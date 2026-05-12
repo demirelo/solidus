@@ -35,11 +35,24 @@ def encodeInstr : TargetInstr → List UInt8
   | .prim op =>
       [EvmYul.EVM.serializeInstr op.toEVM]
 
+def byteSize : TargetInstr → Nat
+  | .push32 _ => 33
+  | .jump | .jumpi | .jumpdest | .prim _ => 1
+
 def encodeLocated (located : LocatedTarget) : List UInt8 :=
   encodeInstr located.instr
 
 def encodeTarget (target : TargetProgram) : ByteArray :=
   ofList (target.code.flatMap encodeLocated)
+
+def codeByteLength : List LocatedTarget → Nat
+  | [] => 0
+  | located :: rest => byteSize located.instr + codeByteLength rest
+
+def codeLayoutFrom : List LocatedTarget → Nat → Prop
+  | [], _ => True
+  | located :: rest, pc =>
+      located.pc = pc ∧ codeLayoutFrom rest (pc + byteSize located.instr)
 
 def compileBytes? (program : Program) : Option ByteArray := do
   let target ← compile? program
@@ -94,6 +107,20 @@ theorem toBytesLE_length (width value : Nat) :
 theorem encodeWord32_length (value : Word) :
     (encodeWord32 value).length = 32 := by
   simp [encodeWord32, toBytesLE_length]
+
+theorem encodeInstr_length (instr : TargetInstr) :
+    (encodeInstr instr).length = byteSize instr := by
+  cases instr with
+  | push32 value =>
+      simp [encodeInstr, byteSize, encodeWord32_length]
+  | jump =>
+      rfl
+  | jumpi =>
+      rfl
+  | jumpdest =>
+      rfl
+  | prim op =>
+      rfl
 
 theorem uint256_ofNat_toNat (value : Word) :
     EvmYul.UInt256.ofNat value.toNat = value := by
@@ -205,6 +232,156 @@ theorem decode_prim_encode (op : PrimOp) :
     EvmYul.EVM.decode (ofList (encodeInstr (TargetInstr.prim op))) (EvmYul.UInt256.ofNat 0) =
       some (op.toEVM, none) := by
   cases op <;> rfl
+
+theorem decode_encodeInstr_zero (instr : TargetInstr) :
+    EvmYul.EVM.decode (ofList (encodeInstr instr)) (EvmYul.UInt256.ofNat 0) =
+      some (instr.op, instr.arg) := by
+  cases instr with
+  | push32 value =>
+      exact decode_push32_encode value
+  | jump =>
+      exact decode_jump_encode
+  | jumpi =>
+      exact decode_jumpi_encode
+  | jumpdest =>
+      exact decode_jumpdest_encode
+  | prim op =>
+      exact decode_prim_encode op
+
+theorem fetchInstr_of_decodeAt {bytes : ByteArray} {pc : Nat} {instr : TargetInstr}
+    {env : EvmYul.ExecutionEnv EvmYul.OperationType.EVM}
+    (hCode : env.code = bytes)
+    (hDecode : decodeAt bytes pc instr) :
+    EvmYul.EVM.fetchInstr env (EvmYul.UInt256.ofNat pc) =
+      .ok (instr.op, instr.arg) := by
+  unfold EvmYul.EVM.fetchInstr
+  rw [hCode, hDecode]
+  rfl
+
+theorem codeLayout_append {first second : List LocatedTarget} {base : Nat}
+    (hFirst : codeLayoutFrom first base)
+    (hSecond : codeLayoutFrom second (base + codeByteLength first)) :
+    codeLayoutFrom (first ++ second) base := by
+  induction first generalizing base with
+  | nil =>
+      simpa [codeLayoutFrom, codeByteLength] using hSecond
+  | cons located rest ih =>
+      simp [codeLayoutFrom] at hFirst ⊢
+      exact ⟨hFirst.1, ih hFirst.2 (by simpa [Nat.add_assoc] using hSecond)⟩
+
+theorem emitInstr_layout {program : Program} {pc : Nat} {instr : Instr}
+    {code : List LocatedTarget}
+    (hEmit : emitInstr? program pc instr = some code) :
+    codeLayoutFrom code pc := by
+  cases instr with
+  | label name =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeLayoutFrom]
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeLayoutFrom]
+  | push value =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeLayoutFrom]
+  | jump target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst code
+          simp [codeLayoutFrom, byteSize, Instr.push32Size]
+  | jumpi target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst code
+          simp [codeLayoutFrom, byteSize, Instr.push32Size]
+
+theorem emitInstr_byteLength {program : Program} {pc : Nat} {instr : Instr}
+    {code : List LocatedTarget}
+    (hEmit : emitInstr? program pc instr = some code) :
+    codeByteLength code = instr.byteSize := by
+  cases instr with
+  | label name =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeByteLength, byteSize, Instr.byteSize]
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeByteLength, byteSize, Instr.byteSize]
+  | push value =>
+      simp [emitInstr?] at hEmit
+      subst code
+      simp [codeByteLength, byteSize, Instr.byteSize, Instr.push32Size]
+  | jump target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst code
+          simp [codeByteLength, byteSize, Instr.byteSize, Instr.jumpSize,
+            Instr.push32Size]
+  | jumpi target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst code
+          simp [codeByteLength, byteSize, Instr.byteSize, Instr.jumpSize,
+            Instr.push32Size]
+
+theorem emitFrom_layout {program suffix : Program} {base : Nat}
+    {code : List LocatedTarget}
+    (hEmit : emitFrom? program suffix base = some code) :
+    codeLayoutFrom code base := by
+  induction suffix generalizing base code with
+  | nil =>
+      simp [emitFrom?] at hEmit
+      subst code
+      trivial
+  | cons instr rest ih =>
+      unfold emitFrom? at hEmit
+      cases hHere : emitInstr? program base instr with
+      | none =>
+          simp [hHere] at hEmit
+      | some here =>
+          cases hThere : emitFrom? program rest (base + instr.byteSize) with
+          | none =>
+              simp [hHere, hThere] at hEmit
+          | some there =>
+              simp [hHere, hThere] at hEmit
+              cases hEmit
+              have hHereLayout := emitInstr_layout hHere
+              have hThereLayout := ih hThere
+              have hHereLength := emitInstr_byteLength hHere
+              refine codeLayout_append hHereLayout ?_
+              simpa [hHereLength] using hThereLayout
+
+theorem assemble_layout {program : Program} {target : TargetProgram}
+    (hAsm : assemble? program = some target) :
+    codeLayoutFrom target.code 0 := by
+  unfold assemble? at hAsm
+  cases hEmit : emit? program with
+  | none =>
+      simp [hEmit] at hAsm
+  | some code =>
+      simp [hEmit] at hAsm
+      cases hAsm
+      exact emitFrom_layout (program := program) (suffix := program) (base := 0) hEmit
+
+theorem compile_layout {program : Program} {target : TargetProgram}
+    (hCompile : compile? program = some target) :
+    codeLayoutFrom target.code 0 :=
+  assemble_layout (Preservation.compile?_some_assemble hCompile)
 
 /--
 Top-level theorem shape for the optional bytecode bridge.
