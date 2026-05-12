@@ -1,3 +1,4 @@
+import EvmCompiler.Assembly.Accepted
 import EvmCompiler.Assembly.Semantics
 
 namespace EvmCompiler
@@ -232,6 +233,190 @@ theorem assemble_source_step_current_projected_sound {program : Program}
           exact
             ⟨pc, instr, emitted, before, after, targetState,
               rfl, hEmitInstr, hTargetBlock, hRun, hErase⟩
+
+theorem assemble_source_step_current_sound {program : Program}
+    {target : TargetProgram} {state sourceState : EVMState}
+    (hAsm : assemble? program = some target)
+    (hStep : Source.step program state = .ok sourceState) :
+    ∃ pc instr emitted before after,
+      Program.instrAtPc program state.pc.toNat = some (pc, instr) ∧
+        emitInstr? program pc instr = some emitted ∧
+        target.code = before ++ emitted ++ after ∧
+        Target.runList (emitted.map LocatedTarget.instr) state = .ok sourceState := by
+  unfold Source.step at hStep
+  cases hAt : Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hStep
+  | some current =>
+      cases current with
+      | mk pc instr =>
+          simp [hAt] at hStep
+          obtain ⟨before, emitted, after, hTargetBlock, hEmitInstr⟩ :=
+            assemble_covers_current_pc hAsm hAt
+          exact
+            ⟨pc, instr, emitted, before, after,
+              rfl, hEmitInstr, hTargetBlock, stepAt_emit_sound hEmitInstr hStep⟩
+
+theorem compile?_some_accepted {program : Program} {target : TargetProgram}
+    (hCompile : compile? program = some target) :
+    Accepted program := by
+  unfold compile? at hCompile
+  cases hAccepted : Program.accepted program <;> simp [hAccepted] at hCompile
+  exact ⟨hAccepted⟩
+
+theorem compile?_some_assemble {program : Program} {target : TargetProgram}
+    (hCompile : compile? program = some target) :
+    assemble? program = some target := by
+  unfold compile? at hCompile
+  cases hAccepted : Program.accepted program <;> simp [hAccepted] at hCompile
+  exact hCompile
+
+theorem compile_source_step_current_sound {program : Program}
+    {target : TargetProgram} {state sourceState : EVMState}
+    (hCompile : compile? program = some target)
+    (hStep : Source.step program state = .ok sourceState) :
+    ∃ pc instr emitted before after,
+      Program.instrAtPc program state.pc.toNat = some (pc, instr) ∧
+        emitInstr? program pc instr = some emitted ∧
+        target.code = before ++ emitted ++ after ∧
+        Target.runList (emitted.map LocatedTarget.instr) state = .ok sourceState := by
+  exact assemble_source_step_current_sound (compile?_some_assemble hCompile) hStep
+
+theorem source_compiled_step_sound {program : Program}
+    {state sourceState : EVMState}
+    (hStep : Source.step program state = .ok sourceState) :
+    Compiled.step program state = .ok sourceState := by
+  unfold Source.step at hStep
+  cases hAt : Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hStep
+  | some current =>
+      cases current with
+      | mk pc instr =>
+          simp [hAt] at hStep
+          cases hEmitInstr : emitInstr? program pc instr with
+          | none =>
+              cases instr with
+              | label name =>
+                  simp [emitInstr?] at hEmitInstr
+              | prim op =>
+                  simp [emitInstr?] at hEmitInstr
+              | push value =>
+                  simp [emitInstr?] at hEmitInstr
+              | jump target =>
+                  cases hDest : Program.labelPc program target with
+                  | none =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+                      have hBad : False := by
+                        simp [Source.stepAt, hDest, Source.invalid] at hStep
+                      cases hBad
+                  | some dest =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+              | jumpi target =>
+                  cases hDest : Program.labelPc program target with
+                  | none =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+                      unfold Source.stepAt at hStep
+                      simp [hDest, Source.invalid] at hStep
+                      change
+                        Except.bind
+                            (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                              Except EVMException Nat)
+                            _ =
+                          Except.ok sourceState at hStep
+                      simp [Except.bind] at hStep
+                  | some dest =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+          | some emitted =>
+              unfold Compiled.step emitCurrent?
+              simp [hAt, hEmitInstr]
+              exact stepAt_emit_sound hEmitInstr hStep
+
+theorem source_compiled_runN_sound {program : Program}
+    {fuel : Nat} {state sourceState : EVMState}
+    (hRun : Source.runN program fuel state = .ok sourceState) :
+    Compiled.runN program fuel state = .ok sourceState := by
+  induction fuel generalizing state with
+  | zero =>
+      simp [Source.runN] at hRun
+      simpa [Compiled.runN] using hRun
+  | succ fuel ih =>
+      unfold Source.runN at hRun
+      cases hStep : Source.step program state with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok mid =>
+          simp [hStep] at hRun
+          unfold Compiled.runN
+          rw [source_compiled_step_sound hStep]
+          exact ih hRun
+
+theorem source_compiled_runN_projected_sound {program : Program}
+    {fuel : Nat} {state sourceState : EVMState}
+    (hRun : Source.runN program fuel state = .ok sourceState) :
+    ∃ targetState,
+      Compiled.runN program fuel state = .ok targetState ∧
+        eraseGas targetState = eraseGas sourceState := by
+  exact ⟨sourceState, source_compiled_runN_sound hRun, rfl⟩
+
+inductive BlockTrace (program : Program) (target : TargetProgram) :
+    Nat → EVMState → EVMState → Prop where
+  | done (state : EVMState) :
+      BlockTrace program target 0 state state
+  | step {fuel : Nat} {state mid final : EVMState}
+      {pc : Nat} {instr : Instr} {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun : Target.runList (emitted.map LocatedTarget.instr) state = .ok mid)
+      (hRest : BlockTrace program target fuel mid final) :
+      BlockTrace program target (fuel + 1) state final
+
+theorem assemble_runN_block_trace_sound {program : Program}
+    {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
+    (hAsm : assemble? program = some target)
+    (hRun : Source.runN program fuel state = .ok sourceState) :
+    BlockTrace program target fuel state sourceState := by
+  induction fuel generalizing state with
+  | zero =>
+      simp [Source.runN] at hRun
+      subst sourceState
+      exact BlockTrace.done state
+  | succ fuel ih =>
+      unfold Source.runN at hRun
+      cases hStep : Source.step program state with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok mid =>
+          simp [hStep] at hRun
+          obtain
+            ⟨pc, instr, emitted, before, after,
+              hAt, hEmit, hTargetBlock, hBlockRun⟩ :=
+            assemble_source_step_current_sound hAsm hStep
+          exact
+            BlockTrace.step hAt hEmit hTargetBlock hBlockRun (ih hRun)
+
+/--
+Whole-program AST-level compiler theorem for the current assembly layer.
+
+For every successful source execution of the accepted labeled assembly program,
+`compile?` produces a resolved target program whose emitted EVM-instruction
+blocks replay the same run exactly.  The final projection is stated explicitly
+so later gas-aware lowerings can reuse this theorem under a gas-erasing
+observation relation.
+-/
+theorem compile_runN_block_trace_projected_sound {program : Program}
+    {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
+    (hCompile : compile? program = some target)
+    (hRun : Source.runN program fuel state = .ok sourceState) :
+    Accepted program ∧
+      ∃ targetState,
+        BlockTrace program target fuel state targetState ∧
+          eraseGas targetState = eraseGas sourceState := by
+  refine ⟨compile?_some_accepted hCompile, sourceState, ?_, rfl⟩
+  exact assemble_runN_block_trace_sound (compile?_some_assemble hCompile) hRun
 
 end Preservation
 

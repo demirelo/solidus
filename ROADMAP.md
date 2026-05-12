@@ -2,7 +2,7 @@
 
 ## Public Spine
 
-accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics
+accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics -> optional emitted EVM bytecode bridge
 
 ## Layer Contract
 
@@ -11,12 +11,15 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Resolved EVM assembly has executable semantics.
 - [x] Assembler has a checked preservation theorem for the verified slice.
 - [x] Whole-program assembler theorem covers every successful current-PC source step.
-- [ ] Byte encoding and full gas-aware EVM `Ξ` refinement are later lowerings.
+- [x] AST-level `compile?` entrypoint has an accepted-input checker and whole-run block-trace theorem.
+- [ ] Byte encoding is a one-way deployable-code lowering, not a parser in the source compiler path.
+- [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
 
 - [x] First source-to-resolved-EVM theorem for labels, push, jump, jumpi, and shared primitive ops.
 - [x] Whole-program current-step theorem from `assemble? program = some target`.
+- [x] Whole-program AST compiler theorem from `compile? program = some target`.
 - [ ] Current-contract memory/storage slice.
 - [ ] Gas oracle/refinement relation for `GAS`.
 - [ ] External-call oracle/refinement relation.

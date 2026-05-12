@@ -97,12 +97,33 @@ def step (program : Program) (state : EVMState) : Except EVMException EVMState :
   | some (pc, instr) => stepAt program pc instr state
   | none => .error .InvalidInstruction
 
+def runN (program : Program) : Nat → EVMState → Except EVMException EVMState
+  | 0, state => .ok state
+  | fuel + 1, state => do
+      let state' ← step program state
+      runN program fuel state'
+
 end Source
 
 def emitCurrent? (program : Program) (state : EVMState) : Option (List TargetInstr) := do
   let (pc, instr) ← Program.instrAtPc program state.pc.toNat
   let located ← emitInstr? program pc instr
   some (located.map LocatedTarget.instr)
+
+namespace Compiled
+
+def step (program : Program) (state : EVMState) : Except EVMException EVMState :=
+  match emitCurrent? program state with
+  | some code => Target.runList code state
+  | none => .error .InvalidInstruction
+
+def runN (program : Program) : Nat → EVMState → Except EVMException EVMState
+  | 0, state => .ok state
+  | fuel + 1, state => do
+      let state' ← step program state
+      runN program fuel state'
+
+end Compiled
 
 /--
 The observable state relation for the gasless layer.
