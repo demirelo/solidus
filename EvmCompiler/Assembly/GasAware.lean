@@ -71,6 +71,100 @@ theorem XRunsSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
   cases hImpossible
 
 /--
+Reusable package produced by the gas-aware bridge theorem.
+
+Higher compiler layers should depend on this structure rather than destructing
+large conjunctions: it names the bytecode facts, runtime-boundary facts,
+gasless block trace, and sufficient-gas `X` behavior that the bridge provides.
+-/
+structure XBridgeCertificate
+    (program : Program) (target : TargetProgram) (fuel : Nat)
+    (initial sourceFinal : EVMState) : Prop where
+  accepted : Accepted program
+  compileBytes_eq : Bytecode.compileBytes? program = some (Bytecode.encodeTarget target)
+  encodingCorrect : Bytecode.EncodingCorrect target (Bytecode.encodeTarget target)
+  noGasOpcode : target.GasOpcodeAbsent
+  noExternalInteraction : target.ExternalInteractionAbsent
+  gasOracle : GasOracleAssumption program initial
+  outsideWorldOracle : OutsideWorldOracleAssumption program initial
+  outOfGasPolicy : OutOfGasPolicyAssumption program initial
+  currentContractProjection : CurrentContractProjectionAssumption program initial
+  blockTrace :
+    ∃ targetFinal,
+      Preservation.BlockTrace program target fuel initial targetFinal ∧
+        eraseGas targetFinal = eraseGas sourceFinal
+  sufficientGas :
+    ∃ evmFuel gasBound,
+      XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound
+
+namespace XBridgeCertificate
+
+theorem exists_sufficient_gas {program : Program} {target : TargetProgram}
+    {fuel : Nat} {initial sourceFinal : EVMState}
+    (cert : XBridgeCertificate program target fuel initial sourceFinal) :
+    ∃ evmFuel gasBound,
+      ∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            ∃ result,
+              EvmYul.EVM.X evmFuel (validJumps target)
+                  (installCodeAndGas target gas initial) =
+                .ok result ∧
+                XSuccessErasesTo sourceFinal result :=
+  cert.sufficientGas
+
+theorem not_out_of_gas_above_bound {program : Program} {target : TargetProgram}
+    {fuel : Nat} {initial sourceFinal : EVMState}
+    (cert : XBridgeCertificate program target fuel initial sourceFinal) :
+    ∃ evmFuel gasBound,
+      ∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            EvmYul.EVM.X evmFuel (validJumps target)
+                (installCodeAndGas target gas initial) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  obtain ⟨evmFuel, gasBound, hRuns⟩ := cert.sufficientGas
+  exact
+    ⟨evmFuel, gasBound, fun gas hGas hUInt256 =>
+      hRuns.not_out_of_gas hGas hUInt256⟩
+
+end XBridgeCertificate
+
+/--
+Primary gas-aware bridge theorem.
+
+This theorem packages the existing compiler-correctness theorem together with
+the explicit `XPreconditionAssumptions` certificate into a single named
+artifact for higher compiler layers.
+-/
+theorem compile_whole_program_X_bridge {program : Program}
+    {target : TargetProgram} {fuel : Nat} {initial sourceFinal : EVMState}
+    (hCompile : compile? program = some target)
+    (hRuntime : RuntimeAssumptions program target initial)
+    (hRun : Source.runN program fuel initial = .ok sourceFinal)
+    (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
+    XBridgeCertificate program target fuel initial sourceFinal := by
+  obtain
+    ⟨hAccepted, hBytes, hEncoding, hNoGas, hNoExternal,
+      hGasOracle, hOutsideWorld, hOutOfGas, hProjection,
+      targetFinal, hTrace, hErase⟩ :=
+    compile_whole_program_sound hCompile hRuntime hRun
+  exact
+    { accepted := hAccepted
+      compileBytes_eq := hBytes
+      encodingCorrect := hEncoding
+      noGasOpcode := hNoGas
+      noExternalInteraction := hNoExternal
+      gasOracle := hGasOracle
+      outsideWorldOracle := hOutsideWorld
+      outOfGasPolicy := hOutOfGas
+      currentContractProjection := hProjection
+      blockTrace := ⟨targetFinal, hTrace, hErase⟩
+      sufficientGas :=
+        ⟨hPreconditions.evmFuel, hPreconditions.gasBound,
+          hPreconditions.runsAboveBound⟩ }
+
+/--
 Gas-aware whole-program bridge to EVMYulLean `X`.
 
 The compiler proof supplies the accepted-program, bytecode, and gas-erased
@@ -92,21 +186,19 @@ theorem compile_whole_program_X_sufficient_gas {program : Program}
               XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound ∧
                 ∀ gas,
                   gasBound ≤ gas →
-                    gas < EvmYul.UInt256.size →
+                  gas < EvmYul.UInt256.size →
                       EvmYul.EVM.X evmFuel (validJumps target)
                           (installCodeAndGas target gas initial) ≠
                         .error EvmYul.EVM.ExecutionException.OutOfGass := by
-  obtain
-    ⟨hAccepted, _hBytes, hEncoding, _hNoGas, _hNoExternal,
-      _hGasOracle, _hOutsideWorld, _hOutOfGas, _hProjection,
-      targetFinal, hTrace, hErase⟩ :=
-    compile_whole_program_sound hCompile hRuntime hRun
+  let cert :=
+    compile_whole_program_X_bridge hCompile hRuntime hRun hSufficientGas
+  obtain ⟨targetFinal, hTrace, hErase⟩ := cert.blockTrace
+  obtain ⟨evmFuel, gasBound, hRuns⟩ := cert.sufficientGas
   refine
-    ⟨hAccepted, hEncoding, targetFinal, hSufficientGas.evmFuel,
-      hSufficientGas.gasBound, hTrace, hErase,
-      hSufficientGas.runsAboveBound, ?_⟩
+    ⟨cert.accepted, cert.encodingCorrect, targetFinal, evmFuel,
+      gasBound, hTrace, hErase, hRuns, ?_⟩
   intro gas hGas hUInt256
-  exact hSufficientGas.runsAboveBound.not_out_of_gas hGas hUInt256
+  exact hRuns.not_out_of_gas hGas hUInt256
 
 /--
 Direct existential sufficient-gas statement for EVMYulLean `X`.
@@ -133,11 +225,33 @@ theorem compile_whole_program_X_exists_sufficient_gas {program : Program}
                       (installCodeAndGas target gas initial) =
                     .ok result ∧
                     XSuccessErasesTo sourceFinal result := by
-  obtain
-    ⟨hAccepted, hEncoding, _targetFinal, evmFuel, gasBound,
-      _hTrace, _hErase, hRuns, _hNoOutOfGas⟩ :=
-    compile_whole_program_X_sufficient_gas hCompile hRuntime hRun hPreconditions
-  exact ⟨hAccepted, hEncoding, evmFuel, gasBound, hRuns⟩
+  let cert := compile_whole_program_X_bridge hCompile hRuntime hRun hPreconditions
+  obtain ⟨evmFuel, gasBound, hRuns⟩ := cert.exists_sufficient_gas
+  exact ⟨cert.accepted, cert.encodingCorrect, evmFuel, gasBound, hRuns⟩
+
+/--
+No-out-of-gas corollary for callers that only need the gas safety part of the
+`X` bridge.  The stronger theorem above additionally returns a successful
+`ExecutionResult` with the gas-erased projection.
+-/
+theorem compile_whole_program_X_no_out_of_gas_above_bound {program : Program}
+    {target : TargetProgram} {fuel : Nat} {initial sourceFinal : EVMState}
+    (hCompile : compile? program = some target)
+    (hRuntime : RuntimeAssumptions program target initial)
+    (hRun : Source.runN program fuel initial = .ok sourceFinal)
+    (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
+    Accepted program ∧
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) ∧
+        ∃ evmFuel gasBound,
+          ∀ gas,
+            gasBound ≤ gas →
+              gas < EvmYul.UInt256.size →
+                EvmYul.EVM.X evmFuel (validJumps target)
+                    (installCodeAndGas target gas initial) ≠
+                  .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  let cert := compile_whole_program_X_bridge hCompile hRuntime hRun hPreconditions
+  obtain ⟨evmFuel, gasBound, hNoOutOfGas⟩ := cert.not_out_of_gas_above_bound
+  exact ⟨cert.accepted, cert.encodingCorrect, evmFuel, gasBound, hNoOutOfGas⟩
 
 end GasAware
 

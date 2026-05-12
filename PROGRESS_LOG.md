@@ -18,3 +18,4 @@
 - 2026-05-12 14:51:00 - oracle - received response for `20260512-203926-evmyul-push32-byte-decode-proof-88bc371d`; disposition superseded by local public `toBytesLE` proof.
 - 2026-05-12 15:20:00 - proof - added gas-aware EVMYulLean `X` bridge theorem `GasAware.compile_whole_program_X_sufficient_gas` with existential bound carried by `SufficientGasForX`; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 15:25:00 - proof - added direct public sufficient-gas theorem `GasAware.compile_whole_program_X_exists_sufficient_gas`; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 15:34:00 - proof - hardened gas-aware API with `XBridgeCertificate` and no-out-of-gas corollary `compile_whole_program_X_no_out_of_gas_above_bound`; command `/Users/dan/.elan/bin/lake build`; result green.
