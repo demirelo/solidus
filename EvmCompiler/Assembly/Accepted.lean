@@ -93,17 +93,80 @@ def compile? (program : Program) : Option TargetProgram :=
   else
     none
 
-def GasOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) : Prop :=
-  True
+/--
+Gas boundary for the gasless source language.
 
-def OutsideWorldOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) : Prop :=
-  True
+The assembly AST has no `GAS` instruction.  Full EVM gas accounting is therefore
+not part of source semantics; later gas-aware theorems may either assume enough
+gas for a run or allow the EVM execution to stop earlier with out-of-gas.
+-/
+structure GasOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) :
+    Prop where
+  gasAccountingIsOutsideSourceSemantics : True
 
-def OutOfGasPolicyAssumption (_program : Program) (_initial : EvmYul.EVM.State) : Prop :=
-  True
+/--
+Boundary for environmental values such as caller, calldata, block data, and
+return data.  This layer reuses EVMYulLean operations directly; source languages
+above it may present those values as explicit oracle inputs before lowering.
+-/
+structure OutsideWorldOracleAssumption
+    (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
+  environmentalInputsComeFromStateOrOracle : True
 
-def CurrentContractProjectionAssumption (_program : Program) (_initial : EvmYul.EVM.State) : Prop :=
-  True
+/--
+Out-of-gas policy boundary for the full EVM runner.
+
+The checked gasless theorem proves preservation for successful source runs.
+When related to gas-aware EVM execution, out-of-gas is an additional behavior:
+it can interrupt the deployed bytecode before the gasless run finishes unless a
+sufficient-gas premise is provided by a later theorem.
+-/
+structure OutOfGasPolicyAssumption
+    (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
+  outOfGasMayInterruptFullEVMExecution : True
+
+/--
+Projection boundary for observations of full EVM state.
+
+The current theorem compares states after erasing gas accounting fields.  It
+also treats outside contracts and chain context through the EVMYulLean state or
+future oracle premises rather than adding them to this assembly semantics.
+-/
+structure CurrentContractProjectionAssumption
+    (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
+  compareOnlyGasErasedCurrentExecutionState : True
+
+namespace GasOracleAssumption
+
+def trivial {program : Program} {initial : EvmYul.EVM.State} :
+    GasOracleAssumption program initial where
+  gasAccountingIsOutsideSourceSemantics := True.intro
+
+end GasOracleAssumption
+
+namespace OutsideWorldOracleAssumption
+
+def trivial {program : Program} {initial : EvmYul.EVM.State} :
+    OutsideWorldOracleAssumption program initial where
+  environmentalInputsComeFromStateOrOracle := True.intro
+
+end OutsideWorldOracleAssumption
+
+namespace OutOfGasPolicyAssumption
+
+def trivial {program : Program} {initial : EvmYul.EVM.State} :
+    OutOfGasPolicyAssumption program initial where
+  outOfGasMayInterruptFullEVMExecution := True.intro
+
+end OutOfGasPolicyAssumption
+
+namespace CurrentContractProjectionAssumption
+
+def trivial {program : Program} {initial : EvmYul.EVM.State} :
+    CurrentContractProjectionAssumption program initial where
+  compareOnlyGasErasedCurrentExecutionState := True.intro
+
+end CurrentContractProjectionAssumption
 
 /--
 The extra assumptions needed when moving from the gasless AST theorem to a
@@ -126,10 +189,10 @@ namespace EVMExecutionAssumptions
 def noExtraAssumptions {program : Program} {initial : EvmYul.EVM.State}
     (accepted : Accepted program) : EVMExecutionAssumptions program initial where
   accepted := accepted
-  gasOracle := trivial
-  outsideWorldOracle := trivial
-  outOfGasPolicy := trivial
-  currentContractProjection := trivial
+  gasOracle := GasOracleAssumption.trivial
+  outsideWorldOracle := OutsideWorldOracleAssumption.trivial
+  outOfGasPolicy := OutOfGasPolicyAssumption.trivial
+  currentContractProjection := CurrentContractProjectionAssumption.trivial
 
 end EVMExecutionAssumptions
 

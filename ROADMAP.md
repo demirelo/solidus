@@ -18,6 +18,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Contextual EVMYulLean `decode` facts cover encoded target instructions at non-wrapping PCs.
 - [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
 - [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
+- [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, outside-world, out-of-gas, and projection assumptions in Lean.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -41,4 +42,4 @@ layer: the source compiler can produce `Assembly.Program` directly and compose
 with `compile_runN_block_trace_projected_sound`. The bytecode bridge is a final
 deployment boundary proving that the resolved target program encodes to EVM
 bytes whose EVMYulLean `decode`/`fetchInstr` behavior matches the target blocks,
-under `DecodeSafety` and `JumpdestCorrect`.
+under `RuntimeAssumptions`.
