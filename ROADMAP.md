@@ -17,6 +17,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Compiled target code has a proved byte-layout invariant.
 - [x] Contextual EVMYulLean `decode` facts cover encoded target instructions at non-wrapping PCs.
 - [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
+- [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -29,5 +30,15 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [ ] External-call oracle/refinement relation.
 - [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
 - [x] Byte encoder correctness against EVMYulLean decoding/fetching for complete target programs under explicit PC/extract bounds.
-- [ ] EVMYulLean jumpdest scanner correctness for complete target programs.
+- [ ] EVMYulLean jumpdest scanner correctness for complete target programs, if `D_J_aux` becomes transparent or a library theorem is added.
 - [ ] Full gas-aware simulation against EVMYulLean `Ξ`.
+
+## AST-First Compiler Interface
+
+The intended frontend target is the labeled assembly AST, not parsed bytecode.
+Parsing bytecode is unnecessary for compiling a future source language into this
+layer: the source compiler can produce `Assembly.Program` directly and compose
+with `compile_runN_block_trace_projected_sound`. The bytecode bridge is a final
+deployment boundary proving that the resolved target program encodes to EVM
+bytes whose EVMYulLean `decode`/`fetchInstr` behavior matches the target blocks,
+under `DecodeSafety` and `JumpdestCorrect`.

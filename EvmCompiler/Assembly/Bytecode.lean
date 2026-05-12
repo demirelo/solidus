@@ -97,6 +97,20 @@ structure DecodeSafety (target : TargetProgram) : Prop where
     ∀ located, located ∈ target.code →
       located.pc + byteSize located.instr < 18446744073709551616
 
+/--
+Assumption boundary for EVMYulLean's jumpdest scanner.
+
+`EvmYul.EVM.D_J_aux` is opaque in the imported library, so this project can
+state and use the exact scanner property needed by `X`, but cannot currently
+derive it by unfolding `D_J`.
+-/
+structure JumpdestCorrect (target : TargetProgram) : Prop where
+  jumpdests :
+    ∀ located,
+      located ∈ target.code →
+        located.instr = TargetInstr.jumpdest →
+          jumpdestListed (encodeTarget target) located.pc
+
 theorem fromBytes_toBytesLE (width value : Nat) :
     EvmYul.fromBytes' (toBytesLE width value) = value % (256 ^ width) := by
   induction width generalizing value with
@@ -687,6 +701,16 @@ theorem compile_fetch_correct {program : Program} {target : TargetProgram}
   exact fetchInstr_of_decodeAt hCode
     (compile_decode_correct hCompile hSafety located hMem)
 
+theorem compile_encoding_correct_of_jumpdests {program : Program}
+    {target : TargetProgram}
+    (hCompile : compile? program = some target)
+    (hSafety : DecodeSafety target)
+    (hJumpdest : JumpdestCorrect target) :
+    EncodingCorrect target (encodeTarget target) where
+  bytes_eq := rfl
+  decodes := compile_decode_correct hCompile hSafety
+  jumpdests := hJumpdest.jumpdests
+
 /--
 Top-level theorem shape for the optional bytecode bridge.
 
@@ -710,6 +734,24 @@ theorem compile_runN_bytecode_bridge {program : Program}
   obtain ⟨hAccepted, targetState, hTrace, hErase⟩ :=
     Preservation.compile_runN_block_trace_projected_sound hCompile hRun
   exact ⟨hAccepted, hBytes.bytes_eq, targetState, hTrace, hErase⟩
+
+theorem compile_runN_bytecode_bridge_checked {program : Program}
+    {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
+    (hCompile : compile? program = some target)
+    (hSafety : DecodeSafety target)
+    (hJumpdest : JumpdestCorrect target)
+    (hRun : Source.runN program fuel state = .ok sourceState) :
+    Accepted program ∧
+      ∃ targetState,
+        EncodingCorrect target (encodeTarget target) ∧
+          Preservation.BlockTrace program target fuel state targetState ∧
+            eraseGas targetState = eraseGas sourceState := by
+  obtain ⟨hAccepted, targetState, hTrace, hErase⟩ :=
+    Preservation.compile_runN_block_trace_projected_sound hCompile hRun
+  exact
+    ⟨hAccepted, targetState,
+      compile_encoding_correct_of_jumpdests hCompile hSafety hJumpdest,
+      hTrace, hErase⟩
 
 end Bytecode
 
