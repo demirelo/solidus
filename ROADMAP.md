@@ -15,6 +15,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Byte encoding is a one-way deployable-code lowering, not a parser in the source compiler path.
 - [x] `PUSH32` payload encoding is proved against EVMYulLean `decode`.
 - [x] Compiled target code has a proved byte-layout invariant.
+- [x] Contextual EVMYulLean `decode` facts cover encoded target instructions at non-wrapping PCs.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones

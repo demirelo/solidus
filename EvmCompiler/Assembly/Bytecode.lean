@@ -165,6 +165,12 @@ theorem ofList_get?_zero (byte : UInt8) (rest : List UInt8) :
     (ofList (byte :: rest)).get? 0 = some byte := by
   simp [ofList, ByteArray.get?, ByteArray.get, ByteArray.size, List.size_toArray]
 
+theorem ofList_get?_append_cons_append
+    (pre payload suffix : List UInt8) (byte : UInt8) :
+    (ofList (pre ++ (byte :: payload) ++ suffix)).get? pre.length =
+      some byte := by
+  simp [ofList, ByteArray.get?, ByteArray.get, ByteArray.size, List.size_toArray]
+
 theorem decode_push32_encode (value : Word) :
     EvmYul.EVM.decode (ofList (encodeInstr (TargetInstr.push32 value)))
         (EvmYul.UInt256.ofNat 0) =
@@ -212,6 +218,183 @@ theorem decode_push32_encode (value : Word) :
   rw [hParse]
   simp [EvmYul.EVM.argOnNBytesOfInstr]
   exact uint256Of_extract_push32_payload value
+
+theorem extract_push32_payload_after_prefix
+    (pre suffix : List UInt8) (value : Word)
+    (hStart : pre.length + 1 < 18446744073709551616)
+    (hEnd : pre.length + 33 < 18446744073709551616) :
+    ((ofList
+          (pre ++
+            (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
+              encodeWord32 value) ++
+            suffix)).extract' (pre.length + 1) (pre.length + 33)).data.toList =
+      encodeWord32 value := by
+  unfold ByteArray.extract' ByteArray.extract ByteArray.copySlice
+    ByteArray.empty ByteArray.emptyWithCapacity ofList
+  have h :
+      pre.length + 1 < 18446744073709551616 ∧
+        pre.length + 33 < 18446744073709551616 :=
+    ⟨hStart, hEnd⟩
+  simp [h, encodeWord32_length]
+
+theorem uint256Of_extract_push32_payload_after_prefix
+    (pre suffix : List UInt8) (value : Word)
+    (hStart : pre.length + 1 < 18446744073709551616)
+    (hEnd : pre.length + 33 < 18446744073709551616) :
+    EvmYul.uInt256OfByteArray
+        ((ofList
+            (pre ++
+              (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
+                encodeWord32 value) ++
+              suffix)).extract' (pre.length + 1) (pre.length + 33)) =
+      value := by
+  unfold EvmYul.uInt256OfByteArray
+  rw [extract_push32_payload_after_prefix pre suffix value hStart hEnd]
+  unfold encodeWord32
+  simp
+  rw [fromBytes_toBytesLE]
+  rw [Nat.mod_eq_of_lt (uint256_toNat_lt_256_pow_32 value)]
+  exact uint256_ofNat_toNat value
+
+set_option maxHeartbeats 800000 in
+theorem decode_push32_at_prefix (pre suffix : List UInt8) (value : Word)
+    (hPc : (EvmYul.UInt256.ofNat pre.length).toNat = pre.length)
+    (hStart : pre.length + 1 < 18446744073709551616)
+    (hEnd : pre.length + 33 < 18446744073709551616) :
+    EvmYul.EVM.decode
+        (ofList (pre ++ encodeInstr (TargetInstr.push32 value) ++ suffix))
+        (EvmYul.UInt256.ofNat pre.length) =
+      some (EvmYul.Operation.PUSH32, some (value, 32)) := by
+  unfold EvmYul.EVM.decode encodeInstr
+  rw [hPc]
+  change
+    (do
+      let instr ←
+        (ofList
+          (pre ++
+            (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
+              encodeWord32 value) ++
+            suffix)).get? pre.length >>= EvmYul.EVM.parseInstr
+      let argWidth := EvmYul.EVM.argOnNBytesOfInstr instr
+      some
+        (instr,
+          if argWidth == 0 then none
+          else
+            some
+              (EvmYul.uInt256OfByteArray
+                  ((ofList
+                    (pre ++
+                      (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
+                        encodeWord32 value) ++
+                      suffix)).extract' (pre.length + 1)
+                    (pre.length + 1 + argWidth)),
+                argWidth))) =
+      some (EvmYul.Operation.PUSH32, some (value, 32))
+  rw [ofList_get?_append_cons_append]
+  change
+    (do
+      let instr ←
+        EvmYul.EVM.parseInstr (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32)
+      let argWidth := EvmYul.EVM.argOnNBytesOfInstr instr
+      some
+        (instr,
+          if argWidth == 0 then none
+          else
+            some
+              (EvmYul.uInt256OfByteArray
+                  ((ofList
+                    (pre ++
+                      (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
+                        encodeWord32 value) ++
+                      suffix)).extract' (pre.length + 1)
+                    (pre.length + 1 + argWidth)),
+                argWidth))) =
+      some (EvmYul.Operation.PUSH32, some (value, 32))
+  have hParse :
+      EvmYul.EVM.parseInstr (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32) =
+        some EvmYul.Operation.PUSH32 := by
+    rfl
+  rw [hParse]
+  simp [EvmYul.EVM.argOnNBytesOfInstr]
+  have hPayload :=
+    uint256Of_extract_push32_payload_after_prefix pre suffix value hStart hEnd
+  simpa [Nat.add_assoc] using hPayload
+
+theorem decode_single_byte_at_prefix (pre suffix : List UInt8)
+    (op : EvmYul.Operation EvmYul.OperationType.EVM)
+    (hPc : (EvmYul.UInt256.ofNat pre.length).toNat = pre.length)
+    (hParse :
+      EvmYul.EVM.parseInstr (EvmYul.EVM.serializeInstr op) =
+        some op)
+    (hArgWidth : EvmYul.EVM.argOnNBytesOfInstr op = 0) :
+    EvmYul.EVM.decode (ofList (pre ++ [EvmYul.EVM.serializeInstr op] ++ suffix))
+        (EvmYul.UInt256.ofNat pre.length) =
+      some (op, none) := by
+  unfold EvmYul.EVM.decode
+  rw [hPc]
+  change
+    (do
+      let instr ←
+        (ofList (pre ++ [EvmYul.EVM.serializeInstr op] ++ suffix)).get?
+            pre.length >>= EvmYul.EVM.parseInstr
+      let argWidth := EvmYul.EVM.argOnNBytesOfInstr instr
+      some
+        (instr,
+          if argWidth == 0 then none
+          else
+            some
+              (EvmYul.uInt256OfByteArray
+                  ((ofList
+                      (pre ++ [EvmYul.EVM.serializeInstr op] ++ suffix)).extract'
+                    (pre.length + 1) (pre.length + 1 + argWidth)),
+                argWidth))) =
+      some (op, none)
+  rw [ofList_get?_append_cons_append]
+  change
+    (do
+      let instr ← EvmYul.EVM.parseInstr (EvmYul.EVM.serializeInstr op)
+      let argWidth := EvmYul.EVM.argOnNBytesOfInstr instr
+      some
+        (instr,
+          if argWidth == 0 then none
+          else
+            some
+              (EvmYul.uInt256OfByteArray
+                  ((ofList
+                      (pre ++ [EvmYul.EVM.serializeInstr op] ++ suffix)).extract'
+                    (pre.length + 1) (pre.length + 1 + argWidth)),
+                argWidth))) =
+      some (op, none)
+  rw [hParse]
+  simp [hArgWidth]
+
+set_option maxHeartbeats 1200000 in
+theorem decode_encodeInstr_at_prefix (pre suffix : List UInt8) (instr : TargetInstr)
+    (hPc : (EvmYul.UInt256.ofNat pre.length).toNat = pre.length)
+    (hStart : pre.length + 1 < 18446744073709551616)
+    (hEnd : pre.length + byteSize instr < 18446744073709551616) :
+    EvmYul.EVM.decode (ofList (pre ++ encodeInstr instr ++ suffix))
+        (EvmYul.UInt256.ofNat pre.length) =
+      some (instr.op, instr.arg) := by
+  cases instr with
+  | push32 value =>
+      apply decode_push32_at_prefix
+      · exact hPc
+      · exact hStart
+      · simpa [byteSize] using hEnd
+  | jump =>
+      exact decode_single_byte_at_prefix pre suffix EvmYul.Operation.JUMP
+        hPc rfl rfl
+  | jumpi =>
+      exact decode_single_byte_at_prefix pre suffix EvmYul.Operation.JUMPI
+        hPc rfl rfl
+  | jumpdest =>
+      exact decode_single_byte_at_prefix pre suffix EvmYul.Operation.JUMPDEST
+        hPc rfl rfl
+  | prim op =>
+      apply decode_single_byte_at_prefix pre suffix op.toEVM hPc
+      · cases op <;> rfl
+      · cases op <;> rfl
 
 theorem decode_jump_encode :
     EvmYul.EVM.decode (ofList (encodeInstr TargetInstr.jump)) (EvmYul.UInt256.ofNat 0) =
