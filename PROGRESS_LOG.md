@@ -15,3 +15,4 @@
 - 2026-05-12 14:25:35 - proof - added `DecodeSafety`, whole-target `compile_decode_correct`, and `compile_fetch_correct` for compiled `ByteArray` under explicit PC/extract bounds; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 14:34:00 - proof - isolated opaque EVMYulLean jumpdest scanning behind `JumpdestCorrect` and added checked bridge theorem `compile_runN_bytecode_bridge_checked`; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 14:47:00 - proof - added public top theorem `compile_whole_program_sound` and named runtime assumption structures for bytecode, gas/OOG, outside-world, and projection boundaries; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 14:51:00 - oracle - received response for `20260512-203926-evmyul-push32-byte-decode-proof-88bc371d`; disposition superseded by local public `toBytesLE` proof.
