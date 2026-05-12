@@ -2,7 +2,7 @@
 
 ## Public Spine
 
-accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics -> optional emitted EVM bytecode bridge
+accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics -> emitted EVM bytecode bridge -> gas-aware EVMYulLean `X` bridge
 
 ## Layer Contract
 
@@ -19,6 +19,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
 - [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
 - [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, outside-world, out-of-gas, and projection assumptions in Lean.
+- [x] Gas-aware `X` bridge theorem exposes an existential sufficient-gas bound via `SufficientGasForX`.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -31,6 +32,8 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [ ] External-call oracle/refinement relation.
 - [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
 - [x] Byte encoder correctness against EVMYulLean decoding/fetching for complete target programs under explicit PC/extract bounds.
+- [x] EVMYulLean `X` runner bridge under explicit sufficient-gas certificate.
+- [ ] Derive `SufficientGasForX` from the finite block trace and EVMYulLean gas-cost/precheck functions.
 - [ ] EVMYulLean jumpdest scanner correctness for complete target programs, if `D_J_aux` becomes transparent or a library theorem is added.
 - [ ] Full gas-aware simulation against EVMYulLean `Ξ`.
 
