@@ -109,10 +109,10 @@ def CurrentContractProjectionAssumption (_program : Program) (_initial : EvmYul.
 The extra assumptions needed when moving from the gasless AST theorem to a
 gas-aware EVM execution theorem.
 
-No field is an axiom: each later theorem must either require this structure as
-a hypothesis or prove the relevant field for a concrete execution.  Keeping the
-fields here makes the trust boundary for gas, outside context, and out-of-gas
-behavior visible to later compiler layers.
+No field is a new trusted constant: each later theorem must either require this
+structure as a hypothesis or prove the relevant field for a concrete execution.
+Keeping the fields here makes the trust boundary for gas, outside context, and
+out-of-gas behavior visible to later compiler layers.
 -/
 structure EVMExecutionAssumptions (program : Program) (initial : EvmYul.EVM.State) : Prop where
   accepted : Accepted program

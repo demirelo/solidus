@@ -3,3 +3,4 @@ import EvmCompiler.Assembly.Assembler
 import EvmCompiler.Assembly.Accepted
 import EvmCompiler.Assembly.Semantics
 import EvmCompiler.Assembly.Preservation
+import EvmCompiler.Assembly.Bytecode
