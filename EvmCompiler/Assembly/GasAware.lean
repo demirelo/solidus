@@ -50,6 +50,13 @@ structure SufficientGasForX
   gasBound : Nat
   runsAboveBound : XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound
 
+/--
+Alias used at theorem boundaries: these are the explicit gas-aware preconditions
+not yet derived from the gasless block trace.
+-/
+abbrev XPreconditionAssumptions :=
+  SufficientGasForX
+
 theorem XRunsSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
     {initial sourceFinal : EVMState} {evmFuel gasBound gas : Nat}
     (hRuns : XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound)
@@ -100,6 +107,37 @@ theorem compile_whole_program_X_sufficient_gas {program : Program}
       hSufficientGas.runsAboveBound, ?_⟩
   intro gas hGas hUInt256
   exact hSufficientGas.runsAboveBound.not_out_of_gas hGas hUInt256
+
+/--
+Direct existential sufficient-gas statement for EVMYulLean `X`.
+
+Under the bytecode/runtime assumptions and the explicit gas-aware `X`
+preconditions, successful source execution implies that there is an EVM fuel
+and gas bound such that every larger UInt256 gas input makes `X` return
+successfully and preserve the gas-erased final state.
+-/
+theorem compile_whole_program_X_exists_sufficient_gas {program : Program}
+    {target : TargetProgram} {fuel : Nat} {initial sourceFinal : EVMState}
+    (hCompile : compile? program = some target)
+    (hRuntime : RuntimeAssumptions program target initial)
+    (hRun : Source.runN program fuel initial = .ok sourceFinal)
+    (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
+    Accepted program ∧
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) ∧
+        ∃ evmFuel gasBound,
+          ∀ gas,
+            gasBound ≤ gas →
+              gas < EvmYul.UInt256.size →
+                ∃ result,
+                  EvmYul.EVM.X evmFuel (validJumps target)
+                      (installCodeAndGas target gas initial) =
+                    .ok result ∧
+                    XSuccessErasesTo sourceFinal result := by
+  obtain
+    ⟨hAccepted, hEncoding, _targetFinal, evmFuel, gasBound,
+      _hTrace, _hErase, hRuns, _hNoOutOfGas⟩ :=
+    compile_whole_program_X_sufficient_gas hCompile hRuntime hRun hPreconditions
+  exact ⟨hAccepted, hEncoding, evmFuel, gasBound, hRuns⟩
 
 end GasAware
 

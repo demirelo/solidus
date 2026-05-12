@@ -19,7 +19,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
 - [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
 - [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, outside-world, out-of-gas, and projection assumptions in Lean.
-- [x] Gas-aware `X` bridge theorem exposes an existential sufficient-gas bound via `SufficientGasForX`.
+- [x] Gas-aware `X` bridge theorem exposes a direct existential sufficient-gas bound via `compile_whole_program_X_exists_sufficient_gas`.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones

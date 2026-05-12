@@ -17,3 +17,4 @@
 - 2026-05-12 14:47:00 - proof - added public top theorem `compile_whole_program_sound` and named runtime assumption structures for bytecode, gas/OOG, outside-world, and projection boundaries; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 14:51:00 - oracle - received response for `20260512-203926-evmyul-push32-byte-decode-proof-88bc371d`; disposition superseded by local public `toBytesLE` proof.
 - 2026-05-12 15:20:00 - proof - added gas-aware EVMYulLean `X` bridge theorem `GasAware.compile_whole_program_X_sufficient_gas` with existential bound carried by `SufficientGasForX`; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 15:25:00 - proof - added direct public sufficient-gas theorem `GasAware.compile_whole_program_X_exists_sufficient_gas`; command `/Users/dan/.elan/bin/lake build`; result green.
