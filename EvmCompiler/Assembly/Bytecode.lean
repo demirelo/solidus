@@ -86,6 +86,17 @@ structure EncodingCorrect (target : TargetProgram) (bytes : ByteArray) : Prop wh
         located.instr = TargetInstr.jumpdest →
           jumpdestListed bytes located.pc
 
+structure DecodeSafety (target : TargetProgram) : Prop where
+  pcNoWrap :
+    ∀ located, located ∈ target.code →
+      (EvmYul.UInt256.ofNat located.pc).toNat = located.pc
+  extractStartSmall :
+    ∀ located, located ∈ target.code →
+      located.pc + 1 < 18446744073709551616
+  extractEndSmall :
+    ∀ located, located ∈ target.code →
+      located.pc + byteSize located.instr < 18446744073709551616
+
 theorem fromBytes_toBytesLE (width value : Nat) :
     EvmYul.fromBytes' (toBytesLE width value) = value % (256 ^ width) := by
   induction width generalizing value with
@@ -565,6 +576,116 @@ theorem compile_layout {program : Program} {target : TargetProgram}
     (hCompile : compile? program = some target) :
     codeLayoutFrom target.code 0 :=
   assemble_layout (Preservation.compile?_some_assemble hCompile)
+
+set_option maxHeartbeats 1200000 in
+theorem codeLayout_decodeAt_with_prefix {code : List LocatedTarget} :
+    ∀ {pre suffix : List UInt8} {base : Nat},
+      codeLayoutFrom code base →
+      pre.length = base →
+      (∀ located, located ∈ code →
+        (EvmYul.UInt256.ofNat located.pc).toNat = located.pc) →
+      (∀ located, located ∈ code →
+        located.pc + 1 < 18446744073709551616) →
+      (∀ located, located ∈ code →
+        located.pc + byteSize located.instr < 18446744073709551616) →
+      ∀ located,
+        located ∈ code →
+          decodeAt (ofList (pre ++ code.flatMap encodeLocated ++ suffix))
+            located.pc located.instr := by
+  induction code with
+  | nil =>
+      intro pre suffix base hLayout hPre hPc hStart hEnd located hMem
+      simp at hMem
+  | cons head rest ih =>
+      intro pre suffix base hLayout hPre hPc hStart hEnd located hMem
+      simp [codeLayoutFrom] at hLayout
+      simp at hMem
+      cases hMem with
+      | inl hHead =>
+          subst located
+          have hPrefixHead : pre.length = head.pc := by
+            rw [hPre, hLayout.1]
+          have hPcHead := hPc head (by simp)
+          have hPcPre : (EvmYul.UInt256.ofNat pre.length).toNat = pre.length := by
+            simpa [hPrefixHead] using hPcHead
+          have hStartHead : pre.length + 1 < 18446744073709551616 := by
+            simpa [hPrefixHead] using hStart head (by simp)
+          have hEndHead :
+              pre.length + byteSize head.instr < 18446744073709551616 := by
+            simpa [hPrefixHead] using hEnd head (by simp)
+          unfold decodeAt
+          rw [← hPrefixHead]
+          simpa [encodeLocated, List.append_assoc] using
+            decode_encodeInstr_at_prefix pre (rest.flatMap encodeLocated ++ suffix)
+              head.instr hPcPre hStartHead hEndHead
+      | inr hRest =>
+          let pre' := pre ++ encodeInstr head.instr
+          have hPre' : pre'.length = base + byteSize head.instr := by
+            simp [pre', hPre, encodeInstr_length]
+          have hPcRest :
+              ∀ located, located ∈ rest →
+                (EvmYul.UInt256.ofNat located.pc).toNat = located.pc := by
+            intro located hMem
+            exact hPc located (by simp [hMem])
+          have hStartRest :
+              ∀ located, located ∈ rest →
+                located.pc + 1 < 18446744073709551616 := by
+            intro located hMem
+            exact hStart located (by simp [hMem])
+          have hEndRest :
+              ∀ located, located ∈ rest →
+                located.pc + byteSize located.instr < 18446744073709551616 := by
+            intro located hMem
+            exact hEnd located (by simp [hMem])
+          have hDecoded :=
+            ih (pre := pre') (suffix := suffix) (base := base + byteSize head.instr)
+              hLayout.2 hPre' hPcRest hStartRest hEndRest located hRest
+          simpa [pre', encodeLocated, List.append_assoc] using hDecoded
+
+theorem codeLayout_decodes {code : List LocatedTarget}
+    (hLayout : codeLayoutFrom code 0)
+    (hPc :
+      ∀ located, located ∈ code →
+        (EvmYul.UInt256.ofNat located.pc).toNat = located.pc)
+    (hStart :
+      ∀ located, located ∈ code →
+        located.pc + 1 < 18446744073709551616)
+    (hEnd :
+      ∀ located, located ∈ code →
+        located.pc + byteSize located.instr < 18446744073709551616) :
+    ∀ located,
+      located ∈ code →
+        decodeAt (ofList (code.flatMap encodeLocated)) located.pc located.instr := by
+  intro located hMem
+  simpa using
+    codeLayout_decodeAt_with_prefix (code := code) (pre := []) (suffix := [])
+      (base := 0) hLayout rfl hPc hStart hEnd located hMem
+
+theorem compile_decode_correct {program : Program} {target : TargetProgram}
+    (hCompile : compile? program = some target)
+    (hSafety : DecodeSafety target) :
+    ∀ located,
+      located ∈ target.code →
+        decodeAt (encodeTarget target) located.pc located.instr := by
+  intro located hMem
+  unfold encodeTarget
+  exact
+    codeLayout_decodes (compile_layout hCompile)
+      hSafety.pcNoWrap hSafety.extractStartSmall hSafety.extractEndSmall
+      located hMem
+
+theorem compile_fetch_correct {program : Program} {target : TargetProgram}
+    {env : EvmYul.ExecutionEnv EvmYul.OperationType.EVM}
+    (hCompile : compile? program = some target)
+    (hSafety : DecodeSafety target)
+    (hCode : env.code = encodeTarget target) :
+    ∀ located,
+      located ∈ target.code →
+        EvmYul.EVM.fetchInstr env (EvmYul.UInt256.ofNat located.pc) =
+          .ok (located.instr.op, located.instr.arg) := by
+  intro located hMem
+  exact fetchInstr_of_decodeAt hCode
+    (compile_decode_correct hCompile hSafety located hMem)
 
 /--
 Top-level theorem shape for the optional bytecode bridge.

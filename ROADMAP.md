@@ -16,6 +16,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] `PUSH32` payload encoding is proved against EVMYulLean `decode`.
 - [x] Compiled target code has a proved byte-layout invariant.
 - [x] Contextual EVMYulLean `decode` facts cover encoded target instructions at non-wrapping PCs.
+- [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -27,5 +28,6 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [ ] Gas oracle/refinement relation for `GAS`.
 - [ ] External-call oracle/refinement relation.
 - [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
-- [ ] Byte encoder correctness against EVMYulLean decoding for complete target programs.
+- [x] Byte encoder correctness against EVMYulLean decoding/fetching for complete target programs under explicit PC/extract bounds.
+- [ ] EVMYulLean jumpdest scanner correctness for complete target programs.
 - [ ] Full gas-aware simulation against EVMYulLean `Ξ`.
