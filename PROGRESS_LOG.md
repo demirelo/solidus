@@ -9,3 +9,4 @@
 - 2026-05-12 13:35:51 - audit - checked `compile_runN_block_trace_projected_sound` and `source_compiled_runN_sound`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
 - 2026-05-12 13:41:15 - proof - added one-way byte encoder boundary `Bytecode.EncodingCorrect`, local decode facts for one-byte opcodes, and bridge theorem `compile_runN_bytecode_bridge`; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 13:41:15 - oracle - asked for `PUSH32` payload decode proof against EVMYulLean `ByteArray.extract'`; conversation `20260512-203926-evmyul-push32-byte-decode-proof-88bc371d`; status pending.
+- 2026-05-12 13:54:11 - proof - replaced private `toBytes!` dependency with public `toBytesLE`, proved `fromBytes_toBytesLE`, `encodeWord32_length`, `uint256Of_extract_push32_payload`, and `decode_push32_encode`; command `/Users/dan/.elan/bin/lake build`; result green.

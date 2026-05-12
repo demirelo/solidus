@@ -13,7 +13,7 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Whole-program assembler theorem covers every successful current-PC source step.
 - [x] AST-level `compile?` entrypoint has an accepted-input checker and whole-run block-trace theorem.
 - [x] Byte encoding is a one-way deployable-code lowering, not a parser in the source compiler path.
-- [ ] Discharge `EncodingCorrect` for emitted `PUSH32` payloads against EVMYulLean `decode`.
+- [x] `PUSH32` payload encoding is proved against EVMYulLean `decode`.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -24,6 +24,6 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [ ] Current-contract memory/storage slice.
 - [ ] Gas oracle/refinement relation for `GAS`.
 - [ ] External-call oracle/refinement relation.
-- [x] Byte encoder boundary and local one-byte opcode decode facts.
+- [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
 - [ ] Byte encoder correctness against EVMYulLean decoding for complete target programs.
 - [ ] Full gas-aware simulation against EVMYulLean `Ξ`.
