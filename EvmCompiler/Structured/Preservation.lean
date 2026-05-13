@@ -84,6 +84,53 @@ theorem entry {state : EVMState}
 
 end RelAt
 
+namespace AssemblyProgram
+
+def PCFitsFrom : Assembly.Program → Assembly.Program → Prop
+  | pre, [] => PCFits pre
+  | pre, instr :: rest =>
+      PCFits pre ∧ PCFitsFrom (pre ++ [instr]) rest
+
+theorem PCFitsFrom.start {pre code : Assembly.Program}
+    (hFits : PCFitsFrom pre code) :
+    PCFits pre := by
+  cases code with
+  | nil =>
+      simpa [PCFitsFrom] using hFits
+  | cons instr rest =>
+      exact hFits.1
+
+theorem PCFitsFrom.end {pre code : Assembly.Program}
+    (hFits : PCFitsFrom pre code) :
+    PCFits (pre ++ code) := by
+  induction code generalizing pre with
+  | nil =>
+      simpa [PCFitsFrom] using hFits
+  | cons instr rest ih =>
+      simpa [PCFitsFrom, List.append_assoc] using ih hFits.2
+
+theorem PCFitsFrom.left {pre first second : Assembly.Program}
+    (hFits : PCFitsFrom pre (first ++ second)) :
+    PCFitsFrom pre first := by
+  induction first generalizing pre with
+  | nil =>
+      exact PCFitsFrom.start hFits
+  | cons instr rest ih =>
+      rcases hFits with ⟨hHere, hRest⟩
+      exact ⟨hHere, ih hRest⟩
+
+theorem PCFitsFrom.right {pre first second : Assembly.Program}
+    (hFits : PCFitsFrom pre (first ++ second)) :
+    PCFitsFrom (pre ++ first) second := by
+  induction first generalizing pre with
+  | nil =>
+      simpa using hFits
+  | cons instr rest ih =>
+      rcases hFits with ⟨_hHere, hRest⟩
+      simpa [List.append_assoc] using ih hRest
+
+end AssemblyProgram
+
 namespace BasicInstr
 
 theorem execBinOp_pc (f : EvmYul.Primop.Binary)
@@ -359,6 +406,20 @@ theorem PCFitsFrom.end {pre : Assembly.Program} {code : Code}
       simpa [PCFitsFrom, Code.toAssembly] using hFits
   | cons instr rest ih =>
       simpa [Code.toAssembly, List.append_assoc] using ih hFits.2
+
+theorem PCFitsFrom.of_assembly {pre : Assembly.Program} {code : Code}
+    (hFits : AssemblyProgram.PCFitsFrom pre code.toAssembly) :
+    PCFitsFrom pre code := by
+  induction code generalizing pre with
+  | nil =>
+      simpa [PCFitsFrom, Code.toAssembly] using hFits
+  | cons instr rest ih =>
+      change
+        PCFits pre ∧
+          PCFitsFrom (pre ++ [instr.toAssembly]) rest
+      constructor
+      · exact hFits.1
+      · exact ih hFits.2
 
 theorem source_run_ctx_relAt_of_relAt {code : Code}
     {pre post : Assembly.Program}

@@ -52,6 +52,14 @@ def labels : Program → List Label
   | .label name :: rest => name :: labels rest
   | _ :: rest => labels rest
 
+theorem labels_append (left right : Program) :
+    labels (left ++ right) = labels left ++ labels right := by
+  induction left with
+  | nil =>
+      simp [labels]
+  | cons instr rest ih =>
+      cases instr <;> simp [labels, ih]
+
 def noDuplicates {α : Type} [BEq α] : List α → Bool
   | [] => true
   | x :: xs => !xs.contains x && noDuplicates xs
