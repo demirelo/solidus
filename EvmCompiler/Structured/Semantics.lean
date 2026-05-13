@@ -304,6 +304,82 @@ theorem eval_of_run {fuel : Nat} {program : Program}
 
 end Program
 
+mutual
+  theorem Block.run_of_eval {fuel : Nat} {block : Block}
+      {state final : EVMState}
+      (hEval : Block.Eval fuel block state final) :
+      Block.run fuel block state = .ok final := by
+    cases hEval with
+    | nil =>
+        simp [Block.run]
+    | cons hStmt hRest =>
+        unfold Block.run
+        rw [Stmt.run_of_eval hStmt]
+        exact Block.run_of_eval hRest
+
+  theorem Stmt.run_of_eval {fuel : Nat} {stmt : Stmt}
+      {state final : EVMState}
+      (hEval : Stmt.Eval fuel stmt state final) :
+      Stmt.run fuel stmt state = .ok final := by
+    cases hEval with
+    | code hCode =>
+        cases fuel <;> simpa [Stmt.run] using hCode
+    | ifTrue hCond hThen =>
+        unfold Stmt.run
+        rw [hCond]
+        simp
+        exact Block.run_of_eval hThen
+    | ifFalse hCond hElse =>
+        unfold Stmt.run
+        rw [hCond]
+        simp
+        exact Block.run_of_eval hElse
+    | for_ hInit hLoop =>
+        unfold Stmt.run
+        rw [Block.run_of_eval hInit]
+        exact For.run_of_eval hLoop
+
+  theorem For.run_of_eval {fuel : Nat} {cond : Code} {post body : Block}
+      {state final : EVMState}
+      (hEval : For.Eval fuel cond post body state final) :
+      Stmt.runForLoop fuel cond post body state = .ok final := by
+    cases hEval with
+    | false hCond =>
+        unfold Stmt.runForLoop
+        rw [hCond]
+        change Except.ok final = Except.ok final
+        rfl
+    | true hCond hBody hPost hLoop =>
+        unfold Stmt.runForLoop
+        rw [hCond]
+        change
+          (do
+            let stateAfterBody ← Block.run _ body _
+            let stateAfterPost ← Block.run _ post stateAfterBody
+            Stmt.runForLoop _ cond post body stateAfterPost) =
+            Except.ok final
+        rw [Block.run_of_eval hBody]
+        change
+          (do
+            let stateAfterPost ← Block.run _ post _
+            Stmt.runForLoop _ cond post body stateAfterPost) =
+            Except.ok final
+        rw [Block.run_of_eval hPost]
+        change Stmt.runForLoop _ cond post body _ = Except.ok final
+        exact For.run_of_eval hLoop
+end
+
+namespace Program
+
+theorem run_of_eval {fuel : Nat} {program : Program}
+    {state final : EVMState}
+    (hEval : Block.Eval fuel program.body state final) :
+    run fuel program state = .ok final := by
+  unfold run
+  exact Block.run_of_eval hEval
+
+end Program
+
 /--
 The structured layer abstracts away from the concrete assembly program counter.
 It also inherits the gas-erasure boundary of the assembly layer.
