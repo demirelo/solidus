@@ -11,6 +11,18 @@ inductive Label where
 abbrev Word := EvmYul.UInt256
 abbrev EVMOp := EvmYul.Operation EvmYul.OperationType.EVM
 
+theorem UInt256_ofNat_add (left right : Nat) :
+    EvmYul.UInt256.ofNat left + EvmYul.UInt256.ofNat right =
+      EvmYul.UInt256.ofNat (left + right) := by
+  change
+    EvmYul.UInt256.add (EvmYul.UInt256.ofNat left)
+      (EvmYul.UInt256.ofNat right) =
+        EvmYul.UInt256.ofNat (left + right)
+  unfold EvmYul.UInt256.add EvmYul.UInt256.ofNat
+  congr
+  ext
+  simp [Id.run, Fin.val_add, Nat.add_mod]
+
 /--
 Primitive operations admitted directly into the first assembly layer.
 
@@ -167,6 +179,18 @@ def pcAfter (program : Program) : Word :=
 
 @[simp]
 theorem pcAfter_nil : pcAfter ([] : Program) = EvmYul.UInt256.ofNat 0 := rfl
+
+theorem pcAfter_append (left right : Program) :
+    pcAfter (left ++ right) =
+      pcAfter left + EvmYul.UInt256.ofNat (byteLength right) := by
+  unfold pcAfter
+  rw [byteLength_append]
+  exact (UInt256_ofNat_add (byteLength left) (byteLength right)).symm
+
+theorem pcAfter_snoc (program : Program) (instr : Instr) :
+    pcAfter (program ++ [instr]) =
+      pcAfter program + EvmYul.UInt256.ofNat instr.byteSize := by
+  simpa [byteLength] using pcAfter_append program [instr]
 
 end Program
 

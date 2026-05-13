@@ -86,6 +86,84 @@ end RelAt
 
 namespace BasicInstr
 
+theorem execBinOp_pc (f : EvmYul.Primop.Binary)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.execBinOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.execBinOp at hStep
+  cases hPop : state.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem execUnOp_pc (f : EvmYul.Primop.Unary)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.execUnOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.execUnOp at hStep
+  cases hPop : state.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem step_pc {instr : BasicInstr} {state final : EVMState}
+    (hStep : instr.step state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
+  cases instr with
+  | push value =>
+      unfold BasicInstr.step at hStep
+      simp [Assembly.Target.stepInstr] at hStep
+      cases hStep
+      simp [BasicInstr.toAssembly, Assembly.Instr.byteSize,
+        Assembly.Instr.push32Size, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | op op =>
+      cases op with
+      | add =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execBinOp EvmYul.UInt256.add state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execBinOp_pc EvmYul.UInt256.add hStep
+      | sub =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execBinOp EvmYul.UInt256.sub state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execBinOp_pc EvmYul.UInt256.sub hStep
+      | lt =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execBinOp EvmYul.UInt256.lt state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execBinOp_pc EvmYul.UInt256.lt hStep
+      | gt =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execBinOp EvmYul.UInt256.gt state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execBinOp_pc EvmYul.UInt256.gt hStep
+      | eq =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execBinOp EvmYul.UInt256.eq state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execBinOp_pc EvmYul.UInt256.eq hStep
+      | iszero =>
+          unfold BasicInstr.step BasicOp.step at hStep
+          change EvmYul.EVM.execUnOp EvmYul.UInt256.isZero state = .ok final at hStep
+          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
+            execUnOp_pc EvmYul.UInt256.isZero hStep
+
 theorem source_stepAt_projected_of_eraseControl_eq {instr : BasicInstr}
     {program : Assembly.Program} {pc : Nat}
     {source target source' : EVMState}
@@ -103,6 +181,16 @@ theorem source_stepAt_projected_of_eraseControl_eq {instr : BasicInstr}
       exact
         BasicInstr.step_projected_of_eraseControl_eq
           (instr := BasicInstr.op op) hEq hStep
+
+theorem source_stepAt_eq_step {instr : BasicInstr}
+    {program : Assembly.Program} {pc : Nat} {state : EVMState} :
+    Assembly.Source.stepAt program pc instr.toAssembly state =
+      instr.step state := by
+  cases instr with
+  | push value =>
+      rfl
+  | op op =>
+      rfl
 
 theorem source_step_ctx_projected_of_relAt {instr : BasicInstr}
     {pre post : Assembly.Program}
@@ -129,6 +217,54 @@ theorem source_step_ctx_projected_of_relAt {instr : BasicInstr}
     source_stepAt_projected_of_eraseControl_eq
       (instr := instr) (program := pre ++ instr.toAssembly :: post)
       (pc := Assembly.Program.byteLength pre) hRel.sameData hStep
+
+theorem source_step_ctx_relAt_of_relAt {instr : BasicInstr}
+    {pre post : Assembly.Program}
+    {source target source' : EVMState}
+    (hFit : PCFits pre)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source)
+    (hStep : instr.step source = .ok source') :
+    ∃ target',
+      Assembly.Source.step (pre ++ instr.toAssembly :: post) target =
+          .ok target' ∧
+        RelAt (Assembly.Program.pcAfter (pre ++ [instr.toAssembly]))
+          target' source' := by
+  obtain ⟨target', hTargetStep, hEq⟩ :=
+    BasicInstr.step_projected_of_eraseControl_eq hRel.sameData hStep
+  refine ⟨target', ?_, ?_, hEq⟩
+  · unfold Assembly.Source.step
+    have hAt :
+        Assembly.Program.instrAtPc (pre ++ instr.toAssembly :: post)
+            target.pc.toNat =
+          some (Assembly.Program.byteLength pre, instr.toAssembly) := by
+      unfold Assembly.Program.instrAtPc
+      rw [hRel.pc_eq, hFit]
+      simpa using
+        Assembly.Program.instrAtPcFrom_append_boundary_cons
+          pre post instr.toAssembly 0
+    rw [hAt]
+    change
+      Assembly.Source.stepAt (pre ++ instr.toAssembly :: post)
+          (Assembly.Program.byteLength pre) instr.toAssembly target =
+        Except.ok target'
+    rw [source_stepAt_eq_step]
+    exact hTargetStep
+  · calc
+      target'.pc
+          = target.pc + EvmYul.UInt256.ofNat instr.toAssembly.byteSize :=
+              step_pc hTargetStep
+      _ = Assembly.Program.pcAfter pre +
+            EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
+              rw [hRel.pc_eq]
+      _ = EvmYul.UInt256.ofNat (Assembly.Program.byteLength pre) +
+            EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
+              rfl
+      _ = EvmYul.UInt256.ofNat
+            (Assembly.Program.byteLength pre + instr.toAssembly.byteSize) := by
+              rw [Assembly.UInt256_ofNat_add]
+      _ = Assembly.Program.pcAfter (pre ++ [instr.toAssembly]) := by
+              simp [Assembly.Program.pcAfter, Assembly.Program.byteLength_append,
+                Assembly.Program.byteLength]
 
 end BasicInstr
 
