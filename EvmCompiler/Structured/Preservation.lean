@@ -268,6 +268,82 @@ theorem source_step_ctx_relAt_of_relAt {instr : BasicInstr}
 
 end BasicInstr
 
+namespace AssemblyControl
+
+theorem label_step_ctx_relAt_of_relAt {label : Assembly.Label}
+    {pre post : Assembly.Program} {source target : EVMState}
+    (hFit : PCFits pre)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source) :
+    ∃ target',
+      Assembly.Source.step (pre ++ [Assembly.Instr.label label] ++ post)
+          target = .ok target' ∧
+        RelAt (Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label]))
+          target' source := by
+  refine ⟨target.incrPC, ?_, ?_, ?_⟩
+  · unfold Assembly.Source.step
+    have hAt :
+        Assembly.Program.instrAtPc (pre ++ [Assembly.Instr.label label] ++ post)
+            target.pc.toNat =
+          some (Assembly.Program.byteLength pre, Assembly.Instr.label label) := by
+      unfold Assembly.Program.instrAtPc
+      rw [hRel.pc_eq, hFit]
+      simpa using
+        Assembly.Program.instrAtPcFrom_append_boundary_cons
+          pre post (Assembly.Instr.label label) 0
+    rw [hAt]
+    rfl
+  · calc
+      target.incrPC.pc
+          = target.pc + EvmYul.UInt256.ofNat 1 := rfl
+      _ = Assembly.Program.pcAfter pre + EvmYul.UInt256.ofNat 1 := by
+            rw [hRel.pc_eq]
+      _ = EvmYul.UInt256.ofNat (Assembly.Program.byteLength pre) +
+            EvmYul.UInt256.ofNat 1 := by
+            rfl
+      _ = EvmYul.UInt256.ofNat (Assembly.Program.byteLength pre + 1) := by
+            rw [Assembly.UInt256_ofNat_add]
+      _ = Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label]) := by
+            simp [Assembly.Program.pcAfter, Assembly.Program.byteLength_append,
+              Assembly.Program.byteLength, Assembly.Instr.byteSize]
+  · simpa [SameData, eraseControl, Assembly.eraseGas,
+      EvmYul.EVM.State.incrPC] using hRel.sameData
+
+theorem jump_step_ctx_relAt_of_relAt {label : Assembly.Label} {dest : Nat}
+    {pre post : Assembly.Program} {source target : EVMState}
+    (hFit : PCFits pre)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source)
+    (hLabel :
+      Assembly.Program.labelPc (pre ++ [Assembly.Instr.jump label] ++ post)
+        label = some dest) :
+    ∃ target',
+      Assembly.Source.step (pre ++ [Assembly.Instr.jump label] ++ post)
+          target = .ok target' ∧
+        RelAt (EvmYul.UInt256.ofNat dest) target' source := by
+  refine ⟨Assembly.Source.jumpPc dest target, ?_, ?_, ?_⟩
+  · unfold Assembly.Source.step
+    have hAt :
+        Assembly.Program.instrAtPc (pre ++ [Assembly.Instr.jump label] ++ post)
+            target.pc.toNat =
+          some (Assembly.Program.byteLength pre, Assembly.Instr.jump label) := by
+      unfold Assembly.Program.instrAtPc
+      rw [hRel.pc_eq, hFit]
+      simpa using
+        Assembly.Program.instrAtPcFrom_append_boundary_cons
+          pre post (Assembly.Instr.jump label) 0
+    rw [hAt]
+    have hLabel' :
+        Assembly.Program.labelPc (pre ++ Assembly.Instr.jump label :: post)
+          label = some dest := by
+      simpa using hLabel
+    unfold Assembly.Source.stepAt
+    simp [hLabel', Assembly.Source.invalid, Assembly.Source.jumpPc]
+    rfl
+  · rfl
+  · simpa [SameData, Assembly.Source.jumpPc, eraseControl_with_pc] using
+      hRel.sameData
+
+end AssemblyControl
+
 namespace Code
 
 def PCFitsFrom : Assembly.Program → Code → Prop
