@@ -1559,6 +1559,616 @@ theorem forLoop_false {supply : LabelSupply} {init postBlock body : Block}
             compiledInit, compiledBody, compiledPost, loopPre, condPre,
             endPrefix, LabelSupply.next, List.append_assoc] using hRelAfterEnd
 
+theorem forLoop_true_step {supply : LabelSupply}
+    {init postBlock body : Block} {cond : Code}
+    (hBody : BlockPreserves
+      (Block.compileFrom (LabelSupply.next supply) init).next body)
+    (hPost :
+      BlockPreserves
+        (Block.compileFrom
+          (Block.compileFrom (LabelSupply.next supply) init).next body).next
+        postBlock) :
+    ∀ {pre suffix : Assembly.Program}
+      {source target stateAfterCond stateAfterBody stateAfterPost final : EVMState}
+      {fuel : Nat},
+      AssemblyProgram.labelsLt supply pre →
+      AssemblyProgram.PCFitsFrom pre
+        (Stmt.compileFrom supply (.for_ init cond postBlock body)).code →
+      RelAt
+        (Assembly.Program.pcAfter
+          (pre ++ (Block.compileFrom (LabelSupply.next supply) init).code))
+        target source →
+      Code.runCondition cond source = .ok (stateAfterCond, true) →
+      Block.Eval fuel body stateAfterCond stateAfterBody →
+      Block.Eval fuel postBlock stateAfterBody stateAfterPost →
+      (∀ targetAfterPost,
+        RelAt
+          (Assembly.Program.pcAfter
+            (pre ++ (Block.compileFrom (LabelSupply.next supply) init).code))
+          targetAfterPost stateAfterPost →
+        ARun
+          (pre ++
+            (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+            suffix)
+          targetAfterPost
+          (fun target' =>
+            RelAt
+              (Assembly.Program.pcAfter
+                (pre ++
+                  (Stmt.compileFrom supply
+                    (.for_ init cond postBlock body)).code))
+              target' final)) →
+      ARun
+        (pre ++
+          (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+          suffix)
+        target
+        (fun target' =>
+          RelAt
+            (Assembly.Program.pcAfter
+              (pre ++
+                (Stmt.compileFrom supply
+                  (.for_ init cond postBlock body)).code))
+            target' final) := by
+  intro pre suffix source target stateAfterCond stateAfterBody stateAfterPost final
+    fuel hLabels hFits hRel hCond hBodyEval hPostEval hLoop
+  let loopLabel := LabelSupply.label supply 0
+  let bodyLabel := LabelSupply.label supply 1
+  let endLabel := LabelSupply.label supply 2
+  let compiledInit := Block.compileFrom (LabelSupply.next supply) init
+  let compiledBody := Block.compileFrom compiledInit.next body
+  let compiledPost := Block.compileFrom compiledBody.next postBlock
+  let loopPre : Assembly.Program := pre ++ compiledInit.code
+  let condPre : Assembly.Program := loopPre ++ [Assembly.Instr.label loopLabel]
+  let bodyPrefix : Assembly.Program :=
+    condPre ++ cond.toAssembly ++
+      [Assembly.Instr.jumpi bodyLabel, Assembly.Instr.jump endLabel]
+  let bodyPre : Assembly.Program :=
+    bodyPrefix ++ [Assembly.Instr.label bodyLabel]
+  let postPre : Assembly.Program := bodyPre ++ compiledBody.code
+  let jumpLoopPre : Assembly.Program := postPre ++ compiledPost.code
+  have hSupplyLtInit : supply < compiledInit.next := by
+    unfold compiledInit
+    exact
+      Nat.lt_of_lt_of_le (Nat.lt_succ_self supply)
+        (CompilerFacts.block_compileFrom_next_ge init
+          (LabelSupply.next supply))
+  have hFitsFull :
+      AssemblyProgram.PCFitsFrom pre
+        (compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+          cond.toAssembly ++
+          [ Assembly.Instr.jumpi bodyLabel
+          , Assembly.Instr.jump endLabel
+          , Assembly.Instr.label bodyLabel
+          ] ++
+          compiledBody.code ++ compiledPost.code ++
+          [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel]) := by
+    simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+      compiledBody, compiledPost, LabelSupply.next, List.append_assoc] using hFits
+  have hInitFits :
+      AssemblyProgram.PCFitsFrom pre compiledInit.code :=
+    AssemblyProgram.PCFitsFrom.left
+      (pre := pre) (first := compiledInit.code)
+      (second :=
+        [Assembly.Instr.label loopLabel] ++ cond.toAssembly ++
+          [ Assembly.Instr.jumpi bodyLabel
+          , Assembly.Instr.jump endLabel
+          , Assembly.Instr.label bodyLabel
+          ] ++
+          compiledBody.code ++ compiledPost.code ++
+          [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+      (by simpa [List.append_assoc] using hFitsFull)
+  have hLoopFit : PCFits loopPre := by
+    simpa [loopPre] using AssemblyProgram.PCFitsFrom.end hInitFits
+  obtain ⟨targetAfterLoopLabel, hLoopStep, hRelAfterLoopLabel⟩ :=
+    AssemblyControl.label_step_ctx_relAt_of_relAt
+      (label := loopLabel) (pre := loopPre)
+      (post :=
+        cond.toAssembly ++
+          [ Assembly.Instr.jumpi bodyLabel
+          , Assembly.Instr.jump endLabel
+          , Assembly.Instr.label bodyLabel
+          ] ++
+          compiledBody.code ++ compiledPost.code ++
+          [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+          suffix)
+      hLoopFit hRel
+  refine
+    ARun.bind
+      (program := pre ++
+        (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+        suffix)
+      (middle := fun targetAfterLoopLabel =>
+        RelAt (Assembly.Program.pcAfter condPre)
+          targetAfterLoopLabel source)
+      ?_ ?_
+  · refine ⟨1, targetAfterLoopLabel, ?_, ?_⟩
+    · change
+        Assembly.Source.runN
+          (pre ++
+            (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+            suffix)
+          1 target = .ok targetAfterLoopLabel
+      rw [show
+          pre ++
+            (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+            suffix =
+            loopPre ++ [Assembly.Instr.label loopLabel] ++
+              (cond.toAssembly ++
+                [ Assembly.Instr.jumpi bodyLabel
+                , Assembly.Instr.jump endLabel
+                , Assembly.Instr.label bodyLabel
+                ] ++
+                compiledBody.code ++ compiledPost.code ++
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+                suffix) by
+            simp [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+              compiledInit, compiledBody, compiledPost, loopPre,
+              LabelSupply.next, List.append_assoc]]
+      unfold Assembly.Source.runN
+      rw [hLoopStep]
+      rfl
+    · simpa [condPre] using hRelAfterLoopLabel
+  · intro targetAfterLoopLabel' hRelAfterLoopLabel'
+    have hAfterLoopFits :
+        AssemblyProgram.PCFitsFrom condPre
+          (cond.toAssembly ++
+            [ Assembly.Instr.jumpi bodyLabel
+            , Assembly.Instr.jump endLabel
+            , Assembly.Instr.label bodyLabel
+            ] ++
+            compiledBody.code ++ compiledPost.code ++
+            [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel]) :=
+      by
+        simpa [loopPre, condPre, List.append_assoc] using
+          AssemblyProgram.PCFitsFrom.right
+            (pre := pre)
+            (first := compiledInit.code ++ [Assembly.Instr.label loopLabel])
+            (second :=
+              cond.toAssembly ++
+                [ Assembly.Instr.jumpi bodyLabel
+                , Assembly.Instr.jump endLabel
+                , Assembly.Instr.label bodyLabel
+                ] ++
+                compiledBody.code ++ compiledPost.code ++
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+            (by simpa [List.append_assoc] using hFitsFull)
+    have hCondFitsAsm :
+        AssemblyProgram.PCFitsFrom condPre cond.toAssembly :=
+      AssemblyProgram.PCFitsFrom.left
+        (pre := condPre) (first := cond.toAssembly)
+        (second :=
+          [ Assembly.Instr.jumpi bodyLabel
+          , Assembly.Instr.jump endLabel
+          , Assembly.Instr.label bodyLabel
+          ] ++
+          compiledBody.code ++ compiledPost.code ++
+          [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+        (by simpa [List.append_assoc] using hAfterLoopFits)
+    have hCondFits : Code.PCFitsFrom condPre cond :=
+      Code.PCFitsFrom.of_assembly hCondFitsAsm
+    have hBodyLabelPc :
+        Assembly.Program.labelPc
+          (condPre ++ cond.toAssembly ++ [Assembly.Instr.jumpi bodyLabel] ++
+            ([Assembly.Instr.jump endLabel, Assembly.Instr.label bodyLabel] ++
+              compiledBody.code ++ compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+              suffix))
+          bodyLabel =
+            some (Assembly.Program.byteLength bodyPrefix) := by
+      have hPc :=
+        CompilerFacts.for_body_labelPc
+          (pre := pre) (suffix := suffix) (supply := supply)
+          (init := init) (post := postBlock) (body := body)
+          (cond := cond) hLabels
+      simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+        compiledBody, compiledPost, condPre, loopPre, bodyPrefix,
+        LabelSupply.next, List.append_assoc] using hPc
+    have hCondRun :=
+      Code.runCondition_jumpi_ctx_relAt_of_relAt
+        (cond := cond) (label := bodyLabel)
+        (dest := Assembly.Program.byteLength bodyPrefix)
+        (pre := condPre)
+        (post :=
+          [Assembly.Instr.jump endLabel, Assembly.Instr.label bodyLabel] ++
+            compiledBody.code ++ compiledPost.code ++
+            [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+            suffix)
+        hCondFits hRelAfterLoopLabel' hBodyLabelPc hCond
+    refine
+      ARun.bind
+        (program := pre ++
+          (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+          suffix)
+        (middle := fun targetAfterCond =>
+          RelAt (Assembly.Program.pcAfter bodyPrefix)
+            targetAfterCond stateAfterCond)
+        ?_ ?_
+    · simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+        compiledBody, compiledPost, condPre, bodyPrefix, loopPre,
+        LabelSupply.next, List.append_assoc] using hCondRun
+    · intro targetAfterCond hRelAfterCond
+      have hBodyPrefixFitsFrom :
+          AssemblyProgram.PCFitsFrom condPre
+            (cond.toAssembly ++
+              [Assembly.Instr.jumpi bodyLabel, Assembly.Instr.jump endLabel]) :=
+        AssemblyProgram.PCFitsFrom.left
+          (pre := condPre)
+          (first := cond.toAssembly ++
+            [Assembly.Instr.jumpi bodyLabel, Assembly.Instr.jump endLabel])
+          (second :=
+            [Assembly.Instr.label bodyLabel] ++ compiledBody.code ++
+              compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+          (by simpa [List.append_assoc] using hAfterLoopFits)
+      have hBodyLabelFit : PCFits bodyPrefix := by
+        simpa [bodyPrefix, List.append_assoc] using
+          AssemblyProgram.PCFitsFrom.end hBodyPrefixFitsFrom
+      obtain ⟨targetAfterBodyLabel, hBodyLabelStep, hRelAfterBodyLabel⟩ :=
+        AssemblyControl.label_step_ctx_relAt_of_relAt
+          (label := bodyLabel) (pre := bodyPrefix)
+          (post :=
+            compiledBody.code ++ compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+              suffix)
+          hBodyLabelFit hRelAfterCond
+      refine
+        ARun.bind
+          (program := pre ++
+            (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+            suffix)
+          (middle := fun targetAfterBodyLabel =>
+            RelAt (Assembly.Program.pcAfter bodyPre)
+              targetAfterBodyLabel stateAfterCond)
+          ?_ ?_
+      · refine ⟨1, targetAfterBodyLabel, ?_, ?_⟩
+        · change
+            Assembly.Source.runN
+              (pre ++
+                (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+                suffix)
+              1 targetAfterCond = .ok targetAfterBodyLabel
+          rw [show
+              pre ++
+                (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+                suffix =
+                bodyPrefix ++ [Assembly.Instr.label bodyLabel] ++
+                  (compiledBody.code ++ compiledPost.code ++
+                    [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+                    suffix) by
+                simp [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+                  compiledInit, compiledBody, compiledPost, loopPre, condPre,
+                  bodyPrefix, LabelSupply.next, List.append_assoc]]
+          unfold Assembly.Source.runN
+          rw [hBodyLabelStep]
+          rfl
+        · simpa [bodyPre] using hRelAfterBodyLabel
+      · intro targetAfterBodyLabel' hRelAfterBodyLabel'
+        have hAfterBodyLabelFits :
+            AssemblyProgram.PCFitsFrom bodyPre
+              (compiledBody.code ++ compiledPost.code ++
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel]) :=
+          by
+            simpa [bodyPrefix, bodyPre, loopPre, condPre, List.append_assoc] using
+              AssemblyProgram.PCFitsFrom.right
+                (pre := pre)
+                (first :=
+                  compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+                    cond.toAssembly ++
+                    [ Assembly.Instr.jumpi bodyLabel
+                    , Assembly.Instr.jump endLabel
+                    , Assembly.Instr.label bodyLabel
+                    ])
+                (second :=
+                  compiledBody.code ++ compiledPost.code ++
+                    [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+                (by simpa [List.append_assoc] using hFitsFull)
+        have hBodyFits :
+            AssemblyProgram.PCFitsFrom bodyPre compiledBody.code :=
+          AssemblyProgram.PCFitsFrom.left
+            (pre := bodyPre) (first := compiledBody.code)
+            (second :=
+              compiledPost.code ++
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+            (by simpa [List.append_assoc] using hAfterBodyLabelFits)
+        have hBodyLabels : AssemblyProgram.labelsLt compiledInit.next bodyPre := by
+          unfold bodyPre bodyPrefix condPre loopPre
+          simpa [List.append_assoc] using
+            AssemblyProgram.labelsLt_append
+              (AssemblyProgram.labelsLt_append
+                (AssemblyProgram.labelsLt_append
+                  (AssemblyProgram.labelsLt_append
+                    (AssemblyProgram.labelsLt_append
+                      (AssemblyProgram.labelsLt_append
+                        (AssemblyProgram.labelsLt_mono
+                          (Nat.le_of_lt hSupplyLtInit) hLabels)
+                        (CompilerFacts.block_compileFrom_labelsLt init
+                          (LabelSupply.next supply)))
+                      (AssemblyProgram.labelsLt_single_label
+                        (by
+                          unfold loopLabel LabelSupply.label
+                          simp [Label.generatedScopeLt]
+                          exact hSupplyLtInit)))
+                    (Code.toAssembly_labelsLt compiledInit.next cond))
+                  (AssemblyProgram.labelsLt_single_nonlabel
+                    (instr := Assembly.Instr.jumpi bodyLabel)
+                    (by intro label h; cases h)))
+                (AssemblyProgram.labelsLt_single_nonlabel
+                  (instr := Assembly.Instr.jump endLabel)
+                  (by intro label h; cases h)))
+              (AssemblyProgram.labelsLt_single_label
+                (by
+                  unfold bodyLabel LabelSupply.label
+                  simp [Label.generatedScopeLt]
+                  exact hSupplyLtInit))
+        have hBodyRun :=
+          hBody (pre := bodyPre)
+            (post :=
+              compiledPost.code ++
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+                suffix)
+            hBodyLabels hBodyFits hRelAfterBodyLabel' hBodyEval
+        refine
+          ARun.bind
+            (program := pre ++
+              (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+              suffix)
+            (middle := fun targetAfterBody =>
+              RelAt (Assembly.Program.pcAfter postPre)
+                targetAfterBody stateAfterBody)
+            ?_ ?_
+        · simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+            compiledInit, compiledBody, compiledPost, loopPre, condPre,
+            bodyPrefix, bodyPre, postPre, LabelSupply.next, List.append_assoc]
+            using hBodyRun
+        · intro targetAfterBody hRelAfterBody
+          have hPostFits :
+              AssemblyProgram.PCFitsFrom postPre compiledPost.code :=
+            by
+              have hAfterBodyFits :
+                  AssemblyProgram.PCFitsFrom postPre
+                    (compiledPost.code ++
+                      [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel]) :=
+                AssemblyProgram.PCFitsFrom.right
+                  (pre := bodyPre) (first := compiledBody.code)
+                  (second :=
+                    compiledPost.code ++
+                      [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+                  (by simpa [List.append_assoc] using hAfterBodyLabelFits)
+              exact
+                AssemblyProgram.PCFitsFrom.left
+                  (pre := postPre) (first := compiledPost.code)
+                  (second :=
+                    [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+                  (by simpa [postPre, List.append_assoc] using hAfterBodyFits)
+          have hPostLabels :
+              AssemblyProgram.labelsLt compiledBody.next postPre := by
+            unfold postPre
+            exact
+              AssemblyProgram.labelsLt_append
+                (AssemblyProgram.labelsLt_mono
+                  (CompilerFacts.block_compileFrom_next_ge body compiledInit.next)
+                  hBodyLabels)
+                (CompilerFacts.block_compileFrom_labelsLt body compiledInit.next)
+          have hPostRun :=
+            hPost (pre := postPre)
+              (post :=
+                [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+                suffix)
+              hPostLabels hPostFits hRelAfterBody hPostEval
+          refine
+            ARun.bind
+              (program := pre ++
+                (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+                suffix)
+              (middle := fun targetAfterPost =>
+                RelAt (Assembly.Program.pcAfter jumpLoopPre)
+                  targetAfterPost stateAfterPost)
+              ?_ ?_
+          · simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+              compiledInit, compiledBody, compiledPost, loopPre, condPre,
+              bodyPrefix, bodyPre, postPre, jumpLoopPre, LabelSupply.next,
+              List.append_assoc] using hPostRun
+          · intro targetAfterPost hRelAfterPost
+            have hJumpLoopFitsFrom :
+                AssemblyProgram.PCFitsFrom postPre
+                  (compiledPost.code) := hPostFits
+            have hJumpLoopFit : PCFits jumpLoopPre := by
+              simpa [jumpLoopPre] using
+                AssemblyProgram.PCFitsFrom.end hJumpLoopFitsFrom
+            have hLoopLabelPc :
+                Assembly.Program.labelPc
+                  (jumpLoopPre ++ [Assembly.Instr.jump loopLabel] ++
+                    ([Assembly.Instr.label endLabel] ++ suffix))
+                  loopLabel =
+                    some (Assembly.Program.byteLength loopPre) := by
+              have hPc :=
+                CompilerFacts.for_loop_labelPc
+                  (pre := pre) (suffix := suffix) (supply := supply)
+                  (init := init) (post := postBlock) (body := body)
+                  (cond := cond) hLabels
+              simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+                compiledInit, compiledBody, compiledPost, loopPre, condPre,
+                bodyPrefix, bodyPre, postPre, jumpLoopPre, LabelSupply.next,
+                List.append_assoc] using hPc
+            obtain ⟨targetAfterJumpLoop, hJumpLoopStep, hRelAfterJumpLoop⟩ :=
+              AssemblyControl.jump_step_ctx_relAt_of_relAt
+                (label := loopLabel)
+                (dest := Assembly.Program.byteLength loopPre)
+                (pre := jumpLoopPre)
+                (post := [Assembly.Instr.label endLabel] ++ suffix)
+                hJumpLoopFit hRelAfterPost hLoopLabelPc
+            refine
+              ARun.bind
+                (program := pre ++
+                  (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+                  suffix)
+                (middle := fun targetAfterJumpLoop =>
+                  RelAt (Assembly.Program.pcAfter loopPre)
+                    targetAfterJumpLoop stateAfterPost)
+                ?_ ?_
+            · refine ⟨1, targetAfterJumpLoop, ?_, ?_⟩
+              · change
+                  Assembly.Source.runN
+                    (pre ++
+                      (Stmt.compileFrom supply
+                        (.for_ init cond postBlock body)).code ++
+                      suffix)
+                    1 targetAfterPost = .ok targetAfterJumpLoop
+                rw [show
+                    pre ++
+                      (Stmt.compileFrom supply
+                        (.for_ init cond postBlock body)).code ++
+                      suffix =
+                      jumpLoopPre ++ [Assembly.Instr.jump loopLabel] ++
+                        ([Assembly.Instr.label endLabel] ++ suffix) by
+                    simp [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+                      compiledInit, compiledBody, compiledPost, loopPre,
+                      condPre, bodyPrefix, bodyPre, postPre, jumpLoopPre,
+                      LabelSupply.next, List.append_assoc]]
+                unfold Assembly.Source.runN
+                rw [hJumpLoopStep]
+                rfl
+              · simpa [Assembly.Program.pcAfter, loopPre] using hRelAfterJumpLoop
+            · intro targetAfterJumpLoop' hRelAfterJumpLoop'
+              exact hLoop targetAfterJumpLoop' hRelAfterJumpLoop'
+
+theorem forLoop {supply : LabelSupply}
+    {init postBlock body : Block} {cond : Code}
+    (hBody : BlockPreserves
+      (Block.compileFrom (LabelSupply.next supply) init).next body)
+    (hPost :
+      BlockPreserves
+        (Block.compileFrom
+          (Block.compileFrom (LabelSupply.next supply) init).next body).next
+        postBlock) :
+    ∀ {pre suffix : Assembly.Program} {fuel : Nat}
+      {source target final : EVMState},
+      AssemblyProgram.labelsLt supply pre →
+      AssemblyProgram.PCFitsFrom pre
+        (Stmt.compileFrom supply (.for_ init cond postBlock body)).code →
+      RelAt
+        (Assembly.Program.pcAfter
+          (pre ++ (Block.compileFrom (LabelSupply.next supply) init).code))
+        target source →
+      For.Eval fuel cond postBlock body source final →
+      ARun
+        (pre ++
+          (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+          suffix)
+        target
+        (fun target' =>
+          RelAt
+            (Assembly.Program.pcAfter
+              (pre ++
+                (Stmt.compileFrom supply
+                  (.for_ init cond postBlock body)).code))
+            target' final) := by
+  intro pre suffix fuel source target final hLabels hFits hRel hEval
+  induction fuel generalizing source target final with
+  | zero =>
+      cases hEval
+  | succ fuel ih =>
+      cases hEval with
+      | false hCond =>
+          exact
+            forLoop_false (supply := supply) (init := init)
+              (postBlock := postBlock) (body := body) (cond := cond)
+              hLabels hFits hRel hCond
+      | true hCond hBodyEval hPostEval hLoopEval =>
+          exact
+            forLoop_true_step (supply := supply) (init := init)
+              (postBlock := postBlock) (body := body) (cond := cond)
+              hBody hPost hLabels hFits hRel hCond hBodyEval hPostEval
+              (fun targetAfterPost hRelAfterPost =>
+                ih hRelAfterPost hLoopEval)
+
+theorem for_ {supply : LabelSupply}
+    {init postBlock body : Block} {cond : Code}
+    (hInit : BlockPreserves (LabelSupply.next supply) init)
+    (hBody : BlockPreserves
+      (Block.compileFrom (LabelSupply.next supply) init).next body)
+    (hPost :
+      BlockPreserves
+        (Block.compileFrom
+          (Block.compileFrom (LabelSupply.next supply) init).next body).next
+        postBlock) :
+    StmtPreserves supply (.for_ init cond postBlock body) := by
+  intro pre suffix fuel source target final hLabels hFits hRel hEval
+  cases hEval with
+  | for_ hInitEval hLoopEval =>
+      rename_i _fuel stateAfterInit
+      let loopLabel := LabelSupply.label supply 0
+      let bodyLabel := LabelSupply.label supply 1
+      let endLabel := LabelSupply.label supply 2
+      let compiledInit := Block.compileFrom (LabelSupply.next supply) init
+      let compiledBody := Block.compileFrom compiledInit.next body
+      let compiledPost := Block.compileFrom compiledBody.next postBlock
+      have hFitsFull :
+          AssemblyProgram.PCFitsFrom pre
+            (compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+              cond.toAssembly ++
+              [ Assembly.Instr.jumpi bodyLabel
+              , Assembly.Instr.jump endLabel
+              , Assembly.Instr.label bodyLabel
+              ] ++
+              compiledBody.code ++ compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel]) := by
+        simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+          compiledInit, compiledBody, compiledPost, LabelSupply.next,
+          List.append_assoc] using hFits
+      have hInitFits :
+          AssemblyProgram.PCFitsFrom pre compiledInit.code :=
+        AssemblyProgram.PCFitsFrom.left
+          (pre := pre) (first := compiledInit.code)
+          (second :=
+            [Assembly.Instr.label loopLabel] ++ cond.toAssembly ++
+              [ Assembly.Instr.jumpi bodyLabel
+              , Assembly.Instr.jump endLabel
+              , Assembly.Instr.label bodyLabel
+              ] ++
+              compiledBody.code ++ compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel])
+          (by simpa [List.append_assoc] using hFitsFull)
+      have hInitLabels :
+          AssemblyProgram.labelsLt (LabelSupply.next supply) pre :=
+        AssemblyProgram.labelsLt_mono (Nat.le_succ supply) hLabels
+      have hInitRun :=
+        hInit (pre := pre)
+          (post :=
+            [Assembly.Instr.label loopLabel] ++ cond.toAssembly ++
+              [ Assembly.Instr.jumpi bodyLabel
+              , Assembly.Instr.jump endLabel
+              , Assembly.Instr.label bodyLabel
+              ] ++
+              compiledBody.code ++ compiledPost.code ++
+              [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+              suffix)
+          hInitLabels hInitFits hRel hInitEval
+      refine
+        ARun.bind
+          (program := pre ++
+            (Stmt.compileFrom supply (.for_ init cond postBlock body)).code ++
+            suffix)
+          (middle := fun targetAfterInit =>
+            RelAt
+              (Assembly.Program.pcAfter (pre ++ compiledInit.code))
+              targetAfterInit stateAfterInit)
+          ?_ ?_
+      · simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+          compiledInit, compiledBody, compiledPost, LabelSupply.next,
+          List.append_assoc] using hInitRun
+      · intro targetAfterInit hRelAfterInit
+        have hLoopRun :=
+          forLoop (supply := supply) (init := init)
+            (postBlock := postBlock) (body := body) (cond := cond)
+            hBody hPost
+            (pre := pre) (suffix := suffix)
+            hLabels hFits hRelAfterInit hLoopEval
+        simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel,
+          compiledInit, compiledBody, compiledPost, LabelSupply.next,
+          List.append_assoc] using hLoopRun
+
 end StmtPreserves
 
 namespace BlockPreserves
@@ -1629,6 +2239,72 @@ theorem cons {supply : LabelSupply} {stmt : Stmt} {rest : List Stmt}
 
 end BlockPreserves
 
+namespace CompilerPreservation
+
+theorem block :
+    ∀ block supply, BlockPreserves supply block :=
+  Block.rec
+    (motive_1 := fun block => ∀ supply, BlockPreserves supply block)
+    (motive_2 := fun stmt => ∀ supply, StmtPreserves supply stmt)
+    (motive_3 := fun stmts =>
+      ∀ supply, BlockPreserves supply { stmts := stmts })
+    (fun _stmts ih supply => ih supply)
+    (fun code supply => StmtPreserves.code supply code)
+    (fun cond thenBody elseBody ihThen ihElse supply => by
+      exact
+        StmtPreserves.ifElse
+          (supply := supply) (cond := cond)
+          (thenBody := thenBody) (elseBody := elseBody)
+          (ihThen (Block.compileFrom (LabelSupply.next supply) elseBody).next)
+          (ihElse (LabelSupply.next supply)))
+    (fun init cond postBlock body ihInit ihPost ihBody supply => by
+      exact
+        StmtPreserves.for_
+          (supply := supply) (init := init) (postBlock := postBlock)
+          (body := body) (cond := cond)
+          (ihInit (LabelSupply.next supply))
+          (ihBody (Block.compileFrom (LabelSupply.next supply) init).next)
+          (ihPost
+            (Block.compileFrom
+              (Block.compileFrom (LabelSupply.next supply) init).next body).next))
+    (fun supply => BlockPreserves.nil supply)
+    (fun head _tail ihHead ihTail supply =>
+      BlockPreserves.cons (ihHead supply)
+        (ihTail (Stmt.compileFrom supply head).next))
+
+theorem stmt :
+    ∀ stmt supply, StmtPreserves supply stmt :=
+  Stmt.rec
+    (motive_1 := fun block => ∀ supply, BlockPreserves supply block)
+    (motive_2 := fun stmt => ∀ supply, StmtPreserves supply stmt)
+    (motive_3 := fun stmts =>
+      ∀ supply, BlockPreserves supply { stmts := stmts })
+    (fun _stmts ih supply => ih supply)
+    (fun code supply => StmtPreserves.code supply code)
+    (fun cond thenBody elseBody ihThen ihElse supply => by
+      exact
+        StmtPreserves.ifElse
+          (supply := supply) (cond := cond)
+          (thenBody := thenBody) (elseBody := elseBody)
+          (ihThen (Block.compileFrom (LabelSupply.next supply) elseBody).next)
+          (ihElse (LabelSupply.next supply)))
+    (fun init cond postBlock body ihInit ihPost ihBody supply => by
+      exact
+        StmtPreserves.for_
+          (supply := supply) (init := init) (postBlock := postBlock)
+          (body := body) (cond := cond)
+          (ihInit (LabelSupply.next supply))
+          (ihBody (Block.compileFrom (LabelSupply.next supply) init).next)
+          (ihPost
+            (Block.compileFrom
+              (Block.compileFrom (LabelSupply.next supply) init).next body).next))
+    (fun supply => BlockPreserves.nil supply)
+    (fun head _tail ihHead ihTail supply =>
+      BlockPreserves.cons (ihHead supply)
+        (ihTail (Stmt.compileFrom supply head).next))
+
+end CompilerPreservation
+
 namespace BasicInstr
 
 theorem source_step_projected_at_prefix {instr : BasicInstr}
@@ -1692,6 +2368,37 @@ theorem exists_assembly_run {program : Program} {fuel : Nat}
 
 end AssemblyReplay
 
+noncomputable def assemblyReplayOfRun {program : Program} {fuel : Nat}
+    {initial sourceFinal : EVMState}
+    (hEntryPc : initial.pc = Assembly.Program.pcAfter ([] : Assembly.Program))
+    (hFits : AssemblyProgram.PCFitsFrom ([] : Assembly.Program) program.compile)
+    (hRun : Program.run fuel program initial = .ok sourceFinal) :
+    AssemblyReplay program fuel initial sourceFinal := by
+  classical
+  have hEval := Program.eval_of_run hRun
+  have hPres :=
+    CompilerPreservation.block program.body 0
+      (pre := []) (post := []) (fuel := fuel)
+      (source := initial) (target := initial) (final := sourceFinal)
+      (AssemblyProgram.labelsLt_nil 0)
+      (by simpa [Program.compile, Block.compile] using hFits)
+      (RelAt.entry hEntryPc)
+      hEval
+  let assemblyFuel := Classical.choose hPres
+  let hPresFuel := Classical.choose_spec hPres
+  let assemblyFinal := Classical.choose hPresFuel
+  let hPresFinal := Classical.choose_spec hPresFuel
+  exact
+    { assemblyFuel := assemblyFuel
+      assemblyFinal := assemblyFinal
+      sourceRun := hRun
+      assemblyRun := by
+        change
+          Assembly.Source.runN program.compile (Classical.choose hPres) initial =
+            .ok (Classical.choose (Classical.choose_spec hPres))
+        simpa [Program.compile, Block.compile] using hPresFinal.1
+      projected := hPresFinal.2.sameData }
+
 /--
 Structured-to-labeled preservation theorem, stated at the reusable boundary.
 
@@ -1708,6 +2415,19 @@ theorem compile_preserves_from_replay {program : Program} {fuel : Nat}
         Assembly.Source.runN program.compile assemblyFuel initial = .ok assemblyFinal ∧
           eraseControl assemblyFinal = eraseControl sourceFinal := by
   exact ⟨replay.sourceRun, replay.exists_assembly_run⟩
+
+theorem compile_preserves {program : Program} {fuel : Nat}
+    {initial sourceFinal : EVMState}
+    (hEntryPc : initial.pc = Assembly.Program.pcAfter ([] : Assembly.Program))
+    (hFits : AssemblyProgram.PCFitsFrom ([] : Assembly.Program) program.compile)
+    (hRun : Program.run fuel program initial = .ok sourceFinal) :
+    Program.run fuel program initial = .ok sourceFinal ∧
+      ∃ assemblyFuel assemblyFinal,
+        Assembly.Source.runN program.compile assemblyFuel initial = .ok assemblyFinal ∧
+          eraseControl assemblyFinal = eraseControl sourceFinal := by
+  exact
+    compile_preserves_from_replay
+      (assemblyReplayOfRun hEntryPc hFits hRun)
 
 /--
 Whole-program theorem composing the structured compiler with the existing
@@ -1748,6 +2468,36 @@ theorem compile_whole_program_sound {program : Program}
       hGasOracle, hOutsideWorld, hOutOfGas, hProjection,
       replay.assemblyFinal, targetFinal, hTrace, hErase, replay.projected⟩
 
+theorem compile_whole_program_sound_of_run {program : Program}
+    {target : Assembly.TargetProgram} {fuel : Nat}
+    {initial structuredFinal : EVMState}
+    (hCompile : Assembly.compile? program.compile = some target)
+    (hRuntime : Assembly.RuntimeAssumptions program.compile target initial)
+    (hEntryPc : initial.pc = Assembly.Program.pcAfter ([] : Assembly.Program))
+    (hFits : AssemblyProgram.PCFitsFrom ([] : Assembly.Program) program.compile)
+    (hRun : Program.run fuel program initial = .ok structuredFinal) :
+    Assembly.Accepted program.compile ∧
+      Assembly.Bytecode.compileBytes? program.compile =
+        some (Assembly.Bytecode.encodeTarget target) ∧
+        Assembly.Bytecode.EncodingCorrect target (Assembly.Bytecode.encodeTarget target) ∧
+          target.GasOpcodeAbsent ∧
+            target.ExternalInteractionAbsent ∧
+              Assembly.GasOracleAssumption program.compile initial ∧
+                Assembly.OutsideWorldOracleAssumption program.compile initial ∧
+                  Assembly.OutOfGasPolicyAssumption program.compile initial ∧
+                    Assembly.CurrentContractProjectionAssumption program.compile initial ∧
+                      ∃ assemblyFinal targetFinal,
+                        Assembly.Preservation.BlockTrace program.compile target
+                          (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFuel
+                          initial targetFinal ∧
+                          Assembly.eraseGas targetFinal =
+                            Assembly.eraseGas assemblyFinal ∧
+                          eraseControl assemblyFinal =
+                            eraseControl structuredFinal := by
+  exact
+    compile_whole_program_sound hCompile hRuntime
+      (assemblyReplayOfRun hEntryPc hFits hRun)
+
 /--
 Gas-aware composition theorem for EVMYulLean `X`.
 
@@ -1770,6 +2520,28 @@ theorem compile_whole_program_X_bridge {program : Program}
     ⟨Assembly.GasAware.compile_whole_program_X_bridge
         hCompile hRuntime replay.assemblyRun hPreconditions,
       replay.projected⟩
+
+theorem compile_whole_program_X_bridge_of_run {program : Program}
+    {target : Assembly.TargetProgram} {fuel : Nat}
+    {initial structuredFinal : EVMState}
+    (hCompile : Assembly.compile? program.compile = some target)
+    (hRuntime : Assembly.RuntimeAssumptions program.compile target initial)
+    (hEntryPc : initial.pc = Assembly.Program.pcAfter ([] : Assembly.Program))
+    (hFits : AssemblyProgram.PCFitsFrom ([] : Assembly.Program) program.compile)
+    (hRun : Program.run fuel program initial = .ok structuredFinal)
+    (hPreconditions :
+      Assembly.GasAware.XPreconditionAssumptions target initial
+        (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFinal) :
+    Assembly.GasAware.XBridgeCertificate program.compile target
+      (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFuel initial
+      (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFinal ∧
+      eraseControl
+        (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFinal =
+        eraseControl structuredFinal := by
+  exact
+    compile_whole_program_X_bridge hCompile hRuntime
+      (assemblyReplayOfRun hEntryPc hFits hRun)
+      hPreconditions
 
 end Structured
 end EvmCompiler

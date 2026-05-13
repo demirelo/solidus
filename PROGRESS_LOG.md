@@ -42,3 +42,5 @@
 - 2026-05-12 18:07:03 - audit - checked loop label PC lemmas; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
 - 2026-05-12 18:09:49 - proof - proved `StmtPreserves.forLoop_false`, covering loop label entry, false condition fallthrough, jump-to-end, and end-label exit; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 18:09:49 - audit - checked `StmtPreserves.forLoop_false`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
+- 2026-05-12 18:17:26 - proof - proved recursive loop preservation (`forLoop_true_step`, `forLoop`, `for_`), syntax-wide `CompilerPreservation.block`/`stmt`, derived `assemblyReplayOfRun`, and added run-based top theorems `compile_whole_program_sound_of_run` and `compile_whole_program_X_bridge_of_run`; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 18:17:26 - audit - checked loop/top structured preservation declarations and `rg` for proof holes; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`; no `sorry`/`admit`/`axiom`/`sorryAx`.
