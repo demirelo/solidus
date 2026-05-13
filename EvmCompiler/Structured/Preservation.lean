@@ -675,6 +675,121 @@ theorem runCondition_jumpi_ctx_relAt_of_relAt
 
 end Code
 
+def BlockPreserves (supply : LabelSupply) (block : Block) : Prop :=
+  ∀ {pre post : Assembly.Program} {fuel : Nat}
+    {source target final : EVMState},
+    AssemblyProgram.labelsLt supply pre →
+    AssemblyProgram.PCFitsFrom pre (Block.compileFrom supply block).code →
+    RelAt (Assembly.Program.pcAfter pre) target source →
+    Block.Eval fuel block source final →
+    ARun (pre ++ (Block.compileFrom supply block).code ++ post) target
+      (fun target' =>
+        RelAt
+          (Assembly.Program.pcAfter
+            (pre ++ (Block.compileFrom supply block).code))
+          target' final)
+
+def StmtPreserves (supply : LabelSupply) (stmt : Stmt) : Prop :=
+  ∀ {pre post : Assembly.Program} {fuel : Nat}
+    {source target final : EVMState},
+    AssemblyProgram.labelsLt supply pre →
+    AssemblyProgram.PCFitsFrom pre (Stmt.compileFrom supply stmt).code →
+    RelAt (Assembly.Program.pcAfter pre) target source →
+    Stmt.Eval fuel stmt source final →
+    ARun (pre ++ (Stmt.compileFrom supply stmt).code ++ post) target
+      (fun target' =>
+        RelAt
+          (Assembly.Program.pcAfter
+            (pre ++ (Stmt.compileFrom supply stmt).code))
+          target' final)
+
+namespace StmtPreserves
+
+theorem code (supply : LabelSupply) (code : Code) :
+    StmtPreserves supply (.code code) := by
+  intro pre post fuel source target final _hLabels hFits hRel hEval
+  cases hEval with
+  | code hCode =>
+      have hCodeFits :
+          Code.PCFitsFrom pre code :=
+        Code.PCFitsFrom.of_assembly (by
+          simpa [Stmt.compileFrom] using hFits)
+      have hRun :=
+        Code.source_run_ctx_relAt_of_relAt
+          (code := code) (pre := pre) (post := post)
+          hCodeFits hRel hCode
+      simpa [Stmt.compileFrom] using hRun
+
+end StmtPreserves
+
+namespace BlockPreserves
+
+theorem nil (supply : LabelSupply) :
+    BlockPreserves supply { stmts := [] } := by
+  intro pre post fuel source target final _hLabels _hFits hRel hEval
+  cases hEval with
+  | nil =>
+      refine ARun.pure ?_
+      simpa [Block.compileFrom] using hRel
+
+theorem cons {supply : LabelSupply} {stmt : Stmt} {rest : List Stmt}
+    (hStmt : StmtPreserves supply stmt)
+    (hRest :
+      BlockPreserves (Stmt.compileFrom supply stmt).next { stmts := rest }) :
+    BlockPreserves supply { stmts := stmt :: rest } := by
+  intro pre post fuel source target final hLabels hFits hRel hEval
+  cases hEval with
+  | cons hStmtEval hRestEval =>
+      rename_i _fuel mid
+      let compiledStmt := Stmt.compileFrom supply stmt
+      let compiledRest := Block.compileFrom compiledStmt.next { stmts := rest }
+      have hFits' :
+          AssemblyProgram.PCFitsFrom pre
+            (compiledStmt.code ++ compiledRest.code) := by
+        simpa [Block.compileFrom, CompileResult.append,
+          compiledStmt, compiledRest] using hFits
+      have hStmtFits :
+          AssemblyProgram.PCFitsFrom pre compiledStmt.code :=
+        AssemblyProgram.PCFitsFrom.left
+          (pre := pre) (first := compiledStmt.code)
+          (second := compiledRest.code) hFits'
+      have hRestFits :
+          AssemblyProgram.PCFitsFrom (pre ++ compiledStmt.code)
+            compiledRest.code :=
+        AssemblyProgram.PCFitsFrom.right
+          (pre := pre) (first := compiledStmt.code)
+          (second := compiledRest.code) hFits'
+      have hRestLabels :
+          AssemblyProgram.labelsLt compiledStmt.next
+            (pre ++ compiledStmt.code) := by
+        apply AssemblyProgram.labelsLt_append
+        · exact
+            AssemblyProgram.labelsLt_mono
+              (CompilerFacts.stmt_compileFrom_next_ge stmt supply)
+              hLabels
+        · simpa [compiledStmt] using
+            CompilerFacts.stmt_compileFrom_labelsLt stmt supply
+      refine
+        ARun.bind
+          (program := pre ++ (Block.compileFrom supply { stmts := stmt :: rest }).code ++ post)
+          (middle := fun targetAfterStmt =>
+            RelAt (Assembly.Program.pcAfter (pre ++ compiledStmt.code))
+              targetAfterStmt mid)
+          ?_ ?_
+      · have hStmtRun :=
+          hStmt (pre := pre) (post := compiledRest.code ++ post)
+            hLabels hStmtFits hRel hStmtEval
+        simpa [Block.compileFrom, CompileResult.append,
+          compiledStmt, compiledRest, List.append_assoc] using hStmtRun
+      · intro targetAfterStmt hRelAfterStmt
+        have hRestRun :=
+          hRest (pre := pre ++ compiledStmt.code) (post := post)
+            hRestLabels hRestFits hRelAfterStmt hRestEval
+        simpa [Block.compileFrom, CompileResult.append,
+          compiledStmt, compiledRest, List.append_assoc] using hRestRun
+
+end BlockPreserves
+
 namespace BasicInstr
 
 theorem source_step_projected_at_prefix {instr : BasicInstr}
