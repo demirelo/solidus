@@ -4,7 +4,10 @@ import EvmYul.UInt256
 namespace EvmCompiler
 namespace Assembly
 
-abbrev Label := String
+inductive Label where
+  | named (name : String)
+  | generated (scope : Nat) (tag : Nat)
+  deriving BEq, DecidableEq, Repr
 abbrev Word := EvmYul.UInt256
 abbrev EVMOp := EvmYul.Operation EvmYul.OperationType.EVM
 
@@ -124,6 +127,9 @@ def byteSize : Instr → Nat
   | .jump _ => jumpSize
   | .jumpi _ => jumpSize
 
+theorem byteSize_pos (instr : Instr) : 0 < instr.byteSize := by
+  cases instr <;> simp [byteSize, push32Size, jumpSize]
+
 def targets : Instr → List Label
   | .jump target => [target]
   | .jumpi target => [target]
@@ -131,6 +137,38 @@ def targets : Instr → List Label
 
 end Instr
 
+namespace Program
+
+def byteLength : Program → Nat
+  | [] => 0
+  | instr :: rest => instr.byteSize + byteLength rest
+
+@[simp]
+theorem byteLength_nil : byteLength ([] : Program) = 0 := rfl
+
+@[simp]
+theorem byteLength_cons (instr : Instr) (rest : Program) :
+    byteLength (instr :: rest) = instr.byteSize + byteLength rest := rfl
+
+theorem byteLength_append (left right : Program) :
+    byteLength (left ++ right) = byteLength left + byteLength right := by
+  induction left with
+  | nil =>
+      simp [byteLength]
+  | cons instr rest ih =>
+      simp [byteLength, ih, Nat.add_assoc]
+
+theorem byteLength_pos_of_cons (instr : Instr) (rest : Program) :
+    0 < byteLength (instr :: rest) := by
+  simp [byteLength, Instr.byteSize_pos]
+
+def pcAfter (program : Program) : Word :=
+  EvmYul.UInt256.ofNat (byteLength program)
+
+@[simp]
+theorem pcAfter_nil : pcAfter ([] : Program) = EvmYul.UInt256.ofNat 0 := rfl
+
+end Program
+
 end Assembly
 end EvmCompiler
-

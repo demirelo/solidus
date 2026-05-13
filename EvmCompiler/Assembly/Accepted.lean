@@ -72,6 +72,41 @@ primitive-operation boundary centralized.
 def accepted (program : Program) : Bool :=
   instructionsAccepted program && labelsUnique program && allTargetsResolve program
 
+theorem labelPcFrom_none_of_not_mem_labels
+    (program : Program) (base : Nat) {target : Label}
+    (hNotMem : target ∉ labels program) :
+    labelPcFrom program base target = none := by
+  induction program generalizing base with
+  | nil =>
+      rfl
+  | cons instr rest ih =>
+      cases instr with
+      | label name =>
+          simp [labels] at hNotMem
+          have hNameNe : name ≠ target := by
+            intro hEq
+            exact hNotMem.left hEq.symm
+          unfold labelPcFrom
+          simp [hNameNe, ih (base + Instr.byteSize (.label name)) hNotMem.right]
+      | prim op =>
+          unfold labelPcFrom
+          exact ih (base + Instr.byteSize (.prim op)) hNotMem
+      | push value =>
+          unfold labelPcFrom
+          exact ih (base + Instr.byteSize (.push value)) hNotMem
+      | jump target' =>
+          unfold labelPcFrom
+          exact ih (base + Instr.byteSize (.jump target')) hNotMem
+      | jumpi target' =>
+          unfold labelPcFrom
+          exact ih (base + Instr.byteSize (.jumpi target')) hNotMem
+
+theorem labelPc_none_of_not_mem_labels
+    (program : Program) {target : Label}
+    (hNotMem : target ∉ labels program) :
+    labelPc program target = none := by
+  exact labelPcFrom_none_of_not_mem_labels program 0 hNotMem
+
 end Program
 
 /--

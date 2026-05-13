@@ -63,6 +63,37 @@ def instrAtPcFrom : Program → Nat → Nat → Option (Nat × Instr)
 def instrAtPc (program : Program) (pc : Nat) : Option (Nat × Instr) :=
   instrAtPcFrom program 0 pc
 
+theorem instrAtPcFrom_at_head (instr : Instr) (rest : Program) (base : Nat) :
+    instrAtPcFrom (instr :: rest) base base = some (base, instr) := by
+  simp [instrAtPcFrom]
+
+theorem instrAtPcFrom_append_boundary
+    (pre suffix : Program) (base : Nat) :
+    instrAtPcFrom (pre ++ suffix) base (base + byteLength pre) =
+      instrAtPcFrom suffix (base + byteLength pre)
+        (base + byteLength pre) := by
+  induction pre generalizing base with
+  | nil =>
+      simp [byteLength]
+  | cons instr rest ih =>
+      unfold instrAtPcFrom
+      have hByteNe : instr.byteSize ≠ 0 :=
+        Nat.ne_of_gt (Instr.byteSize_pos instr)
+      simp [byteLength, hByteNe]
+      rw [← Nat.add_assoc]
+      cases suffix with
+      | nil =>
+          simpa [instrAtPcFrom] using ih (base := base + instr.byteSize)
+      | cons next suffixTail =>
+          simpa [instrAtPcFrom] using ih (base := base + instr.byteSize)
+
+theorem instrAtPcFrom_append_boundary_cons
+    (pre suffix : Program) (instr : Instr) (base : Nat) :
+    instrAtPcFrom (pre ++ instr :: suffix) base (base + byteLength pre) =
+      some (base + byteLength pre, instr) := by
+  rw [instrAtPcFrom_append_boundary]
+  exact instrAtPcFrom_at_head instr suffix (base + byteLength pre)
+
 def allTargetsResolve (program : Program) : Bool :=
   program.all fun instr =>
     instr.targets.all fun target =>

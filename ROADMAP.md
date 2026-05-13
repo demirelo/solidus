@@ -2,7 +2,7 @@
 
 ## Public Spine
 
-accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics -> emitted EVM bytecode bridge -> gas-aware EVMYulLean `X` bridge
+accepted structured-control AST -> labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean operation semantics -> emitted EVM bytecode bridge -> gas-aware EVMYulLean `X` bridge
 
 ## Layer Contract
 
@@ -20,6 +20,9 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
 - [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, outside-world, out-of-gas, and projection assumptions in Lean.
 - [x] Gas-aware `X` bridge theorem exposes a reusable `XBridgeCertificate`, a direct existential sufficient-gas theorem, and a no-out-of-gas corollary.
+- [x] Structured-control layer has syntax, a fuel-indexed source evaluator, compiler to labeled assembly, and top theorem composing through the existing assembly/bytecode bridge under an explicit replay certificate.
+- [x] Structured-control proof spine has relational `Eval` semantics, executable-run-to-`Eval`, source-run sequencing, and prefix PC-layout lemmas for the replay derivation.
+- [ ] Derive the structured replay certificate by induction over the structured evaluator, eliminating the current caller-provided proof object from the structured top theorem.
 - [ ] Full gas-aware EVM `Ξ` refinement is a later theorem layer with explicit gas/out-of-gas assumptions.
 
 ## Milestones
@@ -33,6 +36,9 @@ accepted labeled assembly AST -> resolved EVM assembly -> gasless EVMYulLean ope
 - [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
 - [x] Byte encoder correctness against EVMYulLean decoding/fetching for complete target programs under explicit PC/extract bounds.
 - [x] EVMYulLean `X` runner bridge under explicit sufficient-gas certificate.
+- [x] Structured-control AST with `code`, `ifElse`, and Yul-shaped `for` compiles to labeled assembly and composes with the lower bridge via `Structured.AssemblyReplay`.
+- [x] First PC-aware structured compiler infrastructure: `Eval` induction principle, `ARun` bind, `pcAfter`, and basic-instruction prefix-step projection.
+- [ ] Structured compiler preservation derives `AssemblyReplay` directly for every successful structured run.
 - [ ] Derive `SufficientGasForX` from the finite block trace and EVMYulLean gas-cost/precheck functions.
 - [ ] EVMYulLean jumpdest scanner correctness for complete target programs, if `D_J_aux` becomes transparent or a library theorem is added.
 - [ ] Full gas-aware simulation against EVMYulLean `Ξ`.
