@@ -36,3 +36,5 @@
 - 2026-05-12 17:56:07 - audit - checked `CompilerFacts.ifElse_then_labelPc`, `CompilerFacts.ifElse_end_labelPc`, and `CompilerFacts.block_compileFrom_labelsLt`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
 - 2026-05-12 17:59:35 - proof - introduced `StmtPreserves`/`BlockPreserves` contracts and proved straight-line statement plus block nil/cons preservation constructors; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 17:59:35 - audit - checked `StmtPreserves.code` and `BlockPreserves.cons`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
+- 2026-05-12 18:04:44 - proof - proved `StmtPreserves.ifElse_false`, `StmtPreserves.ifElse_true`, and composed `StmtPreserves.ifElse` over compiled labeled assembly; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 18:04:44 - audit - checked `StmtPreserves.ifElse_false`, `StmtPreserves.ifElse_true`, and `StmtPreserves.ifElse`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
