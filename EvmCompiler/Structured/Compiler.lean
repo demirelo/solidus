@@ -1081,6 +1081,205 @@ theorem ifElse_end_labelPc {pre post : Assembly.Program}
   simpa [Stmt.compileFrom, thenLabel, endLabel, compiledElse, compiledThen,
     LabelSupply.next, List.append_assoc] using hEq
 
+theorem for_loop_labelPc {pre suffix : Assembly.Program}
+    {supply : LabelSupply} {init post body : Block} {cond : Code}
+    (hPreLt : AssemblyProgram.labelsLt supply pre) :
+    Assembly.Program.labelPc
+      (pre ++ (Stmt.compileFrom supply
+        (Stmt.for_ init cond post body)).code ++ suffix)
+      (LabelSupply.label supply 0) =
+        some (Assembly.Program.byteLength
+          (pre ++
+            (Block.compileFrom (LabelSupply.next supply) init).code)) := by
+  let loopLabel := LabelSupply.label supply 0
+  let bodyLabel := LabelSupply.label supply 1
+  let endLabel := LabelSupply.label supply 2
+  let compiledInit := Block.compileFrom (LabelSupply.next supply) init
+  let compiledBody := Block.compileFrom compiledInit.next body
+  let compiledPost := Block.compileFrom compiledBody.next post
+  have hNotMem :
+      loopLabel ∉ Assembly.Program.labels (pre ++ compiledInit.code) := by
+    intro hMem
+    have hPreNot : loopLabel ∉ Assembly.Program.labels pre := by
+      unfold loopLabel
+      exact AssemblyProgram.not_mem_generated_of_labelsLt hPreLt
+    have hInitNot : loopLabel ∉ Assembly.Program.labels compiledInit.code := by
+      unfold loopLabel compiledInit
+      exact
+        AssemblyProgram.not_mem_generated_of_labelsGe_next
+          (block_compileFrom_labelsGe init (LabelSupply.next supply))
+    simp [Assembly.Program.labels_append, hPreNot, hInitNot] at hMem
+  have hEq :=
+    Assembly.Program.labelPc_append_label_eq
+      (pre ++ compiledInit.code)
+      (cond.toAssembly ++
+        [ Assembly.Instr.jumpi bodyLabel
+        , Assembly.Instr.jump endLabel
+        , Assembly.Instr.label bodyLabel
+        ] ++
+        compiledBody.code ++ compiledPost.code ++
+        [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+        suffix)
+      (target := loopLabel) hNotMem
+  simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+    compiledBody, compiledPost, LabelSupply.next, List.append_assoc] using hEq
+
+theorem for_body_labelPc {pre suffix : Assembly.Program}
+    {supply : LabelSupply} {init post body : Block} {cond : Code}
+    (hPreLt : AssemblyProgram.labelsLt supply pre) :
+    Assembly.Program.labelPc
+      (pre ++ (Stmt.compileFrom supply
+        (Stmt.for_ init cond post body)).code ++ suffix)
+      (LabelSupply.label supply 1) =
+        some (Assembly.Program.byteLength
+          (pre ++
+            (Block.compileFrom (LabelSupply.next supply) init).code ++
+            [Assembly.Instr.label (LabelSupply.label supply 0)] ++
+            cond.toAssembly ++
+            [ Assembly.Instr.jumpi (LabelSupply.label supply 1)
+            , Assembly.Instr.jump (LabelSupply.label supply 2)
+            ])) := by
+  let loopLabel := LabelSupply.label supply 0
+  let bodyLabel := LabelSupply.label supply 1
+  let endLabel := LabelSupply.label supply 2
+  let compiledInit := Block.compileFrom (LabelSupply.next supply) init
+  let compiledBody := Block.compileFrom compiledInit.next body
+  let compiledPost := Block.compileFrom compiledBody.next post
+  have hNotMem :
+      bodyLabel ∉ Assembly.Program.labels
+        (pre ++ compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+          cond.toAssembly ++
+          [Assembly.Instr.jumpi bodyLabel, Assembly.Instr.jump endLabel]) := by
+    intro hMem
+    have hPreNot :
+        Assembly.Label.generated supply 1 ∉ Assembly.Program.labels pre := by
+      exact AssemblyProgram.not_mem_generated_of_labelsLt hPreLt
+    have hInitNot :
+        Assembly.Label.generated supply 1 ∉
+          Assembly.Program.labels compiledInit.code := by
+      unfold compiledInit
+      exact
+        AssemblyProgram.not_mem_generated_of_labelsGe_next
+          (block_compileFrom_labelsGe init (LabelSupply.next supply))
+    unfold loopLabel bodyLabel endLabel at hMem
+    simp [Assembly.Program.labels_append, Assembly.Program.labels,
+      Code.toAssembly_labels, LabelSupply.label] at hMem
+    rcases hMem with hPre | hInit
+    · exact hPreNot hPre
+    · exact hInitNot hInit
+  have hEq :=
+    Assembly.Program.labelPc_append_label_eq
+      (pre ++ compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+        cond.toAssembly ++
+        [Assembly.Instr.jumpi bodyLabel, Assembly.Instr.jump endLabel])
+      (compiledBody.code ++ compiledPost.code ++
+        [Assembly.Instr.jump loopLabel, Assembly.Instr.label endLabel] ++
+        suffix)
+      (target := bodyLabel) hNotMem
+  simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+    compiledBody, compiledPost, LabelSupply.next, List.append_assoc] using hEq
+
+theorem for_end_labelPc {pre suffix : Assembly.Program}
+    {supply : LabelSupply} {init post body : Block} {cond : Code}
+    (hPreLt : AssemblyProgram.labelsLt supply pre) :
+    Assembly.Program.labelPc
+      (pre ++ (Stmt.compileFrom supply
+        (Stmt.for_ init cond post body)).code ++ suffix)
+      (LabelSupply.label supply 2) =
+        some (Assembly.Program.byteLength
+          (pre ++
+            (Block.compileFrom (LabelSupply.next supply) init).code ++
+            [Assembly.Instr.label (LabelSupply.label supply 0)] ++
+            cond.toAssembly ++
+            [ Assembly.Instr.jumpi (LabelSupply.label supply 1)
+            , Assembly.Instr.jump (LabelSupply.label supply 2)
+            , Assembly.Instr.label (LabelSupply.label supply 1)
+            ] ++
+            (Block.compileFrom
+              (Block.compileFrom (LabelSupply.next supply) init).next
+              body).code ++
+            (Block.compileFrom
+              (Block.compileFrom
+                (Block.compileFrom (LabelSupply.next supply) init).next
+                body).next
+              post).code ++
+            [Assembly.Instr.jump (LabelSupply.label supply 0)])) := by
+  let loopLabel := LabelSupply.label supply 0
+  let bodyLabel := LabelSupply.label supply 1
+  let endLabel := LabelSupply.label supply 2
+  let compiledInit := Block.compileFrom (LabelSupply.next supply) init
+  let compiledBody := Block.compileFrom compiledInit.next body
+  let compiledPost := Block.compileFrom compiledBody.next post
+  have hSupplyLtInit : supply < compiledInit.next := by
+    unfold compiledInit
+    exact
+      Nat.lt_of_lt_of_le (Nat.lt_succ_self supply)
+        (block_compileFrom_next_ge init (LabelSupply.next supply))
+  have hSupplyLtBody : supply < compiledBody.next := by
+    exact
+      Nat.lt_of_lt_of_le hSupplyLtInit
+        (block_compileFrom_next_ge body compiledInit.next)
+  have hNotMem :
+      endLabel ∉ Assembly.Program.labels
+        (pre ++ compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+          cond.toAssembly ++
+          [ Assembly.Instr.jumpi bodyLabel
+          , Assembly.Instr.jump endLabel
+          , Assembly.Instr.label bodyLabel
+          ] ++
+          compiledBody.code ++ compiledPost.code ++
+          [Assembly.Instr.jump loopLabel]) := by
+    intro hMem
+    have hPreNot :
+        Assembly.Label.generated supply 2 ∉ Assembly.Program.labels pre := by
+      exact AssemblyProgram.not_mem_generated_of_labelsLt hPreLt
+    have hInitNot :
+        Assembly.Label.generated supply 2 ∉
+          Assembly.Program.labels compiledInit.code := by
+      unfold compiledInit
+      exact
+        AssemblyProgram.not_mem_generated_of_labelsGe_next
+          (block_compileFrom_labelsGe init (LabelSupply.next supply))
+    have hBodyNot :
+        Assembly.Label.generated supply 2 ∉
+          Assembly.Program.labels compiledBody.code := by
+      unfold compiledBody
+      exact
+        AssemblyProgram.not_mem_generated_of_labelsGe_gt
+          (lower := compiledInit.next) (supply := supply) (tag := 2)
+          hSupplyLtInit
+          (block_compileFrom_labelsGe body compiledInit.next)
+    have hPostNot :
+        Assembly.Label.generated supply 2 ∉
+          Assembly.Program.labels compiledPost.code := by
+      unfold compiledPost
+      exact
+        AssemblyProgram.not_mem_generated_of_labelsGe_gt
+          (lower := compiledBody.next) (supply := supply) (tag := 2)
+          hSupplyLtBody
+          (block_compileFrom_labelsGe post compiledBody.next)
+    unfold loopLabel bodyLabel endLabel at hMem
+    simp [Assembly.Program.labels_append, Assembly.Program.labels,
+      Code.toAssembly_labels, LabelSupply.label] at hMem
+    rcases hMem with hPre | hInit | hBody | hPost
+    · exact hPreNot hPre
+    · exact hInitNot hInit
+    · exact hBodyNot hBody
+    · exact hPostNot hPost
+  have hEq :=
+    Assembly.Program.labelPc_append_label_eq
+      (pre ++ compiledInit.code ++ [Assembly.Instr.label loopLabel] ++
+        cond.toAssembly ++
+        [ Assembly.Instr.jumpi bodyLabel
+        , Assembly.Instr.jump endLabel
+        , Assembly.Instr.label bodyLabel
+        ] ++
+        compiledBody.code ++ compiledPost.code ++
+        [Assembly.Instr.jump loopLabel])
+      suffix (target := endLabel) hNotMem
+  simpa [Stmt.compileFrom, loopLabel, bodyLabel, endLabel, compiledInit,
+    compiledBody, compiledPost, LabelSupply.next, List.append_assoc] using hEq
+
 end CompilerFacts
 
 namespace Block

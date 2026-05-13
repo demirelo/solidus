@@ -38,3 +38,5 @@
 - 2026-05-12 17:59:35 - audit - checked `StmtPreserves.code` and `BlockPreserves.cons`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
 - 2026-05-12 18:04:44 - proof - proved `StmtPreserves.ifElse_false`, `StmtPreserves.ifElse_true`, and composed `StmtPreserves.ifElse` over compiled labeled assembly; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 18:04:44 - audit - checked `StmtPreserves.ifElse_false`, `StmtPreserves.ifElse_true`, and `StmtPreserves.ifElse`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
+- 2026-05-12 18:07:03 - proof - proved exact generated-label PC resolution for `for_`: `for_loop_labelPc`, `for_body_labelPc`, and `for_end_labelPc`; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 18:07:03 - audit - checked loop label PC lemmas; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
