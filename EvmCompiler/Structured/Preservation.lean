@@ -268,6 +268,73 @@ theorem source_step_ctx_relAt_of_relAt {instr : BasicInstr}
 
 end BasicInstr
 
+namespace Code
+
+def PCFitsFrom : Assembly.Program → Code → Prop
+  | pre, [] => PCFits pre
+  | pre, instr :: rest =>
+      PCFits pre ∧ PCFitsFrom (pre ++ [instr.toAssembly]) rest
+
+theorem source_run_ctx_relAt_of_relAt {code : Code}
+    {pre post : Assembly.Program}
+    {source target source' : EVMState}
+    (hFits : PCFitsFrom pre code)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source)
+    (hRun : Code.run code source = .ok source') :
+    ARun (pre ++ code.toAssembly ++ post) target
+      (fun target' =>
+        RelAt (Assembly.Program.pcAfter (pre ++ code.toAssembly))
+          target' source') := by
+  induction code generalizing pre source target with
+  | nil =>
+      simp [Code.run] at hRun
+      cases hRun
+      refine ARun.pure ?_
+      simpa [Code.toAssembly, Assembly.Program.byteLength_append,
+        Assembly.Program.pcAfter] using hRel
+  | cons instr rest ih =>
+      unfold Code.run at hRun
+      cases hStep : instr.step source with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok sourceMid =>
+          rw [hStep] at hRun
+          rcases hFits with ⟨hFitHere, hFitsRest⟩
+          obtain ⟨targetMid, hAssemblyStep, hRelMid⟩ :=
+            BasicInstr.source_step_ctx_relAt_of_relAt
+              (instr := instr) (pre := pre)
+              (post := Code.toAssembly rest ++ post)
+              hFitHere hRel hStep
+          refine
+            ARun.bind
+              (program := pre ++ Code.toAssembly (instr :: rest) ++ post)
+              (middle := fun stateAfterInstr =>
+                RelAt (Assembly.Program.pcAfter (pre ++ [instr.toAssembly]))
+                  stateAfterInstr sourceMid)
+              ?_ ?_
+          · refine ⟨1, targetMid, ?_, hRelMid⟩
+            change
+              Assembly.Source.runN
+                  (pre ++ Code.toAssembly (instr :: rest) ++ post)
+                  1 target =
+                Except.ok targetMid
+            rw [show
+                pre ++ Code.toAssembly (instr :: rest) ++ post =
+                  pre ++ instr.toAssembly :: (Code.toAssembly rest ++ post) by
+                  simp [Code.toAssembly, List.append_assoc]]
+            unfold Assembly.Source.runN
+            rw [hAssemblyStep]
+            rfl
+          · intro stateAfterInstr hStateAfterInstr
+            change Code.run rest sourceMid = Except.ok source' at hRun
+            have hRest :=
+              ih (pre := pre ++ [instr.toAssembly])
+                hFitsRest hStateAfterInstr hRun
+            simpa [Code.toAssembly, List.append_assoc] using hRest
+
+end Code
+
 namespace BasicInstr
 
 theorem source_step_projected_at_prefix {instr : BasicInstr}
