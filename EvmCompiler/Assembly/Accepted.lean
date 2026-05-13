@@ -107,6 +107,66 @@ theorem labelPc_none_of_not_mem_labels
     labelPc program target = none := by
   exact labelPcFrom_none_of_not_mem_labels program 0 hNotMem
 
+theorem labelPcFrom_append_label_eq
+    (pre suffix : Program) (base : Nat) {target : Label}
+    (hNotMem : target ∉ labels pre) :
+    labelPcFrom (pre ++ .label target :: suffix) base target =
+      some (base + byteLength pre) := by
+  induction pre generalizing base with
+  | nil =>
+      simp [labelPcFrom, byteLength]
+  | cons instr rest ih =>
+      cases instr with
+      | label name =>
+          simp [labels] at hNotMem
+          have hNameNe : name ≠ target := by
+            intro hEq
+            exact hNotMem.left hEq.symm
+          unfold labelPcFrom
+          simp [hNameNe]
+          rw [ih (base := base + Instr.byteSize (.label name)) hNotMem.right]
+          simp [Nat.add_assoc]
+      | prim op =>
+          unfold labelPcFrom
+          change
+            labelPcFrom (rest ++ Instr.label target :: suffix)
+              (base + Instr.byteSize (.prim op)) target =
+              some (base + byteLength (.prim op :: rest))
+          rw [ih (base := base + Instr.byteSize (.prim op)) hNotMem]
+          simp [byteLength, Nat.add_assoc]
+      | push value =>
+          unfold labelPcFrom
+          change
+            labelPcFrom (rest ++ Instr.label target :: suffix)
+              (base + Instr.byteSize (.push value)) target =
+              some (base + byteLength (.push value :: rest))
+          rw [ih (base := base + Instr.byteSize (.push value)) hNotMem]
+          simp [byteLength, Nat.add_assoc]
+      | jump target' =>
+          unfold labelPcFrom
+          change
+            labelPcFrom (rest ++ Instr.label target :: suffix)
+              (base + Instr.byteSize (.jump target')) target =
+              some (base + byteLength (.jump target' :: rest))
+          rw [ih (base := base + Instr.byteSize (.jump target')) hNotMem]
+          simp [byteLength, Nat.add_assoc]
+      | jumpi target' =>
+          unfold labelPcFrom
+          change
+            labelPcFrom (rest ++ Instr.label target :: suffix)
+              (base + Instr.byteSize (.jumpi target')) target =
+              some (base + byteLength (.jumpi target' :: rest))
+          rw [ih (base := base + Instr.byteSize (.jumpi target')) hNotMem]
+          simp [byteLength, Nat.add_assoc]
+
+theorem labelPc_append_label_eq
+    (pre suffix : Program) {target : Label}
+    (hNotMem : target ∉ labels pre) :
+    labelPc (pre ++ .label target :: suffix) target =
+      some (byteLength pre) := by
+  simpa [labelPc] using
+    labelPcFrom_append_label_eq pre suffix 0 hNotMem
+
 end Program
 
 /--
