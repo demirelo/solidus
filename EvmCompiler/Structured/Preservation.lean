@@ -351,6 +351,15 @@ def PCFitsFrom : Assembly.Program → Code → Prop
   | pre, instr :: rest =>
       PCFits pre ∧ PCFitsFrom (pre ++ [instr.toAssembly]) rest
 
+theorem PCFitsFrom.end {pre : Assembly.Program} {code : Code}
+    (hFits : PCFitsFrom pre code) :
+    PCFits (pre ++ code.toAssembly) := by
+  induction code generalizing pre with
+  | nil =>
+      simpa [PCFitsFrom, Code.toAssembly] using hFits
+  | cons instr rest ih =>
+      simpa [Code.toAssembly, List.append_assoc] using ih hFits.2
+
 theorem source_run_ctx_relAt_of_relAt {code : Code}
     {pre post : Assembly.Program}
     {source target source' : EVMState}
@@ -533,6 +542,75 @@ theorem jumpi_step_ctx_relAt_of_popCondition
                   rw [hRel.sameData]
           _ = eraseControl { source with stack := rest } :=
                   (eraseControl_with_stack source rest).symm
+
+theorem runCondition_jumpi_ctx_relAt_of_relAt
+    {cond : Code} {label : Assembly.Label} {dest : Nat}
+    {pre post : Assembly.Program}
+    {source target source' : EVMState} {condTrue : Bool}
+    (hFits : PCFitsFrom pre cond)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source)
+    (hLabel :
+      Assembly.Program.labelPc
+          (pre ++ cond.toAssembly ++ [Assembly.Instr.jumpi label] ++ post)
+          label = some dest)
+    (hRun : runCondition cond source = .ok (source', condTrue)) :
+    ARun (pre ++ cond.toAssembly ++ [Assembly.Instr.jumpi label] ++ post)
+      target
+      (fun target' =>
+        RelAt
+          (if condTrue then
+            EvmYul.UInt256.ofNat dest
+          else
+            Assembly.Program.pcAfter
+              (pre ++ cond.toAssembly ++ [Assembly.Instr.jumpi label]))
+          target' source') := by
+  unfold runCondition at hRun
+  cases hCode : run cond source with
+  | error err =>
+      rw [hCode] at hRun
+      cases hRun
+  | ok sourceAfterCode =>
+      rw [hCode] at hRun
+      refine
+        ARun.bind
+          (program := pre ++ cond.toAssembly ++ [Assembly.Instr.jumpi label] ++ post)
+          (middle := fun targetAfterCode =>
+            RelAt (Assembly.Program.pcAfter (pre ++ cond.toAssembly))
+              targetAfterCode sourceAfterCode)
+          ?_ ?_
+      · have hCodeRun :=
+          source_run_ctx_relAt_of_relAt
+            (code := cond) (pre := pre)
+            (post := [Assembly.Instr.jumpi label] ++ post)
+            hFits hRel hCode
+        simpa [List.append_assoc] using hCodeRun
+      · intro targetAfterCode hRelAfterCode
+        have hLabel' :
+            Assembly.Program.labelPc
+                ((pre ++ cond.toAssembly) ++
+                  [Assembly.Instr.jumpi label] ++ post) label =
+              some dest := by
+          simpa [List.append_assoc] using hLabel
+        obtain ⟨targetAfterJump, hJumpStep, hRelAfterJump⟩ :=
+          jumpi_step_ctx_relAt_of_popCondition
+            (label := label) (dest := dest)
+            (pre := pre ++ cond.toAssembly) (post := post)
+            (PCFitsFrom.end hFits) hRelAfterCode hLabel' hRun
+        refine ⟨1, targetAfterJump, ?_, ?_⟩
+        · change
+            Assembly.Source.runN
+                (pre ++ cond.toAssembly ++
+                  [Assembly.Instr.jumpi label] ++ post)
+                1 targetAfterCode =
+              Except.ok targetAfterJump
+          rw [show
+              pre ++ cond.toAssembly ++ [Assembly.Instr.jumpi label] ++ post =
+                (pre ++ cond.toAssembly) ++ [Assembly.Instr.jumpi label] ++ post by
+                simp [List.append_assoc]]
+          unfold Assembly.Source.runN
+          rw [hJumpStep]
+          rfl
+        · simpa [List.append_assoc] using hRelAfterJump
 
 end Code
 
