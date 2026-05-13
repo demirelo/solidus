@@ -18,7 +18,8 @@ accepted structured-control AST -> labeled assembly AST -> resolved EVM assembly
 - [x] Contextual EVMYulLean `decode` facts cover encoded target instructions at non-wrapping PCs.
 - [x] Whole-target EVMYulLean `decode` and `fetchInstr` correctness holds under explicit decode-safety bounds.
 - [x] EVMYulLean jumpdest scanner dependence is isolated as the explicit `JumpdestCorrect` assumption boundary.
-- [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, outside-world, out-of-gas, and projection assumptions in Lean.
+- [x] Public top theorem `compile_whole_program_sound` exposes bytecode, gas, out-of-gas, and gas-erased projection assumptions in Lean; external-facing EVM state semantics are reused directly, not abstracted by an oracle.
+- [x] Labeled assembly primitive surface includes all current one-byte EVM operations except `GAS` and raw jump/jumpdest opcodes; pushes are represented by the AST immediate instruction and currently encoded canonically as `PUSH32`.
 - [x] Gas-aware `X` bridge theorem exposes a reusable `XBridgeCertificate`, a direct existential sufficient-gas theorem, and a no-out-of-gas corollary.
 - [x] Structured-control layer has syntax, a fuel-indexed source evaluator, compiler to labeled assembly, and top theorem composing through the existing assembly/bytecode bridge from successful source runs.
 - [x] Structured-control proof spine has relational `Eval` semantics, executable-run-to-`Eval`, source-run sequencing, and prefix PC-layout lemmas for the replay derivation.
@@ -32,7 +33,7 @@ accepted structured-control AST -> labeled assembly AST -> resolved EVM assembly
 - [x] Whole-program AST compiler theorem from `compile? program = some target`.
 - [ ] Current-contract memory/storage slice.
 - [ ] Gas oracle/refinement relation for `GAS`.
-- [ ] External-call oracle/refinement relation.
+- [x] External calls/creates/account-code reads/logs/selfdestruct are direct EVMYulLean state operations in the assembly layer, not oracle-refined operations.
 - [x] Byte encoder boundary plus local `PUSH32` and one-byte opcode decode facts.
 - [x] Byte encoder correctness against EVMYulLean decoding/fetching for complete target programs under explicit PC/extract bounds.
 - [x] EVMYulLean `X` runner bridge under explicit sufficient-gas certificate.

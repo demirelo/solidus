@@ -2447,25 +2447,23 @@ theorem compile_whole_program_sound {program : Program}
         some (Assembly.Bytecode.encodeTarget target) ∧
         Assembly.Bytecode.EncodingCorrect target (Assembly.Bytecode.encodeTarget target) ∧
           target.GasOpcodeAbsent ∧
-            target.ExternalInteractionAbsent ∧
-              Assembly.GasOracleAssumption program.compile initial ∧
-                Assembly.OutsideWorldOracleAssumption program.compile initial ∧
-                  Assembly.OutOfGasPolicyAssumption program.compile initial ∧
-                    Assembly.CurrentContractProjectionAssumption program.compile initial ∧
-                      ∃ assemblyFinal targetFinal,
-                        Assembly.Preservation.BlockTrace program.compile target
-                          replay.assemblyFuel initial targetFinal ∧
-                          Assembly.eraseGas targetFinal =
-                            Assembly.eraseGas assemblyFinal ∧
-                          eraseControl assemblyFinal = eraseControl structuredFinal := by
+            Assembly.GasOracleAssumption program.compile initial ∧
+              Assembly.OutOfGasPolicyAssumption program.compile initial ∧
+                Assembly.CurrentContractProjectionAssumption program.compile initial ∧
+                  ∃ assemblyFinal targetFinal,
+                    Assembly.Preservation.BlockTrace program.compile target
+                      replay.assemblyFuel initial targetFinal ∧
+                      Assembly.eraseGas targetFinal =
+                        Assembly.eraseGas assemblyFinal ∧
+                      eraseControl assemblyFinal = eraseControl structuredFinal := by
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hNoGas, hNoExternal,
-      hGasOracle, hOutsideWorld, hOutOfGas, hProjection,
+    ⟨hAccepted, hBytes, hEncoding, hNoGas,
+      hGasOracle, hOutOfGas, hProjection,
       targetFinal, hTrace, hErase⟩ :=
     Assembly.compile_whole_program_sound hCompile hRuntime replay.assemblyRun
   exact
-    ⟨hAccepted, hBytes, hEncoding, hNoGas, hNoExternal,
-      hGasOracle, hOutsideWorld, hOutOfGas, hProjection,
+    ⟨hAccepted, hBytes, hEncoding, hNoGas,
+      hGasOracle, hOutOfGas, hProjection,
       replay.assemblyFinal, targetFinal, hTrace, hErase, replay.projected⟩
 
 theorem compile_whole_program_sound_of_run {program : Program}
@@ -2481,19 +2479,17 @@ theorem compile_whole_program_sound_of_run {program : Program}
         some (Assembly.Bytecode.encodeTarget target) ∧
         Assembly.Bytecode.EncodingCorrect target (Assembly.Bytecode.encodeTarget target) ∧
           target.GasOpcodeAbsent ∧
-            target.ExternalInteractionAbsent ∧
-              Assembly.GasOracleAssumption program.compile initial ∧
-                Assembly.OutsideWorldOracleAssumption program.compile initial ∧
-                  Assembly.OutOfGasPolicyAssumption program.compile initial ∧
-                    Assembly.CurrentContractProjectionAssumption program.compile initial ∧
-                      ∃ assemblyFinal targetFinal,
-                        Assembly.Preservation.BlockTrace program.compile target
-                          (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFuel
-                          initial targetFinal ∧
-                          Assembly.eraseGas targetFinal =
-                            Assembly.eraseGas assemblyFinal ∧
-                          eraseControl assemblyFinal =
-                            eraseControl structuredFinal := by
+            Assembly.GasOracleAssumption program.compile initial ∧
+              Assembly.OutOfGasPolicyAssumption program.compile initial ∧
+                Assembly.CurrentContractProjectionAssumption program.compile initial ∧
+                  ∃ assemblyFinal targetFinal,
+                    Assembly.Preservation.BlockTrace program.compile target
+                      (assemblyReplayOfRun hEntryPc hFits hRun).assemblyFuel
+                      initial targetFinal ∧
+                      Assembly.eraseGas targetFinal =
+                        Assembly.eraseGas assemblyFinal ∧
+                      eraseControl assemblyFinal =
+                        eraseControl structuredFinal := by
   exact
     compile_whole_program_sound hCompile hRuntime
       (assemblyReplayOfRun hEntryPc hFits hRun)

@@ -10,27 +10,30 @@ namespace PrimOp
 Primitive operations whose non-gas behavior is supplied by the shared
 EVM/Yul semantics imported from EVMYulLean.
 
-The first assembly layer deliberately has no `GAS`, `CALL`, `CREATE`,
-`SELFDESTRUCT`, or exact gas accounting in its syntax. Environment and
-state-reading operations can still be treated by later source languages as
-oracle inputs; at this layer they are just the same EVMYulLean state
-transformers used by the target.
+The first assembly layer deliberately has no `GAS` or exact gas accounting in
+its syntax, and raw EVM jumps are represented by labeled control-flow
+instructions. External-facing operations such as `CALL`, `CREATE`, account/code
+reads, logs, and `SELFDESTRUCT` are admitted here and use exactly the same
+EVMYulLean state transformers as the compiled target.
 -/
 def accepted (_op : PrimOp) : Bool :=
   true
 
 /--
 Operations whose result can depend on context outside the current stack/control
-state.  This classifier is documentation in code for later compilers that want
-to model those values by oracles before lowering into this assembly layer.
+state. This classifier is documentation only: the assembly semantics itself
+does not abstract these operations and delegates to EVMYulLean directly.
 -/
 def usesOutsideContext : PrimOp → Bool
-  | .address | .origin | .caller | .callvalue | .calldataload | .calldatasize
-  | .calldatacopy | .gasprice | .returndatasize | .returndatacopy
+  | .address | .balance | .origin | .caller | .callvalue | .calldataload
+  | .calldatasize | .calldatacopy | .codesize | .codecopy | .gasprice
+  | .extcodesize | .extcodecopy | .returndatasize | .returndatacopy
+  | .extcodehash
   | .blockhash | .coinbase | .timestamp | .number | .prevrandao | .gaslimit
   | .chainid | .selfbalance | .basefee | .blobhash | .blobbasefee
   | .sload | .sstore | .tload | .tstore | .log0 | .log1 | .log2 | .log3
-  | .log4 | .return | .revert =>
+  | .log4 | .create | .call | .callcode | .return | .delegatecall | .create2
+  | .staticcall | .revert | .selfdestruct =>
       true
   | _ =>
       false
@@ -199,22 +202,13 @@ def compile? (program : Program) : Option TargetProgram :=
 /--
 Gas boundary for the gasless source language.
 
-The assembly AST has no `GAS` instruction.  Full EVM gas accounting is therefore
+The assembly AST has no `GAS` instruction. Full EVM gas accounting is therefore
 not part of source semantics; later gas-aware theorems may either assume enough
 gas for a run or allow the EVM execution to stop earlier with out-of-gas.
 -/
 structure GasOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) :
     Prop where
   gasAccountingIsOutsideSourceSemantics : True
-
-/--
-Boundary for environmental values such as caller, calldata, block data, and
-return data.  This layer reuses EVMYulLean operations directly; source languages
-above it may present those values as explicit oracle inputs before lowering.
--/
-structure OutsideWorldOracleAssumption
-    (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
-  environmentalInputsComeFromStateOrOracle : True
 
 /--
 Out-of-gas policy boundary for the full EVM runner.
@@ -231,13 +225,13 @@ structure OutOfGasPolicyAssumption
 /--
 Projection boundary for observations of full EVM state.
 
-The current theorem compares states after erasing gas accounting fields.  It
-also treats outside contracts and chain context through the EVMYulLean state or
-future oracle premises rather than adding them to this assembly semantics.
+The current theorem compares EVM states after erasing gas accounting fields.
+External-facing state remains part of the compared EVM state; it is not
+projected away by this assembly layer.
 -/
 structure CurrentContractProjectionAssumption
     (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
-  compareOnlyGasErasedCurrentExecutionState : True
+  compareOnlyGasErasedExecutionState : True
 
 namespace GasOracleAssumption
 
@@ -246,14 +240,6 @@ def trivial {program : Program} {initial : EvmYul.EVM.State} :
   gasAccountingIsOutsideSourceSemantics := True.intro
 
 end GasOracleAssumption
-
-namespace OutsideWorldOracleAssumption
-
-def trivial {program : Program} {initial : EvmYul.EVM.State} :
-    OutsideWorldOracleAssumption program initial where
-  environmentalInputsComeFromStateOrOracle := True.intro
-
-end OutsideWorldOracleAssumption
 
 namespace OutOfGasPolicyAssumption
 
@@ -267,7 +253,7 @@ namespace CurrentContractProjectionAssumption
 
 def trivial {program : Program} {initial : EvmYul.EVM.State} :
     CurrentContractProjectionAssumption program initial where
-  compareOnlyGasErasedCurrentExecutionState := True.intro
+  compareOnlyGasErasedExecutionState := True.intro
 
 end CurrentContractProjectionAssumption
 
@@ -277,13 +263,14 @@ gas-aware EVM execution theorem.
 
 No field is a new trusted constant: each later theorem must either require this
 structure as a hypothesis or prove the relevant field for a concrete execution.
-Keeping the fields here makes the trust boundary for gas, outside context, and
-out-of-gas behavior visible to later compiler layers.
+Keeping the fields here makes the trust boundary for gas and out-of-gas
+behavior visible to later compiler layers. External-facing EVM behavior is not
+an extra assumption: assembly primitives call the imported EVMYulLean semantics
+directly.
 -/
 structure EVMExecutionAssumptions (program : Program) (initial : EvmYul.EVM.State) : Prop where
   accepted : Accepted program
   gasOracle : GasOracleAssumption program initial
-  outsideWorldOracle : OutsideWorldOracleAssumption program initial
   outOfGasPolicy : OutOfGasPolicyAssumption program initial
   currentContractProjection : CurrentContractProjectionAssumption program initial
 
@@ -293,7 +280,6 @@ def noExtraAssumptions {program : Program} {initial : EvmYul.EVM.State}
     (accepted : Accepted program) : EVMExecutionAssumptions program initial where
   accepted := accepted
   gasOracle := GasOracleAssumption.trivial
-  outsideWorldOracle := OutsideWorldOracleAssumption.trivial
   outOfGasPolicy := OutOfGasPolicyAssumption.trivial
   currentContractProjection := CurrentContractProjectionAssumption.trivial
 

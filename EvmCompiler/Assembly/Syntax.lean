@@ -27,22 +27,30 @@ theorem UInt256_ofNat_add (left right : Nat) :
 Primitive operations admitted directly into the first assembly layer.
 
 Control transfer, labels, and pushes are represented by dedicated assembly
-instructions. `GAS` and external-call/create opcodes are intentionally absent
-from this verified deterministic slice; they will enter through oracle/refinement
-relations rather than by giving the source language gas accounting.
+instructions. `GAS` is intentionally absent because the source semantics is
+gasless; raw `JUMP`/`JUMPI`/`JUMPDEST` are represented by labeled control-flow
+instructions instead. The remaining EVM operations reuse EVMYulLean's EVM
+semantics directly.
 -/
 inductive PrimOp where
   | stop
   | add | mul | sub | div | sdiv | mod | smod | addmod | mulmod | exp | signextend
   | lt | gt | slt | sgt | eq | iszero | and | or | xor | not | byte | shl | shr | sar
-  | address | origin | caller | callvalue | calldataload | calldatasize | calldatacopy
-  | gasprice | returndatasize | returndatacopy
+  | address | balance | origin | caller | callvalue | calldataload | calldatasize
+  | calldatacopy | codesize | codecopy | gasprice | extcodesize | extcodecopy
+  | returndatasize | returndatacopy | extcodehash
   | blockhash | coinbase | timestamp | number | prevrandao | gaslimit | chainid
   | selfbalance | basefee | blobhash | blobbasefee
-  | pop | mload | mstore | sload | sstore | mstore8 | msize | tload | tstore | mcopy
+  | pop | mload | mstore | sload | sstore | mstore8 | pc | msize | tload | tstore
+  | mcopy
   | keccak256
+  | dup1 | dup2 | dup3 | dup4 | dup5 | dup6 | dup7 | dup8
+  | dup9 | dup10 | dup11 | dup12 | dup13 | dup14 | dup15 | dup16
+  | swap1 | swap2 | swap3 | swap4 | swap5 | swap6 | swap7 | swap8
+  | swap9 | swap10 | swap11 | swap12 | swap13 | swap14 | swap15 | swap16
   | log0 | log1 | log2 | log3 | log4
-  | return | revert | invalid
+  | create | call | callcode | return | delegatecall | create2 | staticcall
+  | revert | invalid | selfdestruct
   deriving DecidableEq, Repr
 
 namespace PrimOp
@@ -75,15 +83,21 @@ def toEVM : PrimOp → EVMOp
   | .shr => EvmYul.Operation.SHR
   | .sar => EvmYul.Operation.SAR
   | .address => EvmYul.Operation.ADDRESS
+  | .balance => EvmYul.Operation.BALANCE
   | .origin => EvmYul.Operation.ORIGIN
   | .caller => EvmYul.Operation.CALLER
   | .callvalue => EvmYul.Operation.CALLVALUE
   | .calldataload => EvmYul.Operation.CALLDATALOAD
   | .calldatasize => EvmYul.Operation.CALLDATASIZE
   | .calldatacopy => EvmYul.Operation.CALLDATACOPY
+  | .codesize => EvmYul.Operation.CODESIZE
+  | .codecopy => EvmYul.Operation.CODECOPY
   | .gasprice => EvmYul.Operation.GASPRICE
+  | .extcodesize => EvmYul.Operation.EXTCODESIZE
+  | .extcodecopy => EvmYul.Operation.EXTCODECOPY
   | .returndatasize => EvmYul.Operation.RETURNDATASIZE
   | .returndatacopy => EvmYul.Operation.RETURNDATACOPY
+  | .extcodehash => EvmYul.Operation.EXTCODEHASH
   | .blockhash => EvmYul.Operation.BLOCKHASH
   | .coinbase => EvmYul.Operation.COINBASE
   | .timestamp => EvmYul.Operation.TIMESTAMP
@@ -101,19 +115,59 @@ def toEVM : PrimOp → EVMOp
   | .sload => EvmYul.Operation.SLOAD
   | .sstore => EvmYul.Operation.SSTORE
   | .mstore8 => EvmYul.Operation.MSTORE8
+  | .pc => EvmYul.Operation.PC
   | .msize => EvmYul.Operation.MSIZE
   | .tload => EvmYul.Operation.TLOAD
   | .tstore => EvmYul.Operation.TSTORE
   | .mcopy => EvmYul.Operation.MCOPY
   | .keccak256 => EvmYul.Operation.KECCAK256
+  | .dup1 => EvmYul.Operation.DUP1
+  | .dup2 => EvmYul.Operation.DUP2
+  | .dup3 => EvmYul.Operation.DUP3
+  | .dup4 => EvmYul.Operation.DUP4
+  | .dup5 => EvmYul.Operation.DUP5
+  | .dup6 => EvmYul.Operation.DUP6
+  | .dup7 => EvmYul.Operation.DUP7
+  | .dup8 => EvmYul.Operation.DUP8
+  | .dup9 => EvmYul.Operation.DUP9
+  | .dup10 => EvmYul.Operation.DUP10
+  | .dup11 => EvmYul.Operation.DUP11
+  | .dup12 => EvmYul.Operation.DUP12
+  | .dup13 => EvmYul.Operation.DUP13
+  | .dup14 => EvmYul.Operation.DUP14
+  | .dup15 => EvmYul.Operation.DUP15
+  | .dup16 => EvmYul.Operation.DUP16
+  | .swap1 => EvmYul.Operation.SWAP1
+  | .swap2 => EvmYul.Operation.SWAP2
+  | .swap3 => EvmYul.Operation.SWAP3
+  | .swap4 => EvmYul.Operation.SWAP4
+  | .swap5 => EvmYul.Operation.SWAP5
+  | .swap6 => EvmYul.Operation.SWAP6
+  | .swap7 => EvmYul.Operation.SWAP7
+  | .swap8 => EvmYul.Operation.SWAP8
+  | .swap9 => EvmYul.Operation.SWAP9
+  | .swap10 => EvmYul.Operation.SWAP10
+  | .swap11 => EvmYul.Operation.SWAP11
+  | .swap12 => EvmYul.Operation.SWAP12
+  | .swap13 => EvmYul.Operation.SWAP13
+  | .swap14 => EvmYul.Operation.SWAP14
+  | .swap15 => EvmYul.Operation.SWAP15
+  | .swap16 => EvmYul.Operation.SWAP16
   | .log0 => EvmYul.Operation.LOG0
   | .log1 => EvmYul.Operation.LOG1
   | .log2 => EvmYul.Operation.LOG2
   | .log3 => EvmYul.Operation.LOG3
   | .log4 => EvmYul.Operation.LOG4
+  | .create => EvmYul.Operation.CREATE
+  | .call => EvmYul.Operation.CALL
+  | .callcode => EvmYul.Operation.CALLCODE
   | .return => EvmYul.Operation.RETURN
+  | .delegatecall => EvmYul.Operation.DELEGATECALL
+  | .create2 => EvmYul.Operation.CREATE2
+  | .staticcall => EvmYul.Operation.STATICCALL
   | .revert => EvmYul.Operation.REVERT
   | .invalid => EvmYul.Operation.INVALID
+  | .selfdestruct => EvmYul.Operation.SELFDESTRUCT
 
 end PrimOp
 
