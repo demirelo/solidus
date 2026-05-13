@@ -40,3 +40,5 @@
 - 2026-05-12 18:04:44 - audit - checked `StmtPreserves.ifElse_false`, `StmtPreserves.ifElse_true`, and `StmtPreserves.ifElse`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
 - 2026-05-12 18:07:03 - proof - proved exact generated-label PC resolution for `for_`: `for_loop_labelPc`, `for_body_labelPc`, and `for_end_labelPc`; command `/Users/dan/.elan/bin/lake build`; result green.
 - 2026-05-12 18:07:03 - audit - checked loop label PC lemmas; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
+- 2026-05-12 18:09:49 - proof - proved `StmtPreserves.forLoop_false`, covering loop label entry, false condition fallthrough, jump-to-end, and end-label exit; command `/Users/dan/.elan/bin/lake build`; result green.
+- 2026-05-12 18:09:49 - audit - checked `StmtPreserves.forLoop_false`; only standard Lean/mathlib axioms reported: `propext`, `Classical.choice`, `Quot.sound`.
