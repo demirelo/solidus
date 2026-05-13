@@ -333,6 +333,131 @@ theorem source_run_ctx_relAt_of_relAt {code : Code}
                 hFitsRest hStateAfterInstr hRun
             simpa [Code.toAssembly, List.append_assoc] using hRest
 
+theorem jumpi_step_ctx_relAt_of_popCondition
+    {label : Assembly.Label} {dest : Nat}
+    {pre post : Assembly.Program}
+    {source target source' : EVMState} {condTrue : Bool}
+    (hFit : PCFits pre)
+    (hRel : RelAt (Assembly.Program.pcAfter pre) target source)
+    (hLabel :
+      Assembly.Program.labelPc (pre ++ [Assembly.Instr.jumpi label] ++ post)
+        label = some dest)
+    (hPop : popCondition source = .ok (source', condTrue)) :
+    ∃ target',
+      Assembly.Source.step (pre ++ [Assembly.Instr.jumpi label] ++ post) target =
+          .ok target' ∧
+        RelAt
+          (if condTrue then
+            EvmYul.UInt256.ofNat dest
+          else
+            Assembly.Program.pcAfter (pre ++ [Assembly.Instr.jumpi label]))
+          target' source' := by
+  unfold popCondition at hPop
+  have hStack := stack_eq_of_eraseControl_eq hRel.sameData
+  cases hSourcePop : source.stack.pop with
+  | none =>
+      rw [hSourcePop] at hPop
+      cases hPop
+  | some popped =>
+      rcases popped with ⟨rest, cond⟩
+      have hTargetPop : target.stack.pop = some (rest, cond) := by
+        rw [hStack, hSourcePop]
+      rw [hSourcePop] at hPop
+      simp at hPop
+      cases hPop.1
+      cases hPop.2
+      unfold Assembly.Source.step
+      have hAt :
+          Assembly.Program.instrAtPc
+              (pre ++ [Assembly.Instr.jumpi label] ++ post)
+              target.pc.toNat =
+            some (Assembly.Program.byteLength pre, Assembly.Instr.jumpi label) := by
+        unfold Assembly.Program.instrAtPc
+        rw [hRel.pc_eq, hFit]
+        simpa using
+          Assembly.Program.instrAtPcFrom_append_boundary_cons
+            pre post (Assembly.Instr.jumpi label) 0
+      rw [hAt]
+      have hLabel' :
+          Assembly.Program.labelPc (pre ++ Assembly.Instr.jumpi label :: post)
+            label = some dest := by
+        simpa using hLabel
+      change
+        ∃ target',
+          Assembly.Source.stepAt (pre ++ [Assembly.Instr.jumpi label] ++ post)
+              (Assembly.Program.byteLength pre) (Assembly.Instr.jumpi label)
+              target =
+            Except.ok target' ∧
+              RelAt
+                (if (cond != EvmYul.UInt256.ofNat 0) then
+                  EvmYul.UInt256.ofNat dest
+                else
+                  Assembly.Program.pcAfter (pre ++ [Assembly.Instr.jumpi label]))
+                target'
+                { source with stack := rest }
+      unfold Assembly.Source.stepAt
+      simp [hLabel', Assembly.Source.invalid, hTargetPop]
+      by_cases hCond : cond != EvmYul.UInt256.ofNat 0
+      · simp [hCond]
+        refine
+          ⟨{ target with pc := EvmYul.UInt256.ofNat dest, stack := rest },
+            rfl, ?_, ?_⟩
+        · rfl
+        calc
+          eraseControl { target with pc := EvmYul.UInt256.ofNat dest, stack := rest }
+              = eraseControl { target with stack := rest } := by
+                  simpa using
+                    (eraseControl_with_pc { target with stack := rest }
+                      (EvmYul.UInt256.ofNat dest))
+          _ = { eraseControl target with stack := rest } :=
+                  eraseControl_with_stack target rest
+          _ = { eraseControl source with stack := rest } := by
+                  rw [hRel.sameData]
+          _ = eraseControl { source with stack := rest } :=
+                  (eraseControl_with_stack source rest).symm
+      · simp [hCond]
+        refine
+          ⟨{ target with pc := (Assembly.Source.jumpiFallthroughPc target), stack := rest },
+            rfl, ?_, ?_⟩
+        · unfold Assembly.Source.jumpiFallthroughPc Assembly.Program.pcAfter
+          calc
+            target.pc + EvmYul.UInt256.ofNat Assembly.Instr.push32Size +
+                EvmYul.UInt256.ofNat 1
+                = EvmYul.UInt256.ofNat (Assembly.Program.byteLength pre) +
+                    EvmYul.UInt256.ofNat Assembly.Instr.push32Size +
+                      EvmYul.UInt256.ofNat 1 := by
+                        rw [hRel.pc_eq]
+                        rfl
+            _ = EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength pre +
+                    Assembly.Instr.push32Size) +
+                    EvmYul.UInt256.ofNat 1 := by
+                      rw [Assembly.UInt256_ofNat_add]
+            _ = EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength pre +
+                    Assembly.Instr.push32Size + 1) := by
+                      rw [Assembly.UInt256_ofNat_add]
+            _ = EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength
+                    (pre ++ [Assembly.Instr.jumpi label])) := by
+                      simp [Assembly.Program.byteLength_append,
+                        Assembly.Program.byteLength, Assembly.Instr.byteSize,
+                        Assembly.Instr.jumpSize]
+                      rw [Nat.add_assoc]
+        calc
+          eraseControl { target with
+                pc := (Assembly.Source.jumpiFallthroughPc target), stack := rest }
+              = eraseControl { target with stack := rest } := by
+                  simpa using
+                    (eraseControl_with_pc { target with stack := rest }
+                      (Assembly.Source.jumpiFallthroughPc target))
+          _ = { eraseControl target with stack := rest } :=
+                  eraseControl_with_stack target rest
+          _ = { eraseControl source with stack := rest } := by
+                  rw [hRel.sameData]
+          _ = eraseControl { source with stack := rest } :=
+                  (eraseControl_with_stack source rest).symm
+
 end Code
 
 namespace BasicInstr
