@@ -382,10 +382,11 @@ end Program
 
 /--
 The structured layer abstracts away from the concrete assembly program counter.
-It also inherits the gas-erasure boundary of the assembly layer.
+Gas remains part of this source-to-assembly relation: gas is erased only at the
+assembly-to-EVM bridge.
 -/
 def eraseControl (state : EVMState) : EVMState :=
-  { Assembly.eraseGas state with pc := EvmYul.UInt256.ofNat 0 }
+  { state with pc := EvmYul.UInt256.ofNat 0 }
 
 theorem eraseControl_with_pc (state : EVMState) (pc : Word) :
     eraseControl { state with pc := pc } = eraseControl state := by
@@ -403,8 +404,34 @@ theorem stack_eq_of_eraseControl_eq {left right : EVMState}
     left.stack = right.stack := by
   cases left
   cases right
-  simp [eraseControl, Assembly.eraseGas] at h
-  exact h.2
+  simp [eraseControl] at h
+  exact h.2.1
+
+theorem sharedState_eq_of_eraseControl_eq {left right : EVMState}
+    (h : eraseControl left = eraseControl right) :
+    left.toSharedState = right.toSharedState := by
+  cases left
+  cases right
+  simp [eraseControl] at h
+  exact h.1
+
+theorem state_eq_of_eraseControl_eq {left right : EVMState}
+    (h : eraseControl left = eraseControl right) :
+    left.toState = right.toState := by
+  exact congrArg EvmYul.SharedState.toState
+    (sharedState_eq_of_eraseControl_eq h)
+
+theorem machineState_eq_of_eraseControl_eq {left right : EVMState}
+    (h : eraseControl left = eraseControl right) :
+    left.toMachineState = right.toMachineState := by
+  exact congrArg EvmYul.SharedState.toMachineState
+    (sharedState_eq_of_eraseControl_eq h)
+
+theorem executionEnv_eq_of_eraseControl_eq {left right : EVMState}
+    (h : eraseControl left = eraseControl right) :
+    left.executionEnv = right.executionEnv := by
+  exact congrArg EvmYul.State.executionEnv
+    (state_eq_of_eraseControl_eq h)
 
 theorem eraseControl_replaceStackAndIncrPC_of_eq {left right : EVMState}
     {leftStack rightStack : EvmYul.Stack Word}
@@ -416,8 +443,68 @@ theorem eraseControl_replaceStackAndIncrPC_of_eq {left right : EVMState}
   cases left
   cases right
   cases hStack
-  simp [eraseControl, Assembly.eraseGas] at hEq ⊢
-  exact ⟨hEq.1, rfl⟩
+  simp [eraseControl] at hEq ⊢
+  exact ⟨hEq.1, rfl, hEq.2.2⟩
+
+theorem eraseControl_replaceSharedStackAndIncrPC_of_eq {left right : EVMState}
+    {leftShared rightShared : EvmYul.SharedState EvmYul.OperationType.EVM}
+    {leftStack rightStack : EvmYul.Stack Word}
+    {pcΔ : Nat}
+    (hEq : eraseControl left = eraseControl right)
+    (hShared : leftShared = rightShared)
+    (hStack : leftStack = rightStack) :
+    eraseControl
+        (({ left with toSharedState := leftShared }).replaceStackAndIncrPC
+          leftStack (pcΔ := pcΔ)) =
+      eraseControl
+        (({ right with toSharedState := rightShared }).replaceStackAndIncrPC
+          rightStack (pcΔ := pcΔ)) := by
+  cases left
+  cases right
+  cases hShared
+  cases hStack
+  simp [eraseControl] at hEq ⊢
+  exact ⟨rfl, rfl, hEq.2.2⟩
+
+theorem eraseControl_withMachineState_of_eq {left right : EVMState}
+    {leftMachine rightMachine : EvmYul.MachineState}
+    (hEq : eraseControl left = eraseControl right)
+    (hMachine : leftMachine = rightMachine) :
+    eraseControl { left with toMachineState := leftMachine } =
+      eraseControl { right with toMachineState := rightMachine } := by
+  cases left
+  cases right
+  cases hMachine
+  simp [eraseControl] at hEq ⊢
+  exact ⟨by
+    cases hEq.1
+    rfl, hEq.2.1, hEq.2.2⟩
+
+theorem eraseControl_withState_of_eq {left right : EVMState}
+    {leftState rightState : EvmYul.State EvmYul.OperationType.EVM}
+    (hEq : eraseControl left = eraseControl right)
+    (hState : leftState = rightState) :
+    eraseControl { left with toState := leftState } =
+      eraseControl { right with toState := rightState } := by
+  cases left
+  cases right
+  cases hState
+  simp [eraseControl] at hEq ⊢
+  exact ⟨by
+    cases hEq.1
+    rfl, hEq.2.1, hEq.2.2⟩
+
+theorem eraseControl_withSharedState_of_eq {left right : EVMState}
+    {leftShared rightShared : EvmYul.SharedState EvmYul.OperationType.EVM}
+    (hEq : eraseControl left = eraseControl right)
+    (hShared : leftShared = rightShared) :
+    eraseControl { left with toSharedState := leftShared } =
+      eraseControl { right with toSharedState := rightShared } := by
+  cases left
+  cases right
+  cases hShared
+  simp [eraseControl] at hEq ⊢
+  exact ⟨hEq.2.1, hEq.2.2⟩
 
 theorem execBinOp_projected_of_eraseControl_eq
     (f : EvmYul.Primop.Binary) {source target source' : EVMState}
@@ -467,6 +554,648 @@ theorem execUnOp_projected_of_eraseControl_eq
       refine ⟨target.replaceStackAndIncrPC (rest.push (f a)), rfl, ?_⟩
       exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
 
+theorem execTriOp_projected_of_eraseControl_eq
+    (f : EvmYul.Primop.Ternary) {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.execTriOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.execTriOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.execTriOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨target.replaceStackAndIncrPC (rest.push (f a b c)), rfl, ?_⟩
+      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
+
+theorem executionEnvOp_projected_of_eraseControl_eq
+    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.executionEnvOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.executionEnvOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.executionEnvOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hEnv := executionEnv_eq_of_eraseControl_eq hEq
+  cases hStep
+  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.executionEnv)),
+    rfl, ?_⟩
+  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hEnv])
+
+theorem unaryExecutionEnvOp_projected_of_eraseControl_eq
+    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word → Word)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.unaryExecutionEnvOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.unaryExecutionEnvOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.unaryExecutionEnvOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hEnv := executionEnv_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      have hTargetPop : target.stack.pop = some (rest, a) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨target.replaceStackAndIncrPC (rest.push (f target.executionEnv a)),
+        rfl, ?_⟩
+      exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hEnv])
+
+theorem machineStateOp_projected_of_eraseControl_eq
+    (f : EvmYul.MachineState → Word)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.machineStateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.machineStateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.machineStateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hStep
+  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.toMachineState)),
+    rfl, ?_⟩
+  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hMachine])
+
+theorem binaryMachineStateOp_projected_of_eraseControl_eq
+    (f : EvmYul.MachineState → Word → Word → EvmYul.MachineState)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.binaryMachineStateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.binaryMachineStateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.binaryMachineStateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toMachineState := f target.toMachineState a b
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
+          rfl
+
+theorem binaryMachineStateOp'_projected_of_eraseControl_eq
+    (f : EvmYul.MachineState → Word → Word → Word × EvmYul.MachineState)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.binaryMachineStateOp' f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.binaryMachineStateOp' f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.binaryMachineStateOp' at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toMachineState := (f target.toMachineState a b).2
+        }).replaceStackAndIncrPC (rest.push (f target.toMachineState a b).1),
+        rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
+          (by rw [hMachine])
+
+theorem ternaryMachineStateOp_projected_of_eraseControl_eq
+    (f : EvmYul.MachineState → Word → Word → Word → EvmYul.MachineState)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.ternaryMachineStateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.ternaryMachineStateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.ternaryMachineStateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toMachineState := f target.toMachineState a b c
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
+          rfl
+
+theorem stateOp_projected_of_eraseControl_eq
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.stateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.stateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.stateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hState := state_eq_of_eraseControl_eq hEq
+  cases hStep
+  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.toState)),
+    rfl, ?_⟩
+  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hState])
+
+theorem unaryStateOp_projected_of_eraseControl_eq
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word →
+      EvmYul.State EvmYul.OperationType.EVM × Word)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.unaryStateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.unaryStateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.unaryStateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hState := state_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      have hTargetPop : target.stack.pop = some (rest, a) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toState := (f target.toState a).1
+        }).replaceStackAndIncrPC (rest.push (f target.toState a).2), rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withState_of_eq hEq (by rw [hState]))
+          (by rw [hState])
+
+theorem binaryStateOp_projected_of_eraseControl_eq
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word → Word →
+      EvmYul.State EvmYul.OperationType.EVM)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.binaryStateOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.binaryStateOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.binaryStateOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hState := state_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toState := f target.toState a b
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withState_of_eq hEq (by rw [hState]))
+          rfl
+
+theorem ternaryCopyOp_projected_of_eraseControl_eq
+    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
+      Word → EvmYul.SharedState EvmYul.OperationType.EVM)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.ternaryCopyOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.ternaryCopyOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.ternaryCopyOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toSharedState := f target.toSharedState a b c
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem quaternaryCopyOp_projected_of_eraseControl_eq
+    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
+      Word → Word → EvmYul.SharedState EvmYul.OperationType.EVM)
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : EvmYul.EVM.quaternaryCopyOp f source = .ok source') :
+    ∃ target',
+      EvmYul.EVM.quaternaryCopyOp f target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold EvmYul.EVM.quaternaryCopyOp at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop4 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c, d⟩
+      have hTargetPop : target.stack.pop4 = some (rest, a, b, c, d) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toSharedState := f target.toSharedState a b c d
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_pop_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .pop source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .pop target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      have hTargetPop : target.stack.pop = some (rest, a) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      cases hStep
+      refine ⟨target.replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
+
+theorem primStep_mload_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .mload source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .mload target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      have hTargetPop : target.stack.pop = some (rest, a) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with toMachineState := (target.toMachineState.mload a).2
+        }).replaceStackAndIncrPC (rest.push (target.toMachineState.mload a).1),
+        rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
+          (by rw [hMachine])
+
+theorem primStep_returndatacopy_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .returndatacopy source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .returndatacopy target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hMachine := machineState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toMachineState := target.toMachineState.returndatacopy a b c
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
+          rfl
+
+theorem primStep_dup_projected_of_eraseControl_eq
+    (n : Nat) {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run (.dup n) source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run (.dup n) target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run EvmYul.dup at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  rw [hStack]
+  by_cases hLen : n ≤ source.stack.length
+  · simp [hLen] at hStep ⊢
+    cases hStep
+    exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
+  · simp [hLen] at hStep
+
+theorem primStep_swap_projected_of_eraseControl_eq
+    (n : Nat) {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run (.swap n) source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run (.swap n) target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run EvmYul.swap at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  rw [hStack]
+  by_cases hLen : n + 1 ≤ source.stack.length
+  · simp [hLen] at hStep ⊢
+    cases hStep
+    exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
+  · simp [hLen] at hStep
+
+theorem primStep_log0_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .log0 source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .log0 target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toSharedState := EvmYul.SharedState.logOp a b #[] target.toSharedState
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_log1_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .log1 source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .log1 target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toSharedState := EvmYul.SharedState.logOp a b #[c] target.toSharedState
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_log2_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .log2 source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .log2 target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop4 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c, d⟩
+      have hTargetPop : target.stack.pop4 = some (rest, a, b, c, d) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toSharedState := EvmYul.SharedState.logOp a b #[c, d]
+            target.toSharedState
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_log3_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .log3 source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .log3 target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop5 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c, d, e⟩
+      have hTargetPop : target.stack.pop5 = some (rest, a, b, c, d, e) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toSharedState := EvmYul.SharedState.logOp a b #[c, d, e]
+            target.toSharedState
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_log4_projected_of_eraseControl_eq
+    {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : Assembly.PrimStep.run .log4 source = .ok source') :
+    ∃ target',
+      Assembly.PrimStep.run .log4 target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  unfold Assembly.PrimStep.run at hStep ⊢
+  have hStack := stack_eq_of_eraseControl_eq hEq
+  have hShared := sharedState_eq_of_eraseControl_eq hEq
+  cases hPop : source.stack.pop6 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c, d, e, g⟩
+      have hTargetPop : target.stack.pop6 = some (rest, a, b, c, d, e, g) := by
+        rw [hStack, hPop]
+      rw [hPop] at hStep
+      rw [hTargetPop]
+      simp at hStep
+      cases hStep
+      refine ⟨({ target with
+          toSharedState := EvmYul.SharedState.logOp a b #[c, d, e, g]
+            target.toSharedState
+        }).replaceStackAndIncrPC rest, rfl, ?_⟩
+      exact
+        eraseControl_replaceStackAndIncrPC_of_eq
+          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
+          rfl
+
+theorem primStep_run_projected_of_eraseControl_eq
+    (step : Assembly.PrimStep) {source target source' : EVMState}
+    (hEq : eraseControl target = eraseControl source)
+    (hStep : step.run source = .ok source') :
+    ∃ target',
+      step.run target = .ok target' ∧
+        eraseControl target' = eraseControl source' := by
+  cases step with
+  | bin f =>
+      exact execBinOp_projected_of_eraseControl_eq f hEq hStep
+  | un f =>
+      exact execUnOp_projected_of_eraseControl_eq f hEq hStep
+  | tri f =>
+      exact execTriOp_projected_of_eraseControl_eq f hEq hStep
+  | executionEnv f =>
+      exact executionEnvOp_projected_of_eraseControl_eq f hEq hStep
+  | unaryExecutionEnv f =>
+      exact unaryExecutionEnvOp_projected_of_eraseControl_eq f hEq hStep
+  | machineState f =>
+      exact machineStateOp_projected_of_eraseControl_eq f hEq hStep
+  | binaryMachineState f =>
+      exact binaryMachineStateOp_projected_of_eraseControl_eq f hEq hStep
+  | binaryMachineStateWithResult f =>
+      exact binaryMachineStateOp'_projected_of_eraseControl_eq f hEq hStep
+  | ternaryMachineState f =>
+      exact ternaryMachineStateOp_projected_of_eraseControl_eq f hEq hStep
+  | state f =>
+      exact stateOp_projected_of_eraseControl_eq f hEq hStep
+  | unaryState f =>
+      exact unaryStateOp_projected_of_eraseControl_eq f hEq hStep
+  | binaryState f =>
+      exact binaryStateOp_projected_of_eraseControl_eq f hEq hStep
+  | ternaryCopy f =>
+      exact ternaryCopyOp_projected_of_eraseControl_eq f hEq hStep
+  | quaternaryCopy f =>
+      exact quaternaryCopyOp_projected_of_eraseControl_eq f hEq hStep
+  | pop =>
+      exact primStep_pop_projected_of_eraseControl_eq hEq hStep
+  | mload =>
+      exact primStep_mload_projected_of_eraseControl_eq hEq hStep
+  | returndatacopy =>
+      exact primStep_returndatacopy_projected_of_eraseControl_eq hEq hStep
+  | dup n =>
+      exact primStep_dup_projected_of_eraseControl_eq n hEq hStep
+  | swap n =>
+      exact primStep_swap_projected_of_eraseControl_eq n hEq hStep
+  | log0 =>
+      exact primStep_log0_projected_of_eraseControl_eq hEq hStep
+  | log1 =>
+      exact primStep_log1_projected_of_eraseControl_eq hEq hStep
+  | log2 =>
+      exact primStep_log2_projected_of_eraseControl_eq hEq hStep
+  | log3 =>
+      exact primStep_log3_projected_of_eraseControl_eq hEq hStep
+  | log4 =>
+      exact primStep_log4_projected_of_eraseControl_eq hEq hStep
+  | invalid =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hStep
+
 namespace BasicInstr
 
 theorem step_projected_of_eraseControl_eq {instr : BasicInstr}
@@ -491,31 +1220,20 @@ theorem step_projected_of_eraseControl_eq {instr : BasicInstr}
         eraseControl_replaceStackAndIncrPC_of_eq hEq
           (by rw [hStack])
   | op op =>
-      cases op with
-      | add =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.add source = .ok source' at hStep
-          exact execBinOp_projected_of_eraseControl_eq EvmYul.UInt256.add hEq hStep
-      | sub =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.sub source = .ok source' at hStep
-          exact execBinOp_projected_of_eraseControl_eq EvmYul.UInt256.sub hEq hStep
-      | lt =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.lt source = .ok source' at hStep
-          exact execBinOp_projected_of_eraseControl_eq EvmYul.UInt256.lt hEq hStep
-      | gt =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.gt source = .ok source' at hStep
-          exact execBinOp_projected_of_eraseControl_eq EvmYul.UInt256.gt hEq hStep
-      | eq =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.eq source = .ok source' at hStep
-          exact execBinOp_projected_of_eraseControl_eq EvmYul.UInt256.eq hEq hStep
-      | iszero =>
-          unfold BasicInstr.step BasicOp.step at hStep ⊢
-          change EvmYul.EVM.execUnOp EvmYul.UInt256.isZero source = .ok source' at hStep
-          exact execUnOp_projected_of_eraseControl_eq EvmYul.UInt256.isZero hEq hStep
+      unfold BasicInstr.step BasicOp.step at hStep ⊢
+      change Assembly.PrimOp.step op.toPrimOp source = .ok source' at hStep
+      change
+        ∃ target',
+          Assembly.PrimOp.step op.toPrimOp target = .ok target' ∧
+            eraseControl target' = eraseControl source'
+      cases hCont : op.toPrimOp.continuingStep? with
+      | none =>
+          cases op <;>
+            simp [BasicOp.toPrimOp, Assembly.PrimOp.continuingStep?] at hCont
+      | some step =>
+          rw [Assembly.PrimOp.step_eq_continuingStep_run hCont] at hStep
+          rw [Assembly.PrimOp.step_eq_continuingStep_run hCont]
+          exact primStep_run_projected_of_eraseControl_eq step hEq hStep
 
 end BasicInstr
 

@@ -182,6 +182,356 @@ theorem execUnOp_pc (f : EvmYul.Primop.Unary)
       simp [EvmYul.EVM.State.replaceStackAndIncrPC,
         EvmYul.EVM.State.incrPC]
 
+theorem execTriOp_pc (f : EvmYul.Primop.Ternary)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.execTriOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.execTriOp at hStep
+  cases hPop : state.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem executionEnvOp_pc
+    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.executionEnvOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.executionEnvOp at hStep
+  cases hStep
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem unaryExecutionEnvOp_pc
+    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word → Word)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.unaryExecutionEnvOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.unaryExecutionEnvOp at hStep
+  cases hPop : state.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem machineStateOp_pc (f : EvmYul.MachineState → Word)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.machineStateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.machineStateOp at hStep
+  cases hStep
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem binaryMachineStateOp_pc
+    (f : EvmYul.MachineState → Word → Word → EvmYul.MachineState)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.binaryMachineStateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.binaryMachineStateOp at hStep
+  cases hPop : state.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem binaryMachineStateOp'_pc
+    (f : EvmYul.MachineState → Word → Word → Word × EvmYul.MachineState)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.binaryMachineStateOp' f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.binaryMachineStateOp' at hStep
+  cases hPop : state.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem ternaryMachineStateOp_pc
+    (f : EvmYul.MachineState → Word → Word → Word → EvmYul.MachineState)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.ternaryMachineStateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.ternaryMachineStateOp at hStep
+  cases hPop : state.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem stateOp_pc
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.stateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.stateOp at hStep
+  cases hStep
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem unaryStateOp_pc
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word →
+      EvmYul.State EvmYul.OperationType.EVM × Word)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.unaryStateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.unaryStateOp at hStep
+  cases hPop : state.stack.pop with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem binaryStateOp_pc
+    (f : EvmYul.State EvmYul.OperationType.EVM → Word → Word →
+      EvmYul.State EvmYul.OperationType.EVM)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.binaryStateOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.binaryStateOp at hStep
+  cases hPop : state.stack.pop2 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem ternaryCopyOp_pc
+    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
+      Word → EvmYul.SharedState EvmYul.OperationType.EVM)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.ternaryCopyOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.ternaryCopyOp at hStep
+  cases hPop : state.stack.pop3 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem quaternaryCopyOp_pc
+    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
+      Word → Word → EvmYul.SharedState EvmYul.OperationType.EVM)
+    {state final : EVMState}
+    (hStep : EvmYul.EVM.quaternaryCopyOp f state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  unfold EvmYul.EVM.quaternaryCopyOp at hStep
+  cases hPop : state.stack.pop4 with
+  | none =>
+      rw [hPop] at hStep
+      cases hStep
+  | some popped =>
+      rcases popped with ⟨rest, a, b, c, d⟩
+      rw [hPop] at hStep
+      simp at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem primStep_run_pc (step : Assembly.PrimStep)
+    {state final : EVMState}
+    (hStep : step.run state = .ok final) :
+    final.pc = state.pc + EvmYul.UInt256.ofNat 1 := by
+  cases step with
+  | bin f =>
+      exact execBinOp_pc f hStep
+  | un f =>
+      exact execUnOp_pc f hStep
+  | tri f =>
+      exact execTriOp_pc f hStep
+  | executionEnv f =>
+      exact executionEnvOp_pc f hStep
+  | unaryExecutionEnv f =>
+      exact unaryExecutionEnvOp_pc f hStep
+  | machineState f =>
+      exact machineStateOp_pc f hStep
+  | binaryMachineState f =>
+      exact binaryMachineStateOp_pc f hStep
+  | binaryMachineStateWithResult f =>
+      exact binaryMachineStateOp'_pc f hStep
+  | ternaryMachineState f =>
+      exact ternaryMachineStateOp_pc f hStep
+  | state f =>
+      exact stateOp_pc f hStep
+  | unaryState f =>
+      exact unaryStateOp_pc f hStep
+  | binaryState f =>
+      exact binaryStateOp_pc f hStep
+  | ternaryCopy f =>
+      exact ternaryCopyOp_pc f hStep
+  | quaternaryCopy f =>
+      exact quaternaryCopyOp_pc f hStep
+  | pop =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a⟩
+          rw [hPop] at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | mload =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | returndatacopy =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop3 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b, c⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | dup n =>
+      unfold Assembly.PrimStep.run EvmYul.dup at hStep
+      by_cases hLen : n ≤ state.stack.length
+      · simp [hLen] at hStep
+        cases hStep
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [hLen] at hStep
+  | swap n =>
+      unfold Assembly.PrimStep.run EvmYul.swap at hStep
+      by_cases hLen : n + 1 ≤ state.stack.length
+      · simp [hLen] at hStep
+        cases hStep
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [hLen] at hStep
+  | log0 =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop2 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log1 =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop3 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b, c⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log2 =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop4 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b, c, d⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log3 =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop5 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b, c, d, e⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log4 =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hPop : state.stack.pop6 with
+      | none =>
+          rw [hPop] at hStep
+          cases hStep
+      | some popped =>
+          rcases popped with ⟨rest, a, b, c, d, e, g⟩
+          rw [hPop] at hStep
+          simp at hStep
+          cases hStep
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | invalid =>
+      unfold Assembly.PrimStep.run at hStep
+      cases hStep
+
 theorem step_pc {instr : BasicInstr} {state final : EVMState}
     (hStep : instr.step state = .ok final) :
     final.pc = state.pc + EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
@@ -194,37 +544,16 @@ theorem step_pc {instr : BasicInstr} {state final : EVMState}
         Assembly.Instr.push32Size, EvmYul.EVM.State.replaceStackAndIncrPC,
         EvmYul.EVM.State.incrPC]
   | op op =>
-      cases op with
-      | add =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.add state = .ok final at hStep
+      unfold BasicInstr.step BasicOp.step at hStep
+      change Assembly.PrimOp.step op.toPrimOp state = .ok final at hStep
+      cases hCont : op.toPrimOp.continuingStep? with
+      | none =>
+          cases op <;>
+            simp [BasicOp.toPrimOp, Assembly.PrimOp.continuingStep?] at hCont
+      | some step =>
+          rw [Assembly.PrimOp.step_eq_continuingStep_run hCont] at hStep
           simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execBinOp_pc EvmYul.UInt256.add hStep
-      | sub =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.sub state = .ok final at hStep
-          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execBinOp_pc EvmYul.UInt256.sub hStep
-      | lt =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.lt state = .ok final at hStep
-          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execBinOp_pc EvmYul.UInt256.lt hStep
-      | gt =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.gt state = .ok final at hStep
-          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execBinOp_pc EvmYul.UInt256.gt hStep
-      | eq =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execBinOp EvmYul.UInt256.eq state = .ok final at hStep
-          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execBinOp_pc EvmYul.UInt256.eq hStep
-      | iszero =>
-          unfold BasicInstr.step BasicOp.step at hStep
-          change EvmYul.EVM.execUnOp EvmYul.UInt256.isZero state = .ok final at hStep
-          simpa [BasicInstr.toAssembly, Assembly.Instr.byteSize] using
-            execUnOp_pc EvmYul.UInt256.isZero hStep
+            primStep_run_pc step hStep
 
 theorem source_stepAt_projected_of_eraseControl_eq {instr : BasicInstr}
     {program : Assembly.Program} {pc : Nat}

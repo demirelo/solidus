@@ -1,4 +1,4 @@
-import EvmCompiler.Assembly.Assembler
+import EvmCompiler.Assembly.PrimSemantics
 import EvmYul.Semantics
 import EvmYul.EVM.State
 import EvmYul.EVM.StateOps
@@ -35,7 +35,7 @@ def stepInstr (instr : TargetInstr) (state : EVMState) : Except EVMException EVM
   | .jumpdest =>
       .ok state.incrPC
   | .prim op =>
-      EvmYul.step op.toEVM none state
+      op.step state
 
 def runList : List TargetInstr → EVMState → Except EVMException EVMState
   | [], state => .ok state
