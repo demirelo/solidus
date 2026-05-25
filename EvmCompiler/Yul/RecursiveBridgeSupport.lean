@@ -28404,6 +28404,70 @@ theorem exprValuePreludeSound_prim_of_arg_stack_preludeRegular
           hRelAfter⟩
 
 /--
+Arity-aware primitive-call expression bridge for the hidden stack-order
+argument prelude.
+-/
+theorem exprValuePreludeSound_prim_of_arg_stack_preludeRegular_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hArgArity : args.length = Expressions.Structured.BasicOp.inputs op)
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre lowerArgs)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+      (.Call (.inl yulPrim) args) codeOverride pre
+      (Locals.Expr.prim op lowerArgs) := by
+  intro source compiler sourceAfter values hInitial hEval
+  cases hArgRaw :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source with
+  | error err =>
+      simp [EvmYul.Yul.evalValues, EvmYul.Yul.reverse', hArgRaw] at hEval
+  | ok argResult =>
+      rcases argResult with ⟨sourceAfterArgs, rawValues⟩
+      have hArgForBridge :
+          EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+            .ok (sourceAfterArgs, rawValues.reverse.reverse) := by
+        simpa using hArgRaw
+      rcases hArgs.2 hInitial hArgForBridge with
+        ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+          hPreludeRun, hCompilerArgs, hRelArgs⟩
+      have hPrimCall :
+          EvmYul.Yul.primCall sourceFuel sourceAfterArgs yulPrim
+              rawValues.reverse =
+            .ok (sourceAfter, values) := by
+        simpa [EvmYul.Yul.evalValues, EvmYul.Yul.reverse', hArgRaw] using hEval
+      have hArity :
+          rawValues.reverse.length =
+            Expressions.Structured.BasicOp.inputs op := by
+        have hLen := Imported.evalArgs_length_of_ok hArgForBridge
+        simpa [List.length_reverse, hArgArity] using hLen
+      rcases hPrim hRelArgs hArity hPrimCall with
+        ⟨sharedAfter, hPrimEval, hRelAfter⟩
+      exact
+        ⟨compilerAfterPre, compilerAfterArgs.withShared sharedAfter,
+          ctxAfter, targetFuel, hPreludeRun,
+          by
+            have hCompilerArgsRaw :
+                Locals.Source.Expr.ExprSeq.eval prim lowerArgs
+                    compilerAfterPre =
+                  .ok (compilerAfterArgs, rawValues) := by
+              simpa using hCompilerArgs
+            have hPrimEvalRaw :
+                prim.eval op compilerAfterArgs.shared rawValues =
+                  .ok (sharedAfter, values) := by
+              simpa using hPrimEval
+            simp [Locals.Source.Expr.eval, hCompilerArgsRaw, hPrimEvalRaw,
+              Locals.Source.State.withShared],
+          hRelAfter⟩
+
+/--
 Hidden-context variant of `exprValuePreludeSound_prim_of_arg_stack_preludeRegular`.
 
 Generated argument preludes may run after earlier hidden temporaries have
@@ -29011,6 +29075,53 @@ theorem lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular
         (op := op) (args := args) (codeOverride := codeOverride)
         (pre := pre) (lowerArgs := seq) hArgs hPrim)
 
+theorem lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) := by
+  have hArgArity :
+      args.length = Expressions.Structured.BasicOp.inputs op := by
+    have hLowerLen :=
+      Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+    have hSeqLen :=
+      exprList_toStackSeq?_length_eq hSeq
+    exact hLowerLen.symm.trans hSeqLen
+  constructor
+  · exact
+      Expr.lower0?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      exprValuePreludeSound_cast hOutputs
+        (exprValuePreludeSound_prim_of_arg_stack_preludeRegular_arity
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (args := args) (codeOverride := codeOverride)
+        (pre := pre) (lowerArgs := seq) hArgArity hArgs hPrim)
+
 /--
 Hidden-context variant of
 `lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular`.
@@ -29054,6 +29165,53 @@ theorem lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
           (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
           (op := op) (args := args) (codeOverride := codeOverride)
           (pre := pre) (lowerArgs := seq) hArgs hPrim)
+
+theorem lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) := by
+  have hArgArity :
+      args.length = Expressions.Structured.BasicOp.inputs op := by
+    have hLowerLen :=
+      Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+    have hSeqLen :=
+      exprList_toStackSeq?_length_eq hSeq
+    exact hLowerLen.symm.trans hSeqLen
+  constructor
+  · exact
+      Expr.lower0?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      exprValuePreludeSound_cast hOutputs
+        (exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity
+          (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+          (op := op) (args := args) (codeOverride := codeOverride)
+          (pre := pre) (lowerArgs := seq) hArgArity hArgs hPrim)
 
 /--
 Hidden regular-sequence bridge for the empty tail.
