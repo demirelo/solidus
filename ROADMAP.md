@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-25 06:34 PDT.
+Last updated: 2026-05-25 06:44 PDT.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -85,6 +85,9 @@ Last updated: 2026-05-25 06:34 PDT.
        stack-order evaluation.
      - [x] Instantiate that bridge for `ADD` under the canonical structured
        primitive semantics.
+     - [x] Generalize the Yul side of the binary-one-result bridge through
+       `execBinOp`, and instantiate the same canonical bridge for `MUL` and
+       `SUB`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
