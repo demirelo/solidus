@@ -28680,6 +28680,53 @@ theorem lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular
           (op := op) (args := args) (codeOverride := codeOverride)
           (pre := pre) (lowerArgs := seq) hArgs hPrim)
 
+theorem lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) := by
+  have hArgArity :
+      args.length = Expressions.Structured.BasicOp.inputs op := by
+    have hLowerLen :=
+      Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+    have hSeqLen :=
+      exprList_toStackSeq?_length_eq hSeq
+    exact hLowerLen.symm.trans hSeqLen
+  constructor
+  · exact
+      Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      exprValuePreludeSound_cast hOutputs
+        (exprValuePreludeSound_prim_of_arg_stack_preludeRegular_arity
+          (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+          (op := op) (args := args) (codeOverride := codeOverride)
+          (pre := pre) (lowerArgs := seq) hArgArity hArgs hPrim)
+
 /--
 Hidden-context variant of
 `lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular`.
@@ -32225,6 +32272,105 @@ theorem sourceRegularSeqRunBridgeHidden_cons_let_prim_of_lower_preludeRegular_ge
   simpa [hHeadEq, List.append_assoc] using hBridge
 
 /--
+Arity-aware checked singleton declaration bridge for non-terminal primitive
+calls through an arbitrary regular hidden argument prelude.
+-/
+theorem sourceRegularSeqRunBridgeHidden_cons_let_prim_of_lower_preludeRegular_general_arity
+    {cfg : StateRelConfig} {layout layoutAfter : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {rest : List AstStmt} {lowerHead : List Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {value : Word}
+    (sourceFuel lowerFuel : Nat) (name : EvmYul.Identifier)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Let [name] (some (.Call (.inl yulPrim) args))) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hDomain : StoreDomainExact layout store)
+    (hFresh : identName name ∉ layout)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, [value]))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hTail :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, [value]) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      SourceRegularSeqRunBridgeHidden cfg (identName name :: layout)
+        layoutAfter prim program
+        { ctxAfterPre with scope := identName name :: ctxAfterPre.scope }
+        sourceFuel.succ.succ rest codeOverride
+        (.Ok sharedAfter (storeAfter.insert (identName name) value))
+        (compilerAfterExpr.insert (identName name) value) lowerTail) :
+    SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program ctx
+      sourceFuel.succ.succ.succ
+      (.Let [name] (some (.Call (.inl yulPrim) args)) :: rest)
+      codeOverride (.Ok shared store) compiler
+      { stmts := lowerHead ++ lowerTail.stmts } := by
+  rcases
+      BridgeFacts.toFunctionsListFuel?_let_prim_single_components hLower with
+    ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
+  rcases
+      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular_arity
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (args := args) (codeOverride := codeOverride)
+        (freshState := freshState) (freshState' := freshState')
+        (pre := pre) (argExprs := argExprs) (seq := seq)
+        hBasic hLowerArgs hSeq hOutputs hArgs hPrim with
+    ⟨hLowerExprExpected, hExprSound⟩
+  have hTuple :
+      (pre, Expr.cast hOutputs (.prim op seq), freshState') =
+        (lowerPre, lowerValue, freshState') := by
+    simpa [hLowerExprExpected] using hLowerExpr
+  cases hTuple
+  have hBridge :=
+    sourceRegularSeqRunBridgeHidden_cons_let_expr_prelude_general
+      (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := rest) (pre := pre)
+      (lowerTail := lowerTail)
+      (sourceExpr := .Call (.inl yulPrim) args)
+      (lowerExpr := Expr.cast hOutputs (.prim op seq))
+      (value := value) (sourceFuel := sourceFuel.succ) (name := name)
+      (codeOverride := codeOverride) hDomain hFresh hRel hEval
+      hExprSound hTail
+  simpa [hHeadEq, List.append_assoc] using hBridge
+
+/--
 Checked singleton assignment bridge for non-terminal primitive calls through an
 arbitrary regular hidden argument prelude.
 -/
@@ -32307,6 +32453,116 @@ theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular
     ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
   rcases
       lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (args := args) (codeOverride := codeOverride)
+        (freshState := freshState) (freshState' := freshState')
+        (pre := pre) (argExprs := argExprs) (seq := seq)
+        hBasic hLowerArgs hSeq hOutputs hArgs hPrim with
+    ⟨hLowerExprExpected, hExprSound⟩
+  have hTuple :
+      (pre, Expr.cast hOutputs (.prim op seq), freshState') =
+        (lowerPre, lowerValue, freshState') := by
+    simpa [hLowerExprExpected] using hLowerExpr
+  cases hTuple
+  have hBridge :=
+    sourceRegularSeqRunBridgeHidden_cons_assign_expr_prelude_general
+      (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := rest) (pre := pre)
+      (lowerTail := lowerTail)
+      (sourceExpr := .Call (.inl yulPrim) args)
+      (lowerExpr := Expr.cast hOutputs (.prim op seq))
+      (value := value) (sourceFuel := sourceFuel.succ) (name := name)
+      (codeOverride := codeOverride) hDomain hTargetMem hRel hEval
+      hExprSound hPreContains hTail
+  simpa [hHeadEq, List.append_assoc] using hBridge
+
+/--
+Arity-aware checked singleton assignment bridge for non-terminal primitive calls
+through an arbitrary regular hidden argument prelude.
+-/
+theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_arity
+    {cfg : StateRelConfig} {layout layoutAfter : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {rest : List AstStmt} {lowerHead : List Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {value : Word}
+    (sourceFuel lowerFuel : Nat) (name : EvmYul.Identifier)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Assign [name] (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hDomain : StoreDomainExact layout store)
+    (hTargetMem : identName name ∈ layout)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, [value]))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hPreContains :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, [value]) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hTail :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, [value]) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program
+        ctxAfterPre sourceFuel.succ.succ rest codeOverride
+        (.Ok sharedAfter (storeAfter.insert (identName name) value))
+        (compilerAfterExpr.insert (identName name) value) lowerTail) :
+    SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program ctx
+      sourceFuel.succ.succ.succ
+      (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+      codeOverride (.Ok shared store) compiler
+      { stmts := lowerHead ++ lowerTail.stmts } := by
+  rcases
+      BridgeFacts.toFunctionsListFuel?_assign_prim_single_components hLower
+    with
+    ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
+  rcases
+      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular_arity
         (cfg := cfg) (layout := layout) (prim := prim) (program := program)
         (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
         (op := op) (args := args) (codeOverride := codeOverride)
@@ -32423,6 +32679,93 @@ theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular
       hTail
 
 /--
+Arity-aware singleton assignment bridge with the prelude containment side
+condition discharged from exact-domain preservation.
+-/
+theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_of_domainAfter_arity
+    {cfg : StateRelConfig} {layout layoutAfter : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {rest : List AstStmt} {lowerHead : List Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {value : Word}
+    (sourceFuel lowerFuel : Nat) (name : EvmYul.Identifier)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Assign [name] (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hDomain : StoreDomainExact layout store)
+    (hDomainAfter : StoreDomainExact layout storeAfter)
+    (hTargetMem : identName name ∈ layout)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, [value]))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hTail :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, [value]) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program
+        ctxAfterPre sourceFuel.succ.succ rest codeOverride
+        (.Ok sharedAfter (storeAfter.insert (identName name) value))
+        (compilerAfterExpr.insert (identName name) value) lowerTail) :
+    SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program ctx
+      sourceFuel.succ.succ.succ
+      (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+      codeOverride (.Ok shared store) compiler
+      { stmts := lowerHead ++ lowerTail.stmts } := by
+  exact
+    sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_arity
+      (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := rest) (lowerHead := lowerHead)
+      (lowerTail := lowerTail) (yulPrim := yulPrim) (op := op)
+      (args := args) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) (value := value) sourceFuel lowerFuel name codeOverride
+      hLower hBasic hLowerArgs hSeq hOutputs hDomain hTargetMem hRel hEval
+      hArgs hPrim
+      (by
+        intro compilerAfterPre compilerAfterExpr _ctxAfterPre _preFuel
+          _hPreRun hCompilerExpr hRelAfter
+        exact
+          SourceStateRel.preContains_of_eval_domain hCompilerExpr
+            hRelAfter hDomainAfter hTargetMem)
+      hTail
+
+/--
 Domain-preservation checked singleton-assignment bridge for primitive calls.
 
 This wrapper is the primitive-call counterpart of
@@ -32500,6 +32843,91 @@ theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular
       { stmts := lowerHead ++ lowerTail.stmts } := by
   exact
     sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_of_domainAfter
+      (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := rest) (lowerHead := lowerHead)
+      (lowerTail := lowerTail) (yulPrim := yulPrim) (op := op)
+      (args := args) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) (value := value) sourceFuel lowerFuel name codeOverride
+      hLower hBasic hLowerArgs hSeq hOutputs hDomain
+      (hEvalDomain hDomain hEval) hTargetMem hRel hEval hArgs hPrim hTail
+
+/--
+Arity-aware domain-preservation checked singleton-assignment bridge for
+primitive calls.
+-/
+theorem sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_of_eval_domain_arity
+    {cfg : StateRelConfig} {layout layoutAfter : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {rest : List AstStmt} {lowerHead : List Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {value : Word}
+    (sourceFuel lowerFuel : Nat) (name : EvmYul.Identifier)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Assign [name] (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hDomain : StoreDomainExact layout store)
+    (hEvalDomain :
+      StoreDomainExact layout store →
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, [value]) →
+      StoreDomainExact layout storeAfter)
+    (hTargetMem : identName name ∈ layout)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, [value]))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hTail :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, [value]) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program
+        ctxAfterPre sourceFuel.succ.succ rest codeOverride
+        (.Ok sharedAfter (storeAfter.insert (identName name) value))
+        (compilerAfterExpr.insert (identName name) value) lowerTail) :
+    SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program ctx
+      sourceFuel.succ.succ.succ
+      (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+      codeOverride (.Ok shared store) compiler
+      { stmts := lowerHead ++ lowerTail.stmts } := by
+  exact
+    sourceRegularSeqRunBridgeHidden_cons_assign_prim_of_lower_preludeRegular_general_of_domainAfter_arity
       (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
       (prim := prim) (program := program) (ctx := ctx)
       (shared := shared) (sharedAfter := sharedAfter)
