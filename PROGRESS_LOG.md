@@ -3319,3 +3319,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 07:33:48 PDT - compaction resume - continuing the primitive-stack contract discharge; current uncommitted work adds the nullary shared-result bridge and dispatcher equations for RETURNDATASIZE/MSIZE/GAS before instantiating their canonical stack-agreement facts.
 
 - 2026-05-25 07:45:39 PDT - proof - added arity-aware nullary machine-read primitive bridge for RETURNDATASIZE/MSIZE/GAS, exported audit aliases, and recorded that GAS uses StateRelConfig.gasValueRel; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
+
+- 2026-05-25 07:51:59 PDT - proof - added reusable arity-aware nullary primitive bridge constructors for imported `primCall ... []` facts plus canonical source `executionEnv`/`state` reads; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.

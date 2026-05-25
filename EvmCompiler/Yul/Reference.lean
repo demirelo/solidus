@@ -6190,6 +6190,30 @@ theorem yulPrimitiveUnarySharedOneSound_mload
               rw [yul_primCall_succ_mload_eq] at hCall
               simp at hCall
 
+theorem yulPrimitiveNullarySharedOneSoundAtArity_of_primCall_ok
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    (sourceResult : EvmYul.SharedState .Yul → Word)
+    (hPrimCall :
+      ∀ (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+        (store : EvmYul.Yul.VarStore),
+        EvmYul.Yul.primCall fuel.succ (.Ok shared store) yulPrim [] =
+          .ok (.Ok shared store, [sourceResult shared])) :
+    ∀ {sourceShared : EvmYul.SharedState .Yul}
+      {store : EvmYul.Yul.VarStore} {sourceAfterPrim : State}
+      {values' : List Word},
+      EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store) yulPrim [] =
+        .ok (sourceAfterPrim, values') →
+      sourceAfterPrim = .Ok sourceShared store ∧
+        values' = [sourceResult sourceShared] := by
+  intro sourceShared store sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [hPrimCall fuel sourceShared store] at hCall
+      cases hCall
+      exact ⟨rfl, rfl⟩
+
 theorem yulPrimitiveNullarySharedOneSoundAtArity_returndatasize
     {sourceFuel : Nat} :
     ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -6828,6 +6852,74 @@ theorem sourcePrimitiveNullarySharedOneSound_structured_of_machineState
       hStep
       (by
         simp [state', Assembly.PrimStep.run, EvmYul.EVM.machineStateOp,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_of_executionEnv
+    {op : Structured.BasicOp} (f : EvmYul.ExecutionEnv .EVM → Word)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.executionEnv f)) :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared => shared)
+      (fun shared => f shared.executionEnv) := by
+  intro shared
+  let state' : EVMState :=
+    { toSharedState := shared,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [f shared.executionEnv],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .executionEnv f)
+      (shared := shared) (shared' := shared)
+      (values := []) (values' := [f shared.executionEnv])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.executionEnvOp,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_of_state
+    {op : Structured.BasicOp} (f : EvmYul.State .EVM → Word)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.state f)) :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared => shared)
+      (fun shared => f shared.toState) := by
+  intro shared
+  let state' : EVMState :=
+    { toSharedState := shared,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [f shared.toState],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .state f)
+      (shared := shared) (shared' := shared)
+      (values := []) (values' := [f shared.toState])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.stateOp,
           EvmYul.EVM.State.replaceStackAndIncrPC,
           EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
         rfl)
