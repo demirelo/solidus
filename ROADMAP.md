@@ -26,6 +26,10 @@ Current assumption-cleanup checkpoint:
   - Shared semantic contracts: `RecursiveBridgeSemanticContracts` names the
     primitive/terminal/revert/outcome agreement between the imported Yul model
     and the compiler source tower.
+  - Preferred semantic-boundary surface now splits primitive assumptions into
+    lower-tower primitive preservation (`PrimitiveSound`) and imported-Yul
+    primitive stack agreement (`RecursiveBridgePrimitiveStackContracts`),
+    instead of hiding both in one package.
   - Source run: `RecursiveBridgeSourceRun` is the concrete imported Nethermind
     Yul run plus the explicit exclusion of the historical successful
     `.regular .OutOfFuel` marker.

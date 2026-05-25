@@ -151512,6 +151512,26 @@ structure RecursiveBridgePrimitiveContracts
       Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
         yulPrim op
 
+/--
+Imported-Yul primitive calls that lower to source-tower stack primitive
+evaluation.
+
+This is separated from `Locals.SourceLowering.PrimitiveSound`: the latter is
+the lower compiler tower's own primitive preservation contract, while this
+package is the semantic bridge between Nethermind's Yul primitive interpreter
+and the source tower's primitive semantics.
+-/
+structure RecursiveBridgePrimitiveStackContracts
+    (cfg : Reference.StateRelConfig)
+    (prim : Objects.Source.PrimitiveSemantics) : Prop where
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
+        yulPrim op
+
 structure RecursiveBridgeTerminalContracts
     (cfg : Reference.StateRelConfig)
     (terminalRel :
@@ -151590,6 +151610,26 @@ theorem ofNoSuccessfulOutOfFuel
         hSafe (hExpr.exprNoSuccessfulOutOfFuel hSafe hScoped hOk)
 
 end RecursiveBridgeExprResultContracts
+
+namespace RecursiveBridgePrimitiveContracts
+
+theorem of_stack
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hSound : Locals.SourceLowering.PrimitiveSound prim)
+    (hStack : RecursiveBridgePrimitiveStackContracts cfg prim) :
+    RecursiveBridgePrimitiveContracts cfg prim where
+  primitiveSound := hSound
+  primitiveStack := hStack.primitiveStack
+
+theorem stack
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim) :
+    RecursiveBridgePrimitiveStackContracts cfg prim where
+  primitiveStack := hPrimitive.primitiveStack
+
+end RecursiveBridgePrimitiveContracts
 
 namespace RecursiveBridgeSemanticContracts
 
