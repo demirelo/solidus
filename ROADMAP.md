@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-24 23:30 PDT.
+Last updated: 2026-05-25 04:05 PDT.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -66,9 +66,12 @@ Last updated: 2026-05-24 23:30 PDT.
      constructors so users do not pass arbitrary semantic-contract packages.
 
 3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
-   - [ ] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
+   - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
      fundamental gas/oracle assumptions from compiler-derived execution
-     evidence.
+     evidence. The preferred public wrapper now takes
+     `Assembly.GasAware.XResultRunnerCompleteness asm target initial`, while
+     the compiler theorem still derives the concrete `BlockTraceResult`
+     internally.
    - [ ] Prove the needed `XResultPreconditionAssumptions` from the checked
      bytecode trace, target encoding/jumpdest correctness, gas oracle,
      out-of-gas policy, and explicit sufficient-gas bound.
