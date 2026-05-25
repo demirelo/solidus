@@ -118,6 +118,9 @@ Last updated: 2026-05-25 06:52 PDT.
        imported `primCall ... []` facts and canonical source
        `executionEnv`/`state` reads, preparing the environment/block read
        families without unfolding the dispatcher per opcode.
+     - [x] Instantiate the arity-correct nullary environment-read bridge for
+       `ADDRESS`, `ORIGIN`, `CALLER`, `CALLVALUE`, `CALLDATASIZE`, and
+       `GASPRICE`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

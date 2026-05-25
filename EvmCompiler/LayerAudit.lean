@@ -3759,6 +3759,27 @@ abbrev primitiveStackSoundAtArityStructuredMsize :=
 abbrev primitiveStackSoundAtArityStructuredGas :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_gas
 
+abbrev primitiveStackSoundAtArityStructuredOfNullaryExecutionEnv :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+
+abbrev primitiveStackSoundAtArityStructuredAddress :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_address
+
+abbrev primitiveStackSoundAtArityStructuredOrigin :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_origin
+
+abbrev primitiveStackSoundAtArityStructuredCaller :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_caller
+
+abbrev primitiveStackSoundAtArityStructuredCallvalue :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_callvalue
+
+abbrev primitiveStackSoundAtArityStructuredCalldatasize :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_calldatasize
+
+abbrev primitiveStackSoundAtArityStructuredGasprice :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_gasprice
+
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound
 

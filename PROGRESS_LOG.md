@@ -3321,3 +3321,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 07:45:39 PDT - proof - added arity-aware nullary machine-read primitive bridge for RETURNDATASIZE/MSIZE/GAS, exported audit aliases, and recorded that GAS uses StateRelConfig.gasValueRel; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
 
 - 2026-05-25 07:51:59 PDT - proof - added reusable arity-aware nullary primitive bridge constructors for imported `primCall ... []` facts plus canonical source `executionEnv`/`state` reads; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
+
+- 2026-05-25 07:55:58 PDT - proof - instantiated the arity-aware nullary environment-read stack bridge for ADDRESS/ORIGIN/CALLER/CALLVALUE/CALLDATASIZE/GASPRICE; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.

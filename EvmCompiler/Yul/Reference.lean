@@ -7672,6 +7672,165 @@ theorem primitiveStackSoundAtArity_structured_gas
         exact cfg.gasValueRel hShared.machine.gasAvailable)
       (by intro sourceShared targetShared hShared; exact hShared)
 
+theorem primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    (yulPrim : EvmYul.Operation .Yul) (op : Structured.BasicOp)
+    (sourceResult : EvmYul.SharedState .Yul → Word)
+    (targetEnv : EvmYul.ExecutionEnv .EVM → Word)
+    (hInputs : Expressions.Structured.BasicOp.inputs op = 0)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.executionEnv targetEnv))
+    (hPrimCall :
+      ∀ (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+        (store : EvmYul.Yul.VarStore),
+        EvmYul.Yul.primCall fuel.succ (.Ok shared store) yulPrim [] =
+          .ok (.Ok shared store, [sourceResult shared]))
+    (hResult :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceResult sourceShared = targetEnv targetShared.executionEnv) :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel yulPrim op := by
+  exact
+    primitiveStackSoundAtArity_of_nullary_shared_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel) (yulPrim := yulPrim) (op := op)
+      (fun shared => shared) (fun shared => shared)
+      sourceResult (fun shared => targetEnv shared.executionEnv)
+      hInputs
+      (yulPrimitiveNullarySharedOneSoundAtArity_of_primCall_ok
+        sourceResult hPrimCall)
+      (sourcePrimitiveNullarySharedOneSound_structured_of_executionEnv
+        targetEnv hStep)
+      hResult
+      (by intro sourceShared targetShared hShared; exact hShared)
+
+theorem primitiveStackSoundAtArity_structured_address
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .ADDRESS : EvmYul.Operation .Yul)) .address :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .ADDRESS : EvmYul.Operation .Yul)) .address
+    (fun shared =>
+      ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.codeOwner)
+        shared.executionEnv))
+    ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.codeOwner))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_address_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg
+          (fun owner : EvmYul.AccountAddress =>
+            EvmYul.UInt256.ofNat owner.val)
+          hShared.chain.executionEnv.codeOwner)
+
+theorem primitiveStackSoundAtArity_structured_origin
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .ORIGIN : EvmYul.Operation .Yul)) .origin :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .ORIGIN : EvmYul.Operation .Yul)) .origin
+    (fun shared =>
+      ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.sender)
+        shared.executionEnv))
+    ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.sender))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_origin_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg
+          (fun owner : EvmYul.AccountAddress =>
+            EvmYul.UInt256.ofNat owner.val)
+          hShared.chain.executionEnv.sender)
+
+theorem primitiveStackSoundAtArity_structured_caller
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CALLER : EvmYul.Operation .Yul)) .caller :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .CALLER : EvmYul.Operation .Yul)) .caller
+    (fun shared =>
+      ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.source)
+        shared.executionEnv))
+    ((.ofNat ∘ Fin.val ∘ EvmYul.ExecutionEnv.source))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_caller_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg
+          (fun owner : EvmYul.AccountAddress =>
+            EvmYul.UInt256.ofNat owner.val)
+          hShared.chain.executionEnv.source)
+
+theorem primitiveStackSoundAtArity_structured_callvalue
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CALLVALUE : EvmYul.Operation .Yul)) .callvalue :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .CALLVALUE : EvmYul.Operation .Yul)) .callvalue
+    (fun shared => EvmYul.ExecutionEnv.weiValue shared.executionEnv)
+    EvmYul.ExecutionEnv.weiValue
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_callvalue_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      exact hShared.chain.executionEnv.weiValue)
+
+theorem primitiveStackSoundAtArity_structured_calldatasize
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CALLDATASIZE : EvmYul.Operation .Yul)) .calldatasize :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .CALLDATASIZE : EvmYul.Operation .Yul)) .calldatasize
+    (fun shared =>
+      ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.calldata)
+        shared.executionEnv))
+    ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.calldata))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_calldatasize_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg
+          (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
+          hShared.chain.executionEnv.calldata)
+
+theorem primitiveStackSoundAtArity_structured_gasprice
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .GASPRICE : EvmYul.Operation .Yul)) .gasprice :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .GASPRICE : EvmYul.Operation .Yul)) .gasprice
+    (fun shared =>
+      ((.ofNat ∘ EvmYul.ExecutionEnv.gasPrice)
+        shared.executionEnv))
+    ((.ofNat ∘ EvmYul.ExecutionEnv.gasPrice))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_gasprice_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg EvmYul.UInt256.ofNat
+          hShared.chain.executionEnv.gasPrice)
+
 /--
 Primitive-call expression bridge for the stack-order argument adapter.
 
