@@ -121,6 +121,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Instantiate the arity-correct nullary environment-read bridge for
        `ADDRESS`, `ORIGIN`, `CALLER`, `CALLVALUE`, `CALLDATASIZE`, and
        `GASPRICE`.
+     - [x] Instantiate the arity-correct nullary block/state read bridge for
+       `PREVRANDAO`, `BASEFEE`, `BLOBBASEFEE`, `COINBASE`, `TIMESTAMP`,
+       `NUMBER`, `GASLIMIT`, `CHAINID`, and `SELFBALANCE`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

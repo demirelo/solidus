@@ -3762,6 +3762,9 @@ abbrev primitiveStackSoundAtArityStructuredGas :=
 abbrev primitiveStackSoundAtArityStructuredOfNullaryExecutionEnv :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_nullary_executionEnv
 
+abbrev primitiveStackSoundAtArityStructuredOfNullaryState :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_nullary_state
+
 abbrev primitiveStackSoundAtArityStructuredAddress :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_address
 
@@ -3779,6 +3782,33 @@ abbrev primitiveStackSoundAtArityStructuredCalldatasize :=
 
 abbrev primitiveStackSoundAtArityStructuredGasprice :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_gasprice
+
+abbrev primitiveStackSoundAtArityStructuredPrevrandao :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_prevrandao
+
+abbrev primitiveStackSoundAtArityStructuredBasefee :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_basefee
+
+abbrev primitiveStackSoundAtArityStructuredBlobbasefee :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_blobbasefee
+
+abbrev primitiveStackSoundAtArityStructuredCoinbase :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_coinbase
+
+abbrev primitiveStackSoundAtArityStructuredTimestamp :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_timestamp
+
+abbrev primitiveStackSoundAtArityStructuredNumber :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_number
+
+abbrev primitiveStackSoundAtArityStructuredGaslimit :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_gaslimit
+
+abbrev primitiveStackSoundAtArityStructuredChainid :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_chainid
+
+abbrev primitiveStackSoundAtArityStructuredSelfbalance :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_selfbalance
 
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound
