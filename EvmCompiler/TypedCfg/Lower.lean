@@ -5,6 +5,10 @@ namespace TypedCfg
 
 namespace Instr
 
+def popMany : Nat → Assembly.Program
+  | 0 => []
+  | n + 1 => .prim .pop :: popMany n
+
 def lower? : Instr → Option Assembly.Program
   | .push value => some [.push value]
   | .prim op => some [.prim op]
@@ -49,6 +53,16 @@ def lower? : Instr → Option Assembly.Program
       | _ => none
   | .unwind _target => none
 
+def lowerWithShape? (instr : Instr) (shape : Shape) :
+    Option (Assembly.Program × Shape) := do
+  let output ← instr.type? shape
+  match instr with
+  | .unwind target =>
+      some (popMany (shape.length - target.length), output)
+  | _ => do
+      let code ← instr.lower?
+      some (code, output)
+
 end Instr
 
 namespace Terminator
@@ -70,15 +84,19 @@ end Terminator
 
 namespace Block
 
-def lowerBody? : List Instr → Option Assembly.Program
-  | [] => some []
-  | instr :: rest => do
-      let head ← instr.lower?
-      let tail ← lowerBody? rest
-      some (head ++ tail)
+def lowerBodyWithShape? : List Instr → Shape → Option (Assembly.Program × Shape)
+  | [], shape => some ([], shape)
+  | instr :: rest, shape => do
+      let (head, shape') ← instr.lowerWithShape? shape
+      let (tail, output) ← lowerBodyWithShape? rest shape'
+      some (head ++ tail, output)
+
+def lowerBody? (body : List Instr) : Option Assembly.Program := do
+  let (code, _output) ← lowerBodyWithShape? body []
+  some code
 
 def lower? (block : Block) : Option Assembly.Program := do
-  let body ← lowerBody? block.body
+  let (body, _output) ← lowerBodyWithShape? block.body block.input
   let term ← block.term.lower?
   some (.label block.label :: body ++ term)
 
