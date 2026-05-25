@@ -9,6 +9,13 @@ compiler architecture before rebuilding preservation proofs.
 Control flow carries an explicit stack contract. The compiler should not recover
 stack shape from generated EVM jumps after the fact.
 
+This document uses "CFG" in the typed stack-machine sense. The typed CFG is not
+stack-free internally: it is the boundary where symbolic stack shapes become
+explicit and checked. The abstraction goal is that layers above it do not expose
+concrete stack slots, `DUP`/`SWAP`, return-token encodings, or bytecode jumps in
+their source semantics. If we later want a stack-free block-parameter CFG, it
+should sit above this typed stack CFG and lower into it.
+
 Use the judgment:
 
 ```text
@@ -142,12 +149,45 @@ Target pipeline:
 
 ```text
 Yul / higher source
-  -> stack-contract source compiler
+  -> stack-free source semantics
+  -> compiler-owned stack layout / continuation contracts
   -> typed CFG
   -> typed assembly / symbolic labels
   -> labeled assembly
   -> EVM bytecode
 ```
+
+The stack-free source layer above typed CFG should have an independent
+interpreter over variables, scopes, expression values, procedure/function
+results, and Yul-style control modes. Its compiler is where locals become
+symbolic stack slots, where expression arity becomes stack effects, and where
+`break`/`continue`/`leave` become unwinds to typed continuations. Once that
+compiler boundary is in place, higher layers should not need to mention stack
+shape directly.
+
+## Yul Surface Audit
+
+The typed CFG should be broad enough that Yul does not force a redesign later:
+
+- ordinary EVM/Yul primitives pass through `TypedCfg.Instr.prim` and reuse the
+  shared EVMYulLean primitive semantics;
+- nonterminal external interaction opcodes such as `CREATE`, `CALL`,
+  `CALLCODE`, `DELEGATECALL`, `CREATE2`, and `STATICCALL` are typed from the
+  EVM opcode stack arity table and lower as ordinary primitives;
+- terminal opcodes `STOP`, `RETURN`, `REVERT`, and `SELFDESTRUCT` are CFG
+  terminators, not ordinary fallthrough instructions, and the checker enforces
+  their operand arity;
+- Yul `leave` remains a structured function/procedure exit to an epilogue
+  continuation, distinct from EVM `RETURN`;
+- object/data builtins such as `datasize`, `dataoffset`, and `datacopy` should
+  be resolved in the object/frontend layer before typed CFG, so they do not add
+  new CFG control semantics.
+
+The remaining intentional hole in this rewrite checkpoint is internal
+procedure call/return lowering in the new structured-to-CFG compiler. The old
+direct assembly compiler has this convention; the CFG path should reintroduce
+it through typed continuations and a checked return-dispatch boundary rather
+than by recreating untyped assembly jumps.
 
 Delay clever stack-slot reuse. Use lexical stack regions first; liveness-based
 slot reuse can be a later optimization pass with its own proof.

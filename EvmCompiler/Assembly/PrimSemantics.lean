@@ -1,5 +1,6 @@
 import EvmCompiler.Assembly.Assembler
 import EvmYul.Semantics
+import EvmYul.EVM.Instr
 import EvmYul.EVM.State
 import EvmYul.EVM.StateOps
 
@@ -1272,6 +1273,17 @@ theorem run_suffix_exists_safe
 end PrimStep
 
 namespace PrimOp
+
+def stackInputArity? (op : PrimOp) : Option Nat :=
+  EvmYul.EVM.δ op.toEVM
+
+def stackOutputArity? (op : PrimOp) : Option Nat :=
+  EvmYul.EVM.α op.toEVM
+
+def stackEffect? (op : PrimOp) : Option (Nat × Nat) := do
+  let input ← op.stackInputArity?
+  let output ← op.stackOutputArity?
+  some (input, output)
 
 /--
 Continuing primitives admitted by structured control as ordinary statements.

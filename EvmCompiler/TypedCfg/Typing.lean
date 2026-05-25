@@ -10,7 +10,19 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
   | .push value => some (.literal value :: shape)
   | .prim op =>
       match op.continuingStep? with
-      | none => none
+      | none =>
+          if op.haltKind?.isSome then
+            none
+          else
+            match op.stackEffect? with
+            | some (inputArity, outputArity) =>
+                if inputArity ≤ shape.length then
+                  some
+                    (Shape.pushWords outputArity
+                      (Shape.pop inputArity shape))
+                else
+                  none
+            | none => none
       | some step =>
           if step.inputArity ≤ shape.length then
             some (Shape.pushWords step.outputArity (Shape.pop step.inputArity shape))
@@ -75,7 +87,8 @@ def type? (program : Program) (shape : Shape) : Terminator → Option Unit
       | _ => none
   | .returnDispatch siteShape =>
       if shape = siteShape then some () else none
-  | .halt _ => some ()
+  | .halt kind =>
+      if kind.argCount ≤ shape.length then some () else none
   | .invalid => some ()
 
 end Terminator

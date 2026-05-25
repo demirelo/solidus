@@ -69,27 +69,30 @@ def runBody : List Instr → EVMState → Except EVMException EVMState
       let state' ← instr.run state
       runBody rest state'
 
-def runTerm (term : Terminator) (state : EVMState) : Outcome :=
+def runTerm (term : Terminator) (state : EVMState) :
+    Except EVMException Outcome :=
   match term with
-  | .fallthrough => .fallthrough state
-  | .jump target => .jump target state
+  | .fallthrough => .ok (.fallthrough state)
+  | .jump target => .ok (.jump target state)
   | .jumpi target fallthrough =>
       match state.stack.pop with
-      | none => .invalid state
+      | none => .ok (.invalid state)
       | some (stack, cond) =>
           let state' := { state with stack := stack }
           if cond = EvmYul.UInt256.ofNat 0 then
-            .jump fallthrough state'
+            .ok (.jump fallthrough state')
           else
-            .jump target state'
-  | .returnDispatch _ => .returnDispatch state
-  | .halt kind => .halt kind state
-  | .invalid => .invalid state
+            .ok (.jump target state')
+  | .returnDispatch _ => .ok (.returnDispatch state)
+  | .halt kind => do
+      let state' ← kind.toPrimOp.step state
+      .ok (.halt kind state')
+  | .invalid => .ok (.invalid state)
 
 def run (block : Block) (state : EVMState) :
     Except EVMException Outcome := do
   let state' ← runBody block.body state
-  .ok (runTerm block.term state')
+  runTerm block.term state'
 
 end Block
 
