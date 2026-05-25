@@ -3372,3 +3372,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25: Added arity-aware generated `for` nonzero/body-continue scoped bridge. Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `git diff --check`, no new sorry/admit/axiom in touched diff, and axiom audit standard-only.
 
 - 2026-05-25: Added arity-aware generated `for` body-continue/post bridge wrappers, covering regular, halt, leave, hidden-scope, exists, and block-sound variants. Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `git diff --check`, no new sorry/admit/axiom in touched diff, and axiom audit standard-only.
+
+- 2026-05-25: Added arity-aware generated `for` body-regular/post bridge wrappers, covering regular, halt, leave, hidden-scope, exists, and block-sound variants. Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `git diff --check`, no new sorry/admit/axiom in touched diff, and axiom audit standard-only. Submitted Aristotle task cec01869 for this frontier when the queue dropped below three running tasks.
