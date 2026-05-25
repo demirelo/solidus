@@ -82,6 +82,10 @@ end Terminator
 
 namespace Block
 
+def type? (program : Program) (block : Block) : Option Unit := do
+  let output ← bodyType? block.body block.input
+  block.term.type? program output
+
 def WellTyped (program : Program) (block : Block) : Prop :=
   ∃ output, bodyType? block.body block.input = some output ∧
     block.term.type? program output = some ()
@@ -98,6 +102,23 @@ def AllBlocksTyped (program : Program) : Prop :=
 
 def WellTyped (program : Program) : Prop :=
   program.LabelsUnique ∧ program.AllBlocksTyped ∧ program.findBlock? program.entry ≠ none
+
+def labelsUnique? : List Block → Bool
+  | [] => true
+  | block :: rest =>
+      rest.all (fun other => decide (block.label ≠ other.label)) &&
+        labelsUnique? rest
+
+def allBlocksTyped? (program : Program) : Bool :=
+  program.blocks.all (fun block => (block.type? program).isSome)
+
+def typeCheck? (program : Program) : Option Unit :=
+  if labelsUnique? program.blocks &&
+      allBlocksTyped? program &&
+      (program.findBlock? program.entry).isSome then
+    some ()
+  else
+    none
 
 theorem wellTyped_allBlocksTyped {program : Program}
     (h : program.WellTyped) :

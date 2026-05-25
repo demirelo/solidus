@@ -360,8 +360,13 @@ def toCfg? (program : Program) : Option TypedCfg.Program := do
     { entry := entryLabel
       blocks := result.blocks ++ [exitBlock endLabel [] (some endKont)] }
 
-def compileCfg? (program : Program) : Option Assembly.Program := do
+def toCheckedCfg? (program : Program) : Option TypedCfg.Program := do
   let cfg ← toCfg? program
+  let _ ← TypedCfg.Program.typeCheck? cfg
+  some cfg
+
+def compileCfg? (program : Program) : Option Assembly.Program := do
+  let cfg ← toCheckedCfg? program
   TypedCfg.Program.lower? cfg
 
 end Program
