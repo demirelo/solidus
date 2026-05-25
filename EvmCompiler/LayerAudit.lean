@@ -9415,6 +9415,9 @@ abbrev yulPrimCallMloadOk :=
 abbrev yulPrimCallPopOk :=
   @Yul.Reference.BridgeFacts.yul_primCall_pop_ok
 
+abbrev importedEvalArgsLengthOfOk :=
+  @Yul.Reference.Imported.evalArgs_length_of_ok
+
 abbrev yulPrimCallMstoreOk :=
   @Yul.Reference.BridgeFacts.yul_primCall_mstore_ok
 

@@ -124,6 +124,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Instantiate the arity-correct nullary block/state read bridge for
        `PREVRANDAO`, `BASEFEE`, `BLOBBASEFEE`, `COINBASE`, `TIMESTAMP`,
        `NUMBER`, `GASLIMIT`, `CHAINID`, and `SELFBALANCE`.
+     - [x] Prove imported `evalArgs` length preservation for successful
+       argument evaluation, giving the recursive bridge the source-side arity
+       evidence needed by arity-aware primitive-stack contracts.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

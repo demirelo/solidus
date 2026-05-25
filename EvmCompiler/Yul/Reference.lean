@@ -1112,6 +1112,56 @@ theorem evalArgs_cons_succ (fuel : Nat) (head : AstExpr)
         (EvmYul.Yul.eval fuel head codeOverride state) := by
   simp [EvmYul.Yul.evalArgs]
 
+theorem evalArgs_length_of_ok
+    {fuel : Nat} {args : List AstExpr} {codeOverride : Option AstContract}
+    {state state' : State} {values : List Word}
+    (hEval :
+      EvmYul.Yul.evalArgs fuel args codeOverride state =
+        .ok (state', values)) :
+    values.length = args.length := by
+  induction args generalizing fuel state state' values with
+  | nil =>
+      cases fuel with
+      | zero =>
+          simp [EvmYul.Yul.evalArgs] at hEval
+      | succ fuel' =>
+          simp [EvmYul.Yul.evalArgs] at hEval
+          rcases hEval with ⟨_hState, hValues⟩
+          subst values
+          rfl
+  | cons head tail ih =>
+      cases fuel with
+      | zero =>
+          simp [EvmYul.Yul.evalArgs] at hEval
+      | succ fuel' =>
+          rw [evalArgs_cons_succ] at hEval
+          cases hHead :
+              EvmYul.Yul.eval fuel' head codeOverride state with
+          | error err =>
+              simp [EvmYul.Yul.evalTail, hHead] at hEval
+          | ok headResult =>
+              rcases headResult with ⟨stateAfterHead, value⟩
+              cases fuel' with
+              | zero =>
+                  simp [EvmYul.Yul.evalTail, hHead] at hEval
+              | succ fuelTail =>
+                  cases hTail :
+                      EvmYul.Yul.evalArgs fuelTail tail codeOverride
+                        stateAfterHead with
+                  | error err =>
+                      simp [EvmYul.Yul.evalTail, hHead, hTail,
+                        EvmYul.Yul.cons'] at hEval
+                  | ok tailResult =>
+                      rcases tailResult with ⟨stateAfterTail, tailValues⟩
+                      simp [EvmYul.Yul.evalTail, hHead, hTail,
+                        EvmYul.Yul.cons'] at hEval
+                      rcases hEval with ⟨_hState, hValues⟩
+                      subst values
+                      have hTailLen :
+                          tailValues.length = tail.length :=
+                        ih hTail
+                      simp [hTailLen]
+
 theorem evalTail_error (fuel : Nat) (tail : List AstExpr)
     (codeOverride : Option AstContract) (err : Exception) :
     EvmYul.Yul.evalTail fuel tail codeOverride (.error err) =
