@@ -922,6 +922,52 @@ theorem resolveObjectBuiltins_dataoffset_namedDataBase
     ObjectBuiltinContext.findDataOffset?, DataSection.offsetEntriesFromNat,
     DataSection.offsetEntryFromNat?]
 
+theorem toYul_after_resolveObjectBuiltins_datasize_namedData
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} :
+    (Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "datasize" [.stringLit name])
+        { layout := layout
+          dataSizes := DataSection.sizeEntries [
+            DataSection.mk (some name) bytes
+          ]
+          dataOffsets := []
+          linkerSymbols := [] } >>= Expr.toYul?) =
+      some (.Lit (EvmYul.UInt256.ofNat bytes.length)) := by
+  simp [resolveObjectBuiltins_datasize_namedData, Expr.toYul?]
+
+theorem toYul_after_resolveObjectBuiltins_dataoffset_namedDataBase
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat} :
+    (Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "dataoffset" [.stringLit name])
+        { layout := layout
+          dataSizes := []
+          dataOffsets := DataSection.offsetEntriesFromNat base [
+            DataSection.mk (some name) bytes
+          ]
+          linkerSymbols := [] } >>= Expr.toYul?) =
+      some (.Lit (EvmYul.UInt256.ofNat base)) := by
+  simp [resolveObjectBuiltins_dataoffset_namedDataBase, Expr.toYul?]
+
+theorem toYul_after_resolveObjectBuiltins_datacopy_codecopy
+    {context : ObjectBuiltinContext} {target offset size : Expr}
+    {target' offset' size' : Expr}
+    {targetYul offsetYul sizeYul : AstExpr}
+    (hTarget : target.resolveObjectBuiltinsIn? context = some target')
+    (hOffset : offset.resolveObjectBuiltinsIn? context = some offset')
+    (hSize : size.resolveObjectBuiltinsIn? context = some size')
+    (hTargetYul : target'.toYul? = some targetYul)
+    (hOffsetYul : offset'.toYul? = some offsetYul)
+    (hSizeYul : size'.toYul? = some sizeYul) :
+    (Expr.resolveObjectBuiltinsIn?
+        (.call .objectBuiltin "datacopy" [target, offset, size])
+        context >>= Expr.toYul?) =
+      some
+        (.Call (.inl ((.Env .CODECOPY : EvmYul.Operation .Yul)))
+          [targetYul, offsetYul, sizeYul]) := by
+  simp [resolveObjectBuiltins_datacopy_codecopy hTarget hOffset hSize,
+    Expr.toYul?, Expr.List.toYul?, Primitive.ofName?, hTargetYul, hOffsetYul,
+    hSizeYul]
+
 end Expr
 
 namespace FunctionPrep
