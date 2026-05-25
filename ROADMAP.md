@@ -106,6 +106,8 @@ Last updated: 2026-05-25 06:52 PDT.
        a reusable ternary machine-state source bridge.
      - [x] Add canonical calldata-to-memory stack-agreement for
        `CALLDATACOPY`, using a reusable ternary shared-copy source bridge.
+     - [x] Add canonical return-data-to-memory stack-agreement for
+       `RETURNDATACOPY`, including its special imported dispatcher equation.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

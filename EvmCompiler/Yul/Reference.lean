@@ -5360,6 +5360,50 @@ theorem yul_primCall_succ_calldatacopy_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_returndatacopy_eq
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        (EvmYul.Operation.RETURNDATACOPY : EvmYul.Operation .Yul) args =
+      match args with
+      | [memStart, dataStart, size] =>
+          .ok
+            (.Ok
+              { shared with
+                toMachineState :=
+                  EvmYul.MachineState.returndatacopy
+                    shared.toMachineState memStart dataStart size }
+              store,
+            [])
+      | _ => .error EvmYul.Yul.Exception.InvalidArguments := by
+  cases args with
+  | nil =>
+      simp [EvmYul.Yul.primCall]
+      unfold EvmYul.step
+      rfl
+  | cons memStart rest =>
+      cases rest with
+      | nil =>
+          simp [EvmYul.Yul.primCall]
+          unfold EvmYul.step
+          rfl
+      | cons dataStart restTail =>
+          cases restTail with
+          | nil =>
+              simp [EvmYul.Yul.primCall]
+              unfold EvmYul.step
+              rfl
+          | cons size restRest =>
+              cases restRest with
+              | nil =>
+                  exact
+                    PrimSemantics.primCall_returndatacopy_ok fuel shared store
+                      memStart dataStart size
+              | cons extra restRestRest =>
+                  simp [EvmYul.Yul.primCall]
+                  unfold EvmYul.step
+                  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -5851,6 +5895,44 @@ theorem yulPrimitiveTernaryZeroSound_calldatacopy
   yulPrimitiveTernaryZeroSound_of_ternaryCopyOp
     EvmYul.SharedState.calldatacopy yul_primCall_succ_calldatacopy_eq
 
+theorem yulPrimitiveTernaryZeroSound_returndatacopy
+    {sourceFuel : Nat} :
+    YulPrimitiveTernaryZeroSound sourceFuel
+      ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
+      (fun shared memStart dataStart size =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.returndatacopy shared.toMachineState
+              memStart dataStart size }) := by
+  intro sourceShared store sourceValues sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases sourceValues with
+      | nil =>
+          rw [yul_primCall_succ_returndatacopy_eq] at hCall
+          simp at hCall
+      | cons memStart rest =>
+          cases rest with
+          | nil =>
+              rw [yul_primCall_succ_returndatacopy_eq] at hCall
+              simp at hCall
+          | cons dataStart restTail =>
+              cases restTail with
+              | nil =>
+                  rw [yul_primCall_succ_returndatacopy_eq] at hCall
+                  simp at hCall
+              | cons size restRest =>
+                  cases restRest with
+                  | nil =>
+                      rw [yul_primCall_succ_returndatacopy_eq] at hCall
+                      cases hCall
+                      exact ⟨memStart, dataStart, size, rfl, rfl, rfl⟩
+                  | cons extra restRestRest =>
+                      rw [yul_primCall_succ_returndatacopy_eq] at hCall
+                      simp at hCall
+
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
     (hStep :
@@ -6326,6 +6408,43 @@ theorem sourcePrimitiveTernaryZeroSound_structured_calldatacopy :
         EvmYul.SharedState.calldatacopy shared memStart dataStart size) :=
   sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
     EvmYul.SharedState.calldatacopy (by rfl)
+
+theorem sourcePrimitiveTernaryZeroSound_structured_returndatacopy :
+    SourcePrimitiveTernaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured .returndatacopy
+      (fun shared memStart dataStart size =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.returndatacopy shared.toMachineState
+              memStart dataStart size }) := by
+  intro shared memStart dataStart size
+  let state' : EVMState :=
+    { toSharedState :=
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.returndatacopy shared.toMachineState
+              memStart dataStart size },
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := .returndatacopy) (step := .returndatacopy)
+      (shared := shared)
+      (shared' :=
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.returndatacopy shared.toMachineState
+              memStart dataStart size })
+      (values := [size, dataStart, memStart])
+      (values' := [])
+      (state' := state')
+      (by rfl) (by rfl)
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.Stack.pop3,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC])
+      (by simp [state']) (by simp [state'])
 
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -6924,6 +7043,16 @@ theorem primitiveStackSoundAt_returndatacopy
         intro sourceShared targetShared memStart dataStart size hShared
         rcases hShared with ⟨hChain, hMachine⟩
         exact ⟨hChain, MachineStateRel.returndatacopy hMachine⟩)
+
+theorem primitiveStackSoundAt_structured_returndatacopy
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .RETURNDATACOPY : EvmYul.Operation .Yul))
+      .returndatacopy :=
+  primitiveStackSoundAt_returndatacopy
+    yulPrimitiveTernaryZeroSound_returndatacopy
+    sourcePrimitiveTernaryZeroSound_structured_returndatacopy
 
 /--
 Primitive-call expression bridge for the stack-order argument adapter.
