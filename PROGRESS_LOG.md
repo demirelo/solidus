@@ -3364,3 +3364,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25: Added arity-aware generated `iszero` guard substrate (`sourceGeneratedIszeroCondition_*_arity` and guard-skip run lemmas). Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, axiom audit standard-only, submitted Aristotle task 98736036 for the next generated for/body-break arity frontier.
 
 - 2026-05-25: Added arity-aware generated `for` nonzero/body-break bridge lemmas through the hidden-head theorem surface. Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `git diff --check`, no new sorry/admit/axiom in touched diff, and axiom audit standard-only.
+
+- 2026-05-25: Added arity-aware generated `for` nonzero/body-leave bridge lemmas through the hidden-scope nonregular theorem surface. Verified `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `git diff --check`, no new sorry/admit/axiom in touched diff, and axiom audit standard-only.
