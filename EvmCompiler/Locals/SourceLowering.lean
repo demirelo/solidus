@@ -701,6 +701,23 @@ theorem sourceContinuingStep_basicOp_step
     cases hStep
     rfl
 
+theorem structured_eval_of_sourceContinuingStep_run
+    {op : Structured.BasicOp} {step : Assembly.PrimStep}
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values values' : List Word} {state' : EVMState}
+    (hLen : values.length = Expressions.Structured.BasicOp.inputs op)
+    (hStep :
+      Source.PrimitiveSemantics.sourceContinuingStep? op = some step)
+    (hRun :
+      step.run (Assembly.PrimStep.isoState shared values.reverse) =
+        .ok state')
+    (hShared : shared' = state'.toSharedState)
+    (hValues : values' = state'.stack.reverse) :
+    Source.PrimitiveSemantics.structured.eval op shared values =
+      .ok (shared', values') := by
+  dsimp [Source.PrimitiveSemantics.structured]
+  simp [hLen, hStep, hRun, hShared, hValues]
+
 theorem structured_eval_step
     {op : Structured.BasicOp}
     {shared shared' : EvmYul.SharedState .EVM}
