@@ -91,6 +91,10 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Generalize the structured source side for arbitrary `.bin`
        primitives using the checked source-step arity theorem, and instantiate
        the same bridge for `DIV` and `MOD`.
+     - [x] Extend the same canonical pure binary bridge to the remaining
+       one-result arithmetic/comparison/bitwise primitives:
+       `SDIV`/`SMOD`/`EXP`/`SIGNEXTEND` and
+       `LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

@@ -4954,6 +4954,184 @@ theorem yul_primCall_succ_mod_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_sdiv_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SDIV : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.sdiv source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_smod_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SMOD : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.smod source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_exp_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.EXP : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.exp source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_signextend_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SIGNEXTEND : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.signextend source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_lt_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.LT : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.lt source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_gt_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.GT : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.gt source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_slt_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SLT : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.slt source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_sgt_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SGT : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.sgt source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_eq_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.EQ : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.eq source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_and_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.AND : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.land source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_or_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.OR : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.lor source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_xor_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.XOR : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.xor source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_byte_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.BYTE : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.byteAt source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_shl_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SHL : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp (flip EvmYul.UInt256.shiftLeft)
+          source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_shr_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SHR : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp (flip EvmYul.UInt256.shiftRight)
+          source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_sar_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.SAR : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.sar source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -5033,6 +5211,150 @@ theorem yulPrimitiveBinaryOneSound_mod
       EvmYul.UInt256.mod :=
   yulPrimitiveBinaryOneSound_of_execBinOp
     EvmYul.UInt256.mod yul_primCall_succ_mod_eq
+
+theorem yulPrimitiveBinaryOneSound_sdiv
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .SDIV : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.sdiv :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.sdiv yul_primCall_succ_sdiv_eq
+
+theorem yulPrimitiveBinaryOneSound_smod
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .SMOD : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.smod :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.smod yul_primCall_succ_smod_eq
+
+theorem yulPrimitiveBinaryOneSound_exp
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .EXP : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.exp :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.exp yul_primCall_succ_exp_eq
+
+theorem yulPrimitiveBinaryOneSound_signextend
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .SIGNEXTEND : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.signextend :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.signextend yul_primCall_succ_signextend_eq
+
+theorem yulPrimitiveBinaryOneSound_lt
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .LT : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.lt :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.lt yul_primCall_succ_lt_eq
+
+theorem yulPrimitiveBinaryOneSound_gt
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .GT : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.gt :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.gt yul_primCall_succ_gt_eq
+
+theorem yulPrimitiveBinaryOneSound_slt
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .SLT : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.slt :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.slt yul_primCall_succ_slt_eq
+
+theorem yulPrimitiveBinaryOneSound_sgt
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .SGT : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.sgt :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.sgt yul_primCall_succ_sgt_eq
+
+theorem yulPrimitiveBinaryOneSound_eq
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .EQ : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.eq :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.eq yul_primCall_succ_eq_eq
+
+theorem yulPrimitiveBinaryOneSound_and
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .AND : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.land :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.land yul_primCall_succ_and_eq
+
+theorem yulPrimitiveBinaryOneSound_or
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .OR : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.lor :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.lor yul_primCall_succ_or_eq
+
+theorem yulPrimitiveBinaryOneSound_xor
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .XOR : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.xor :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.xor yul_primCall_succ_xor_eq
+
+theorem yulPrimitiveBinaryOneSound_byte
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .BYTE : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.byteAt :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.byteAt yul_primCall_succ_byte_eq
+
+theorem yulPrimitiveBinaryOneSound_shl
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .SHL : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      (flip EvmYul.UInt256.shiftLeft) :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    (flip EvmYul.UInt256.shiftLeft) yul_primCall_succ_shl_eq
+
+theorem yulPrimitiveBinaryOneSound_shr
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .SHR : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      (flip EvmYul.UInt256.shiftRight) :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    (flip EvmYul.UInt256.shiftRight) yul_primCall_succ_shr_eq
+
+theorem yulPrimitiveBinaryOneSound_sar
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.CompBit .SAR : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.sar :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.sar yul_primCall_succ_sar_eq
 
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
@@ -5155,6 +5477,104 @@ theorem sourcePrimitiveBinaryOneSound_structured_mod :
       (fun shared _left _right => shared) EvmYul.UInt256.mod :=
   sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.mod (by rfl)
 
+theorem sourcePrimitiveBinaryOneSound_structured_sdiv :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .sdiv
+      (fun shared _left _right => shared) EvmYul.UInt256.sdiv :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.sdiv (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_smod :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .smod
+      (fun shared _left _right => shared) EvmYul.UInt256.smod :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.smod (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_exp :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .exp
+      (fun shared _left _right => shared) EvmYul.UInt256.exp :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.exp (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_signextend :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .signextend
+      (fun shared _left _right => shared) EvmYul.UInt256.signextend :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.signextend (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_lt :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .lt
+      (fun shared _left _right => shared) EvmYul.UInt256.lt :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.lt (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_gt :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .gt
+      (fun shared _left _right => shared) EvmYul.UInt256.gt :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.gt (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_slt :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .slt
+      (fun shared _left _right => shared) EvmYul.UInt256.slt :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.slt (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_sgt :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .sgt
+      (fun shared _left _right => shared) EvmYul.UInt256.sgt :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.sgt (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_eq :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .eq
+      (fun shared _left _right => shared) EvmYul.UInt256.eq :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.eq (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_and :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .and
+      (fun shared _left _right => shared) EvmYul.UInt256.land :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.land (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_or :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .or
+      (fun shared _left _right => shared) EvmYul.UInt256.lor :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.lor (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_xor :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .xor
+      (fun shared _left _right => shared) EvmYul.UInt256.xor :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.xor (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_byte :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .byte
+      (fun shared _left _right => shared) EvmYul.UInt256.byteAt :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.byteAt (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_shl :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .shl
+      (fun shared _left _right => shared) (flip EvmYul.UInt256.shiftLeft) :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin
+    (flip EvmYul.UInt256.shiftLeft) (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_shr :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .shr
+      (fun shared _left _right => shared) (flip EvmYul.UInt256.shiftRight) :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin
+    (flip EvmYul.UInt256.shiftRight) (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_sar :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .sar
+      (fun shared _left _right => shared) EvmYul.UInt256.sar :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.sar (by rfl)
+
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
     PrimitiveStackSoundAt cfg layout
@@ -5254,6 +5674,175 @@ theorem primitiveStackSoundAt_structured_mod
       sourcePrimitiveBinaryOneSound_structured_mod
       (by intro left right; rfl)
       (by intro sourceShared targetShared left right hShared; exact hShared)
+
+theorem primitiveStackSoundAt_structured_of_pure_bin
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (f : EvmYul.Primop.Binary)
+    (hYul :
+      YulPrimitiveBinaryOneSound sourceFuel yulPrim
+        (fun shared _left _right => shared) f)
+    (hSource :
+      SourcePrimitiveBinaryOneSound
+        Locals.Source.PrimitiveSemantics.structured op
+        (fun shared _left _right => shared) f) :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel yulPrim op := by
+  exact
+    primitiveStackSoundAt_of_binary_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := yulPrim) (op := op)
+      (fun shared _left _right => shared)
+      (fun shared _left _right => shared)
+      f f hYul hSource
+      (by intro left right; rfl)
+      (by intro sourceShared targetShared left right hShared; exact hShared)
+
+theorem primitiveStackSoundAt_structured_sdiv
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .SDIV : EvmYul.Operation .Yul)) .sdiv :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.sdiv yulPrimitiveBinaryOneSound_sdiv
+    sourcePrimitiveBinaryOneSound_structured_sdiv
+
+theorem primitiveStackSoundAt_structured_smod
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .SMOD : EvmYul.Operation .Yul)) .smod :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.smod yulPrimitiveBinaryOneSound_smod
+    sourcePrimitiveBinaryOneSound_structured_smod
+
+theorem primitiveStackSoundAt_structured_exp
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .EXP : EvmYul.Operation .Yul)) .exp :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.exp yulPrimitiveBinaryOneSound_exp
+    sourcePrimitiveBinaryOneSound_structured_exp
+
+theorem primitiveStackSoundAt_structured_signextend
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .SIGNEXTEND : EvmYul.Operation .Yul)) .signextend :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.signextend yulPrimitiveBinaryOneSound_signextend
+    sourcePrimitiveBinaryOneSound_structured_signextend
+
+theorem primitiveStackSoundAt_structured_lt
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .LT : EvmYul.Operation .Yul)) .lt :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.lt yulPrimitiveBinaryOneSound_lt
+    sourcePrimitiveBinaryOneSound_structured_lt
+
+theorem primitiveStackSoundAt_structured_gt
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .GT : EvmYul.Operation .Yul)) .gt :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.gt yulPrimitiveBinaryOneSound_gt
+    sourcePrimitiveBinaryOneSound_structured_gt
+
+theorem primitiveStackSoundAt_structured_slt
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .SLT : EvmYul.Operation .Yul)) .slt :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.slt yulPrimitiveBinaryOneSound_slt
+    sourcePrimitiveBinaryOneSound_structured_slt
+
+theorem primitiveStackSoundAt_structured_sgt
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .SGT : EvmYul.Operation .Yul)) .sgt :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.sgt yulPrimitiveBinaryOneSound_sgt
+    sourcePrimitiveBinaryOneSound_structured_sgt
+
+theorem primitiveStackSoundAt_structured_eq
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .EQ : EvmYul.Operation .Yul)) .eq :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.eq yulPrimitiveBinaryOneSound_eq
+    sourcePrimitiveBinaryOneSound_structured_eq
+
+theorem primitiveStackSoundAt_structured_and
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .AND : EvmYul.Operation .Yul)) .and :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.land yulPrimitiveBinaryOneSound_and
+    sourcePrimitiveBinaryOneSound_structured_and
+
+theorem primitiveStackSoundAt_structured_or
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .OR : EvmYul.Operation .Yul)) .or :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.lor yulPrimitiveBinaryOneSound_or
+    sourcePrimitiveBinaryOneSound_structured_or
+
+theorem primitiveStackSoundAt_structured_xor
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .XOR : EvmYul.Operation .Yul)) .xor :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.xor yulPrimitiveBinaryOneSound_xor
+    sourcePrimitiveBinaryOneSound_structured_xor
+
+theorem primitiveStackSoundAt_structured_byte
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .BYTE : EvmYul.Operation .Yul)) .byte :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.byteAt yulPrimitiveBinaryOneSound_byte
+    sourcePrimitiveBinaryOneSound_structured_byte
+
+theorem primitiveStackSoundAt_structured_shl
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .SHL : EvmYul.Operation .Yul)) .shl :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    (flip EvmYul.UInt256.shiftLeft) yulPrimitiveBinaryOneSound_shl
+    sourcePrimitiveBinaryOneSound_structured_shl
+
+theorem primitiveStackSoundAt_structured_shr
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .SHR : EvmYul.Operation .Yul)) .shr :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    (flip EvmYul.UInt256.shiftRight) yulPrimitiveBinaryOneSound_shr
+    sourcePrimitiveBinaryOneSound_structured_shr
+
+theorem primitiveStackSoundAt_structured_sar
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.CompBit .SAR : EvmYul.Operation .Yul)) .sar :=
+  primitiveStackSoundAt_structured_of_pure_bin
+    EvmYul.UInt256.sar yulPrimitiveBinaryOneSound_sar
+    sourcePrimitiveBinaryOneSound_structured_sar
 
 theorem primitiveStackSoundAt_mstore
     {cfg : StateRelConfig} {layout : List Name}

@@ -3423,6 +3423,54 @@ abbrev yulPrimitiveBinaryOneSoundDiv :=
 abbrev yulPrimitiveBinaryOneSoundMod :=
   @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_mod
 
+abbrev yulPrimitiveBinaryOneSoundSdiv :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_sdiv
+
+abbrev yulPrimitiveBinaryOneSoundSmod :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_smod
+
+abbrev yulPrimitiveBinaryOneSoundExp :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_exp
+
+abbrev yulPrimitiveBinaryOneSoundSignextend :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_signextend
+
+abbrev yulPrimitiveBinaryOneSoundLt :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_lt
+
+abbrev yulPrimitiveBinaryOneSoundGt :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_gt
+
+abbrev yulPrimitiveBinaryOneSoundSlt :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_slt
+
+abbrev yulPrimitiveBinaryOneSoundSgt :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_sgt
+
+abbrev yulPrimitiveBinaryOneSoundEq :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_eq
+
+abbrev yulPrimitiveBinaryOneSoundAnd :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_and
+
+abbrev yulPrimitiveBinaryOneSoundOr :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_or
+
+abbrev yulPrimitiveBinaryOneSoundXor :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_xor
+
+abbrev yulPrimitiveBinaryOneSoundByte :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_byte
+
+abbrev yulPrimitiveBinaryOneSoundShl :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_shl
+
+abbrev yulPrimitiveBinaryOneSoundShr :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_shr
+
+abbrev yulPrimitiveBinaryOneSoundSar :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_sar
+
 abbrev sourcePrimitiveBinaryOneSoundStructuredOfBin :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_of_bin
 
@@ -3441,6 +3489,54 @@ abbrev sourcePrimitiveBinaryOneSoundStructuredDiv :=
 abbrev sourcePrimitiveBinaryOneSoundStructuredMod :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_mod
 
+abbrev sourcePrimitiveBinaryOneSoundStructuredSdiv :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_sdiv
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredSmod :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_smod
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredExp :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_exp
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredSignextend :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_signextend
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredLt :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_lt
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredGt :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_gt
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredSlt :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_slt
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredSgt :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_sgt
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredEq :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_eq
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredAnd :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_and
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredOr :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_or
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredXor :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_xor
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredByte :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_byte
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredShl :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_shl
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredShr :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_shr
+
+abbrev sourcePrimitiveBinaryOneSoundStructuredSar :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_sar
+
 abbrev primitiveStackSoundAtStructuredAdd :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_add
 
@@ -3455,6 +3551,57 @@ abbrev primitiveStackSoundAtStructuredDiv :=
 
 abbrev primitiveStackSoundAtStructuredMod :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_mod
+
+abbrev primitiveStackSoundAtStructuredOfPureBin :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_of_pure_bin
+
+abbrev primitiveStackSoundAtStructuredSdiv :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_sdiv
+
+abbrev primitiveStackSoundAtStructuredSmod :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_smod
+
+abbrev primitiveStackSoundAtStructuredExp :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_exp
+
+abbrev primitiveStackSoundAtStructuredSignextend :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_signextend
+
+abbrev primitiveStackSoundAtStructuredLt :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_lt
+
+abbrev primitiveStackSoundAtStructuredGt :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_gt
+
+abbrev primitiveStackSoundAtStructuredSlt :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_slt
+
+abbrev primitiveStackSoundAtStructuredSgt :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_sgt
+
+abbrev primitiveStackSoundAtStructuredEq :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_eq
+
+abbrev primitiveStackSoundAtStructuredAnd :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_and
+
+abbrev primitiveStackSoundAtStructuredOr :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_or
+
+abbrev primitiveStackSoundAtStructuredXor :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_xor
+
+abbrev primitiveStackSoundAtStructuredByte :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_byte
+
+abbrev primitiveStackSoundAtStructuredShl :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_shl
+
+abbrev primitiveStackSoundAtStructuredShr :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_shr
+
+abbrev primitiveStackSoundAtStructuredSar :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_sar
 
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound
