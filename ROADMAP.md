@@ -28,6 +28,9 @@ Last updated: 2026-05-25 04:05 PDT.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
+   - [x] Export checked full-source-surface facts showing code-image and
+     external call/create primitives are accepted by `Reference.Safe.Full`,
+     while keeping the old rejection facts named as bridge-coverage facts.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.

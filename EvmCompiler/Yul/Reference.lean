@@ -223,6 +223,50 @@ theorem primitive_all (op : EvmYul.Operation .Yul) :
     primitive op := by
   trivial
 
+theorem accepts_call :
+    primitive (.System .CALL) := by
+  trivial
+
+theorem accepts_create :
+    primitive (.System .CREATE) := by
+  trivial
+
+theorem accepts_callcode :
+    primitive (.System .CALLCODE) := by
+  trivial
+
+theorem accepts_delegatecall :
+    primitive (.System .DELEGATECALL) := by
+  trivial
+
+theorem accepts_create2 :
+    primitive (.System .CREATE2) := by
+  trivial
+
+theorem accepts_staticcall :
+    primitive (.System .STATICCALL) := by
+  trivial
+
+theorem accepts_codesize :
+    primitive (.Env .CODESIZE) := by
+  trivial
+
+theorem accepts_codecopy :
+    primitive (.Env .CODECOPY) := by
+  trivial
+
+theorem accepts_extcodesize :
+    primitive (.Env .EXTCODESIZE) := by
+  trivial
+
+theorem accepts_extcodecopy :
+    primitive (.Env .EXTCODECOPY) := by
+  trivial
+
+theorem accepts_extcodehash :
+    primitive (.Env .EXTCODEHASH) := by
+  trivial
+
 mutual
   def expr_all : (expr' : AstExpr) → expr expr'
     | .Lit _value => True.intro

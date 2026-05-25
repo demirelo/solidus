@@ -11170,6 +11170,24 @@ abbrev selfdestructAcceptedByReferenceBridge :=
 abbrev returnAcceptedByReferenceBridge :=
   Yul.Reference.Safe.accepts_return
 
+abbrev callAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_call
+
+abbrev createAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_create
+
+abbrev callcodeAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_callcode
+
+abbrev delegatecallAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_delegatecall
+
+abbrev create2AcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_create2
+
+abbrev staticcallAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_staticcall
+
 abbrev callRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_call
 
@@ -11437,17 +11455,32 @@ abbrev recursiveBridgeTargetRuntimeAcceptedNoCallCreate
 abbrev codesizeRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_codesize
 
+abbrev codesizeAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_codesize
+
 abbrev codecopyRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_codecopy
+
+abbrev codecopyAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_codecopy
 
 abbrev extcodesizeRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_extcodesize
 
+abbrev extcodesizeAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_extcodesize
+
 abbrev extcodecopyRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_extcodecopy
 
+abbrev extcodecopyAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_extcodecopy
+
 abbrev extcodehashRejectedByReferenceBridge :=
   Yul.Reference.Safe.rejects_extcodehash
+
+abbrev extcodehashAcceptedByFullReferenceSurface :=
+  Yul.Reference.Safe.Full.accepts_extcodehash
 
 abbrev sstoreAcceptedByReferenceBridge :=
   Yul.Reference.Safe.accepts_sstore
