@@ -410,11 +410,17 @@ noncomputable abbrev frontendCompileCheckedWithLayout :=
 abbrev frontendCompileCheckedWithLayoutEqSome :=
   @Solidity.Frontend.Program.compileCheckedWithLayout?_eq_some
 
+abbrev frontendCompileCheckedWithLayoutSomeLower :=
+  @Solidity.Frontend.Program.compileCheckedWithLayout?_some_lower
+
 noncomputable abbrev frontendCompileCheckedWithLocalDataBase :=
   @Solidity.Frontend.Program.compileCheckedWithLocalDataBase?
 
 abbrev frontendCompileCheckedWithLocalDataBaseEqSome :=
   @Solidity.Frontend.Program.compileCheckedWithLocalDataBase?_eq_some
+
+abbrev frontendCompileCheckedWithLocalDataBaseSomeLower :=
+  @Solidity.Frontend.Program.compileCheckedWithLocalDataBase?_some_lower
 
 end ObjectData
 

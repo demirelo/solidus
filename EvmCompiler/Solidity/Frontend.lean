@@ -1861,6 +1861,21 @@ theorem compileCheckedWithLayout?_eq_some
     program.compileCheckedWithLayout? layout = some asm := by
   simp [compileCheckedWithLayout?, hLower, hCompile]
 
+theorem compileCheckedWithLayout?_some_lower
+    {program : Program} {layout : ObjectLayout}
+    {asm : Assembly.Program}
+    (hCompile : program.compileCheckedWithLayout? layout = some asm) :
+    ∃ lower : Objects.Program,
+      program.toObjectsWithLayout? layout = some lower ∧
+        Objects.Source.Program.compileChecked? lower = some asm := by
+  unfold compileCheckedWithLayout? at hCompile
+  cases hLower : program.toObjectsWithLayout? layout with
+  | none =>
+      simp [hLower] at hCompile
+  | some lower =>
+      simp [hLower] at hCompile
+      exact ⟨lower, rfl, hCompile⟩
+
 def toObjectsUncheckedWithLayout? (program : Program)
     (layout : ObjectLayout) : Option Objects.Program := do
   let root ← Object.toObjectsUncheckedWithLayout? program.object layout
@@ -1907,6 +1922,22 @@ theorem compileCheckedWithLocalDataBase?_eq_some
       Objects.Source.Program.compileChecked? lower = some asm) :
     program.compileCheckedWithLocalDataBase? layout base = some asm := by
   simp [compileCheckedWithLocalDataBase?, hLower, hCompile]
+
+theorem compileCheckedWithLocalDataBase?_some_lower
+    {program : Program} {layout : ObjectLayout} {base : Nat}
+    {asm : Assembly.Program}
+    (hCompile :
+      program.compileCheckedWithLocalDataBase? layout base = some asm) :
+    ∃ lower : Objects.Program,
+      program.toObjectsWithLocalDataBase? layout base = some lower ∧
+        Objects.Source.Program.compileChecked? lower = some asm := by
+  unfold compileCheckedWithLocalDataBase? at hCompile
+  cases hLower : program.toObjectsWithLocalDataBase? layout base with
+  | none =>
+      simp [hLower] at hCompile
+  | some lower =>
+      simp [hLower] at hCompile
+      exact ⟨lower, rfl, hCompile⟩
 
 def toObjectsUncheckedWithLocalDataBase? (program : Program)
     (layout : ObjectLayout) (base : Nat) : Option Objects.Program := do
