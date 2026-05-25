@@ -180,6 +180,12 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSemanticCoreContracts.ofBoundaries`. This makes clear which
     fields are shared primitive semantics, terminal/revert semantics, and
     imported-Yul expression result-shape/resource behavior.
+  - [x] Add preferred gas-aware wrappers that take those three boundary
+    packages directly:
+    `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X`
+    and the matching no-out-of-gas corollary. `LayerAudit`'s preferred
+    gas-aware aliases now route through this split-boundary surface rather than
+    through the opaque semantic-core bundle.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The
