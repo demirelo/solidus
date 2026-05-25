@@ -23,6 +23,15 @@ def step : BasicInstr → EVMState → Except EVMException EVMState
 
 end BasicInstr
 
+namespace Terminal
+
+def step (kind : Assembly.HaltKind) (state : EVMState) :
+    Except EVMException EVMState :=
+  Assembly.Target.stepInstr
+    (Assembly.TargetInstr.prim kind.toPrimOp) state
+
+end Terminal
+
 namespace Code
 
 def run : Code → EVMState → Except EVMException EVMState
@@ -30,6 +39,11 @@ def run : Code → EVMState → Except EVMException EVMState
   | instr :: rest, state => do
       let state' ← instr.step state
       run rest state'
+
+def runState (code : Code) (state : RunState) :
+    Except EVMException RunState := do
+  let evm ← run code state.evm
+  .ok (state.withEVM evm)
 
 def popCondition (state : EVMState) :
     Except EVMException (EVMState × Bool) :=
@@ -44,122 +58,532 @@ def runCondition (code : Code) (state : EVMState) :
   let state' ← run code state
   popCondition state'
 
+def runConditionState (code : Code) (state : RunState) :
+    Except EVMException (RunState × Bool) := do
+  let (evm, cond) ← runCondition code state.evm
+  .ok (state.withEVM evm, cond)
+
 end Code
+
+namespace Code
+
+/--
+Semantic frame safety for straight-line code.
+
+Running frame-safe code with an extra hidden stack suffix gives the same EVM
+state as running it without that suffix, except that the suffix is preserved at
+the bottom of the resulting stack. This is the key condition needed before the
+procedure compiler may realize ghost return frames as hidden concrete stack
+tokens.
+-/
+def FrameSafe (code : Code) : Prop :=
+  ∀ (state final : EVMState) (hidden : EvmYul.Stack Word),
+    run code state = .ok final →
+      run code { state with stack := state.stack ++ hidden } =
+        .ok { final with stack := final.stack ++ hidden }
+
+end Code
+
+namespace StackFrame
+
+def splitArgs? (argc : Nat) (stack : EvmYul.Stack Word) :
+    Option (EvmYul.Stack Word × EvmYul.Stack Word) :=
+  if argc ≤ stack.length then
+    some (stack.take argc, stack.drop argc)
+  else
+    none
+
+def attachReturns? (frame : ReturnDest) (stack : EvmYul.Stack Word) :
+    Option (EvmYul.Stack Word) :=
+  if stack.length = frame.retc then
+    some (stack ++ frame.callerStack)
+  else
+    none
+
+end StackFrame
+
+namespace Switch
+
+def select (scrutinee : Word) :
+    List (Word × Block) → Option Block → Option Block
+  | [], defaultBody => defaultBody
+  | (value, body) :: rest, defaultBody =>
+      if value = scrutinee then
+        some body
+      else
+        select scrutinee rest defaultBody
+
+theorem wf_of_select {canBreak canContinue canLeave : Bool}
+    {scrutinee : Word} {cases : List (Word × Block)}
+    {defaultBody : Option Block} {selected : Block}
+    (hCases :
+      ∀ value body, (value, body) ∈ cases →
+        Block.WF canBreak canContinue canLeave body)
+    (hDefault :
+      ∀ body, defaultBody = some body →
+        Block.WF canBreak canContinue canLeave body)
+    (hSelect : select scrutinee cases defaultBody = some selected) :
+    Block.WF canBreak canContinue canLeave selected := by
+  revert selected
+  induction cases with
+  | nil =>
+      intro selected hSelect
+      exact hDefault selected hSelect
+  | cons head rest ih =>
+      intro selected hSelect
+      rcases head with ⟨value, headBody⟩
+      by_cases hEq : value = scrutinee
+      · simp [select, hEq] at hSelect
+        cases hSelect
+        exact hCases value selected (by simp)
+      · have hTail :
+            select scrutinee rest defaultBody = some selected := by
+          simpa [select, hEq] using hSelect
+        exact ih
+          (fun value body hMem => hCases value body (by simp [hMem]))
+          hTail
+
+end Switch
 
 mutual
   /--
   Fuel-indexed structured block execution.
 
-  Fuel is only a totality device for recursive structured control.  A successful
-  run is the semantic fact used by preservation; running out of this source fuel
-  is reported as `InvalidInstruction`, not as EVM gas.
+  `RunState.returns` is ghost control state. Primitive code and terminal EVM
+  opcodes mutate only `RunState.evm`; `call` pushes a return frame, and a
+  procedure boundary catches both ordinary fallthrough and `leave`.
   -/
-  def Block.run : Nat → Block → EVMState → Except EVMException EVMState
+  def Block.run (program : Program) : Nat → Block → RunState →
+      Except EVMException Outcome
     | 0, _block, _state =>
         invalid
     | _fuel + 1, ⟨[]⟩, state =>
-        .ok state
+        .ok (Outcome.regular state)
     | fuel + 1, ⟨stmt :: rest⟩, state => do
-        let state' ← Stmt.run fuel stmt state
-        Block.run fuel ⟨rest⟩ state'
+        let outcome ← Stmt.run program fuel stmt state
+        match outcome.mode with
+        | .regular => Block.run program fuel ⟨rest⟩ outcome.state
+        | .brk | .cont | .leave | .halt _ => .ok outcome
 
-  def Stmt.runForLoop (fuel : Nat) (cond : Code) (post body : Block)
-      (state : EVMState) : Except EVMException EVMState :=
+  def Stmt.runForLoop (program : Program) (fuel : Nat) (cond : Code)
+      (post body : Block) (state : RunState) :
+      Except EVMException Outcome :=
     match fuel with
     | 0 =>
         invalid
-    | fuel' + 1 => do
-        let (stateAfterCond, condTrue) ← Code.runCondition cond state
-        if condTrue then
-          let stateAfterBody ← Block.run fuel' body stateAfterCond
-          let stateAfterPost ← Block.run fuel' post stateAfterBody
-          Stmt.runForLoop fuel' cond post body stateAfterPost
-        else
-          .ok stateAfterCond
+    | fuel' + 1 =>
+        match Code.runConditionState cond state with
+        | .error err => .error err
+        | .ok (stateAfterCond, condTrue) =>
+            if condTrue then
+              match Block.run program fuel' body stateAfterCond with
+              | .error err => .error err
+              | .ok bodyOutcome =>
+                  match bodyOutcome.mode with
+                  | .brk =>
+                      .ok (Outcome.regular bodyOutcome.state)
+                  | .regular | .cont =>
+                      match Block.run program fuel' post bodyOutcome.state with
+                      | .error err => .error err
+                      | .ok postOutcome =>
+                          match postOutcome.mode with
+                          | .regular =>
+                              Stmt.runForLoop program fuel' cond post body
+                                postOutcome.state
+                          | .brk | .cont =>
+                              invalid
+                          | .leave | .halt _ =>
+                              .ok postOutcome
+                  | .leave | .halt _ =>
+                      .ok bodyOutcome
+            else
+              .ok (Outcome.regular stateAfterCond)
 
-  def Stmt.run : Nat → Stmt → EVMState → Except EVMException EVMState
-    | _fuel, Stmt.code code, state =>
-        Code.run code state
-    | 0, Stmt.ifElse _cond _thenBody _elseBody, _state =>
+  def Stmt.run (program : Program) : Nat → Stmt → RunState →
+      Except EVMException Outcome
+    | _fuel, Stmt.code code, state => do
+        let state' ← Code.runState code state
+        .ok (Outcome.regular state')
+    | 0, Stmt.if_ _cond _body, _state =>
         invalid
-    | fuel + 1, Stmt.ifElse cond thenBody elseBody, state => do
-        let (stateAfterCond, condTrue) ← Code.runCondition cond state
+    | fuel + 1, Stmt.if_ cond body, state => do
+        let (stateAfterCond, condTrue) ← Code.runConditionState cond state
         if condTrue then
-          Block.run fuel thenBody stateAfterCond
+          Block.run program fuel body stateAfterCond
         else
-          Block.run fuel elseBody stateAfterCond
+          .ok (Outcome.regular stateAfterCond)
+    | 0, Stmt.switch _scrutinee _cases _defaultBody, _state =>
+        invalid
+    | fuel + 1, Stmt.switch scrutinee cases defaultBody, state => do
+        let stateAfterScrutinee ← Code.runState scrutinee state
+        match stateAfterScrutinee.evm.stack.pop with
+        | none =>
+            .error .StackUnderflow
+        | some ⟨stack, value⟩ =>
+            let evmAfterPop := { stateAfterScrutinee.evm with stack := stack }
+            let stateAfterPop := stateAfterScrutinee.withEVM evmAfterPop
+            match Switch.select value cases defaultBody with
+            | some body => Block.run program fuel body stateAfterPop
+            | none => .ok (Outcome.regular stateAfterPop)
     | 0, Stmt.for_ _init _cond _post _body, _state =>
         invalid
     | fuel + 1, Stmt.for_ init cond post body, state => do
-        let stateAfterInit ← Block.run fuel init state
-        Stmt.runForLoop fuel cond post body stateAfterInit
+        let initOutcome ← Block.run program fuel init state
+        match initOutcome.mode with
+        | .regular =>
+            Stmt.runForLoop program fuel cond post body initOutcome.state
+        | .brk | .cont =>
+            invalid
+        | .leave | .halt _ =>
+            .ok initOutcome
+    | _fuel, Stmt.brk, state =>
+        .ok (Outcome.brk state)
+    | _fuel, Stmt.cont, state =>
+        .ok (Outcome.cont state)
+    | _fuel, Stmt.leave, state =>
+        match state.returns with
+        | [] => invalid
+        | _ :: _ => .ok (Outcome.leave state)
+    | 0, Stmt.call _name, _state =>
+        invalid
+    | fuel + 1, Stmt.call name, state =>
+        match ProcList.lookup? name program.procs with
+        | none =>
+            invalid
+        | some proc =>
+            match StackFrame.splitArgs? proc.argc state.evm.stack with
+            | none =>
+                .error .StackUnderflow
+            | some (args, callerStack) =>
+                let callEVM := { state.evm with stack := args }
+                let callState :=
+                  (state.withEVM callEVM).pushReturn callerStack proc.retc
+                match Block.run program fuel proc.body callState with
+                | .error err => .error err
+                | .ok outcome =>
+                    match outcome.mode with
+                    | .regular | .leave =>
+                        match outcome.state.popReturn? with
+                        | none => invalid
+                        | some (frame, returned) =>
+                            match StackFrame.attachReturns? frame
+                                outcome.state.evm.stack with
+                            | none => invalid
+                            | some stack =>
+                                let evm := { outcome.state.evm with stack := stack }
+                                .ok (Outcome.regular (returned.withEVM evm))
+                    | .brk | .cont =>
+                        invalid
+                    | .halt kind =>
+                        .ok (Outcome.halt kind outcome.state)
+    | _fuel, Stmt.terminal kind, state => do
+        let evm ← Terminal.step kind state.evm
+        .ok (Outcome.halt kind (state.withEVM evm))
 end
 
 namespace Program
 
+def initialState (state : EVMState) : RunState :=
+  RunState.initial state
+
+def runState (fuel : Nat) (program : Program) (state : RunState) :
+    Except EVMException Outcome :=
+  Block.run program fuel program.body state
+
 def run (fuel : Nat) (program : Program) (state : EVMState) :
-    Except EVMException EVMState :=
-  Block.run fuel program.body state
+    Except EVMException Outcome :=
+  runState fuel program (initialState state)
 
 end Program
 
 mutual
   /--
-  Relational semantics for blocks, shaped to match the executable
-  fuel-indexed evaluator but easier to induct over in compiler proofs.
+  Relational source semantics for the procedure-aware structured layer.
 
-  The `fuel + 1` in the block constructors mirrors `Block.run`: a zero-fuel
-  block execution is invalid even for an empty block.
+  This mirrors the executable evaluator, but exposes the control cases that the
+  compiler proof has to handle: regular fallthrough, loop exits,
+  procedure-delimited `leave`, terminal EVM halts, and call-frame
+  push/pop/return attachment.
   -/
-  inductive Block.Eval : Nat → Block → EVMState → EVMState → Prop where
-    | nil {fuel : Nat} {state : EVMState} :
-        Block.Eval (fuel + 1) ⟨[]⟩ state state
-    | cons {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
-        {state mid final : EVMState}
-        (hStmt : Stmt.Eval fuel stmt state mid)
-        (hRest : Block.Eval fuel ⟨rest⟩ mid final) :
-        Block.Eval (fuel + 1) ⟨stmt :: rest⟩ state final
+  inductive Block.Eval (program : Program) :
+      Nat → Block → RunState → Outcome → Prop where
+    | nil {fuel : Nat} {state : RunState} :
+        Block.Eval program (fuel + 1) { stmts := [] } state
+          (Outcome.regular state)
+    | cons_regular {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
+        {state mid : RunState} {outcome : Outcome}
+        (hStmt :
+          Stmt.Eval program fuel stmt state (Outcome.regular mid))
+        (hRest :
+          Block.Eval program fuel { stmts := rest } mid outcome) :
+        Block.Eval program (fuel + 1) { stmts := stmt :: rest } state outcome
+    | cons_brk {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
+        {state outState : RunState}
+        (hStmt : Stmt.Eval program fuel stmt state (Outcome.brk outState)) :
+        Block.Eval program (fuel + 1) { stmts := stmt :: rest } state
+          (Outcome.brk outState)
+    | cons_cont {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
+        {state outState : RunState}
+        (hStmt : Stmt.Eval program fuel stmt state (Outcome.cont outState)) :
+        Block.Eval program (fuel + 1) { stmts := stmt :: rest } state
+          (Outcome.cont outState)
+    | cons_leave {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
+        {state outState : RunState}
+        (hStmt : Stmt.Eval program fuel stmt state (Outcome.leave outState)) :
+        Block.Eval program (fuel + 1) { stmts := stmt :: rest } state
+          (Outcome.leave outState)
+    | cons_halt {fuel : Nat} {stmt : Stmt} {rest : List Stmt}
+        {state outState : RunState} {kind : Assembly.HaltKind}
+        (hStmt :
+          Stmt.Eval program fuel stmt state (Outcome.halt kind outState)) :
+        Block.Eval program (fuel + 1) { stmts := stmt :: rest } state
+          (Outcome.halt kind outState)
 
-  inductive Stmt.Eval : Nat → Stmt → EVMState → EVMState → Prop where
-    | code {fuel : Nat} {code : Code} {state final : EVMState}
-        (hCode : Code.run code state = .ok final) :
-        Stmt.Eval fuel (.code code) state final
-    | ifTrue {fuel : Nat} {cond : Code} {thenBody elseBody : Block}
-        {state stateAfterCond final : EVMState}
-        (hCond : Code.runCondition cond state = .ok (stateAfterCond, true))
-        (hThen : Block.Eval fuel thenBody stateAfterCond final) :
-        Stmt.Eval (fuel + 1) (.ifElse cond thenBody elseBody) state final
-    | ifFalse {fuel : Nat} {cond : Code} {thenBody elseBody : Block}
-        {state stateAfterCond final : EVMState}
-        (hCond : Code.runCondition cond state = .ok (stateAfterCond, false))
-        (hElse : Block.Eval fuel elseBody stateAfterCond final) :
-        Stmt.Eval (fuel + 1) (.ifElse cond thenBody elseBody) state final
-    | for_ {fuel : Nat} {init post body : Block} {cond : Code}
-        {state stateAfterInit final : EVMState}
-        (hInit : Block.Eval fuel init state stateAfterInit)
-        (hLoop : For.Eval fuel cond post body stateAfterInit final) :
-        Stmt.Eval (fuel + 1) (.for_ init cond post body) state final
+  inductive Stmt.Eval (program : Program) :
+      Nat → Stmt → RunState → Outcome → Prop where
+    | code {fuel : Nat} {code : Code} {state final : RunState}
+        (hCode : Code.runState code state = .ok final) :
+        Stmt.Eval program fuel (.code code) state (Outcome.regular final)
+    | if_false {fuel : Nat} {cond : Code} {body : Block}
+        {state stateAfterCond : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, false)) :
+        Stmt.Eval program (fuel + 1) (.if_ cond body) state
+          (Outcome.regular stateAfterCond)
+    | if_true {fuel : Nat} {cond : Code} {body : Block}
+        {state stateAfterCond : RunState} {outcome : Outcome}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody : Block.Eval program fuel body stateAfterCond outcome) :
+        Stmt.Eval program (fuel + 1) (.if_ cond body) state outcome
+    | switch_none {fuel : Nat} {scrutinee : Code}
+        {cases : List (Word × Block)} {defaultBody : Option Block}
+        {state stateAfterScrutinee : RunState}
+        {stack : EvmYul.Stack Word} {value : Word}
+        (hScrutinee : Code.runState scrutinee state = .ok stateAfterScrutinee)
+        (hPop : stateAfterScrutinee.evm.stack.pop = some (stack, value))
+        (hSelect : Switch.select value cases defaultBody = none) :
+        Stmt.Eval program (fuel + 1)
+          (.switch scrutinee cases defaultBody) state
+          (Outcome.regular
+            (stateAfterScrutinee.withEVM
+              { stateAfterScrutinee.evm with stack := stack }))
+    | switch_some {fuel : Nat} {scrutinee : Code}
+        {cases : List (Word × Block)} {defaultBody : Option Block}
+        {state stateAfterScrutinee stateAfterPop : RunState}
+        {stack : EvmYul.Stack Word} {value : Word} {body : Block}
+        {outcome : Outcome}
+        (hScrutinee : Code.runState scrutinee state = .ok stateAfterScrutinee)
+        (hPop : stateAfterScrutinee.evm.stack.pop = some (stack, value))
+        (hStateAfterPop :
+          stateAfterPop =
+            stateAfterScrutinee.withEVM
+              { stateAfterScrutinee.evm with stack := stack })
+        (hSelect : Switch.select value cases defaultBody = some body)
+        (hBody : Block.Eval program fuel body stateAfterPop outcome) :
+        Stmt.Eval program (fuel + 1)
+          (.switch scrutinee cases defaultBody) state outcome
+    | for_init_regular {fuel : Nat} {init : Block} {cond : Code}
+        {post body : Block} {state initState : RunState}
+        {outcome : Outcome}
+        (hInit : Block.Eval program fuel init state (Outcome.regular initState))
+        (hLoop : For.Eval program fuel cond post body initState outcome) :
+        Stmt.Eval program (fuel + 1) (.for_ init cond post body) state outcome
+    | for_init_leave {fuel : Nat} {init : Block} {cond : Code}
+        {post body : Block} {state outState : RunState}
+        (hInit : Block.Eval program fuel init state (Outcome.leave outState)) :
+        Stmt.Eval program (fuel + 1) (.for_ init cond post body) state
+          (Outcome.leave outState)
+    | for_init_halt {fuel : Nat} {init : Block} {cond : Code}
+        {post body : Block} {state outState : RunState}
+        {kind : Assembly.HaltKind}
+        (hInit :
+          Block.Eval program fuel init state (Outcome.halt kind outState)) :
+        Stmt.Eval program (fuel + 1) (.for_ init cond post body) state
+          (Outcome.halt kind outState)
+    | brk {fuel : Nat} {state : RunState} :
+        Stmt.Eval program fuel .brk state (Outcome.brk state)
+    | cont {fuel : Nat} {state : RunState} :
+        Stmt.Eval program fuel .cont state (Outcome.cont state)
+    | leave {fuel : Nat} {state : RunState}
+        (hReturns : state.returns ≠ []) :
+        Stmt.Eval program fuel .leave state (Outcome.leave state)
+    | call_regular {fuel : Nat} {name : Name} {state : RunState}
+        {proc : Proc} {args callerStack stack : EvmYul.Stack Word}
+        {bodyState returned : RunState} {frame : ReturnDest}
+        (hLookup : ProcList.lookup? name program.procs = some proc)
+        (hSplit :
+          StackFrame.splitArgs? proc.argc state.evm.stack =
+            some (args, callerStack))
+        (hBody :
+          Block.Eval program fuel proc.body
+            ((state.withEVM { state.evm with stack := args }).pushReturn
+              callerStack proc.retc)
+            (Outcome.regular bodyState))
+        (hPop : bodyState.popReturn? = some (frame, returned))
+        (hAttach :
+          StackFrame.attachReturns? frame bodyState.evm.stack = some stack) :
+        Stmt.Eval program (fuel + 1) (.call name) state
+          (Outcome.regular
+            (returned.withEVM { bodyState.evm with stack := stack }))
+    | call_leave {fuel : Nat} {name : Name} {state : RunState}
+        {proc : Proc} {args callerStack stack : EvmYul.Stack Word}
+        {bodyState returned : RunState} {frame : ReturnDest}
+        (hLookup : ProcList.lookup? name program.procs = some proc)
+        (hSplit :
+          StackFrame.splitArgs? proc.argc state.evm.stack =
+            some (args, callerStack))
+        (hBody :
+          Block.Eval program fuel proc.body
+            ((state.withEVM { state.evm with stack := args }).pushReturn
+              callerStack proc.retc)
+            (Outcome.leave bodyState))
+        (hPop : bodyState.popReturn? = some (frame, returned))
+        (hAttach :
+          StackFrame.attachReturns? frame bodyState.evm.stack = some stack) :
+        Stmt.Eval program (fuel + 1) (.call name) state
+          (Outcome.regular
+            (returned.withEVM { bodyState.evm with stack := stack }))
+    | call_halt {fuel : Nat} {name : Name} {state : RunState}
+        {proc : Proc} {args callerStack : EvmYul.Stack Word}
+        {bodyState : RunState} {kind : Assembly.HaltKind}
+        (hLookup : ProcList.lookup? name program.procs = some proc)
+        (hSplit :
+          StackFrame.splitArgs? proc.argc state.evm.stack =
+            some (args, callerStack))
+        (hBody :
+          Block.Eval program fuel proc.body
+            ((state.withEVM { state.evm with stack := args }).pushReturn
+              callerStack proc.retc)
+            (Outcome.halt kind bodyState)) :
+        Stmt.Eval program (fuel + 1) (.call name) state
+          (Outcome.halt kind bodyState)
+    | terminal {fuel : Nat} {kind : Assembly.HaltKind}
+        {state : RunState} {evm : EVMState}
+        (hStep : Terminal.step kind state.evm = .ok evm) :
+        Stmt.Eval program fuel (.terminal kind) state
+          (Outcome.halt kind (state.withEVM evm))
 
-  inductive For.Eval :
-      Nat → Code → Block → Block → EVMState → EVMState → Prop where
+  inductive For.Eval (program : Program) :
+      Nat → Code → Block → Block → RunState → Outcome → Prop where
     | false {fuel : Nat} {cond : Code} {post body : Block}
-        {state stateAfterCond : EVMState}
-        (hCond : Code.runCondition cond state = .ok (stateAfterCond, false)) :
-        For.Eval (fuel + 1) cond post body state stateAfterCond
-    | true {fuel : Nat} {cond : Code} {post body : Block}
-        {state stateAfterCond stateAfterBody stateAfterPost final : EVMState}
-        (hCond : Code.runCondition cond state = .ok (stateAfterCond, true))
-        (hBody : Block.Eval fuel body stateAfterCond stateAfterBody)
-        (hPost : Block.Eval fuel post stateAfterBody stateAfterPost)
-        (hLoop : For.Eval fuel cond post body stateAfterPost final) :
-        For.Eval (fuel + 1) cond post body state final
+        {state stateAfterCond : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, false)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.regular stateAfterCond)
+    | body_brk {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.brk bodyState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.regular bodyState)
+    | body_leave {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.leave bodyState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.leave bodyState)
+    | body_halt {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState : RunState}
+        {kind : Assembly.HaltKind}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.halt kind bodyState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.halt kind bodyState)
+    | regular_post_regular {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        {outcome : Outcome}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.regular bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.regular postState))
+        (hLoop : For.Eval program fuel cond post body postState outcome) :
+        For.Eval program (fuel + 1) cond post body state outcome
+    | cont_post_regular {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        {outcome : Outcome}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.cont bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.regular postState))
+        (hLoop : For.Eval program fuel cond post body postState outcome) :
+        For.Eval program (fuel + 1) cond post body state outcome
+    | regular_post_leave {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.regular bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.leave postState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.leave postState)
+    | cont_post_leave {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.cont bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.leave postState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.leave postState)
+    | regular_post_halt {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        {kind : Assembly.HaltKind}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.regular bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.halt kind postState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.halt kind postState)
+    | cont_post_halt {fuel : Nat} {cond : Code} {post body : Block}
+        {state stateAfterCond bodyState postState : RunState}
+        {kind : Assembly.HaltKind}
+        (hCond :
+          Code.runConditionState cond state = .ok (stateAfterCond, true))
+        (hBody :
+          Block.Eval program fuel body stateAfterCond
+            (Outcome.cont bodyState))
+        (hPost :
+          Block.Eval program fuel post bodyState
+            (Outcome.halt kind postState)) :
+        For.Eval program (fuel + 1) cond post body state
+          (Outcome.halt kind postState)
 end
 
+set_option linter.unusedSimpArgs false in
 mutual
-  theorem Block.eval_of_run {fuel : Nat} {block : Block}
-      {state final : EVMState}
-      (hRun : Block.run fuel block state = .ok final) :
-      Block.Eval fuel block state final := by
+  theorem Block.eval_of_run {program : Program} {fuel : Nat} {block : Block}
+      {state : RunState} {outcome : Outcome}
+      (hRun : Block.run program fuel block state = .ok outcome) :
+      Block.Eval program fuel block state outcome := by
     cases fuel with
     | zero =>
         simp [Block.run, invalid] at hRun
@@ -173,37 +597,63 @@ mutual
                 exact Block.Eval.nil
             | cons stmt rest =>
                 unfold Block.run at hRun
-                cases hStmt : Stmt.run fuel stmt state with
+                cases hStmtRun : Stmt.run program fuel stmt state with
                 | error err =>
-                    rw [hStmt] at hRun
+                    rw [hStmtRun] at hRun
                     cases hRun
-                | ok mid =>
-                    rw [hStmt] at hRun
-                    exact
-                      Block.Eval.cons
-                        (Stmt.eval_of_run hStmt)
-                        (Block.eval_of_run hRun)
+                | ok stmtOutcome =>
+                    rw [hStmtRun] at hRun
+                    have hStmtEval := Stmt.eval_of_run hStmtRun
+                    cases stmtOutcome with
+                    | mk stmtState stmtMode =>
+                        cases stmtMode with
+                        | regular =>
+                            exact
+                              Block.Eval.cons_regular
+                                (by
+                                  simpa [Outcome.regular] using hStmtEval)
+                                (Block.eval_of_run hRun)
+                        | brk =>
+                            cases hRun
+                            exact
+                              Block.Eval.cons_brk
+                                (by simpa [Outcome.brk] using hStmtEval)
+                        | cont =>
+                            cases hRun
+                            exact
+                              Block.Eval.cons_cont
+                                (by simpa [Outcome.cont] using hStmtEval)
+                        | leave =>
+                            cases hRun
+                            exact
+                              Block.Eval.cons_leave
+                                (by simpa [Outcome.leave] using hStmtEval)
+                        | halt kind =>
+                            cases hRun
+                            exact
+                              Block.Eval.cons_halt
+                                (by simpa [Outcome.halt] using hStmtEval)
 
-  theorem Stmt.eval_of_run {fuel : Nat} {stmt : Stmt}
-      {state final : EVMState}
-      (hRun : Stmt.run fuel stmt state = .ok final) :
-      Stmt.Eval fuel stmt state final := by
+  theorem Stmt.eval_of_run {program : Program} {fuel : Nat} {stmt : Stmt}
+      {state : RunState} {outcome : Outcome}
+      (hRun : Stmt.run program fuel stmt state = .ok outcome) :
+      Stmt.Eval program fuel stmt state outcome := by
     cases stmt with
     | code code =>
-        cases fuel with
-        | zero =>
-            simp [Stmt.run] at hRun
-            exact Stmt.Eval.code hRun
-        | succ fuel =>
-            simp [Stmt.run] at hRun
-            exact Stmt.Eval.code hRun
-    | ifElse cond thenBody elseBody =>
+        cases hCode : Code.runState code state with
+        | error err =>
+            simp [Stmt.run, hCode, Bind.bind, Except.bind] at hRun
+        | ok final =>
+            simp [Stmt.run, hCode, Bind.bind, Except.bind] at hRun
+            cases hRun
+            exact Stmt.Eval.code hCode
+    | if_ cond body =>
         cases fuel with
         | zero =>
             simp [Stmt.run, invalid] at hRun
         | succ fuel =>
             unfold Stmt.run at hRun
-            cases hCond : Code.runCondition cond state with
+            cases hCond : Code.runConditionState cond state with
             | error err =>
                 rw [hCond] at hRun
                 cases hRun
@@ -213,1301 +663,434 @@ mutual
                 cases condTrue with
                 | false =>
                     simp at hRun
-                    exact
-                      Stmt.Eval.ifFalse hCond
-                        (Block.eval_of_run hRun)
+                    cases hRun
+                    exact Stmt.Eval.if_false hCond
                 | true =>
-                    simp at hRun
                     exact
-                      Stmt.Eval.ifTrue hCond
+                      Stmt.Eval.if_true hCond
                         (Block.eval_of_run hRun)
+    | switch scrutinee cases defaultBody =>
+        cases fuel with
+        | zero =>
+            simp [Stmt.run, invalid] at hRun
+        | succ fuel =>
+            unfold Stmt.run at hRun
+            cases hScrutinee : Code.runState scrutinee state with
+            | error err =>
+                simp [hScrutinee, Bind.bind, Except.bind] at hRun
+            | ok stateAfterScrutinee =>
+                simp [hScrutinee, Bind.bind, Except.bind] at hRun
+                cases hPop : stateAfterScrutinee.evm.stack.pop with
+                | none =>
+                    simp [hPop] at hRun
+                | some popped =>
+                    rcases popped with ⟨stack, value⟩
+                    simp [hPop] at hRun
+                    let stateAfterPop :=
+                      stateAfterScrutinee.withEVM
+                        { stateAfterScrutinee.evm with stack := stack }
+                    cases hSelect : Switch.select value cases defaultBody with
+                    | none =>
+                        simp [hSelect] at hRun
+                        cases hRun
+                        exact Stmt.Eval.switch_none hScrutinee hPop hSelect
+                    | some body =>
+                        simp [hSelect] at hRun
+                        exact
+                          Stmt.Eval.switch_some hScrutinee hPop
+                            (show stateAfterPop =
+                              stateAfterScrutinee.withEVM
+                                { stateAfterScrutinee.evm with stack := stack } from
+                              rfl)
+                            hSelect (Block.eval_of_run hRun)
     | for_ init cond post body =>
         cases fuel with
         | zero =>
             simp [Stmt.run, invalid] at hRun
         | succ fuel =>
             unfold Stmt.run at hRun
-            cases hInit : Block.run fuel init state with
+            cases hInitRun : Block.run program fuel init state with
             | error err =>
-                rw [hInit] at hRun
-                cases hRun
-            | ok stateAfterInit =>
-                rw [hInit] at hRun
-                exact
-                  Stmt.Eval.for_
-                    (Block.eval_of_run hInit)
-                    (For.eval_of_run hRun)
+                simp [hInitRun, Bind.bind, Except.bind] at hRun
+            | ok initOutcome =>
+                simp [hInitRun, Bind.bind, Except.bind] at hRun
+                have hInitEval := Block.eval_of_run hInitRun
+                cases initOutcome with
+                | mk initState initMode =>
+                    cases initMode with
+                    | regular =>
+                        exact
+                          Stmt.Eval.for_init_regular
+                            (by simpa [Outcome.regular] using hInitEval)
+                            (For.eval_of_run hRun)
+                    | brk =>
+                        dsimp [Bind.bind, Except.bind, invalid] at hRun
+                        cases hRun
+                    | cont =>
+                        dsimp [Bind.bind, Except.bind, invalid] at hRun
+                        cases hRun
+                    | leave =>
+                        change
+                          Except.ok (Outcome.leave initState) =
+                            Except.ok outcome at hRun
+                        cases hRun
+                        exact
+                          Stmt.Eval.for_init_leave
+                            (by simpa [Outcome.leave] using hInitEval)
+                    | halt kind =>
+                        change
+                          Except.ok (Outcome.halt kind initState) =
+                            Except.ok outcome at hRun
+                        cases hRun
+                        exact
+                          Stmt.Eval.for_init_halt
+                            (by simpa [Outcome.halt] using hInitEval)
+    | brk =>
+        simp [Stmt.run] at hRun
+        cases hRun
+        exact Stmt.Eval.brk
+    | cont =>
+        simp [Stmt.run] at hRun
+        cases hRun
+        exact Stmt.Eval.cont
+    | leave =>
+        unfold Stmt.run at hRun
+        cases hReturns : state.returns with
+        | nil =>
+            simp [hReturns, invalid] at hRun
+        | cons frame returns =>
+            simp [hReturns] at hRun
+            cases hRun
+            exact Stmt.Eval.leave (by simp [hReturns])
+    | call name =>
+        cases fuel with
+        | zero =>
+            simp [Stmt.run, invalid] at hRun
+        | succ fuel =>
+            unfold Stmt.run at hRun
+            cases hLookup : ProcList.lookup? name program.procs with
+            | none =>
+                simp [hLookup, Bind.bind, Except.bind, invalid] at hRun
+            | some proc =>
+                simp [hLookup, Bind.bind, Except.bind] at hRun
+                cases hSplit :
+                    StackFrame.splitArgs? proc.argc state.evm.stack with
+                | none =>
+                    simp [hSplit, Bind.bind, Except.bind] at hRun
+                | some split =>
+                    rcases split with ⟨args, callerStack⟩
+                    simp [hSplit, Bind.bind, Except.bind] at hRun
+                    let callState : RunState :=
+                      (state.withEVM { state.evm with stack := args }).pushReturn
+                        callerStack proc.retc
+                    cases hBodyRun :
+                        Block.run program fuel proc.body callState with
+                    | error err =>
+                        simp [callState, hBodyRun, Bind.bind, Except.bind] at hRun
+                    | ok bodyOutcome =>
+                        simp [callState, hBodyRun, Bind.bind, Except.bind] at hRun
+                        have hBodyEval := Block.eval_of_run hBodyRun
+                        cases bodyOutcome with
+                        | mk bodyState bodyMode =>
+                            cases bodyMode with
+                            | regular =>
+                                simp [Outcome.regular] at hRun
+                                cases hPop : bodyState.popReturn? with
+                                | none =>
+                                    simp [hPop, invalid] at hRun
+                                | some popped =>
+                                    rcases popped with ⟨frame, returned⟩
+                                    simp [hPop] at hRun
+                                    cases hAttach :
+                                        StackFrame.attachReturns? frame
+                                          bodyState.evm.stack with
+                                    | none =>
+                                        simp [hAttach, invalid] at hRun
+                                    | some stack =>
+                                        simp [hAttach] at hRun
+                                        cases hRun
+                                        exact
+                                          Stmt.Eval.call_regular hLookup hSplit
+                                            (by
+                                              simpa [callState, Outcome.regular]
+                                                using hBodyEval)
+                                            hPop hAttach
+                            | brk =>
+                                simp [Outcome.brk, invalid] at hRun
+                            | cont =>
+                                simp [Outcome.cont, invalid] at hRun
+                            | leave =>
+                                simp [Outcome.leave] at hRun
+                                cases hPop : bodyState.popReturn? with
+                                | none =>
+                                    simp [hPop, invalid] at hRun
+                                | some popped =>
+                                    rcases popped with ⟨frame, returned⟩
+                                    simp [hPop] at hRun
+                                    cases hAttach :
+                                        StackFrame.attachReturns? frame
+                                          bodyState.evm.stack with
+                                    | none =>
+                                        simp [hAttach, invalid] at hRun
+                                    | some stack =>
+                                        simp [hAttach] at hRun
+                                        cases hRun
+                                        exact
+                                          Stmt.Eval.call_leave hLookup hSplit
+                                            (by
+                                              simpa [callState, Outcome.leave]
+                                                using hBodyEval)
+                                            hPop hAttach
+                            | halt kind =>
+                                simp [Outcome.halt] at hRun
+                                cases hRun
+                                exact
+                                  Stmt.Eval.call_halt hLookup hSplit
+                                    (by
+                                      simpa [callState, Outcome.halt]
+                                        using hBodyEval)
+    | terminal kind =>
+        cases hStep : Terminal.step kind state.evm with
+        | error err =>
+            simp [Stmt.run, hStep] at hRun
+            cases hRun
+        | ok evm =>
+            simp [Stmt.run, hStep] at hRun
+            cases hRun
+            exact Stmt.Eval.terminal hStep
 
-  theorem For.eval_of_run {fuel : Nat} {cond : Code} {post body : Block}
-      {state final : EVMState}
-      (hRun : Stmt.runForLoop fuel cond post body state = .ok final) :
-      For.Eval fuel cond post body state final := by
+  theorem For.eval_of_run {program : Program} {fuel : Nat} {cond : Code}
+      {post body : Block} {state : RunState} {outcome : Outcome}
+      (hRun :
+        Stmt.runForLoop program fuel cond post body state = .ok outcome) :
+      For.Eval program fuel cond post body state outcome := by
     cases fuel with
     | zero =>
         simp [Stmt.runForLoop, invalid] at hRun
     | succ fuel =>
         unfold Stmt.runForLoop at hRun
-        cases hCond : Code.runCondition cond state with
+        cases hCond : Code.runConditionState cond state with
         | error err =>
-            rw [hCond] at hRun
-            cases hRun
+            simp [hCond, Bind.bind, Except.bind] at hRun
         | ok condResult =>
             rcases condResult with ⟨stateAfterCond, condTrue⟩
-            rw [hCond] at hRun
+            simp [hCond, Bind.bind, Except.bind] at hRun
             cases condTrue with
             | false =>
                 simp at hRun
                 cases hRun
                 exact For.Eval.false hCond
             | true =>
-                change
-                  (do
-                    let stateAfterBody ← Block.run fuel body stateAfterCond
-                    let stateAfterPost ← Block.run fuel post stateAfterBody
-                    Stmt.runForLoop fuel cond post body stateAfterPost) =
-                    Except.ok final at hRun
-                cases hBody : Block.run fuel body stateAfterCond with
+                cases hBodyRun :
+                    Block.run program fuel body stateAfterCond with
                 | error err =>
-                    rw [hBody] at hRun
-                    cases hRun
-                | ok stateAfterBody =>
-                    rw [hBody] at hRun
-                    change
-                      (do
-                        let stateAfterPost ← Block.run fuel post stateAfterBody
-                        Stmt.runForLoop fuel cond post body stateAfterPost) =
-                        Except.ok final at hRun
-                    cases hPost : Block.run fuel post stateAfterBody with
-                    | error err =>
-                        rw [hPost] at hRun
-                        cases hRun
-                    | ok stateAfterPost =>
-                        rw [hPost] at hRun
-                        change
-                          Stmt.runForLoop fuel cond post body stateAfterPost =
-                            Except.ok final at hRun
-                        exact
-                          For.Eval.true hCond
-                            (Block.eval_of_run hBody)
-                            (Block.eval_of_run hPost)
-                            (For.eval_of_run hRun)
+                    simp [hBodyRun, Bind.bind, Except.bind] at hRun
+                | ok bodyOutcome =>
+                    simp [hBodyRun, Bind.bind, Except.bind] at hRun
+                    have hBodyEval := Block.eval_of_run hBodyRun
+                    cases bodyOutcome with
+                    | mk bodyState bodyMode =>
+                        cases bodyMode with
+                        | regular =>
+                            simp [Outcome.regular] at hRun
+                            cases hPostRun :
+                                Block.run program fuel post bodyState with
+                            | error err =>
+                                simp [hPostRun, Bind.bind, Except.bind] at hRun
+                            | ok postOutcome =>
+                                simp [hPostRun, Bind.bind, Except.bind] at hRun
+                                have hPostEval := Block.eval_of_run hPostRun
+                                cases postOutcome with
+                                | mk postState postMode =>
+                                    cases postMode with
+                                    | regular =>
+                                        exact
+                                          For.Eval.regular_post_regular hCond
+                                            (by
+                                              simpa [Outcome.regular]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.regular]
+                                                using hPostEval)
+                                            (For.eval_of_run hRun)
+                                    | brk =>
+                                        simp [invalid] at hRun
+                                    | cont =>
+                                        simp [invalid] at hRun
+                                    | leave =>
+                                        simp at hRun
+                                        cases hRun
+                                        exact
+                                          For.Eval.regular_post_leave hCond
+                                            (by
+                                              simpa [Outcome.regular]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.leave]
+                                                using hPostEval)
+                                    | halt kind =>
+                                        simp at hRun
+                                        cases hRun
+                                        exact
+                                          For.Eval.regular_post_halt hCond
+                                            (by
+                                              simpa [Outcome.regular]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.halt]
+                                                using hPostEval)
+                        | brk =>
+                            simp [Outcome.brk] at hRun
+                            cases hRun
+                            exact
+                              For.Eval.body_brk hCond
+                                (by simpa [Outcome.brk] using hBodyEval)
+                        | cont =>
+                            simp [Outcome.cont] at hRun
+                            cases hPostRun :
+                                Block.run program fuel post bodyState with
+                            | error err =>
+                                simp [hPostRun, Bind.bind, Except.bind] at hRun
+                            | ok postOutcome =>
+                                simp [hPostRun, Bind.bind, Except.bind] at hRun
+                                have hPostEval := Block.eval_of_run hPostRun
+                                cases postOutcome with
+                                | mk postState postMode =>
+                                    cases postMode with
+                                    | regular =>
+                                        exact
+                                          For.Eval.cont_post_regular hCond
+                                            (by
+                                              simpa [Outcome.cont]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.regular]
+                                                using hPostEval)
+                                            (For.eval_of_run hRun)
+                                    | brk =>
+                                        simp [invalid] at hRun
+                                    | cont =>
+                                        simp [invalid] at hRun
+                                    | leave =>
+                                        simp at hRun
+                                        cases hRun
+                                        exact
+                                          For.Eval.cont_post_leave hCond
+                                            (by
+                                              simpa [Outcome.cont]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.leave]
+                                                using hPostEval)
+                                    | halt kind =>
+                                        simp at hRun
+                                        cases hRun
+                                        exact
+                                          For.Eval.cont_post_halt hCond
+                                            (by
+                                              simpa [Outcome.cont]
+                                                using hBodyEval)
+                                            (by
+                                              simpa [Outcome.halt]
+                                                using hPostEval)
+                        | leave =>
+                            simp [Outcome.leave] at hRun
+                            cases hRun
+                            exact
+                              For.Eval.body_leave hCond
+                                (by simpa [Outcome.leave] using hBodyEval)
+                        | halt kind =>
+                            simp [Outcome.halt] at hRun
+                            cases hRun
+                            exact
+                              For.Eval.body_halt hCond
+                                (by simpa [Outcome.halt] using hBodyEval)
 end
 
 namespace Program
 
-theorem eval_of_run {fuel : Nat} {program : Program}
-    {state final : EVMState}
-    (hRun : run fuel program state = .ok final) :
-    Block.Eval fuel program.body state final := by
-  unfold run at hRun
+theorem eval_of_runState {fuel : Nat} {program : Program}
+    {state : RunState} {outcome : Outcome}
+    (hRun : program.runState fuel state = .ok outcome) :
+    Block.Eval program fuel program.body state outcome := by
   exact Block.eval_of_run hRun
 
+theorem eval_of_run {fuel : Nat} {program : Program}
+    {initial : EVMState} {outcome : Outcome}
+    (hRun : program.run fuel initial = .ok outcome) :
+    Block.Eval program fuel program.body (Program.initialState initial)
+      outcome := by
+  exact eval_of_runState hRun
+
 end Program
 
 mutual
-  theorem Block.run_of_eval {fuel : Nat} {block : Block}
-      {state final : EVMState}
-      (hEval : Block.Eval fuel block state final) :
-      Block.run fuel block state = .ok final := by
-    cases hEval with
-    | nil =>
-        simp [Block.run]
-    | cons hStmt hRest =>
-        unfold Block.run
-        rw [Stmt.run_of_eval hStmt]
-        exact Block.run_of_eval hRest
+  inductive Block.FrameSafe : Block → Prop where
+    | nil : Block.FrameSafe { stmts := [] }
+    | cons {stmt : Stmt} {rest : List Stmt}
+        (hStmt : Stmt.FrameSafe stmt)
+        (hRest : Block.FrameSafe { stmts := rest }) :
+        Block.FrameSafe { stmts := stmt :: rest }
 
-  theorem Stmt.run_of_eval {fuel : Nat} {stmt : Stmt}
-      {state final : EVMState}
-      (hEval : Stmt.Eval fuel stmt state final) :
-      Stmt.run fuel stmt state = .ok final := by
-    cases hEval with
-    | code hCode =>
-        cases fuel <;> simpa [Stmt.run] using hCode
-    | ifTrue hCond hThen =>
-        unfold Stmt.run
-        rw [hCond]
-        simp
-        exact Block.run_of_eval hThen
-    | ifFalse hCond hElse =>
-        unfold Stmt.run
-        rw [hCond]
-        simp
-        exact Block.run_of_eval hElse
-    | for_ hInit hLoop =>
-        unfold Stmt.run
-        rw [Block.run_of_eval hInit]
-        exact For.run_of_eval hLoop
-
-  theorem For.run_of_eval {fuel : Nat} {cond : Code} {post body : Block}
-      {state final : EVMState}
-      (hEval : For.Eval fuel cond post body state final) :
-      Stmt.runForLoop fuel cond post body state = .ok final := by
-    cases hEval with
-    | false hCond =>
-        unfold Stmt.runForLoop
-        rw [hCond]
-        change Except.ok final = Except.ok final
-        rfl
-    | true hCond hBody hPost hLoop =>
-        unfold Stmt.runForLoop
-        rw [hCond]
-        change
-          (do
-            let stateAfterBody ← Block.run _ body _
-            let stateAfterPost ← Block.run _ post stateAfterBody
-            Stmt.runForLoop _ cond post body stateAfterPost) =
-            Except.ok final
-        rw [Block.run_of_eval hBody]
-        change
-          (do
-            let stateAfterPost ← Block.run _ post _
-            Stmt.runForLoop _ cond post body stateAfterPost) =
-            Except.ok final
-        rw [Block.run_of_eval hPost]
-        change Stmt.runForLoop _ cond post body _ = Except.ok final
-        exact For.run_of_eval hLoop
+  inductive Stmt.FrameSafe : Stmt → Prop where
+    | code {code : Code} (hCode : Code.FrameSafe code) :
+        Stmt.FrameSafe (.code code)
+    | if_ {cond : Code} {body : Block}
+        (hCond : Code.FrameSafe cond)
+        (hBody : Block.FrameSafe body) :
+        Stmt.FrameSafe (.if_ cond body)
+    | switch {scrutinee : Code} {cases : List (Word × Block)}
+        {defaultBody : Option Block}
+        (hScrutinee : Code.FrameSafe scrutinee)
+        (hCases :
+          ∀ value body, (value, body) ∈ cases → Block.FrameSafe body)
+        (hDefault :
+          ∀ body, defaultBody = some body → Block.FrameSafe body) :
+        Stmt.FrameSafe (.switch scrutinee cases defaultBody)
+    | for_ {init post body : Block} {cond : Code}
+        (hInit : Block.FrameSafe init)
+        (hCond : Code.FrameSafe cond)
+        (hPost : Block.FrameSafe post)
+        (hBody : Block.FrameSafe body) :
+        Stmt.FrameSafe (.for_ init cond post body)
+    | brk : Stmt.FrameSafe .brk
+    | cont : Stmt.FrameSafe .cont
+    | leave : Stmt.FrameSafe .leave
+    | call {name : Name} : Stmt.FrameSafe (.call name)
+    | terminal {kind : Assembly.HaltKind} : Stmt.FrameSafe (.terminal kind)
 end
+
+namespace Proc
+
+def FrameSafe (proc : Proc) : Prop :=
+  proc.body.FrameSafe
+
+end Proc
+
+namespace ProcList
+
+def FrameSafe : List Proc → Prop
+  | [] => True
+  | proc :: rest => proc.FrameSafe ∧ FrameSafe rest
+
+end ProcList
 
 namespace Program
 
-theorem run_of_eval {fuel : Nat} {program : Program}
-    {state final : EVMState}
-    (hEval : Block.Eval fuel program.body state final) :
-    run fuel program state = .ok final := by
-  unfold run
-  exact Block.run_of_eval hEval
+def FrameSafe (program : Program) : Prop :=
+  ProcList.FrameSafe program.procs ∧ program.body.FrameSafe
 
 end Program
 
-/--
-The structured layer abstracts away from the concrete assembly program counter.
-Gas remains part of this source-to-assembly relation: gas is erased only at the
-assembly-to-EVM bridge.
--/
-def eraseControl (state : EVMState) : EVMState :=
-  { state with pc := EvmYul.UInt256.ofNat 0 }
+namespace Observation
 
-theorem eraseControl_with_pc (state : EVMState) (pc : Word) :
-    eraseControl { state with pc := pc } = eraseControl state := by
-  cases state
-  rfl
+def eraseState (state : RunState) : EVMState :=
+  state.evm
 
-theorem eraseControl_with_stack (state : EVMState) (stack : EvmYul.Stack Word) :
-    eraseControl { state with stack := stack } =
-      { eraseControl state with stack := stack } := by
-  cases state
-  rfl
+def eraseOutcome (outcome : Outcome) : EVMState × Mode :=
+  (outcome.state.evm, outcome.mode)
 
-theorem stack_eq_of_eraseControl_eq {left right : EVMState}
-    (h : eraseControl left = eraseControl right) :
-    left.stack = right.stack := by
-  cases left
-  cases right
-  simp [eraseControl] at h
-  exact h.2.1
-
-theorem sharedState_eq_of_eraseControl_eq {left right : EVMState}
-    (h : eraseControl left = eraseControl right) :
-    left.toSharedState = right.toSharedState := by
-  cases left
-  cases right
-  simp [eraseControl] at h
-  exact h.1
-
-theorem state_eq_of_eraseControl_eq {left right : EVMState}
-    (h : eraseControl left = eraseControl right) :
-    left.toState = right.toState := by
-  exact congrArg EvmYul.SharedState.toState
-    (sharedState_eq_of_eraseControl_eq h)
-
-theorem machineState_eq_of_eraseControl_eq {left right : EVMState}
-    (h : eraseControl left = eraseControl right) :
-    left.toMachineState = right.toMachineState := by
-  exact congrArg EvmYul.SharedState.toMachineState
-    (sharedState_eq_of_eraseControl_eq h)
-
-theorem executionEnv_eq_of_eraseControl_eq {left right : EVMState}
-    (h : eraseControl left = eraseControl right) :
-    left.executionEnv = right.executionEnv := by
-  exact congrArg EvmYul.State.executionEnv
-    (state_eq_of_eraseControl_eq h)
-
-theorem eraseControl_replaceStackAndIncrPC_of_eq {left right : EVMState}
-    {leftStack rightStack : EvmYul.Stack Word}
-    {pcΔ : Nat}
-    (hEq : eraseControl left = eraseControl right)
-    (hStack : leftStack = rightStack) :
-    eraseControl (left.replaceStackAndIncrPC leftStack (pcΔ := pcΔ)) =
-      eraseControl (right.replaceStackAndIncrPC rightStack (pcΔ := pcΔ)) := by
-  cases left
-  cases right
-  cases hStack
-  simp [eraseControl] at hEq ⊢
-  exact ⟨hEq.1, rfl, hEq.2.2⟩
-
-theorem eraseControl_replaceSharedStackAndIncrPC_of_eq {left right : EVMState}
-    {leftShared rightShared : EvmYul.SharedState EvmYul.OperationType.EVM}
-    {leftStack rightStack : EvmYul.Stack Word}
-    {pcΔ : Nat}
-    (hEq : eraseControl left = eraseControl right)
-    (hShared : leftShared = rightShared)
-    (hStack : leftStack = rightStack) :
-    eraseControl
-        (({ left with toSharedState := leftShared }).replaceStackAndIncrPC
-          leftStack (pcΔ := pcΔ)) =
-      eraseControl
-        (({ right with toSharedState := rightShared }).replaceStackAndIncrPC
-          rightStack (pcΔ := pcΔ)) := by
-  cases left
-  cases right
-  cases hShared
-  cases hStack
-  simp [eraseControl] at hEq ⊢
-  exact ⟨rfl, rfl, hEq.2.2⟩
-
-theorem eraseControl_withMachineState_of_eq {left right : EVMState}
-    {leftMachine rightMachine : EvmYul.MachineState}
-    (hEq : eraseControl left = eraseControl right)
-    (hMachine : leftMachine = rightMachine) :
-    eraseControl { left with toMachineState := leftMachine } =
-      eraseControl { right with toMachineState := rightMachine } := by
-  cases left
-  cases right
-  cases hMachine
-  simp [eraseControl] at hEq ⊢
-  exact ⟨by
-    cases hEq.1
-    rfl, hEq.2.1, hEq.2.2⟩
-
-theorem eraseControl_withState_of_eq {left right : EVMState}
-    {leftState rightState : EvmYul.State EvmYul.OperationType.EVM}
-    (hEq : eraseControl left = eraseControl right)
-    (hState : leftState = rightState) :
-    eraseControl { left with toState := leftState } =
-      eraseControl { right with toState := rightState } := by
-  cases left
-  cases right
-  cases hState
-  simp [eraseControl] at hEq ⊢
-  exact ⟨by
-    cases hEq.1
-    rfl, hEq.2.1, hEq.2.2⟩
-
-theorem eraseControl_withSharedState_of_eq {left right : EVMState}
-    {leftShared rightShared : EvmYul.SharedState EvmYul.OperationType.EVM}
-    (hEq : eraseControl left = eraseControl right)
-    (hShared : leftShared = rightShared) :
-    eraseControl { left with toSharedState := leftShared } =
-      eraseControl { right with toSharedState := rightShared } := by
-  cases left
-  cases right
-  cases hShared
-  simp [eraseControl] at hEq ⊢
-  exact ⟨hEq.2.1, hEq.2.2⟩
-
-theorem execBinOp_projected_of_eraseControl_eq
-    (f : EvmYul.Primop.Binary) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.execBinOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.execBinOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.execBinOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop2 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b⟩
-      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨target.replaceStackAndIncrPC (rest.push (f a b)), rfl, ?_⟩
-      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-
-theorem execUnOp_projected_of_eraseControl_eq
-    (f : EvmYul.Primop.Unary) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.execUnOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.execUnOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.execUnOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a⟩
-      have hTargetPop : target.stack.pop = some (rest, a) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨target.replaceStackAndIncrPC (rest.push (f a)), rfl, ?_⟩
-      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-
-theorem execTriOp_projected_of_eraseControl_eq
-    (f : EvmYul.Primop.Ternary) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.execTriOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.execTriOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.execTriOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop3 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c⟩
-      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨target.replaceStackAndIncrPC (rest.push (f a b c)), rfl, ?_⟩
-      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-
-theorem executionEnvOp_projected_of_eraseControl_eq
-    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.executionEnvOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.executionEnvOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.executionEnvOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hEnv := executionEnv_eq_of_eraseControl_eq hEq
-  cases hStep
-  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.executionEnv)),
-    rfl, ?_⟩
-  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hEnv])
-
-theorem unaryExecutionEnvOp_projected_of_eraseControl_eq
-    (f : EvmYul.ExecutionEnv EvmYul.OperationType.EVM → Word → Word)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.unaryExecutionEnvOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.unaryExecutionEnvOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.unaryExecutionEnvOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hEnv := executionEnv_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a⟩
-      have hTargetPop : target.stack.pop = some (rest, a) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨target.replaceStackAndIncrPC (rest.push (f target.executionEnv a)),
-        rfl, ?_⟩
-      exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hEnv])
-
-theorem machineStateOp_projected_of_eraseControl_eq
-    (f : EvmYul.MachineState → Word)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.machineStateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.machineStateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.machineStateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hStep
-  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.toMachineState)),
-    rfl, ?_⟩
-  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hMachine])
-
-theorem binaryMachineStateOp_projected_of_eraseControl_eq
-    (f : EvmYul.MachineState → Word → Word → EvmYul.MachineState)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.binaryMachineStateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.binaryMachineStateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.binaryMachineStateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop2 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b⟩
-      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toMachineState := f target.toMachineState a b
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
-          rfl
-
-theorem binaryMachineStateOp'_projected_of_eraseControl_eq
-    (f : EvmYul.MachineState → Word → Word → Word × EvmYul.MachineState)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.binaryMachineStateOp' f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.binaryMachineStateOp' f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.binaryMachineStateOp' at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop2 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b⟩
-      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toMachineState := (f target.toMachineState a b).2
-        }).replaceStackAndIncrPC (rest.push (f target.toMachineState a b).1),
-        rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
-          (by rw [hMachine])
-
-theorem ternaryMachineStateOp_projected_of_eraseControl_eq
-    (f : EvmYul.MachineState → Word → Word → Word → EvmYul.MachineState)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.ternaryMachineStateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.ternaryMachineStateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.ternaryMachineStateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop3 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c⟩
-      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toMachineState := f target.toMachineState a b c
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
-          rfl
-
-theorem stateOp_projected_of_eraseControl_eq
-    (f : EvmYul.State EvmYul.OperationType.EVM → Word)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.stateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.stateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.stateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hState := state_eq_of_eraseControl_eq hEq
-  cases hStep
-  refine ⟨target.replaceStackAndIncrPC (target.stack.push (f target.toState)),
-    rfl, ?_⟩
-  exact eraseControl_replaceStackAndIncrPC_of_eq hEq (by rw [hStack, hState])
-
-theorem unaryStateOp_projected_of_eraseControl_eq
-    (f : EvmYul.State EvmYul.OperationType.EVM → Word →
-      EvmYul.State EvmYul.OperationType.EVM × Word)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.unaryStateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.unaryStateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.unaryStateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hState := state_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a⟩
-      have hTargetPop : target.stack.pop = some (rest, a) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toState := (f target.toState a).1
-        }).replaceStackAndIncrPC (rest.push (f target.toState a).2), rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withState_of_eq hEq (by rw [hState]))
-          (by rw [hState])
-
-theorem binaryStateOp_projected_of_eraseControl_eq
-    (f : EvmYul.State EvmYul.OperationType.EVM → Word → Word →
-      EvmYul.State EvmYul.OperationType.EVM)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.binaryStateOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.binaryStateOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.binaryStateOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hState := state_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop2 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b⟩
-      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toState := f target.toState a b
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withState_of_eq hEq (by rw [hState]))
-          rfl
-
-theorem ternaryCopyOp_projected_of_eraseControl_eq
-    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
-      Word → EvmYul.SharedState EvmYul.OperationType.EVM)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.ternaryCopyOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.ternaryCopyOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.ternaryCopyOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop3 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c⟩
-      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toSharedState := f target.toSharedState a b c
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem quaternaryCopyOp_projected_of_eraseControl_eq
-    (f : EvmYul.SharedState EvmYul.OperationType.EVM → Word → Word →
-      Word → Word → EvmYul.SharedState EvmYul.OperationType.EVM)
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : EvmYul.EVM.quaternaryCopyOp f source = .ok source') :
-    ∃ target',
-      EvmYul.EVM.quaternaryCopyOp f target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold EvmYul.EVM.quaternaryCopyOp at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop4 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c, d⟩
-      have hTargetPop : target.stack.pop4 = some (rest, a, b, c, d) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toSharedState := f target.toSharedState a b c d
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_pop_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .pop source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .pop target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a⟩
-      have hTargetPop : target.stack.pop = some (rest, a) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      cases hStep
-      refine ⟨target.replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-
-theorem primStep_mload_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .mload source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .mload target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a⟩
-      have hTargetPop : target.stack.pop = some (rest, a) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with toMachineState := (target.toMachineState.mload a).2
-        }).replaceStackAndIncrPC (rest.push (target.toMachineState.mload a).1),
-        rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
-          (by rw [hMachine])
-
-theorem primStep_returndatacopy_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .returndatacopy source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .returndatacopy target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hMachine := machineState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop3 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c⟩
-      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toMachineState := target.toMachineState.returndatacopy a b c
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withMachineState_of_eq hEq (by rw [hMachine]))
-          rfl
-
-theorem primStep_dup_projected_of_eraseControl_eq
-    (n : Nat) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run (.dup n) source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run (.dup n) target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run EvmYul.dup at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  rw [hStack]
-  by_cases hLen : n ≤ source.stack.length
-  · simp [hLen] at hStep ⊢
-    cases hStep
-    exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-  · simp [hLen] at hStep
-
-theorem primStep_swap_projected_of_eraseControl_eq
-    (n : Nat) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run (.swap n) source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run (.swap n) target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run EvmYul.swap at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  rw [hStack]
-  by_cases hLen : n + 1 ≤ source.stack.length
-  · simp [hLen] at hStep ⊢
-    cases hStep
-    exact eraseControl_replaceStackAndIncrPC_of_eq hEq rfl
-  · simp [hLen] at hStep
-
-theorem primStep_log0_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .log0 source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .log0 target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop2 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b⟩
-      have hTargetPop : target.stack.pop2 = some (rest, a, b) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toSharedState := EvmYul.SharedState.logOp a b #[] target.toSharedState
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_log1_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .log1 source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .log1 target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop3 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c⟩
-      have hTargetPop : target.stack.pop3 = some (rest, a, b, c) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toSharedState := EvmYul.SharedState.logOp a b #[c] target.toSharedState
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_log2_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .log2 source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .log2 target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop4 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c, d⟩
-      have hTargetPop : target.stack.pop4 = some (rest, a, b, c, d) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toSharedState := EvmYul.SharedState.logOp a b #[c, d]
-            target.toSharedState
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_log3_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .log3 source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .log3 target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop5 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c, d, e⟩
-      have hTargetPop : target.stack.pop5 = some (rest, a, b, c, d, e) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toSharedState := EvmYul.SharedState.logOp a b #[c, d, e]
-            target.toSharedState
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_log4_projected_of_eraseControl_eq
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : Assembly.PrimStep.run .log4 source = .ok source') :
-    ∃ target',
-      Assembly.PrimStep.run .log4 target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold Assembly.PrimStep.run at hStep ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  have hShared := sharedState_eq_of_eraseControl_eq hEq
-  cases hPop : source.stack.pop6 with
-  | none =>
-      rw [hPop] at hStep
-      cases hStep
-  | some popped =>
-      rcases popped with ⟨rest, a, b, c, d, e, g⟩
-      have hTargetPop : target.stack.pop6 = some (rest, a, b, c, d, e, g) := by
-        rw [hStack, hPop]
-      rw [hPop] at hStep
-      rw [hTargetPop]
-      simp at hStep
-      cases hStep
-      refine ⟨({ target with
-          toSharedState := EvmYul.SharedState.logOp a b #[c, d, e, g]
-            target.toSharedState
-        }).replaceStackAndIncrPC rest, rfl, ?_⟩
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq
-          (eraseControl_withSharedState_of_eq hEq (by rw [hShared]))
-          rfl
-
-theorem primStep_run_projected_of_eraseControl_eq
-    (step : Assembly.PrimStep) {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : step.run source = .ok source') :
-    ∃ target',
-      step.run target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  cases step with
-  | bin f =>
-      exact execBinOp_projected_of_eraseControl_eq f hEq hStep
-  | un f =>
-      exact execUnOp_projected_of_eraseControl_eq f hEq hStep
-  | tri f =>
-      exact execTriOp_projected_of_eraseControl_eq f hEq hStep
-  | executionEnv f =>
-      exact executionEnvOp_projected_of_eraseControl_eq f hEq hStep
-  | unaryExecutionEnv f =>
-      exact unaryExecutionEnvOp_projected_of_eraseControl_eq f hEq hStep
-  | machineState f =>
-      exact machineStateOp_projected_of_eraseControl_eq f hEq hStep
-  | binaryMachineState f =>
-      exact binaryMachineStateOp_projected_of_eraseControl_eq f hEq hStep
-  | binaryMachineStateWithResult f =>
-      exact binaryMachineStateOp'_projected_of_eraseControl_eq f hEq hStep
-  | ternaryMachineState f =>
-      exact ternaryMachineStateOp_projected_of_eraseControl_eq f hEq hStep
-  | state f =>
-      exact stateOp_projected_of_eraseControl_eq f hEq hStep
-  | unaryState f =>
-      exact unaryStateOp_projected_of_eraseControl_eq f hEq hStep
-  | binaryState f =>
-      exact binaryStateOp_projected_of_eraseControl_eq f hEq hStep
-  | ternaryCopy f =>
-      exact ternaryCopyOp_projected_of_eraseControl_eq f hEq hStep
-  | quaternaryCopy f =>
-      exact quaternaryCopyOp_projected_of_eraseControl_eq f hEq hStep
-  | pop =>
-      exact primStep_pop_projected_of_eraseControl_eq hEq hStep
-  | mload =>
-      exact primStep_mload_projected_of_eraseControl_eq hEq hStep
-  | returndatacopy =>
-      exact primStep_returndatacopy_projected_of_eraseControl_eq hEq hStep
-  | dup n =>
-      exact primStep_dup_projected_of_eraseControl_eq n hEq hStep
-  | swap n =>
-      exact primStep_swap_projected_of_eraseControl_eq n hEq hStep
-  | log0 =>
-      exact primStep_log0_projected_of_eraseControl_eq hEq hStep
-  | log1 =>
-      exact primStep_log1_projected_of_eraseControl_eq hEq hStep
-  | log2 =>
-      exact primStep_log2_projected_of_eraseControl_eq hEq hStep
-  | log3 =>
-      exact primStep_log3_projected_of_eraseControl_eq hEq hStep
-  | log4 =>
-      exact primStep_log4_projected_of_eraseControl_eq hEq hStep
-  | invalid =>
-      unfold Assembly.PrimStep.run at hStep
-      cases hStep
-
-namespace BasicInstr
-
-theorem step_projected_of_eraseControl_eq {instr : BasicInstr}
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hStep : instr.step source = .ok source') :
-    ∃ target',
-      instr.step target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  cases instr with
-  | push value =>
-      unfold BasicInstr.step at hStep
-      simp [Assembly.Target.stepInstr] at hStep
-      have hStack := stack_eq_of_eraseControl_eq hEq
-      cases hStep
-      refine
-        ⟨target.replaceStackAndIncrPC (target.stack.push value) (pcΔ := 33),
-          ?_, ?_⟩
-      · unfold BasicInstr.step
-        simp [Assembly.Target.stepInstr]
-      exact
-        eraseControl_replaceStackAndIncrPC_of_eq hEq
-          (by rw [hStack])
-  | op op =>
-      unfold BasicInstr.step BasicOp.step at hStep ⊢
-      change Assembly.PrimOp.step op.toPrimOp source = .ok source' at hStep
-      change
-        ∃ target',
-          Assembly.PrimOp.step op.toPrimOp target = .ok target' ∧
-            eraseControl target' = eraseControl source'
-      cases hCont : op.toPrimOp.continuingStep? with
-      | none =>
-          cases op <;>
-            simp [BasicOp.toPrimOp, Assembly.PrimOp.continuingStep?] at hCont
-      | some step =>
-          rw [Assembly.PrimOp.step_eq_continuingStep_run hCont] at hStep
-          rw [Assembly.PrimOp.step_eq_continuingStep_run hCont]
-          exact primStep_run_projected_of_eraseControl_eq step hEq hStep
-
-end BasicInstr
-
-namespace Code
-
-theorem run_projected_of_eraseControl_eq {code : Code}
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hRun : run code source = .ok source') :
-    ∃ target',
-      run code target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  induction code generalizing source target with
-  | nil =>
-      simp [run] at hRun
-      cases hRun
-      exact ⟨target, by simp [run], hEq⟩
-  | cons instr rest ih =>
-      unfold run at hRun ⊢
-      cases hStep : instr.step source with
-      | error err =>
-          rw [hStep] at hRun
-          cases hRun
-      | ok sourceMid =>
-          rw [hStep] at hRun
-          obtain ⟨targetMid, hTargetStep, hMidEq⟩ :=
-            BasicInstr.step_projected_of_eraseControl_eq hEq hStep
-          rw [hTargetStep]
-          exact ih hMidEq hRun
-
-theorem popCondition_projected_of_eraseControl_eq
-    {source target source' : EVMState} {condTrue : Bool}
-    (hEq : eraseControl target = eraseControl source)
-    (hPop : popCondition source = .ok (source', condTrue)) :
-    ∃ target',
-      popCondition target = .ok (target', condTrue) ∧
-        eraseControl target' = eraseControl source' := by
-  unfold popCondition at hPop ⊢
-  have hStack := stack_eq_of_eraseControl_eq hEq
-  cases hSourcePop : source.stack.pop with
-  | none =>
-      rw [hSourcePop] at hPop
-      cases hPop
-  | some popped =>
-      rcases popped with ⟨rest, cond⟩
-      have hTargetPop : target.stack.pop = some (rest, cond) := by
-        rw [hStack, hSourcePop]
-      rw [hSourcePop] at hPop
-      rw [hTargetPop]
-      simp at hPop
-      cases hPop.1
-      cases hPop.2
-      refine ⟨{ target with stack := rest }, ?_, ?_⟩
-      · rfl
-      calc
-        eraseControl { target with stack := rest }
-            = { eraseControl target with stack := rest } := eraseControl_with_stack target rest
-        _ = { eraseControl source with stack := rest } := by rw [hEq]
-        _ = eraseControl { source with stack := rest } := (eraseControl_with_stack source rest).symm
-
-theorem runCondition_projected_of_eraseControl_eq {code : Code}
-    {source target source' : EVMState} {condTrue : Bool}
-    (hEq : eraseControl target = eraseControl source)
-    (hRun : runCondition code source = .ok (source', condTrue)) :
-    ∃ target',
-      runCondition code target = .ok (target', condTrue) ∧
-        eraseControl target' = eraseControl source' := by
-  unfold runCondition at hRun ⊢
-  cases hCode : run code source with
-  | error err =>
-      rw [hCode] at hRun
-      cases hRun
-  | ok sourceMid =>
-      rw [hCode] at hRun
-      obtain ⟨targetMid, hTargetCode, hMidEq⟩ :=
-        run_projected_of_eraseControl_eq hEq hCode
-      rw [hTargetCode]
-      exact popCondition_projected_of_eraseControl_eq hMidEq hRun
-
-end Code
-
-mutual
-  theorem Block.run_projected_of_eraseControl_eq {fuel : Nat} {block : Block}
-      {source target source' : EVMState}
-      (hEq : eraseControl target = eraseControl source)
-      (hRun : Block.run fuel block source = .ok source') :
-      ∃ target',
-        Block.run fuel block target = .ok target' ∧
-          eraseControl target' = eraseControl source' := by
-    cases fuel with
-    | zero =>
-        simp [Block.run, invalid] at hRun
-    | succ fuel =>
-        cases block with
-        | mk stmts =>
-            cases stmts with
-            | nil =>
-                simp [Block.run] at hRun ⊢
-                cases hRun
-                exact hEq
-            | cons stmt rest =>
-                unfold Block.run at hRun ⊢
-                cases hStmt : Stmt.run fuel stmt source with
-                | error err =>
-                    rw [hStmt] at hRun
-                    cases hRun
-                | ok sourceMid =>
-                    rw [hStmt] at hRun
-                    obtain ⟨targetMid, hTargetStmt, hMidEq⟩ :=
-                      Stmt.run_projected_of_eraseControl_eq hEq hStmt
-                    rw [hTargetStmt]
-                    exact Block.run_projected_of_eraseControl_eq hMidEq hRun
-
-  theorem Stmt.runForLoop_projected_of_eraseControl_eq {fuel : Nat}
-      {cond : Code} {post body : Block}
-      {source target source' : EVMState}
-      (hEq : eraseControl target = eraseControl source)
-      (hRun : Stmt.runForLoop fuel cond post body source = .ok source') :
-      ∃ target',
-        Stmt.runForLoop fuel cond post body target = .ok target' ∧
-          eraseControl target' = eraseControl source' := by
-    cases fuel with
-    | zero =>
-        simp [Stmt.runForLoop, invalid] at hRun
-    | succ fuel =>
-        unfold Stmt.runForLoop at hRun ⊢
-        cases hCond : Code.runCondition cond source with
-        | error err =>
-            rw [hCond] at hRun
-            cases hRun
-        | ok condResult =>
-            rcases condResult with ⟨sourceAfterCond, condTrue⟩
-            rw [hCond] at hRun
-            obtain ⟨targetAfterCond, hTargetCond, hCondEq⟩ :=
-              Code.runCondition_projected_of_eraseControl_eq hEq hCond
-            rw [hTargetCond]
-            cases condTrue with
-            | false =>
-                change Except.ok sourceAfterCond = Except.ok source' at hRun
-                change
-                  ∃ target',
-                    Except.ok targetAfterCond = Except.ok target' ∧
-                      eraseControl target' = eraseControl source'
-                cases hRun
-                exact ⟨targetAfterCond, rfl, hCondEq⟩
-            | true =>
-                change
-                  (do
-                    let stateAfterBody ← Block.run fuel body sourceAfterCond
-                    let stateAfterPost ← Block.run fuel post stateAfterBody
-                    Stmt.runForLoop fuel cond post body stateAfterPost) =
-                    Except.ok source' at hRun
-                change
-                  ∃ target',
-                    (do
-                      let stateAfterBody ← Block.run fuel body targetAfterCond
-                      let stateAfterPost ← Block.run fuel post stateAfterBody
-                      Stmt.runForLoop fuel cond post body stateAfterPost) =
-                        Except.ok target' ∧
-                      eraseControl target' = eraseControl source'
-                cases hBody : Block.run fuel body sourceAfterCond with
-                | error err =>
-                    rw [hBody] at hRun
-                    cases hRun
-                | ok sourceAfterBody =>
-                    rw [hBody] at hRun
-                    change
-                      (do
-                        let stateAfterPost ← Block.run fuel post sourceAfterBody
-                        Stmt.runForLoop fuel cond post body stateAfterPost) =
-                        Except.ok source' at hRun
-                    obtain ⟨targetAfterBody, hTargetBody, hBodyEq⟩ :=
-                      Block.run_projected_of_eraseControl_eq hCondEq hBody
-                    rw [hTargetBody]
-                    change
-                      ∃ target',
-                        (do
-                          let stateAfterPost ← Block.run fuel post targetAfterBody
-                          Stmt.runForLoop fuel cond post body stateAfterPost) =
-                            Except.ok target' ∧
-                          eraseControl target' = eraseControl source'
-                    cases hPost : Block.run fuel post sourceAfterBody with
-                    | error err =>
-                        rw [hPost] at hRun
-                        cases hRun
-                    | ok sourceAfterPost =>
-                        rw [hPost] at hRun
-                        change
-                          Stmt.runForLoop fuel cond post body sourceAfterPost =
-                            Except.ok source' at hRun
-                        obtain ⟨targetAfterPost, hTargetPost, hPostEq⟩ :=
-                          Block.run_projected_of_eraseControl_eq hBodyEq hPost
-                        rw [hTargetPost]
-                        change
-                          ∃ target',
-                            Stmt.runForLoop fuel cond post body targetAfterPost =
-                              Except.ok target' ∧
-                            eraseControl target' = eraseControl source'
-                        exact
-                          Stmt.runForLoop_projected_of_eraseControl_eq
-                            hPostEq hRun
-
-  theorem Stmt.run_projected_of_eraseControl_eq {fuel : Nat} {stmt : Stmt}
-      {source target source' : EVMState}
-      (hEq : eraseControl target = eraseControl source)
-      (hRun : Stmt.run fuel stmt source = .ok source') :
-      ∃ target',
-        Stmt.run fuel stmt target = .ok target' ∧
-          eraseControl target' = eraseControl source' := by
-    cases stmt with
-    | code code =>
-        cases fuel with
-        | zero =>
-            simp [Stmt.run] at hRun ⊢
-            exact Code.run_projected_of_eraseControl_eq hEq hRun
-        | succ fuel =>
-            simp [Stmt.run] at hRun ⊢
-            exact Code.run_projected_of_eraseControl_eq hEq hRun
-    | ifElse cond thenBody elseBody =>
-        cases fuel with
-        | zero =>
-            simp [Stmt.run, invalid] at hRun
-        | succ fuel =>
-            unfold Stmt.run at hRun ⊢
-            cases hCond : Code.runCondition cond source with
-            | error err =>
-                rw [hCond] at hRun
-                cases hRun
-            | ok condResult =>
-                rcases condResult with ⟨sourceAfterCond, condTrue⟩
-                rw [hCond] at hRun
-                obtain ⟨targetAfterCond, hTargetCond, hCondEq⟩ :=
-                  Code.runCondition_projected_of_eraseControl_eq hEq hCond
-                rw [hTargetCond]
-                cases condTrue with
-                | false =>
-                    simp at hRun ⊢
-                    exact Block.run_projected_of_eraseControl_eq hCondEq hRun
-                | true =>
-                    simp at hRun ⊢
-                    exact Block.run_projected_of_eraseControl_eq hCondEq hRun
-    | for_ init cond post body =>
-        cases fuel with
-        | zero =>
-            simp [Stmt.run, invalid] at hRun
-        | succ fuel =>
-            unfold Stmt.run at hRun ⊢
-            cases hInit : Block.run fuel init source with
-            | error err =>
-                rw [hInit] at hRun
-                cases hRun
-            | ok sourceAfterInit =>
-                rw [hInit] at hRun
-                obtain ⟨targetAfterInit, hTargetInit, hInitEq⟩ :=
-                  Block.run_projected_of_eraseControl_eq hEq hInit
-                rw [hTargetInit]
-                exact
-                  Stmt.runForLoop_projected_of_eraseControl_eq
-                    hInitEq hRun
-end
-
-namespace Program
-
-theorem run_projected_of_eraseControl_eq {fuel : Nat} {program : Program}
-    {source target source' : EVMState}
-    (hEq : eraseControl target = eraseControl source)
-    (hRun : run fuel program source = .ok source') :
-    ∃ target',
-      run fuel program target = .ok target' ∧
-        eraseControl target' = eraseControl source' := by
-  unfold run at hRun ⊢
-  exact Block.run_projected_of_eraseControl_eq hEq hRun
-
-end Program
+end Observation
 
 end Structured
 end EvmCompiler

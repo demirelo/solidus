@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/lean-backend-check-v1.schema.json",
+  "title": "evm-compiler Lean backend check v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "checkedObjects",
+    "checkedContracts",
+    "skippedContracts",
+    "counts",
+    "firstNoneCounts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "evm-compiler.lean-backend-check.v1"
+    },
+    "checkedObjects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/checkedObject"
+      }
+    },
+    "checkedContracts": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "skippedContracts": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkedObjects",
+        "checkedContracts",
+        "skippedContracts",
+        "passedObjects",
+        "failedObjects"
+      ],
+      "properties": {
+        "checkedObjects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "checkedContracts": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedContracts": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "passedObjects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "failedObjects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "firstNoneCounts": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/positiveInteger"
+      }
+    }
+  },
+  "$defs": {
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonemptyString"
+      }
+    },
+    "stageStatus": {
+      "enum": ["some", "none"]
+    },
+    "stageMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/stageStatus"
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "ast"],
+      "properties": {
+        "producer": {
+          "const": "solc"
+        },
+        "ast": {
+          "enum": ["irAst", "irOptimizedAst"]
+        }
+      }
+    },
+    "checkedObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "contract",
+        "selector",
+        "object",
+        "status",
+        "firstNone",
+        "stages"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "selector": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "object": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "status": {
+          "enum": ["pass", "fail"]
+        },
+        "firstNone": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "stages": {
+          "$ref": "#/$defs/stageMap"
+        },
+        "frontend": {
+          "$ref": "#/$defs/frontend"
+        },
+        "bytecodeBytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    }
+  }
+}

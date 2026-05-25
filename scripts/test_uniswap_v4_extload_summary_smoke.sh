@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOLC_BIN="${SOLC:-solc}"
+
+TMPDIR="${TMPDIR:-/tmp}"
+OUTDIR="$(mktemp -d "$TMPDIR/evm-compiler-uniswap-v4-extload-summary.XXXXXX")"
+UNISWAP_V4_REPO_URL="${UNISWAP_V4_REPO_URL:-https://github.com/Uniswap/v4-core.git}"
+UNISWAP_V4_REF="${UNISWAP_V4_REF:-46c6834698c48bc4a463a86d8420f4eb1d7f3b75}"
+UNISWAP_V4_SOLC_VERSION="${UNISWAP_V4_SOLC_VERSION:-0.8.26}"
+INSTALL_SOLC="${INSTALL_SOLC:-1}"
+
+cleanup() {
+  if [[ "${KEEP_TMP:-0}" == "1" ]]; then
+    printf 'outdir=%s\n' "$OUTDIR"
+  else
+    rm -rf "$OUTDIR"
+  fi
+}
+trap cleanup EXIT
+
+ensure_solc_version() {
+  local version="$1"
+  local output
+  output="$(SOLC_VERSION="$version" "$SOLC_BIN" --version 2>/dev/null || true)"
+  if [[ "$output" == *"Version: $version"* ]]; then
+    return
+  fi
+  if [[ "$INSTALL_SOLC" == "1" ]] && command -v solc-select >/dev/null 2>&1; then
+    solc-select install "$version"
+  fi
+  output="$(SOLC_VERSION="$version" "$SOLC_BIN" --version 2>&1 || true)"
+  if [[ "$output" != *"Version: $version"* ]]; then
+    printf 'error: %s cannot provide solc %s\n%s\n' "$SOLC_BIN" "$version" "$output" >&2
+    return 1
+  fi
+}
+
+if [[ -n "${UNISWAP_V4_DIR:-}" ]]; then
+  REPO="$UNISWAP_V4_DIR"
+else
+  REPO="$OUTDIR/v4-core"
+  git init -q "$REPO"
+  git -C "$REPO" remote add origin "$UNISWAP_V4_REPO_URL"
+  git -C "$REPO" fetch --depth 1 origin "$UNISWAP_V4_REF"
+  git -C "$REPO" -c advice.detachedHead=false checkout -q FETCH_HEAD
+fi
+
+ensure_solc_version "$UNISWAP_V4_SOLC_VERSION"
+
+ACTUAL_REF="$(git -C "$REPO" rev-parse HEAD)"
+EXTLOAD_FIXTURE="$OUTDIR/UniswapV4ExtloadWrapper.sol"
+EXTLOAD_BRIDGE_DIR="$OUTDIR/extload-bridge-json"
+EXTLOAD_MANIFEST="$EXTLOAD_BRIDGE_DIR/manifest.json"
+EXTLOAD_SUMMARY="$OUTDIR/UniswapV4ExtloadWrapper.bridge-json-summary.json"
+
+cat > "$EXTLOAD_FIXTURE" <<'SOL'
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.26;
+
+import {Extsload} from "v4-core/src/Extsload.sol";
+import {Exttload} from "v4-core/src/Exttload.sol";
+
+contract UniswapV4ExtloadWrapper is Extsload, Exttload {
+    event Seeded(bytes32 indexed slot, bytes32 value);
+
+    function seed(bytes32 slot, bytes32 value) external {
+        assembly ("memory-safe") {
+            sstore(slot, value)
+            tstore(slot, value)
+        }
+        emit Seeded(slot, value);
+    }
+}
+SOL
+
+mkdir -p "$EXTLOAD_BRIDGE_DIR"
+SOLC_VERSION="$UNISWAP_V4_SOLC_VERSION" python3 "$ROOT/scripts/solidity_to_yul_lean.py" \
+  "$EXTLOAD_FIXTURE" \
+  --solc "$SOLC_BIN" \
+  --remapping "v4-core/=$REPO/" \
+  --format bridge-json \
+  --all-contracts \
+  --bridge-json-dir "$EXTLOAD_BRIDGE_DIR" \
+  --output "$EXTLOAD_MANIFEST"
+
+python3 "$ROOT/scripts/validate_bridge_json.py" --quiet "$EXTLOAD_MANIFEST"
+
+python3 "$ROOT/scripts/solidity_to_yul_lean.py" \
+  "$EXTLOAD_MANIFEST" \
+  --input-format bridge-json-manifest \
+  --format bridge-json-summary \
+  --contract UniswapV4ExtloadWrapper \
+  --object runtime \
+  --output "$EXTLOAD_SUMMARY"
+
+python3 "$ROOT/scripts/validate_bridge_json.py" --quiet "$EXTLOAD_SUMMARY"
+
+printf 'uniswap_v4_extload_summary_smoke=pass\n'
+printf 'repo_ref=%s\n' "$ACTUAL_REF"
+python3 - "$EXTLOAD_MANIFEST" "$EXTLOAD_BRIDGE_DIR" "$EXTLOAD_SUMMARY" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+bridge_dir = Path(sys.argv[2])
+summary_path = Path(sys.argv[3])
+
+manifest = json.loads(manifest_path.read_text())
+counts = manifest.get("counts", {})
+if counts.get("entries") != 2 or counts.get("skippedContracts") != 0:
+    raise SystemExit(f"unexpected extload manifest counts: {counts!r}")
+
+runtime_entries = [
+    entry
+    for entry in manifest.get("entries", [])
+    if entry.get("contract") == "UniswapV4ExtloadWrapper"
+    and entry.get("selector") == "runtime"
+]
+if len(runtime_entries) != 1:
+    raise SystemExit(f"expected one extload runtime entry, got {runtime_entries!r}")
+
+frontend = runtime_entries[0].get("frontend")
+if frontend != {"producer": "solc", "ast": "irAst"}:
+    raise SystemExit(f"unexpected extload frontend metadata: {frontend!r}")
+
+runtime_bridge = json.loads((bridge_dir / runtime_entries[0]["path"]).read_text())
+if runtime_bridge.get("frontend") != frontend:
+    raise SystemExit(
+        f"extload bridge frontend drift: {runtime_bridge.get('frontend')!r}"
+    )
+if not runtime_bridge.get("selectedObject", {}).get("name"):
+    raise SystemExit("extload runtime bridge is missing selected object name")
+
+summary = json.loads(summary_path.read_text())
+if summary.get("schema") != "evm-compiler.solc-yul-bridge-manifest-summary.v1":
+    raise SystemExit(f"unexpected extload summary schema: {summary.get('schema')!r}")
+if summary.get("counts", {}).get("objects") != 1:
+    raise SystemExit(f"unexpected extload summary counts: {summary.get('counts')!r}")
+
+runtime_summary = summary.get("objects", [])[0]
+if runtime_summary.get("frontend") != frontend:
+    raise SystemExit(
+        f"extload summary frontend drift: {runtime_summary.get('frontend')!r}"
+    )
+if runtime_summary.get("counts", {}).get("functions", 0) < 40:
+    raise SystemExit(
+        f"expected rich Extsload/Exttload helper surface, got {runtime_summary!r}"
+    )
+
+primitive_entries = runtime_summary.get("calls", {}).get("primitive", {}).get("names", [])
+primitives = {
+    entry.get("name")
+    for entry in primitive_entries
+    if isinstance(entry, dict)
+}
+required_primitives = {
+    "calldataload",
+    "log2",
+    "return",
+    "sload",
+    "sstore",
+    "tload",
+    "tstore",
+}
+missing_primitives = sorted(required_primitives - primitives)
+if missing_primitives:
+    raise SystemExit(f"extload summary missing primitives: {missing_primitives!r}")
+
+compatibility = runtime_summary.get("backendCompatibility", {})
+if compatibility.get("status") != "blocked":
+    raise SystemExit(f"unexpected extload backend compatibility: {compatibility!r}")
+unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
+missing_blockers = sorted({"log2", "sstore", "tstore"} - unsupported)
+if missing_blockers:
+    raise SystemExit(f"extload summary missing backend blockers: {missing_blockers!r}")
+
+print(f"uniswap_v4_extload_manifest_entries={counts['entries']}")
+print(f"uniswap_v4_extload_summary_calls={runtime_summary['counts']['calls']}")
+print("uniswap_v4_extload_frontend_metadata=yes")
+print("uniswap_v4_extload_summary_primitives=yes")
+print(f"uniswap_v4_extload_backend_compatibility={compatibility['status']}")
+PY

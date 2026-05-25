@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/bridge-json-manifest-v1.schema.json",
+  "title": "evm-compiler bridge JSON manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "entries"],
+  "properties": {
+    "schema": {
+      "const": "evm-compiler.bridge-json-manifest.v1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "skippedContracts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonemptyString"
+      }
+    },
+    "skippedContractEntries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/skippedContract"
+      }
+    },
+    "linkerSymbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/linkerSymbol"
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skippedContracts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "contract", "selector", "object", "path"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "selector": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "object": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "frontend": {
+          "$ref": "#/$defs/frontend"
+        },
+        "objectLayout": {
+          "$ref": "#/$defs/objectLayout"
+        },
+        "localDataBase": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "uint256Hex": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "ast"],
+      "properties": {
+        "producer": {
+          "const": "solc"
+        },
+        "ast": {
+          "enum": ["irAst", "irOptimizedAst"]
+        }
+      }
+    },
+    "objectLayout": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/objectLayoutEntry"
+      }
+    },
+    "objectLayoutEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "size"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "offset": {
+          "$ref": "#/$defs/uint256Hex"
+        },
+        "size": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "linkerSymbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "value": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "skippedContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "contract", "reason"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    }
+  }
+}

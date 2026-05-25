@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/solc-yul-bridge-v3.schema.json",
+  "title": "evm-compiler solc Yul bridge JSON v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source", "contract", "selectedObject"],
+  "properties": {
+    "schema": {
+      "const": "evm-compiler.solc-yul-bridge.v3"
+    },
+    "source": {
+      "type": "string"
+    },
+    "contract": {
+      "type": "string"
+    },
+    "frontend": {
+      "$ref": "#/$defs/frontend"
+    },
+    "selectedObject": {
+      "$ref": "#/$defs/object"
+    }
+  },
+  "$defs": {
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "ast"],
+      "properties": {
+        "producer": {
+          "const": "solc"
+        },
+        "ast": {
+          "enum": ["irAst", "irOptimizedAst"]
+        }
+      }
+    },
+    "uint256": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 115792089237316195423570985008687907853269984665640564039457584007913129639935
+    },
+    "byte": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "nameArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expr": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "value"],
+          "properties": {
+            "node": {
+              "const": "literal"
+            },
+            "value": {
+              "$ref": "#/$defs/uint256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "value"],
+          "properties": {
+            "node": {
+              "const": "stringLiteral"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "name"],
+          "properties": {
+            "node": {
+              "const": "var"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "callee", "calleeKind", "args"],
+          "properties": {
+            "node": {
+              "const": "call"
+            },
+            "callee": {
+              "type": "string"
+            },
+            "calleeKind": {
+              "enum": [
+                "primitive",
+                "user",
+                "objectBuiltin",
+                "dialectBuiltin"
+              ]
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/expr"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stmt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "stmts"],
+          "properties": {
+            "node": {
+              "const": "block"
+            },
+            "stmts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "names", "value"],
+          "properties": {
+            "node": {
+              "const": "let"
+            },
+            "names": {
+              "$ref": "#/$defs/nameArray"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/expr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "names", "value"],
+          "properties": {
+            "node": {
+              "const": "assign"
+            },
+            "names": {
+              "$ref": "#/$defs/nameArray"
+            },
+            "value": {
+              "$ref": "#/$defs/expr"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "expr"],
+          "properties": {
+            "node": {
+              "const": "exprStmt"
+            },
+            "expr": {
+              "$ref": "#/$defs/expr"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "scrutinee", "cases", "default"],
+          "properties": {
+            "node": {
+              "const": "switch"
+            },
+            "scrutinee": {
+              "$ref": "#/$defs/expr"
+            },
+            "cases": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/switchCase"
+              }
+            },
+            "default": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "condition", "post", "body"],
+          "properties": {
+            "node": {
+              "const": "for"
+            },
+            "condition": {
+              "$ref": "#/$defs/expr"
+            },
+            "post": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            },
+            "body": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node", "condition", "body"],
+          "properties": {
+            "node": {
+              "const": "if"
+            },
+            "condition": {
+              "$ref": "#/$defs/expr"
+            },
+            "body": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stmt"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["node"],
+          "properties": {
+            "node": {
+              "enum": ["break", "continue", "leave"]
+            }
+          }
+        }
+      ]
+    },
+    "switchCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "body"],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/uint256"
+        },
+        "body": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stmt"
+          }
+        }
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params", "returns", "body"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/nameArray"
+        },
+        "returns": {
+          "$ref": "#/$defs/nameArray"
+        },
+        "body": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stmt"
+          }
+        }
+      }
+    },
+    "dataSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bytes"],
+      "properties": {
+        "name": {
+          "type": ["string", "null"]
+        },
+        "bytes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/byte"
+          }
+        }
+      }
+    },
+    "objectItemRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "index"],
+      "properties": {
+        "kind": {
+          "enum": ["data", "object"]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node",
+        "name",
+        "dispatcher",
+        "functions",
+        "data",
+        "subobjects",
+        "items"
+      ],
+      "properties": {
+        "node": {
+          "const": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "dispatcher": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stmt"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/function"
+          }
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dataSection"
+          }
+        },
+        "subobjects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/object"
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/objectItemRef"
+          }
+        }
+      }
+    }
+  }
+}

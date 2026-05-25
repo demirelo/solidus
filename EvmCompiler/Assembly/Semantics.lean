@@ -9,6 +9,70 @@ namespace Assembly
 abbrev EVMState := EvmYul.EVM.State
 abbrev EVMException := EvmYul.EVM.ExecutionException
 
+inductive HaltKind where
+  | stop
+  | return
+  | revert
+  | selfdestruct
+  deriving DecidableEq, Repr
+
+structure Halt where
+  kind : HaltKind
+  state : EVMState
+  output : ByteArray
+
+inductive StepResult where
+  | running (state : EVMState)
+  | halted (halt : Halt)
+
+namespace HaltKind
+
+def argCount : HaltKind → Nat
+  | .stop => 0
+  | .return => 2
+  | .revert => 2
+  | .selfdestruct => 1
+
+def toPrimOp : HaltKind → PrimOp
+  | .stop => .stop
+  | .return => .return
+  | .revert => .revert
+  | .selfdestruct => .selfdestruct
+
+def output (kind : HaltKind) (state : EVMState) : ByteArray :=
+  match kind with
+  | .stop | .selfdestruct => .empty
+  | .return | .revert => state.toMachineState.H_return
+
+end HaltKind
+
+namespace PrimOp
+
+def haltKind? : PrimOp → Option HaltKind
+  | .stop => some .stop
+  | .return => some .return
+  | .revert => some .revert
+  | .selfdestruct => some .selfdestruct
+  | _ => none
+
+end PrimOp
+
+namespace TargetInstr
+
+def haltKind? : TargetInstr → Option HaltKind
+  | .prim op => op.haltKind?
+  | _ => none
+
+end TargetInstr
+
+namespace Instr
+
+def haltKind? : Instr → Option HaltKind
+  | .prim op => op.haltKind?
+  | _ => none
+
+end Instr
+
 namespace Target
 
 def stepInstr (instr : TargetInstr) (state : EVMState) : Except EVMException EVMState :=
@@ -37,15 +101,38 @@ def stepInstr (instr : TargetInstr) (state : EVMState) : Except EVMException EVM
   | .prim op =>
       op.step state
 
+def stepInstrResult (instr : TargetInstr) (state : EVMState) :
+    Except EVMException StepResult := do
+  let state' ← stepInstr instr state
+  match instr.haltKind? with
+  | some kind =>
+      .ok (.halted { kind := kind, state := state', output := kind.output state' })
+  | none =>
+      .ok (.running state')
+
 def runList : List TargetInstr → EVMState → Except EVMException EVMState
   | [], state => .ok state
   | instr :: rest, state => do
       let state' ← stepInstr instr state
       runList rest state'
 
+def runListResult : List TargetInstr → EVMState → Except EVMException StepResult
+  | [], state => .ok (.running state)
+  | instr :: rest, state => do
+      let result ← stepInstrResult instr state
+      match result with
+      | .running state' => runListResult rest state'
+      | .halted halt => .ok (.halted halt)
+
 def step (target : TargetProgram) (state : EVMState) : Except EVMException EVMState :=
   match target.fetch state.pc.toNat with
   | some instr => stepInstr instr state
+  | none => .error .InvalidInstruction
+
+def stepResult (target : TargetProgram) (state : EVMState) :
+    Except EVMException StepResult :=
+  match target.fetch state.pc.toNat with
+  | some instr => stepInstrResult instr state
   | none => .error .InvalidInstruction
 
 def runN (target : TargetProgram) : Nat → EVMState → Except EVMException EVMState
@@ -53,6 +140,14 @@ def runN (target : TargetProgram) : Nat → EVMState → Except EVMException EVM
   | fuel + 1, state => do
       let state' ← step target state
       runN target fuel state'
+
+def runNResult (target : TargetProgram) : Nat → EVMState → Except EVMException StepResult
+  | 0, state => .ok (.running state)
+  | fuel + 1, state => do
+      let result ← stepResult target state
+      match result with
+      | .running state' => runNResult target fuel state'
+      | .halted halt => .ok (.halted halt)
 
 end Target
 
@@ -92,9 +187,24 @@ def stepAt (program : Program) (_pc : Nat) (instr : Instr)
       | none =>
           .error .StackUnderflow
 
+def stepAtResult (program : Program) (pc : Nat) (instr : Instr)
+    (state : EVMState) : Except EVMException StepResult := do
+  let state' ← stepAt program pc instr state
+  match instr.haltKind? with
+  | some kind =>
+      .ok (.halted { kind := kind, state := state', output := kind.output state' })
+  | none =>
+      .ok (.running state')
+
 def step (program : Program) (state : EVMState) : Except EVMException EVMState :=
   match Program.instrAtPc program state.pc.toNat with
   | some (pc, instr) => stepAt program pc instr state
+  | none => .error .InvalidInstruction
+
+def stepResult (program : Program) (state : EVMState) :
+    Except EVMException StepResult :=
+  match Program.instrAtPc program state.pc.toNat with
+  | some (pc, instr) => stepAtResult program pc instr state
   | none => .error .InvalidInstruction
 
 def runN (program : Program) : Nat → EVMState → Except EVMException EVMState
@@ -102,6 +212,14 @@ def runN (program : Program) : Nat → EVMState → Except EVMException EVMState
   | fuel + 1, state => do
       let state' ← step program state
       runN program fuel state'
+
+def runNResult (program : Program) : Nat → EVMState → Except EVMException StepResult
+  | 0, state => .ok (.running state)
+  | fuel + 1, state => do
+      let result ← stepResult program state
+      match result with
+      | .running state' => runNResult program fuel state'
+      | .halted halt => .ok (.halted halt)
 
 end Source
 
@@ -117,11 +235,25 @@ def step (program : Program) (state : EVMState) : Except EVMException EVMState :
   | some code => Target.runList code state
   | none => .error .InvalidInstruction
 
+def stepResult (program : Program) (state : EVMState) :
+    Except EVMException StepResult :=
+  match emitCurrent? program state with
+  | some code => Target.runListResult code state
+  | none => .error .InvalidInstruction
+
 def runN (program : Program) : Nat → EVMState → Except EVMException EVMState
   | 0, state => .ok state
   | fuel + 1, state => do
       let state' ← step program state
       runN program fuel state'
+
+def runNResult (program : Program) : Nat → EVMState → Except EVMException StepResult
+  | 0, state => .ok (.running state)
+  | fuel + 1, state => do
+      let result ← stepResult program state
+      match result with
+      | .running state' => runNResult program fuel state'
+      | .halted halt => .ok (.halted halt)
 
 end Compiled
 

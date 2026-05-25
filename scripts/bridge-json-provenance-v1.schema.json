@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/bridge-json-provenance-v1.schema.json",
+  "title": "evm-compiler bridge JSON provenance v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "manifestSchema", "manifest", "entries"],
+  "properties": {
+    "schema": {
+      "const": "evm-compiler.bridge-json-provenance.v1"
+    },
+    "manifestSchema": {
+      "const": "evm-compiler.bridge-json-manifest.v1"
+    },
+    "manifest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creation", "runtime"],
+      "properties": {
+        "creation": {
+          "$ref": "#/$defs/manifestEntry"
+        },
+        "runtime": {
+          "$ref": "#/$defs/manifestEntry"
+        }
+      }
+    },
+    "linkerSymbols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/linkerSymbol"
+      }
+    }
+  },
+  "$defs": {
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "manifestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "contract", "selector", "object", "path"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "selector": {
+          "enum": ["creation", "runtime"]
+        },
+        "object": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "frontend": {
+          "$ref": "#/$defs/frontend"
+        },
+        "objectLayout": {
+          "$ref": "#/$defs/objectLayout"
+        },
+        "localDataBase": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "uint256Hex": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "ast"],
+      "properties": {
+        "producer": {
+          "const": "solc"
+        },
+        "ast": {
+          "enum": ["irAst", "irOptimizedAst"]
+        }
+      }
+    },
+    "objectLayout": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/objectLayoutEntry"
+      }
+    },
+    "objectLayoutEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "size"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "offset": {
+          "$ref": "#/$defs/uint256Hex"
+        },
+        "size": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "linkerSymbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "value": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    }
+  }
+}

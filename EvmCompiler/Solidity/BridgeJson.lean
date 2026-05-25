@@ -1,0 +1,228 @@
+import EvmCompiler.Solidity.Frontend
+import Lean.Data.Json
+
+namespace EvmCompiler
+namespace Solidity
+namespace Frontend
+namespace BridgeJson
+
+abbrev DecodeM := Except String
+
+def maxDecodeFuel : Nat :=
+  1000000
+
+def field (json : Lean.Json) (name : String) : DecodeM Lean.Json :=
+  match json.getObjVal? name with
+  | .ok value => .ok value
+  | .error err => .error s!"{name}: {err}"
+
+def optionalField (json : Lean.Json) (name : String) : DecodeM (Option Lean.Json) :=
+  match json.getObjVal? name with
+  | .ok .null => .ok none
+  | .ok value => .ok (some value)
+  | .error err => .error s!"{name}: {err}"
+
+def stringField (json : Lean.Json) (name : String) : DecodeM String := do
+  (← field json name).getStr?
+
+def natField (json : Lean.Json) (name : String) : DecodeM Nat := do
+  (← field json name).getNat?
+
+def arrayField (json : Lean.Json) (name : String) : DecodeM (Array Lean.Json) := do
+  (← field json name).getArr?
+
+def decodeArray {α : Type} (decode : Lean.Json → DecodeM α) (json : Lean.Json) :
+    DecodeM (List α) := do
+  let values ← json.getArr?
+  let mut out : List α := []
+  for value in values do
+    out := (← decode value) :: out
+  pure out.reverse
+
+def decodeArrayField {α : Type} (decode : Lean.Json → DecodeM α)
+    (json : Lean.Json) (name : String) : DecodeM (List α) := do
+  decodeArray decode (← field json name)
+
+def decodeStringArrayField (json : Lean.Json) (name : String) :
+    DecodeM (List String) :=
+  decodeArrayField (fun value => value.getStr?) json name
+
+def decodeWordNat (value : Nat) : DecodeM Word :=
+  if value < 2 ^ (256 : Nat) then
+    .ok (EvmYul.UInt256.ofNat value)
+  else
+    .error s!"UInt256 literal out of range: {value}"
+
+def decodeWordField (json : Lean.Json) (name : String) : DecodeM Word := do
+  decodeWordNat (← natField json name)
+
+def decodeByte (value : Nat) : DecodeM UInt8 :=
+  if value < 256 then
+    .ok (UInt8.ofNat value)
+  else
+    .error s!"byte out of range: {value}"
+
+def decodeByteArrayField (json : Lean.Json) (name : String) :
+    DecodeM (List UInt8) :=
+  decodeArrayField
+    (fun value => do decodeByte (← value.getNat?))
+    json name
+
+def expectNode (json : Lean.Json) (expected : String) : DecodeM Unit := do
+  let actual ← stringField json "node"
+  if actual == expected then
+    pure ()
+  else
+    .error s!"expected node {expected}, got {actual}"
+
+def decodeCallKind : String → DecodeM CallKind
+  | "primitive" => .ok .primitive
+  | "user" => .ok .user
+  | "objectBuiltin" => .ok .objectBuiltin
+  | "dialectBuiltin" => .ok .dialectBuiltin
+  | other => .error s!"unknown call kind: {other}"
+
+def decodeOptionalName (json : Lean.Json) (name : String) :
+    DecodeM (Option Name) := do
+  match ← optionalField json name with
+  | none => pure none
+  | some value => some <$> value.getStr?
+
+mutual
+  def decodeExpr : Nat → Lean.Json → DecodeM Expr
+    | 0, _ => .error "expression JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        let node ← stringField json "node"
+        match node with
+        | "literal" =>
+            .ok (.lit (← decodeWordField json "value"))
+        | "stringLiteral" =>
+            .ok (.stringLit (← stringField json "value"))
+        | "var" =>
+            .ok (.var (← stringField json "name"))
+        | "call" =>
+            let kind ← decodeCallKind (← stringField json "calleeKind")
+            let callee ← stringField json "callee"
+            let args ← decodeArrayField (decodeExpr fuel) json "args"
+            .ok (.call kind callee args)
+        | other =>
+            .error s!"unknown expression node: {other}"
+
+  def decodeStmt : Nat → Lean.Json → DecodeM Stmt
+    | 0, _ => .error "statement JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        let node ← stringField json "node"
+        match node with
+        | "block" =>
+            .ok (.block (← decodeArrayField (decodeStmt fuel) json "stmts"))
+        | "let" =>
+            let names ← decodeStringArrayField json "names"
+            let value? ← optionalField json "value"
+            let value? ←
+              match value? with
+              | none => pure none
+              | some value => some <$> decodeExpr fuel value
+            .ok (.letDecl names value?)
+        | "assign" =>
+            let names ← decodeStringArrayField json "names"
+            let value ← decodeExpr fuel (← field json "value")
+            .ok (.assign names value)
+        | "exprStmt" =>
+            .ok (.exprStmt (← decodeExpr fuel (← field json "expr")))
+        | "switch" =>
+            let scrutinee ← decodeExpr fuel (← field json "scrutinee")
+            let cases ← decodeArrayField (decodeSwitchCase fuel) json "cases"
+            let default ← decodeArrayField (decodeStmt fuel) json "default"
+            .ok (.switch scrutinee cases default)
+        | "for" =>
+            let condition ← decodeExpr fuel (← field json "condition")
+            let post ← decodeArrayField (decodeStmt fuel) json "post"
+            let body ← decodeArrayField (decodeStmt fuel) json "body"
+            .ok (.forLoop condition post body)
+        | "if" =>
+            let condition ← decodeExpr fuel (← field json "condition")
+            let body ← decodeArrayField (decodeStmt fuel) json "body"
+            .ok (.ifThen condition body)
+        | "break" => .ok .break
+        | "continue" => .ok .continue
+        | "leave" => .ok .leave
+        | other =>
+            .error s!"unknown statement node: {other}"
+
+  def decodeSwitchCase : Nat → Lean.Json → DecodeM (Word × List Stmt)
+    | 0, _ => .error "switch-case JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        let value ← decodeWordField json "value"
+        let body ← decodeArrayField (decodeStmt fuel) json "body"
+        .ok (value, body)
+
+  def decodeFunctionDef : Nat → Lean.Json → DecodeM FunctionDef
+    | 0, _ => .error "function JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        let params ← decodeStringArrayField json "params"
+        let returns ← decodeStringArrayField json "returns"
+        let body ← decodeArrayField (decodeStmt fuel) json "body"
+        .ok { params := params, returns := returns, body := body }
+
+  def decodeNamedFunction : Nat → Lean.Json → DecodeM (Name × FunctionDef)
+    | 0, _ => .error "named-function JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        let name ← stringField json "name"
+        let fn ← decodeFunctionDef fuel json
+        .ok (name, fn)
+
+  def decodeDataSection : Nat → Lean.Json → DecodeM DataSection
+    | 0, _ => .error "data-section JSON decoder ran out of fuel"
+    | _fuel + 1, json => do
+        let name? ← decodeOptionalName json "name"
+        let bytes ← decodeByteArrayField json "bytes"
+        .ok { name? := name?, bytes := bytes }
+
+  def decodeObjectItemRef : Nat → Lean.Json → DecodeM ObjectItemRef
+    | 0, _ => .error "object-item JSON decoder ran out of fuel"
+    | _fuel + 1, json => do
+        let kind ← stringField json "kind"
+        let index ← natField json "index"
+        match kind with
+        | "data" => .ok (.data index)
+        | "object" => .ok (.object index)
+        | other => .error s!"unknown object item kind: {other}"
+
+  def decodeObject : Nat → Lean.Json → DecodeM Object
+    | 0, _ => .error "object JSON decoder ran out of fuel"
+    | fuel + 1, json => do
+        expectNode json "object"
+        let name ← stringField json "name"
+        let dispatcher ← decodeArrayField (decodeStmt fuel) json "dispatcher"
+        let functions ← decodeArrayField (decodeNamedFunction fuel) json "functions"
+        let data ← decodeArrayField (decodeDataSection fuel) json "data"
+        let objects ← decodeArrayField (decodeObject fuel) json "subobjects"
+        let items ← decodeArrayField (decodeObjectItemRef fuel) json "items"
+        .ok
+          { name := name
+            dispatcher := dispatcher
+            functions := functions
+            data := data
+            objects := objects
+            items := items }
+end
+
+def decodeProgram (json : Lean.Json) : DecodeM Program := do
+  let schema ← stringField json "schema"
+  if schema != "evm-compiler.solc-yul-bridge.v3" then
+    .error s!"unsupported bridge JSON schema: {schema}"
+  else
+    let source ← stringField json "source"
+    let contract ← stringField json "contract"
+    let objectJson ← field json "selectedObject"
+    let object ← decodeObject maxDecodeFuel objectJson
+    .ok { source := source, contract := contract, object := object }
+
+def parseProgram? (input : String) : DecodeM Program := do
+  let json ← Lean.Json.parse input
+  decodeProgram json
+
+end BridgeJson
+end Frontend
+end Solidity
+end EvmCompiler

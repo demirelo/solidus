@@ -3,7 +3,8 @@ build/
 lake-packages/
 *.olean
 *.ilean
+__pycache__/
+*.pyc
 *.c
 *.o
 .DS_Store
-

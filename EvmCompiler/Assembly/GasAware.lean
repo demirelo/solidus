@@ -37,6 +37,39 @@ def XRunsSuccessfullyAbove (target : TargetProgram) (initial sourceFinal : EVMSt
             XSuccessErasesTo sourceFinal result
 
 /--
+Result-level agreement for the gas-aware `X` runner.
+
+The running case compares gas-erased states. Terminal success compares both the
+gas-erased halted state and output. Revert in EVMYulLean does not carry the
+final state, so the result-level contract compares the revert output and halt
+kind only.
+-/
+def XResultAgrees (targetResult : StepResult) :
+    EvmYul.EVM.ExecutionResult EVMState → Prop
+  | .success evmFinal output =>
+      match targetResult with
+      | .running state => eraseGas evmFinal = eraseGas state
+      | .halted halt =>
+          halt.kind ≠ .revert ∧
+            eraseGas evmFinal = eraseGas halt.state ∧
+              output = halt.output
+  | .revert _gas output =>
+      match targetResult with
+      | .running _ => False
+      | .halted halt => halt.kind = .revert ∧ output = halt.output
+
+def XRunsResultSuccessfullyAbove (target : TargetProgram) (initial : EVMState)
+    (targetResult : StepResult) (evmFuel gasBound : Nat) : Prop :=
+  ∀ gas,
+    gasBound ≤ gas →
+      gas < EvmYul.UInt256.size →
+        ∃ result,
+          EvmYul.EVM.X evmFuel (validJumps target)
+              (installCodeAndGas target gas initial) =
+            .ok result ∧
+            XResultAgrees targetResult result
+
+/--
 The gas-analysis certificate needed to move from the gasless block trace to
 EVMYulLean's gas-aware `X` runner.
 
@@ -57,9 +90,41 @@ not yet derived from the gasless block trace.
 abbrev XPreconditionAssumptions :=
   SufficientGasForX
 
+/--
+Result-level gas-analysis certificate for the theorem path whose source
+semantics can halt.  This is the explicit gas/resource boundary for connecting
+the gasless result trace to EVMYulLean's gas-aware `X` runner.
+-/
+structure SufficientGasForXResult
+    (target : TargetProgram) (initial : EVMState)
+    (targetResult : StepResult) where
+  evmFuel : Nat
+  gasBound : Nat
+  runsAboveBound :
+    XRunsResultSuccessfullyAbove target initial targetResult evmFuel gasBound
+
+abbrev XResultPreconditionAssumptions :=
+  SufficientGasForXResult
+
 theorem XRunsSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
     {initial sourceFinal : EVMState} {evmFuel gasBound gas : Nat}
     (hRuns : XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound)
+    (hGas : gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    EvmYul.EVM.X evmFuel (validJumps target)
+        (installCodeAndGas target gas initial) ≠
+      .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  obtain ⟨result, hRun, _hProject⟩ := hRuns gas hGas hUInt256
+  rw [hRun]
+  intro hImpossible
+  cases hImpossible
+
+theorem XRunsResultSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
+    {initial : EVMState} {targetResult : StepResult}
+    {evmFuel gasBound gas : Nat}
+    (hRuns :
+      XRunsResultSuccessfullyAbove target initial targetResult evmFuel
+        gasBound)
     (hGas : gasBound ≤ gas)
     (hUInt256 : gas < EvmYul.UInt256.size) :
     EvmYul.EVM.X evmFuel (validJumps target)
@@ -83,10 +148,11 @@ structure XBridgeCertificate
   accepted : Accepted program
   compileBytes_eq : Bytecode.compileBytes? program = some (Bytecode.encodeTarget target)
   encodingCorrect : Bytecode.EncodingCorrect target (Bytecode.encodeTarget target)
-  noGasOpcode : target.GasOpcodeAbsent
+  gasOpcodeBoundary : target.GasOpcodeBoundary
   gasOracle : GasOracleAssumption program initial
   outOfGasPolicy : OutOfGasPolicyAssumption program initial
   currentContractProjection : CurrentContractProjectionAssumption program initial
+  externalInteraction : ExternalInteractionAssumption program target initial
   blockTrace :
     ∃ targetFinal,
       Preservation.BlockTrace program target fuel initial targetFinal ∧
@@ -143,7 +209,7 @@ theorem compile_whole_program_X_bridge {program : Program}
     (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
     XBridgeCertificate program target fuel initial sourceFinal := by
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hNoGas,
+    ⟨hAccepted, hBytes, hEncoding, hGasOpcode,
       hGasOracle, hOutOfGas, hProjection,
       targetFinal, hTrace, hErase⟩ :=
     compile_whole_program_sound hCompile hRuntime hRun
@@ -151,10 +217,11 @@ theorem compile_whole_program_X_bridge {program : Program}
     { accepted := hAccepted
       compileBytes_eq := hBytes
       encodingCorrect := hEncoding
-      noGasOpcode := hNoGas
+      gasOpcodeBoundary := hGasOpcode
       gasOracle := hGasOracle
       outOfGasPolicy := hOutOfGas
       currentContractProjection := hProjection
+      externalInteraction := hRuntime.externalInteraction
       blockTrace := ⟨targetFinal, hTrace, hErase⟩
       sufficientGas :=
         ⟨hPreconditions.evmFuel, hPreconditions.gasBound,

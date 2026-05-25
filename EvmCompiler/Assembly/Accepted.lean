@@ -12,17 +12,21 @@ EVM/Yul semantics imported from EVMYulLean.
 
 The first assembly layer deliberately has no `GAS` or exact gas accounting in
 its syntax, and raw EVM jumps are represented by labeled control-flow
-instructions. External-facing operations such as `CALL`, `CREATE`, account/code
-reads, logs, and `SELFDESTRUCT` are admitted here and use exactly the same
-EVMYulLean state transformers as the compiled target.
+instructions. Account/code reads, logs, storage, memory, and terminal
+`SELFDESTRUCT` reuse shared EVMYulLean state transformers in the gasless source
+step relation.  `CALL`/`CREATE` are admitted at the syntax/encoding level, but
+their deployed behavior is exposed separately by
+`ExternalInteractionAssumption` until the bridge to `EvmYul.EVM.step/X` is
+proved.
 -/
 def accepted (_op : PrimOp) : Bool :=
   true
 
 /--
 Operations whose result can depend on context outside the current stack/control
-state. This classifier is documentation only: the assembly semantics itself
-does not abstract these operations and delegates to EVMYulLean directly.
+state. This classifier is documentation only.  It includes the call/create
+family because those opcodes have an additional gas-aware runner bridge
+obligation beyond the ordinary gasless source step relation.
 -/
 def usesOutsideContext : PrimOp → Bool
   | .address | .balance | .origin | .caller | .callvalue | .calldataload
@@ -38,6 +42,12 @@ def usesOutsideContext : PrimOp → Bool
   | _ =>
       false
 
+def isCallCreate : PrimOp → Bool
+  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
+      true
+  | _ =>
+      false
+
 end PrimOp
 
 namespace Instr
@@ -45,6 +55,10 @@ namespace Instr
 def accepted : Instr → Bool
   | .prim op => op.accepted
   | .label _ | .push _ | .jump _ | .jumpi _ => true
+
+def usesCallCreate : Instr → Bool
+  | .prim op => op.isCallCreate
+  | .label _ | .push _ | .jump _ | .jumpi _ => false
 
 end Instr
 
@@ -72,6 +86,20 @@ def labelsUnique (program : Program) : Bool :=
 
 def instructionsAccepted (program : Program) : Bool :=
   program.all Instr.accepted
+
+def usesCallCreate (program : Program) : Bool :=
+  program.any Instr.usesCallCreate
+
+theorem usesCallCreate_append (left right : Program) :
+    usesCallCreate (left ++ right) =
+      (usesCallCreate left || usesCallCreate right) := by
+  simp [usesCallCreate]
+
+theorem usesCallCreate_append_eq_false {left right : Program}
+    (hLeft : usesCallCreate left = false)
+    (hRight : usesCallCreate right = false) :
+    usesCallCreate (left ++ right) = false := by
+  simp [usesCallCreate_append, hLeft, hRight]
 
 /--
 The independent accepted-input checker for the labeled assembly IR.
@@ -200,11 +228,12 @@ def compile? (program : Program) : Option TargetProgram :=
     none
 
 /--
-Gas boundary for the gasless source language.
+Gas boundary for the source language.
 
-The assembly AST has no `GAS` instruction. Full EVM gas accounting is therefore
-not part of source semantics; later gas-aware theorems may either assume enough
-gas for a run or allow the EVM execution to stop earlier with out-of-gas.
+The source semantics may execute `GAS`, but it does not model target-side gas
+deduction.  The value returned by `GAS` is therefore part of the explicit
+agreement with the gas-aware `X` runner rather than a fact derived from the
+gasless block trace alone.
 -/
 structure GasOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) :
     Prop where
@@ -232,6 +261,53 @@ projected away by this assembly layer.
 structure CurrentContractProjectionAssumption
     (_program : Program) (_initial : EvmYul.EVM.State) : Prop where
   compareOnlyGasErasedExecutionState : True
+
+/--
+Concrete agreement package for opcodes whose full deployed behavior is provided
+by EVMYulLean's gas-aware `X` runner rather than by the gasless source step
+relation alone.
+
+Most account/storage/log operations already reuse shared EVMYulLean state
+transformers in the gasless source semantics.  The call/create family is
+different: the imported generic `EvmYul.step` is not the real EVM call/create
+interpreter, so a complete source theorem must either prove a dedicated bridge
+to `EvmYul.EVM.step/X` or carry this agreement as an explicit assumption.
+-/
+structure CallCreateAgreementWithGasAwareRunner
+    (_program : Program) (_target : TargetProgram)
+    (_initial : EvmYul.EVM.State) : Prop where
+  callCreateAgreementWithGasAwareRunner : True
+
+/--
+External-interaction boundary for call/create opcodes.
+
+Programs that do not contain call/create opcodes discharge this boundary
+syntactically.  Programs that do contain them must supply the explicit agreement
+package above, which is intentionally not constructed by a default helper.
+-/
+structure ExternalInteractionAssumption
+    (program : Program) (target : TargetProgram)
+    (initial : EvmYul.EVM.State) : Prop where
+  callCreateBoundary :
+    program.usesCallCreate = false ∨
+      CallCreateAgreementWithGasAwareRunner program target initial
+
+namespace ExternalInteractionAssumption
+
+def noCallCreate {program : Program} {target : TargetProgram}
+    {initial : EvmYul.EVM.State}
+    (hNoCallCreate : program.usesCallCreate = false) :
+    ExternalInteractionAssumption program target initial where
+  callCreateBoundary := Or.inl hNoCallCreate
+
+def withAgreement {program : Program} {target : TargetProgram}
+    {initial : EvmYul.EVM.State}
+    (hAgreement :
+      CallCreateAgreementWithGasAwareRunner program target initial) :
+    ExternalInteractionAssumption program target initial where
+  callCreateBoundary := Or.inr hAgreement
+
+end ExternalInteractionAssumption
 
 namespace GasOracleAssumption
 
@@ -264,9 +340,9 @@ gas-aware EVM execution theorem.
 No field is a new trusted constant: each later theorem must either require this
 structure as a hypothesis or prove the relevant field for a concrete execution.
 Keeping the fields here makes the trust boundary for gas and out-of-gas
-behavior visible to later compiler layers. External-facing EVM behavior is not
-an extra assumption: assembly primitives call the imported EVMYulLean semantics
-directly.
+behavior visible to later compiler layers.  This legacy package is target-free;
+the target-aware `RuntimeAssumptions` additionally records the call/create
+agreement boundary.
 -/
 structure EVMExecutionAssumptions (program : Program) (initial : EvmYul.EVM.State) : Prop where
   accepted : Accepted program

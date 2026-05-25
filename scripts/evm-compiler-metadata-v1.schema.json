@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/evm-compiler-metadata-v1.schema.json",
+  "title": "evm-compiler bytecode replacement metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source",
+    "contract",
+    "yul",
+    "sizes",
+    "bytecodeSource"
+  ],
+  "properties": {
+    "schema": {
+      "enum": [
+        "evm-compiler.forge-artifact.v1",
+        "evm-compiler.solc-standard-json-output.v1"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/nonemptyString"
+    },
+    "contract": {
+      "$ref": "#/$defs/nonemptyString"
+    },
+    "yul": {
+      "$ref": "#/$defs/yulObjects"
+    },
+    "sizes": {
+      "$ref": "#/$defs/bytecodeSizes"
+    },
+    "bytecodeSource": {
+      "const": "lean-unchecked-bytecode-image"
+    },
+    "backendCompatibility": {
+      "$ref": "#/$defs/backendCompatibility"
+    },
+    "bridgeJson": {
+      "$ref": "#/$defs/bridgeJsonProvenance"
+    }
+  },
+  "$defs": {
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bytecodeSizes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creationBytes", "runtimeBytes"],
+      "properties": {
+        "creationBytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "runtimeBytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "yulObjects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creationObject", "runtimeObject"],
+      "properties": {
+        "creationObject": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "runtimeObject": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    },
+        "stringArray": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "frontend": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "producer",
+                "ast"
+            ],
+            "properties": {
+                "producer": {
+                    "const": "solc"
+                },
+                "ast": {
+                    "enum": [
+                        "irAst",
+                        "irOptimizedAst"
+                    ]
+                }
+            }
+        },
+        "backendCompatibility": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "profile",
+        "status",
+        "unsupportedPrimitiveNames",
+        "objectBuiltinNames",
+        "dialectBuiltinNames",
+        "notes"
+      ],
+      "properties": {
+        "profile": {
+          "const": "current-yul-compiler"
+        },
+        "status": {
+          "enum": ["ready", "needs-resolution", "blocked"]
+        },
+        "unsupportedPrimitiveNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "objectBuiltinNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "dialectBuiltinNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "notes": {
+          "$ref": "#/$defs/stringArray"
+        }
+      }
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "manifestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "contract", "selector", "object", "path"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "selector": {
+          "enum": ["creation", "runtime"]
+        },
+        "object": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+                "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                },
+                "frontend": {
+                    "$ref": "#/$defs/frontend"
+                },
+                "objectLayout": {
+                    "$ref": "#/$defs/objectLayout"
+                },
+        "localDataBase": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "uint256Hex": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "objectLayout": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/objectLayoutEntry"
+      }
+    },
+    "objectLayoutEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "size"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "offset": {
+          "$ref": "#/$defs/uint256Hex"
+        },
+        "size": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "linkerSymbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "value": {
+          "$ref": "#/$defs/uint256Hex"
+        }
+      }
+    },
+    "bridgeJsonProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "manifestSchema", "manifest", "entries"],
+      "properties": {
+        "schema": {
+          "const": "evm-compiler.bridge-json-provenance.v1"
+        },
+        "manifestSchema": {
+          "const": "evm-compiler.bridge-json-manifest.v1"
+        },
+        "manifest": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "entries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["creation", "runtime"],
+          "properties": {
+            "creation": {
+              "$ref": "#/$defs/manifestEntry"
+            },
+            "runtime": {
+              "$ref": "#/$defs/manifestEntry"
+            }
+          }
+        },
+        "linkerSymbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/linkerSymbol"
+          }
+        }
+      }
+    }
+  }
+}

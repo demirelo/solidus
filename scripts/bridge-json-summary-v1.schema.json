@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evm-compiler.local/schemas/bridge-json-summary-v1.schema.json",
+  "title": "evm-compiler bridge JSON summary v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/objectSummaryArtifact"
+    },
+    {
+      "$ref": "#/$defs/manifestSummaryArtifact"
+    }
+  ],
+  "$defs": {
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "countEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "count"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "count": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "countEntries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/countEntry"
+      }
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "ast"],
+      "properties": {
+        "producer": {
+          "const": "solc"
+        },
+        "ast": {
+          "enum": ["irAst", "irOptimizedAst"]
+        }
+      }
+    },
+    "objectInventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "depth",
+        "dispatcherStatements",
+        "functions",
+        "dataSections",
+        "dataBytes",
+        "subobjects",
+        "items"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "depth": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "dispatcherStatements": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "functions": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "dataSections": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "dataBytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "subobjects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "items": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "objectSummaryCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "objects",
+        "functions",
+        "dataSections",
+        "dataBytes",
+        "statements",
+        "expressions",
+        "calls"
+      ],
+      "properties": {
+        "objects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "functions": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "dataSections": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "dataBytes": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "statements": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "expressions": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "calls": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "callKindSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "names"],
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "names": {
+          "$ref": "#/$defs/countEntries"
+        }
+      }
+    },
+    "callsByKind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primitive", "user", "objectBuiltin", "dialectBuiltin"],
+      "properties": {
+        "primitive": {
+          "$ref": "#/$defs/callKindSummary"
+        },
+        "user": {
+          "$ref": "#/$defs/callKindSummary"
+        },
+        "objectBuiltin": {
+          "$ref": "#/$defs/callKindSummary"
+        },
+        "dialectBuiltin": {
+          "$ref": "#/$defs/callKindSummary"
+        }
+      }
+    },
+    "backendCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "status",
+        "unsupportedPrimitiveNames",
+        "objectBuiltinNames",
+        "dialectBuiltinNames",
+        "notes"
+      ],
+      "properties": {
+        "profile": {
+          "const": "current-yul-compiler"
+        },
+        "status": {
+          "enum": ["ready", "needs-resolution", "blocked"]
+        },
+        "unsupportedPrimitiveNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "objectBuiltinNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "dialectBuiltinNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "notes": {
+          "$ref": "#/$defs/stringArray"
+        }
+      }
+    },
+    "objectSummaryArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "source",
+        "contract",
+        "selector",
+        "object",
+        "counts",
+        "objects",
+        "statements",
+        "expressions",
+        "calls",
+        "backendCompatibility",
+        "backendHints"
+      ],
+      "properties": {
+        "schema": {
+          "const": "evm-compiler.solc-yul-bridge-summary.v1"
+        },
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "selector": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "object": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "frontend": {
+          "$ref": "#/$defs/frontend"
+        },
+        "counts": {
+          "$ref": "#/$defs/objectSummaryCounts"
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/objectInventoryEntry"
+          }
+        },
+        "statements": {
+          "$ref": "#/$defs/countEntries"
+        },
+        "expressions": {
+          "$ref": "#/$defs/countEntries"
+        },
+        "calls": {
+          "$ref": "#/$defs/callsByKind"
+        },
+        "backendCompatibility": {
+          "$ref": "#/$defs/backendCompatibility"
+        },
+        "backendHints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "manifestSummaryCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objects", "skippedContracts", "calls"],
+      "properties": {
+        "objects": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedContracts": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "calls": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "manifestSummaryArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "counts",
+        "objects",
+        "skippedContracts",
+        "backendCompatibility"
+      ],
+      "properties": {
+        "schema": {
+          "const": "evm-compiler.solc-yul-bridge-manifest-summary.v1"
+        },
+        "counts": {
+          "$ref": "#/$defs/manifestSummaryCounts"
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/objectSummaryArtifact"
+          }
+        },
+        "skippedContracts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonemptyString"
+          }
+        },
+        "skippedContractEntries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/skippedContractEntry"
+          }
+        },
+        "backendCompatibility": {
+          "$ref": "#/$defs/backendCompatibility"
+        }
+      }
+    },
+    "skippedContractEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "contract", "reason"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "contract": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonemptyString"
+        }
+      }
+    }
+  }
+}

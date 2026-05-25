@@ -1,0 +1,275 @@
+import EvmCompiler.Locals.Syntax
+
+namespace EvmCompiler
+namespace Functions
+
+abbrev Word := Locals.Word
+abbrev EVMState := Locals.EVMState
+abbrev EVMException := Locals.EVMException
+abbrev Name := Locals.Name
+abbrev Expr := Locals.Expr
+
+mutual
+  structure Block where
+    stmts : List Stmt
+
+  /--
+  Function-aware statements.
+
+  Calls are statement-level and assign all return values to explicit caller
+  targets. Later Yul-surface call expressions can lower into temporaries plus
+  this statement form.
+  -/
+  inductive Stmt where
+    | expr (expr : Expr 0)
+    | let_ (name : Name) (value : Expr 1)
+    | assign (name : Name) (value : Expr 1)
+    | block (body : Block)
+    | if_ (cond : Expr 1) (body : Block)
+    | switch (scrutinee : Expr 1) (cases : List (Word × Block))
+        (defaultBody : Option Block)
+    | for_ (init : Block) (cond : Expr 1) (post : Block) (body : Block)
+    | brk
+    | cont
+    | leave
+    | call (targets : List Name) (functionName : Name)
+        (args : List (Expr 1))
+    | terminal (kind : Assembly.HaltKind)
+    | terminalArgs (kind : Assembly.HaltKind)
+        (args : Locals.ExprSeq kind.argCount)
+end
+
+structure FunDef where
+  name : Name
+  params : List Name
+  returns : List Name
+  body : Block
+
+structure Program where
+  functions : List FunDef
+  body : Block
+
+mutual
+  inductive Block.WF : Bool → Bool → Bool → Block → Prop where
+    | nil {canBreak canContinue inFunction : Bool} :
+        Block.WF canBreak canContinue inFunction { stmts := [] }
+    | cons {canBreak canContinue inFunction : Bool}
+        {stmt : Stmt} {rest : List Stmt}
+        (hStmt : Stmt.WF canBreak canContinue inFunction stmt)
+        (hRest :
+          Block.WF canBreak canContinue inFunction { stmts := rest }) :
+        Block.WF canBreak canContinue inFunction { stmts := stmt :: rest }
+
+  inductive Stmt.WF : Bool → Bool → Bool → Stmt → Prop where
+    | expr {canBreak canContinue inFunction : Bool} {expr : Expr 0} :
+        Stmt.WF canBreak canContinue inFunction (.expr expr)
+    | let_ {canBreak canContinue inFunction : Bool}
+        {name : Name} {value : Expr 1} :
+        Stmt.WF canBreak canContinue inFunction (.let_ name value)
+    | assign {canBreak canContinue inFunction : Bool}
+        {name : Name} {value : Expr 1} :
+        Stmt.WF canBreak canContinue inFunction (.assign name value)
+    | block {canBreak canContinue inFunction : Bool} {body : Block}
+        (hBody : Block.WF canBreak canContinue inFunction body) :
+        Stmt.WF canBreak canContinue inFunction (.block body)
+    | if_ {canBreak canContinue inFunction : Bool}
+        {cond : Expr 1} {body : Block}
+        (hBody : Block.WF canBreak canContinue inFunction body) :
+        Stmt.WF canBreak canContinue inFunction (.if_ cond body)
+    | switch {canBreak canContinue inFunction : Bool}
+        {scrutinee : Expr 1} {cases : List (Word × Block)}
+        {defaultBody : Option Block}
+        (hCases : CaseList.WF canBreak canContinue inFunction cases)
+        (hDefault : Default.WF canBreak canContinue inFunction defaultBody) :
+        Stmt.WF canBreak canContinue inFunction
+          (.switch scrutinee cases defaultBody)
+    | for_ {canBreak canContinue inFunction : Bool}
+        {init post body : Block} {cond : Expr 1}
+        (hInit : Block.WF false false inFunction init)
+        (hPost : Block.WF false false inFunction post)
+        (hBody : Block.WF true true inFunction body) :
+        Stmt.WF canBreak canContinue inFunction
+          (.for_ init cond post body)
+    | brk {canBreak canContinue inFunction : Bool}
+        (hAllowed : canBreak = true) :
+        Stmt.WF canBreak canContinue inFunction .brk
+    | cont {canBreak canContinue inFunction : Bool}
+        (hAllowed : canContinue = true) :
+        Stmt.WF canBreak canContinue inFunction .cont
+    | leave {canBreak canContinue inFunction : Bool}
+        (hAllowed : inFunction = true) :
+        Stmt.WF canBreak canContinue inFunction .leave
+    | call {canBreak canContinue inFunction : Bool}
+        {targets : List Name} {functionName : Name}
+        {args : List (Expr 1)} :
+        Stmt.WF canBreak canContinue inFunction
+          (.call targets functionName args)
+    | terminal {canBreak canContinue inFunction : Bool}
+        {kind : Assembly.HaltKind} :
+        Stmt.WF canBreak canContinue inFunction (.terminal kind)
+    | terminalArgs {canBreak canContinue inFunction : Bool}
+        {kind : Assembly.HaltKind} {args : Locals.ExprSeq kind.argCount} :
+        Stmt.WF canBreak canContinue inFunction (.terminalArgs kind args)
+
+  inductive CaseList.WF :
+      Bool → Bool → Bool → List (Word × Block) → Prop where
+    | nil {canBreak canContinue inFunction : Bool} :
+        CaseList.WF canBreak canContinue inFunction []
+    | cons {canBreak canContinue inFunction : Bool}
+        {value : Word} {body : Block} {rest : List (Word × Block)}
+        (hBody : Block.WF canBreak canContinue inFunction body)
+        (hRest : CaseList.WF canBreak canContinue inFunction rest) :
+        CaseList.WF canBreak canContinue inFunction ((value, body) :: rest)
+
+  inductive Default.WF : Bool → Bool → Bool → Option Block → Prop where
+    | none {canBreak canContinue inFunction : Bool} :
+        Default.WF canBreak canContinue inFunction none
+    | some {canBreak canContinue inFunction : Bool} {body : Block}
+        (hBody : Block.WF canBreak canContinue inFunction body) :
+        Default.WF canBreak canContinue inFunction (some body)
+end
+
+namespace FunDef
+
+def WF (fn : FunDef) : Prop :=
+  Block.WF false false true fn.body
+
+end FunDef
+
+namespace FunList
+
+inductive WF : List FunDef → Prop where
+  | nil : WF []
+  | cons {fn : FunDef} {rest : List FunDef}
+      (hFn : fn.WF) (hRest : WF rest) : WF (fn :: rest)
+
+end FunList
+
+namespace Program
+
+def WF (program : Program) : Prop :=
+  FunList.WF program.functions ∧
+    Block.WF false false false program.body
+
+end Program
+
+namespace Scope
+
+def Contains (env : List Name) (name : Name) : Prop :=
+  name ∈ env
+
+def containsAll (env names : List Name) : Prop :=
+  ∀ name, name ∈ names → Contains env name
+
+mutual
+  def ExprScoped {results : Nat} (env : List Name) :
+      Expr results → Prop
+    | .lit _value => True
+    | .var name => Contains env name
+    | .code _code => False
+    | .prim _op args => ExprSeqScoped env args
+
+  def ExprSeqScoped {results : Nat} (env : List Name) :
+      Locals.ExprSeq results → Prop
+    | .nil => True
+    | .cons head tail =>
+        ExprScoped env head ∧ ExprSeqScoped env tail
+end
+
+theorem exprScoped_code_false (env : List Name) {results : Nat}
+    (code : Structured.Code) :
+    ¬ ExprScoped (results := results) env (.code code) := by
+  intro h
+  exact h
+
+mutual
+  def Block.outEnv (env : List Name) : Block → List Name
+    | ⟨stmts⟩ => StmtList.outEnv env stmts
+
+  def Stmt.outEnv (env : List Name) : Stmt → List Name
+    | .let_ name _value => name :: env
+    | _ => env
+
+  def StmtList.outEnv (env : List Name) : List Stmt → List Name
+    | [] => env
+    | stmt :: rest => StmtList.outEnv (Stmt.outEnv env stmt) rest
+end
+
+mutual
+  def Block.Scoped (env : List Name) : Block → Prop
+    | ⟨stmts⟩ => StmtList.Scoped env stmts
+
+  def Stmt.Scoped (env : List Name) : Stmt → Prop
+    | .expr expr => ExprScoped env expr
+    | .let_ name value => name ∉ env ∧ ExprScoped env value
+    | .assign name value => Contains env name ∧ ExprScoped env value
+    | .block body => Block.Scoped env body
+    | .if_ cond body => ExprScoped env cond ∧ Block.Scoped env body
+    | .switch scrutinee cases defaultBody =>
+        ExprScoped env scrutinee ∧
+          CaseList.Scoped env cases ∧ Default.Scoped env defaultBody
+    | .for_ init cond post body =>
+        Block.Scoped env init ∧
+          let loopEnv := Block.outEnv env init
+          ExprScoped loopEnv cond ∧
+            Block.Scoped loopEnv post ∧ Block.Scoped loopEnv body
+    | .brk => True
+    | .cont => True
+    | .leave => True
+    | .call targets _functionName args =>
+        targets.Nodup ∧ containsAll env targets ∧
+          ∀ arg, arg ∈ args → ExprScoped env arg
+    | .terminal _kind => True
+    | .terminalArgs _kind args => ExprSeqScoped env args
+
+  def StmtList.Scoped (env : List Name) : List Stmt → Prop
+    | [] => True
+    | stmt :: rest =>
+        Stmt.Scoped env stmt ∧ StmtList.Scoped (Stmt.outEnv env stmt) rest
+
+  def CaseList.Scoped (env : List Name) :
+      List (Word × Block) → Prop
+    | [] => True
+    | (_value, body) :: rest =>
+        Block.Scoped env body ∧ CaseList.Scoped env rest
+
+  def Default.Scoped (env : List Name) : Option Block → Prop
+    | none => True
+    | some body => Block.Scoped env body
+end
+
+end Scope
+
+namespace FunDef
+
+def Scoped (fn : FunDef) : Prop :=
+  (fn.returns ++ fn.params).Nodup ∧
+    Scope.Block.Scoped (fn.returns ++ fn.params) fn.body
+
+theorem signatureNodup {fn : FunDef} (hScoped : fn.Scoped) :
+    (fn.returns ++ fn.params).Nodup :=
+  hScoped.1
+
+theorem bodyScoped {fn : FunDef} (hScoped : fn.Scoped) :
+    Scope.Block.Scoped (fn.returns ++ fn.params) fn.body :=
+  hScoped.2
+
+end FunDef
+
+namespace FunList
+
+def Scoped : List FunDef → Prop
+  | [] => True
+  | fn :: rest => fn.Scoped ∧ Scoped rest
+
+end FunList
+
+namespace Program
+
+def Scoped (program : Program) : Prop :=
+  FunList.Scoped program.functions ∧ Scope.Block.Scoped [] program.body
+
+end Program
+
+end Functions
+end EvmCompiler

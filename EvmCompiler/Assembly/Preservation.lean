@@ -48,6 +48,49 @@ theorem runList_single (instr : TargetInstr) (state : EVMState) :
       rw [h]
       rfl
 
+theorem run_push_jump_result (dest : Nat) (state : EVMState) :
+    Target.runListResult
+        [TargetInstr.push32 (EvmYul.UInt256.ofNat dest), TargetInstr.jump]
+        state =
+      .ok (.running (Source.jumpPc dest state)) := by
+  rfl
+
+theorem run_push_jumpi_result (dest : Nat) (state : EVMState) :
+    Target.runListResult
+        [TargetInstr.push32 (EvmYul.UInt256.ofNat dest), TargetInstr.jumpi]
+        state =
+      match state.stack.pop with
+      | some (stack, cond) =>
+          .ok
+            (.running
+              { state with
+                pc :=
+                  if cond != EvmYul.UInt256.ofNat 0 then
+                    EvmYul.UInt256.ofNat dest
+                  else
+                    Source.jumpiFallthroughPc state
+                stack := stack
+              })
+      | none =>
+          .error .StackUnderflow := by
+  cases state with
+  | mk shared pc stack execLength =>
+  cases stack with
+  | nil => rfl
+  | cons _ _ => rfl
+
+theorem runListResult_single (instr : TargetInstr) (state : EVMState) :
+    Target.runListResult [instr] state = Target.stepInstrResult instr state := by
+  cases h : Target.stepInstrResult instr state with
+  | error e =>
+      unfold Target.runListResult
+      rw [h]
+      rfl
+  | ok result =>
+      unfold Target.runListResult
+      rw [h]
+      cases result <;> rfl
+
 theorem stepAt_emit_sound {program : Program} {pc : Nat} {instr : Instr}
     {located : List LocatedTarget} {state sourceState : EVMState}
     (hEmit : emitInstr? program pc instr = some located)
@@ -95,6 +138,67 @@ theorem stepAt_emit_sound {program : Program} {pc : Nat} {instr : Instr}
           rw [run_push_jumpi dest state]
           exact hStep
 
+theorem stepAt_emit_result_sound {program : Program} {pc : Nat} {instr : Instr}
+    {located : List LocatedTarget} {state : EVMState} {result : StepResult}
+    (hEmit : emitInstr? program pc instr = some located)
+    (hStep : Source.stepAtResult program pc instr state = .ok result) :
+    Target.runListResult (located.map LocatedTarget.instr) state = .ok result := by
+  cases instr with
+  | label name =>
+      simp [emitInstr?, Source.stepAtResult, Source.stepAt] at hEmit hStep
+      subst located
+      simpa [runListResult_single] using hStep
+  | prim op =>
+      simp [emitInstr?, Source.stepAtResult, Source.stepAt] at hEmit hStep
+      subst located
+      simpa [runListResult_single] using hStep
+  | push value =>
+      simp [emitInstr?, Source.stepAtResult, Source.stepAt] at hEmit hStep
+      subst located
+      simpa [runListResult_single] using hStep
+  | jump target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest, Source.stepAtResult, Source.stepAt,
+            Source.jumpPc, Instr.haltKind?] at hEmit hStep
+          subst located
+          change
+            Target.runListResult
+                [TargetInstr.push32 (EvmYul.UInt256.ofNat dest), TargetInstr.jump]
+                state =
+              .ok result
+          rw [run_push_jump_result dest state]
+          simpa [Source.jumpPc] using
+            congrArg (fun r => (Except.ok r : Except EVMException StepResult)) hStep
+  | jumpi target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest, Source.stepAtResult, Source.stepAt,
+            Instr.haltKind?] at hEmit hStep
+          subst located
+          change
+            Target.runListResult
+                [TargetInstr.push32 (EvmYul.UInt256.ofNat dest), TargetInstr.jumpi]
+                state =
+              .ok result
+          rw [run_push_jumpi_result dest state]
+          cases hPop : state.stack.pop with
+          | none =>
+              simp [hPop] at hStep
+              change
+                (Except.error EvmYul.EVM.ExecutionException.StackUnderflow :
+                  Except EVMException StepResult) = .ok result at hStep
+              cases hStep
+          | some pair =>
+              cases pair with
+              | mk stack cond =>
+                  simp [hPop] at hStep ⊢
+                  exact hStep
+
 theorem stepAt_emit_projected_sound {program : Program} {pc : Nat} {instr : Instr}
     {located : List LocatedTarget} {state sourceState : EVMState}
     (hEmit : emitInstr? program pc instr = some located)
@@ -105,11 +209,33 @@ theorem stepAt_emit_projected_sound {program : Program} {pc : Nat} {instr : Inst
   refine ⟨sourceState, ?_, rfl⟩
   exact stepAt_emit_sound hEmit hStep
 
+theorem source_step_current_emit_result_sound {program : Program}
+    {state : EVMState} {result : StepResult} {code : List TargetInstr}
+    (hEmit : emitCurrent? program state = some code)
+    (hStep : Source.stepResult program state = .ok result) :
+    Target.runListResult code state = .ok result := by
+  unfold emitCurrent? at hEmit
+  unfold Source.stepResult at hStep
+  cases hAt : Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hEmit
+  | some current =>
+      cases current with
+      | mk pc instr =>
+          simp [hAt] at hEmit hStep
+          cases hEmitInstr : emitInstr? program pc instr with
+          | none =>
+              simp [hEmitInstr] at hEmit
+          | some located =>
+              simp [hEmitInstr] at hEmit
+              subst code
+              exact stepAt_emit_result_sound hEmitInstr hStep
+
 theorem source_step_current_emit_sound {program : Program} {state sourceState : EVMState}
     {code : List TargetInstr}
     (hEmit : emitCurrent? program state = some code)
     (hStep : Source.step program state = .ok sourceState) :
-    Target.runList code state = .ok sourceState := by
+        Target.runList code state = .ok sourceState := by
   unfold emitCurrent? at hEmit
   unfold Source.step at hStep
   cases hAt : Program.instrAtPc program state.pc.toNat with
@@ -207,6 +333,31 @@ theorem assemble_covers_current_pc {program : Program} {target : TargetProgram}
   obtain ⟨before, emitted, after, hDecomp, hEmitInstr⟩ :=
     emit_block_for_instrAtPc hEmit hAt
   exact ⟨before, emitted, after, hTargetCode.trans hDecomp, hEmitInstr⟩
+
+theorem assemble_source_step_current_result_sound {program : Program}
+    {target : TargetProgram} {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hStep : Source.stepResult program state = .ok result) :
+    ∃ pc instr emitted before after,
+      Program.instrAtPc program state.pc.toNat = some (pc, instr) ∧
+        emitInstr? program pc instr = some emitted ∧
+        target.code = before ++ emitted ++ after ∧
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok result := by
+  unfold Source.stepResult at hStep
+  cases hAt : Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hStep
+  | some current =>
+      cases current with
+      | mk pc instr =>
+          simp [hAt] at hStep
+          obtain ⟨before, emitted, after, hTargetBlock, hEmitInstr⟩ :=
+            assemble_covers_current_pc hAsm hAt
+          exact
+            ⟨pc, instr, emitted, before, after,
+              rfl, hEmitInstr, hTargetBlock,
+              stepAt_emit_result_sound hEmitInstr hStep⟩
 
 theorem assemble_source_step_current_projected_sound {program : Program}
     {target : TargetProgram} {state sourceState : EVMState}
@@ -332,6 +483,62 @@ theorem source_compiled_step_sound {program : Program}
               simp [hAt, hEmitInstr]
               exact stepAt_emit_sound hEmitInstr hStep
 
+theorem source_compiled_step_result_sound {program : Program}
+    {state : EVMState} {result : StepResult}
+    (hStep : Source.stepResult program state = .ok result) :
+    Compiled.stepResult program state = .ok result := by
+  unfold Source.stepResult at hStep
+  cases hAt : Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hStep
+  | some current =>
+      cases current with
+      | mk pc instr =>
+          simp [hAt] at hStep
+          cases hEmitInstr : emitInstr? program pc instr with
+          | none =>
+              cases instr with
+              | label name =>
+                  simp [emitInstr?] at hEmitInstr
+              | prim op =>
+                  simp [emitInstr?] at hEmitInstr
+              | push value =>
+                  simp [emitInstr?] at hEmitInstr
+              | jump target =>
+                  cases hDest : Program.labelPc program target with
+                  | none =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+                      have hBad : False := by
+                        unfold Source.stepAtResult Source.stepAt Source.invalid at hStep
+                        simp [hDest, Instr.haltKind?] at hStep
+                        change
+                          (Except.error
+                              EvmYul.EVM.ExecutionException.InvalidInstruction :
+                            Except EVMException StepResult) = .ok result at hStep
+                        cases hStep
+                      cases hBad
+                  | some dest =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+              | jumpi target =>
+                  cases hDest : Program.labelPc program target with
+                  | none =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+                      have hBad : False := by
+                        unfold Source.stepAtResult Source.stepAt Source.invalid at hStep
+                        simp [hDest, Instr.haltKind?] at hStep
+                        change
+                          (Except.error
+                              EvmYul.EVM.ExecutionException.InvalidInstruction :
+                            Except EVMException StepResult) = .ok result at hStep
+                        cases hStep
+                      cases hBad
+                  | some dest =>
+                      simp [emitInstr?, hDest] at hEmitInstr
+          | some emitted =>
+              unfold Compiled.stepResult emitCurrent?
+              simp [hAt, hEmitInstr]
+              exact stepAt_emit_result_sound hEmitInstr hStep
+
 theorem source_compiled_runN_sound {program : Program}
     {fuel : Nat} {state sourceState : EVMState}
     (hRun : Source.runN program fuel state = .ok sourceState) :
@@ -351,6 +558,30 @@ theorem source_compiled_runN_sound {program : Program}
           unfold Compiled.runN
           rw [source_compiled_step_sound hStep]
           exact ih hRun
+
+theorem source_compiled_runN_result_sound {program : Program}
+    {fuel : Nat} {state : EVMState} {result : StepResult}
+    (hRun : Source.runNResult program fuel state = .ok result) :
+    Compiled.runNResult program fuel state = .ok result := by
+  induction fuel generalizing state with
+  | zero =>
+      simp [Source.runNResult] at hRun
+      simpa [Compiled.runNResult] using hRun
+  | succ fuel ih =>
+      unfold Source.runNResult at hRun
+      cases hStep : Source.stepResult program state with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok stepResult =>
+          rw [hStep] at hRun
+          unfold Compiled.runNResult
+          rw [source_compiled_step_result_sound hStep]
+          cases stepResult with
+          | running mid =>
+              exact ih hRun
+          | halted halt =>
+              exact hRun
 
 theorem source_compiled_runN_projected_sound {program : Program}
     {fuel : Nat} {state sourceState : EVMState}
@@ -372,6 +603,30 @@ inductive BlockTrace (program : Program) (target : TargetProgram) :
       (hRun : Target.runList (emitted.map LocatedTarget.instr) state = .ok mid)
       (hRest : BlockTrace program target fuel mid final) :
       BlockTrace program target (fuel + 1) state final
+
+inductive BlockTraceResult (program : Program) (target : TargetProgram) :
+    Nat → EVMState → StepResult → Prop where
+  | done (state : EVMState) :
+      BlockTraceResult program target 0 state (.running state)
+  | stepRunning {fuel : Nat} {state mid : EVMState} {result : StepResult}
+      {pc : Nat} {instr : Instr} {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest : BlockTraceResult program target fuel mid result) :
+      BlockTraceResult program target (fuel + 1) state result
+  | stepHalted {fuel : Nat} {state : EVMState} {halt : Halt}
+      {pc : Nat} {instr : Instr} {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt)) :
+      BlockTraceResult program target (fuel + 1) state (.halted halt)
 
 theorem assemble_runN_block_trace_sound {program : Program}
     {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
@@ -398,6 +653,39 @@ theorem assemble_runN_block_trace_sound {program : Program}
           exact
             BlockTrace.step hAt hEmit hTargetBlock hBlockRun (ih hRun)
 
+theorem assemble_runN_result_block_trace_sound {program : Program}
+    {target : TargetProgram} {fuel : Nat} {state : EVMState}
+    {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hRun : Source.runNResult program fuel state = .ok result) :
+    BlockTraceResult program target fuel state result := by
+  induction fuel generalizing state with
+  | zero =>
+      simp [Source.runNResult] at hRun
+      subst result
+      exact BlockTraceResult.done state
+  | succ fuel ih =>
+      unfold Source.runNResult at hRun
+      cases hStep : Source.stepResult program state with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok stepResult =>
+          rw [hStep] at hRun
+          obtain
+            ⟨pc, instr, emitted, before, after,
+              hAt, hEmit, hTargetBlock, hBlockRun⟩ :=
+            assemble_source_step_current_result_sound hAsm hStep
+          cases stepResult with
+          | running mid =>
+              exact
+                BlockTraceResult.stepRunning hAt hEmit hTargetBlock hBlockRun
+                  (ih hRun)
+          | halted halt =>
+              cases hRun
+              exact
+                BlockTraceResult.stepHalted hAt hEmit hTargetBlock hBlockRun
+
 /--
 Whole-program AST-level compiler theorem for the current assembly layer.
 
@@ -417,6 +705,26 @@ theorem compile_runN_block_trace_projected_sound {program : Program}
           eraseGas targetState = eraseGas sourceState := by
   refine ⟨compile?_some_accepted hCompile, sourceState, ?_, rfl⟩
   exact assemble_runN_block_trace_sound (compile?_some_assemble hCompile) hRun
+
+/--
+Outcome-aware assembly theorem.
+
+This is the terminal-opcode-aware sibling of
+`compile_runN_block_trace_projected_sound`: `STOP`, `RETURN`, `REVERT`, and
+`SELFDESTRUCT` halt the gasless source runner with a named result, and the
+compiled target block trace produces the same result.
+-/
+theorem compile_runN_result_block_trace_sound {program : Program}
+    {target : TargetProgram} {fuel : Nat} {state : EVMState}
+    {result : StepResult}
+    (hCompile : compile? program = some target)
+    (hRun : Source.runNResult program fuel state = .ok result) :
+    Accepted program ∧
+      BlockTraceResult program target fuel state result := by
+  exact
+    ⟨compile?_some_accepted hCompile,
+      assemble_runN_result_block_trace_sound (compile?_some_assemble hCompile)
+        hRun⟩
 
 end Preservation
 

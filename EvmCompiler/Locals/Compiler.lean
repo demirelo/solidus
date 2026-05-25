@@ -1,0 +1,1463 @@
+import EvmCompiler.Locals.SourceSemantics
+import EvmCompiler.Expressions.Compiler
+
+namespace EvmCompiler
+namespace Locals
+
+mutual
+  def Expr.usesCallCreate {results : Nat} : Expr results → Bool
+    | .lit _value => false
+    | .var _name => false
+    | .code code => code.usesCallCreate
+    | .prim op args => ExprSeq.usesCallCreate args || op.toPrimOp.isCallCreate
+
+  def ExprSeq.usesCallCreate {results : Nat} : ExprSeq results → Bool
+    | .nil => false
+    | .cons head tail => head.usesCallCreate || tail.usesCallCreate
+end
+
+mutual
+  def Block.usesCallCreate : Block → Bool
+    | ⟨stmts⟩ => StmtList.usesCallCreate stmts
+
+  def Stmt.usesCallCreate : Stmt → Bool
+    | .expr expr => expr.usesCallCreate
+    | .exprs exprs => exprs.usesCallCreate
+    | .let_ _name value => value.usesCallCreate
+    | .assign _name value => value.usesCallCreate
+    | .assignTop _name => false
+    | .assignTopWithOffset _offset _name => false
+    | .block body => body.usesCallCreate
+    | .if_ cond body => cond.usesCallCreate || body.usesCallCreate
+    | .switch scrutinee cases defaultBody =>
+        scrutinee.usesCallCreate || CaseList.usesCallCreate cases ||
+          Default.usesCallCreate defaultBody
+    | .for_ init cond post body =>
+        init.usesCallCreate || cond.usesCallCreate || post.usesCallCreate ||
+          body.usesCallCreate
+    | .brk | .cont | .leave | .call _ | .terminal _ => false
+    | .terminalArgs _kind args => args.usesCallCreate
+
+  def StmtList.usesCallCreate : List Stmt → Bool
+    | [] => false
+    | stmt :: rest => stmt.usesCallCreate || StmtList.usesCallCreate rest
+
+  def CaseList.usesCallCreate : List (Word × Block) → Bool
+    | [] => false
+    | (_value, body) :: rest =>
+        body.usesCallCreate || CaseList.usesCallCreate rest
+
+  def Default.usesCallCreate : Option Block → Bool
+    | none => false
+    | some body => body.usesCallCreate
+end
+
+namespace Proc
+
+def usesCallCreate (proc : Proc) : Bool :=
+  proc.body.usesCallCreate
+
+end Proc
+
+namespace ProcList
+
+def usesCallCreate : List Proc → Bool
+  | [] => false
+  | proc :: rest => proc.usesCallCreate || usesCallCreate rest
+
+end ProcList
+
+namespace Program
+
+def usesCallCreate (program : Program) : Bool :=
+  ProcList.usesCallCreate program.procs || program.body.usesCallCreate
+
+end Program
+
+namespace Layout
+
+def lookupDepthFrom (name : Name) : Nat → Layout → Option Nat
+  | _depth, [] => none
+  | depth, key :: rest =>
+      if key = name then
+        some depth
+      else
+        lookupDepthFrom name (depth + 1) rest
+
+def lookupDepth? (name : Name) (layout : Layout) : Option Nat :=
+  lookupDepthFrom name 1 layout
+
+end Layout
+
+namespace StackOp
+
+def dup? : Nat → Option Structured.BasicOp
+  | 1 => some .dup1
+  | 2 => some .dup2
+  | 3 => some .dup3
+  | 4 => some .dup4
+  | 5 => some .dup5
+  | 6 => some .dup6
+  | 7 => some .dup7
+  | 8 => some .dup8
+  | 9 => some .dup9
+  | 10 => some .dup10
+  | 11 => some .dup11
+  | 12 => some .dup12
+  | 13 => some .dup13
+  | 14 => some .dup14
+  | 15 => some .dup15
+  | 16 => some .dup16
+  | _ => none
+
+def swap? : Nat → Option Structured.BasicOp
+  | 1 => some .swap1
+  | 2 => some .swap2
+  | 3 => some .swap3
+  | 4 => some .swap4
+  | 5 => some .swap5
+  | 6 => some .swap6
+  | 7 => some .swap7
+  | 8 => some .swap8
+  | 9 => some .swap9
+  | 10 => some .swap10
+  | 11 => some .swap11
+  | 12 => some .swap12
+  | 13 => some .swap13
+  | 14 => some .swap14
+  | 15 => some .swap15
+  | 16 => some .swap16
+  | _ => none
+
+end StackOp
+
+structure Ctx where
+  layout : Layout
+  breakDepth? : Option Nat
+  continueDepth? : Option Nat
+  leaveDepth? : Option Nat
+  leaveRetc : Nat := 0
+
+namespace Ctx
+
+def initial : Ctx where
+  layout := []
+  breakDepth? := none
+  continueDepth? := none
+  leaveDepth? := none
+
+def procEntry : Ctx :=
+  { initial with leaveDepth? := some 0 }
+
+def procEntryWithLayout (layout : Layout) : Ctx :=
+  { procEntry with layout := layout }
+
+def procEntryWithLayoutAndRetc (layout : Layout) (retc : Nat) : Ctx :=
+  { procEntryWithLayout layout with leaveRetc := retc }
+
+def withLayout (ctx : Ctx) (layout : Layout) : Ctx :=
+  { ctx with layout := layout }
+
+def withoutLoopControl (ctx : Ctx) : Ctx :=
+  { ctx with breakDepth? := none, continueDepth? := none }
+
+def withLoopControl (ctx : Ctx) (depth : Nat) : Ctx :=
+  { ctx with breakDepth? := some depth, continueDepth? := some depth }
+
+def cleanupTo? (ctx : Ctx) (targetDepth : Nat) : Option Structured.Code :=
+  if targetDepth ≤ ctx.layout.length then
+    some (List.replicate (ctx.layout.length - targetDepth)
+      (Structured.BasicInstr.op .pop))
+  else
+    none
+
+def swapRestoreUpTo? : Nat → Option Structured.Code
+  | 0 => some []
+  | n + 1 => do
+      let rest ← swapRestoreUpTo? n
+      let op ← StackOp.swap? (n + 1)
+      some (rest ++ [Structured.BasicInstr.op op])
+
+def cleanupOnePreserving? : Nat → Option Structured.Code
+  | 0 => some [Structured.BasicInstr.op .pop]
+  | temps + 1 => do
+      let op ← StackOp.swap? (temps + 1)
+      let restore ← swapRestoreUpTo? temps
+      some ([Structured.BasicInstr.op op, Structured.BasicInstr.op .pop] ++
+        restore)
+
+def cleanupManyPreserving? : Nat → Nat → Option Structured.Code
+  | 0, _temps => some []
+  | count + 1, temps => do
+      let head ← cleanupOnePreserving? temps
+      let tail ← cleanupManyPreserving? count temps
+      some (head ++ tail)
+
+def cleanupToPreserving? (ctx : Ctx) (preserve targetDepth : Nat) :
+    Option Structured.Code :=
+  if targetDepth ≤ ctx.layout.length then
+    cleanupManyPreserving? (ctx.layout.length - targetDepth) preserve
+  else
+    none
+
+def cleanupAll (ctx : Ctx) : Structured.Code :=
+  List.replicate ctx.layout.length (Structured.BasicInstr.op .pop)
+
+end Ctx
+
+def codeStmt (code : Structured.Code) : List Expressions.Stmt :=
+  [Expressions.Stmt.code code]
+
+def finishTo (final : Ctx) (targetDepth : Nat)
+    (stmts : List Expressions.Stmt) :
+    Option Expressions.Block := do
+  let cleanup ← final.cleanupTo? targetDepth
+  some { stmts := stmts ++ codeStmt cleanup }
+
+def finishToPreserving (final : Ctx) (preserve targetDepth : Nat)
+    (stmts : List Expressions.Stmt) :
+    Option Expressions.Block := do
+  let cleanup ← final.cleanupToPreserving? preserve targetDepth
+  some { stmts := stmts ++ codeStmt cleanup }
+
+def finishScoped (outer final : Ctx) (stmts : List Expressions.Stmt) :
+    Option Expressions.Block := do
+  let cleanup ← final.cleanupTo? outer.layout.length
+  some { stmts := stmts ++ codeStmt cleanup }
+
+set_option maxHeartbeats 800000 in
+mutual
+  def Expr.compileCode {results : Nat} (ctx : Ctx) (offset : Nat)
+      (expr : Expr results) : Option Structured.Code :=
+    match expr with
+    | .lit value =>
+        some [Structured.BasicInstr.push value]
+    | .var name => do
+        let depth ← Layout.lookupDepth? name ctx.layout
+        let op ← StackOp.dup? (offset + depth)
+        some [Structured.BasicInstr.op op]
+    | .code code =>
+        some code
+    | .prim op args => do
+        let code ← ExprSeq.compileCode ctx offset args
+        some (code ++ [Structured.BasicInstr.op op])
+
+  def ExprSeq.compileCode {results : Nat} (ctx : Ctx) (offset : Nat)
+      (exprs : ExprSeq results) : Option Structured.Code :=
+    match exprs with
+    | .nil => some []
+    | .cons (left := left) head tail => do
+        let headCode ← Expr.compileCode ctx offset head
+        let tailCode ← ExprSeq.compileCode ctx (offset + left) tail
+        some (headCode ++ tailCode)
+end
+
+namespace Expr
+
+def compile {results : Nat} (ctx : Ctx) (expr : Expr results) :
+    Option (Expressions.Expr results) := do
+  let code ← Expr.compileCode ctx 0 expr
+  some (Expressions.Expr.code code)
+
+end Expr
+
+set_option maxHeartbeats 800000 in
+mutual
+  def Block.compileOpen (ctx : Ctx) (block : Block) :
+      Option (List Expressions.Stmt × Ctx) :=
+    match block with
+    | ⟨[]⟩ => some ([], ctx)
+    | ⟨stmt :: rest⟩ => do
+        let (stmtCode, ctx') ← Stmt.compile ctx stmt
+        let (restCode, ctx'') ← Block.compileOpen ctx' { stmts := rest }
+        some (stmtCode ++ restCode, ctx'')
+
+  def Stmt.compile (ctx : Ctx) :
+      Stmt → Option (List Expressions.Stmt × Ctx)
+    | .expr expr => do
+        let code ← Expr.compileCode ctx 0 expr
+        some (codeStmt code, ctx)
+    | .exprs exprs => do
+        let code ← ExprSeq.compileCode ctx 0 exprs
+        some (codeStmt code, ctx)
+    | .let_ name value => do
+        let code ← Expr.compileCode ctx 0 value
+        some (codeStmt code, ctx.withLayout (name :: ctx.layout))
+    | .assign name value => do
+        let depth ← Layout.lookupDepth? name ctx.layout
+        let valueCode ← Expr.compileCode ctx 0 value
+        let swapOp ← StackOp.swap? depth
+        let code :=
+          valueCode ++
+            [Structured.BasicInstr.op swapOp, Structured.BasicInstr.op .pop]
+        some (codeStmt code, ctx)
+    | .assignTop name => do
+        let depth ← Layout.lookupDepth? name ctx.layout
+        let swapOp ← StackOp.swap? depth
+        let code := [Structured.BasicInstr.op swapOp, Structured.BasicInstr.op .pop]
+        some (codeStmt code, ctx)
+    | .assignTopWithOffset offset name => do
+        let depth ← Layout.lookupDepth? name ctx.layout
+        let swapOp ← StackOp.swap? (offset + depth)
+        let code := [Structured.BasicInstr.op swapOp, Structured.BasicInstr.op .pop]
+        some (codeStmt code, ctx)
+    | .block body => do
+        let (bodyCode, bodyCtx) ← Block.compileOpen ctx body
+        let lowerBlock ← finishScoped ctx bodyCtx bodyCode
+        some (lowerBlock.stmts, ctx)
+    | .if_ cond body => do
+        let condExpr ← Expr.compile ctx cond
+        let (bodyCode, bodyCtx) ← Block.compileOpen ctx body
+        let lowerBody ← finishScoped ctx bodyCtx bodyCode
+        some ([Expressions.Stmt.if_ condExpr lowerBody], ctx)
+    | .switch scrutinee cases defaultBody => do
+        let scrutineeExpr ← Expr.compile ctx scrutinee
+        let lowerCases ← CaseList.compile ctx cases
+        let lowerDefault ← Default.compile ctx defaultBody
+        some ([Expressions.Stmt.switch scrutineeExpr lowerCases lowerDefault], ctx)
+    | .for_ init cond post body => do
+        let initBase := ctx.withoutLoopControl
+        let (initCode, initCtx) ← Block.compileOpen initBase init
+        let condExpr ← Expr.compile initCtx cond
+        let postBase := initCtx.withoutLoopControl
+        let (postCode, postCtx) ← Block.compileOpen postBase post
+        let lowerPost ← finishScoped postBase postCtx postCode
+        let bodyBase := initCtx.withLoopControl initCtx.layout.length
+        let (bodyCode, bodyCtx) ← Block.compileOpen bodyBase body
+        let lowerBody ← finishScoped bodyBase bodyCtx bodyCode
+        let loopStmt :=
+          Expressions.Stmt.for_ { stmts := initCode } condExpr lowerPost lowerBody
+        let cleanup ← initCtx.cleanupTo? ctx.layout.length
+        some ([loopStmt] ++ codeStmt cleanup, ctx)
+    | .brk => do
+        let target ← ctx.breakDepth?
+        let cleanup ← ctx.cleanupTo? target
+        some (codeStmt cleanup ++ [Expressions.Stmt.brk], ctx)
+    | .cont => do
+        let target ← ctx.continueDepth?
+        let cleanup ← ctx.cleanupTo? target
+        some (codeStmt cleanup ++ [Expressions.Stmt.cont], ctx)
+    | .leave => do
+        let target ← ctx.leaveDepth?
+        let cleanup ← ctx.cleanupToPreserving? ctx.leaveRetc target
+        some (codeStmt cleanup ++ [Expressions.Stmt.leave], ctx)
+    | .call name =>
+        some ([Expressions.Stmt.call name], ctx)
+    | .terminal kind =>
+        some (codeStmt ctx.cleanupAll ++ [Expressions.Stmt.terminal kind], ctx)
+    | .terminalArgs kind args => do
+        let code ← ExprSeq.compileCode ctx 0 args
+        some (codeStmt code ++ [Expressions.Stmt.terminal kind], ctx)
+
+  def CaseList.compile (ctx : Ctx) :
+      List (Word × Block) → Option (List (Word × Expressions.Block))
+    | [] => some []
+    | (value, body) :: rest => do
+        let (bodyCode, bodyCtx) ← Block.compileOpen ctx body
+        let lowerBody ← finishScoped ctx bodyCtx bodyCode
+        let lowerRest ← CaseList.compile ctx rest
+        some ((value, lowerBody) :: lowerRest)
+
+  def Default.compile (ctx : Ctx) :
+      Option Block → Option (Option Expressions.Block)
+    | none => some none
+    | some body => do
+        let (bodyCode, bodyCtx) ← Block.compileOpen ctx body
+        let lowerBody ← finishScoped ctx bodyCtx bodyCode
+        some (some lowerBody)
+end
+
+namespace Block
+
+def compileToPreserving (ctx : Ctx) (preserve targetDepth : Nat)
+    (block : Block) : Option Expressions.Block := do
+  let (code, finalCtx) ← Block.compileOpen ctx block
+  finishToPreserving finalCtx preserve targetDepth code
+
+def compileTo (ctx : Ctx) (targetDepth : Nat)
+    (block : Block) : Option Expressions.Block := do
+  compileToPreserving ctx 0 targetDepth block
+
+def compile (ctx : Ctx) (block : Block) : Option Expressions.Block := do
+  let (code, finalCtx) ← Block.compileOpen ctx block
+  finishScoped ctx finalCtx code
+
+end Block
+
+namespace Proc
+
+def toExpressions? (proc : Proc) : Option Expressions.Proc := do
+  let body ←
+    Block.compileToPreserving
+      (Ctx.procEntryWithLayoutAndRetc proc.entryLayout proc.retc)
+      proc.retc 0 proc.body
+  some { name := proc.name, argc := proc.argc, retc := proc.retc, body := body }
+
+end Proc
+
+namespace ProcList
+
+def toExpressions? : List Proc → Option (List Expressions.Proc)
+  | [] => some []
+  | proc :: rest => do
+      let lowerProc ← proc.toExpressions?
+      let lowerRest ← toExpressions? rest
+      some (lowerProc :: lowerRest)
+
+end ProcList
+
+namespace Program
+
+def toExpressions? (program : Program) : Option Expressions.Program := do
+  let procs ← ProcList.toExpressions? program.procs
+  let body ← Block.compile Ctx.initial program.body
+  some { procs := procs, body := body }
+
+def compile? (program : Program) :
+    Option Assembly.TargetProgram := do
+  let lower ← toExpressions? program
+  lower.compile?
+
+def Accepted (program : Program) : Prop :=
+  ∃ lower : Expressions.Program, toExpressions? program = some lower ∧
+    lower.Accepted
+
+def SourceAccepted (program : Program) : Prop :=
+  program.WF ∧ Source.Program.SourceWF program
+
+end Program
+
+namespace CompilerFacts
+
+theorem StackOp.dup?_not_callCreate :
+    ∀ (depth : Nat) {op : Structured.BasicOp},
+      StackOp.dup? depth = some op → op.toPrimOp.isCallCreate = false
+  | 0, _op, h => by simp [StackOp.dup?] at h
+  | 1, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 2, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 3, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 4, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 5, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 6, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 7, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 8, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 9, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 10, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 11, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 12, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 13, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 14, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 15, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | 16, _op, h => by simp [StackOp.dup?] at h; cases h; rfl
+  | n + 17, _op, h => by simp [StackOp.dup?] at h
+
+theorem StackOp.swap?_not_callCreate :
+    ∀ (depth : Nat) {op : Structured.BasicOp},
+      StackOp.swap? depth = some op → op.toPrimOp.isCallCreate = false
+  | 0, _op, h => by simp [StackOp.swap?] at h
+  | 1, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 2, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 3, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 4, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 5, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 6, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 7, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 8, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 9, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 10, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 11, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 12, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 13, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 14, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 15, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | 16, _op, h => by simp [StackOp.swap?] at h; cases h; rfl
+  | n + 17, _op, h => by simp [StackOp.swap?] at h
+
+theorem Structured.Code.all_false_of_usesCallCreate_false
+    {code : Structured.Code}
+    (hCode : code.usesCallCreate = false) :
+    ∀ instr ∈ code, instr.usesCallCreate = false := by
+  simpa [Structured.Code.usesCallCreate] using hCode
+
+theorem Structured.Code.usesCallCreate_append_eq_false
+    {left right : Structured.Code}
+    (hLeft : Structured.Code.usesCallCreate left = false)
+    (hRight : Structured.Code.usesCallCreate right = false) :
+    Structured.Code.usesCallCreate (left ++ right) = false := by
+  simp [Structured.Code.usesCallCreate] at hLeft hRight ⊢
+  exact ⟨hLeft, hRight⟩
+
+theorem Structured.Code.swapPop_noCallCreate {op : Structured.BasicOp}
+    (hOp : op.toPrimOp.isCallCreate = false) :
+    Structured.Code.usesCallCreate
+      ([Structured.BasicInstr.op op, Structured.BasicInstr.op .pop] :
+        Structured.Code) = false := by
+  simp [Structured.Code.usesCallCreate, Structured.BasicInstr.usesCallCreate,
+    Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate]
+  exact hOp
+
+theorem Ctx.cleanupTo?_noCallCreate {ctx : Ctx} {targetDepth : Nat}
+    {code : Structured.Code}
+    (hCleanup : ctx.cleanupTo? targetDepth = some code) :
+    code.usesCallCreate = false := by
+  unfold Ctx.cleanupTo? at hCleanup
+  split at hCleanup
+  · cases hCleanup
+    simp [Structured.Code.usesCallCreate,
+      Structured.BasicInstr.usesCallCreate, Structured.BasicOp.toPrimOp,
+      Assembly.PrimOp.isCallCreate]
+  · simp at hCleanup
+
+theorem Ctx.swapRestoreUpTo?_noCallCreate :
+    ∀ {depth : Nat} {code : Structured.Code},
+      Ctx.swapRestoreUpTo? depth = some code →
+        code.usesCallCreate = false
+  | 0, code, hCode => by
+      simp [Ctx.swapRestoreUpTo?] at hCode
+      cases hCode
+      rfl
+  | depth + 1, code, hCode => by
+      simp [Ctx.swapRestoreUpTo?] at hCode
+      cases hRest : Ctx.swapRestoreUpTo? depth with
+      | none =>
+          simp [hRest] at hCode
+      | some rest =>
+          cases hOp : StackOp.swap? (depth + 1) with
+          | none =>
+              simp [hRest, hOp] at hCode
+          | some op =>
+              simp [hRest, hOp] at hCode
+              cases hCode
+              have hRestNo :=
+                Ctx.swapRestoreUpTo?_noCallCreate (depth := depth)
+                  (code := rest) hRest
+              have hOpNo := StackOp.swap?_not_callCreate (depth + 1) hOp
+              have hRestAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hRestNo
+              simp [Structured.Code.usesCallCreate,
+                Structured.BasicInstr.usesCallCreate, hRestNo, hOpNo]
+              exact hRestAll
+
+theorem Ctx.cleanupOnePreserving?_noCallCreate {temps : Nat}
+    {code : Structured.Code}
+    (hCleanup : Ctx.cleanupOnePreserving? temps = some code) :
+    code.usesCallCreate = false := by
+  cases temps with
+  | zero =>
+      simp [Ctx.cleanupOnePreserving?] at hCleanup
+      cases hCleanup
+      rfl
+  | succ temps =>
+      simp [Ctx.cleanupOnePreserving?] at hCleanup
+      cases hOp : StackOp.swap? (temps + 1) with
+      | none =>
+          simp [hOp] at hCleanup
+      | some op =>
+          cases hRestore : Ctx.swapRestoreUpTo? temps with
+          | none =>
+              simp [hOp, hRestore] at hCleanup
+          | some restore =>
+              simp [hOp, hRestore] at hCleanup
+              cases hCleanup
+              have hOpNo := StackOp.swap?_not_callCreate (temps + 1) hOp
+              have hRestoreNo :=
+                Ctx.swapRestoreUpTo?_noCallCreate (depth := temps)
+                  (code := restore) hRestore
+              have hRestoreAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hRestoreNo
+              simp [Structured.Code.usesCallCreate,
+                Structured.BasicInstr.usesCallCreate,
+                Structured.BasicOp.toPrimOp, Assembly.PrimOp.isCallCreate,
+                hOpNo, hRestoreNo]
+              exact ⟨hOpNo, hRestoreAll⟩
+
+theorem Ctx.cleanupManyPreserving?_noCallCreate :
+    ∀ {count temps : Nat} {code : Structured.Code},
+      Ctx.cleanupManyPreserving? count temps = some code →
+        code.usesCallCreate = false
+  | 0, temps, code, hCode => by
+      simp [Ctx.cleanupManyPreserving?] at hCode
+      cases hCode
+      rfl
+  | count + 1, temps, code, hCode => by
+      simp [Ctx.cleanupManyPreserving?] at hCode
+      cases hHead : Ctx.cleanupOnePreserving? temps with
+      | none =>
+          simp [hHead] at hCode
+      | some head =>
+          cases hTail : Ctx.cleanupManyPreserving? count temps with
+          | none =>
+              simp [hHead, hTail] at hCode
+          | some tail =>
+              simp [hHead, hTail] at hCode
+              cases hCode
+              have hHeadNo := Ctx.cleanupOnePreserving?_noCallCreate hHead
+              have hTailNo :=
+                Ctx.cleanupManyPreserving?_noCallCreate
+                  (count := count) (temps := temps) (code := tail) hTail
+              have hHeadAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hHeadNo
+              have hTailAll :=
+                Structured.Code.all_false_of_usesCallCreate_false hTailNo
+              simp [Structured.Code.usesCallCreate, hHeadNo, hTailNo]
+              exact ⟨hHeadAll, hTailAll⟩
+
+theorem Ctx.cleanupToPreserving?_noCallCreate {ctx : Ctx}
+    {preserve targetDepth : Nat} {code : Structured.Code}
+    (hCleanup : ctx.cleanupToPreserving? preserve targetDepth = some code) :
+    code.usesCallCreate = false := by
+  unfold Ctx.cleanupToPreserving? at hCleanup
+  split at hCleanup
+  · exact Ctx.cleanupManyPreserving?_noCallCreate hCleanup
+  · simp at hCleanup
+
+theorem Ctx.cleanupAll_noCallCreate (ctx : Ctx) :
+    ctx.cleanupAll.usesCallCreate = false := by
+  simp [Ctx.cleanupAll, Structured.Code.usesCallCreate,
+    Structured.BasicInstr.usesCallCreate, Structured.BasicOp.toPrimOp,
+    Assembly.PrimOp.isCallCreate]
+
+theorem codeStmt_noCallCreate {code : Structured.Code}
+    (hCode : code.usesCallCreate = false) :
+    Expressions.StmtList.usesCallCreate (codeStmt code) = false := by
+  simp [codeStmt, Expressions.StmtList.usesCallCreate,
+    Expressions.Stmt.usesCallCreate, hCode]
+
+theorem Expressions.StmtList.usesCallCreate_append_eq_false
+    {left right : List Expressions.Stmt}
+    (hLeft : Expressions.StmtList.usesCallCreate left = false)
+    (hRight : Expressions.StmtList.usesCallCreate right = false) :
+    Expressions.StmtList.usesCallCreate (left ++ right) = false := by
+  induction left with
+  | nil =>
+      simpa using hRight
+  | cons head tail ih =>
+      have hParts :
+          head.usesCallCreate = false ∧
+            Expressions.StmtList.usesCallCreate tail = false := by
+        simpa [Expressions.StmtList.usesCallCreate] using hLeft
+      simp [Expressions.StmtList.usesCallCreate, hParts.1,
+        ih hParts.2]
+
+theorem Expressions.StmtList.cons_noCallCreate {stmt : Expressions.Stmt}
+    {rest : List Expressions.Stmt}
+    (hStmt : stmt.usesCallCreate = false)
+    (hRest : Expressions.StmtList.usesCallCreate rest = false) :
+    Expressions.StmtList.usesCallCreate (stmt :: rest) = false := by
+  simp [Expressions.StmtList.usesCallCreate, hStmt, hRest]
+
+theorem finishTo_noCallCreate {final : Ctx} {targetDepth : Nat}
+    {stmts : List Expressions.Stmt} {block : Expressions.Block}
+    (hStmts : Expressions.StmtList.usesCallCreate stmts = false)
+    (hFinish : finishTo final targetDepth stmts = some block) :
+    block.usesCallCreate = false := by
+  unfold finishTo at hFinish
+  cases hCleanup : final.cleanupTo? targetDepth with
+  | none =>
+      simp [hCleanup] at hFinish
+  | some cleanup =>
+      simp [hCleanup] at hFinish
+      cases hFinish
+      have hCleanupNo := Ctx.cleanupTo?_noCallCreate hCleanup
+      have hCleanupStmtNo := codeStmt_noCallCreate hCleanupNo
+      exact Expressions.StmtList.usesCallCreate_append_eq_false
+        hStmts hCleanupStmtNo
+
+theorem finishToPreserving_noCallCreate {final : Ctx}
+    {preserve targetDepth : Nat} {stmts : List Expressions.Stmt}
+    {block : Expressions.Block}
+    (hStmts : Expressions.StmtList.usesCallCreate stmts = false)
+    (hFinish :
+      finishToPreserving final preserve targetDepth stmts = some block) :
+    block.usesCallCreate = false := by
+  unfold finishToPreserving at hFinish
+  cases hCleanup : final.cleanupToPreserving? preserve targetDepth with
+  | none =>
+      simp [hCleanup] at hFinish
+  | some cleanup =>
+      simp [hCleanup] at hFinish
+      cases hFinish
+      have hCleanupNo := Ctx.cleanupToPreserving?_noCallCreate hCleanup
+      have hCleanupStmtNo := codeStmt_noCallCreate hCleanupNo
+      exact Expressions.StmtList.usesCallCreate_append_eq_false
+        hStmts hCleanupStmtNo
+
+theorem finishScoped_noCallCreate {outer final : Ctx}
+    {stmts : List Expressions.Stmt} {block : Expressions.Block}
+    (hStmts : Expressions.StmtList.usesCallCreate stmts = false)
+    (hFinish : finishScoped outer final stmts = some block) :
+    block.usesCallCreate = false := by
+  unfold finishScoped at hFinish
+  exact finishTo_noCallCreate (final := final)
+    (targetDepth := outer.layout.length) hStmts hFinish
+
+set_option linter.unusedSimpArgs false in
+mutual
+  theorem Expr.compileCode_noCallCreate {results : Nat}
+      (ctx : Ctx) (offset : Nat) (expr : Expr results)
+      {code : Structured.Code}
+      (hExpr : expr.usesCallCreate = false)
+      (hCompile : Expr.compileCode ctx offset expr = some code) :
+      code.usesCallCreate = false := by
+    cases expr with
+    | lit value =>
+        simp [Expr.compileCode] at hCompile
+        cases hCompile
+        try subst stmts
+        simp [Structured.Code.usesCallCreate,
+          Structured.BasicInstr.usesCallCreate]
+    | var name =>
+        simp [Expr.compileCode] at hCompile
+        cases hDepth : Layout.lookupDepth? name ctx.layout with
+        | none =>
+            simp [hDepth] at hCompile
+        | some depth =>
+            cases hOp : StackOp.dup? (offset + depth) with
+            | none =>
+                simp [hDepth, hOp] at hCompile
+            | some op =>
+                simp [hDepth, hOp] at hCompile
+                cases hCompile
+                try subst stmts
+                have hOpNo := StackOp.dup?_not_callCreate (offset + depth) hOp
+                simp [Structured.Code.usesCallCreate,
+                  Structured.BasicInstr.usesCallCreate, hOpNo]
+    | code raw =>
+        simp [Expr.compileCode] at hCompile
+        cases hCompile
+        try subst stmts
+        simpa [Expr.usesCallCreate] using hExpr
+    | prim op args =>
+        have hParts :
+            args.usesCallCreate = false ∧ op.toPrimOp.isCallCreate = false := by
+          simpa [Expr.usesCallCreate] using hExpr
+        simp [Expr.compileCode] at hCompile
+        cases hArgs : ExprSeq.compileCode ctx offset args with
+        | none =>
+            simp [hArgs] at hCompile
+        | some argsCode =>
+            simp [hArgs] at hCompile
+            cases hCompile
+            try subst stmts
+            have hArgsNo :=
+              ExprSeq.compileCode_noCallCreate ctx offset args hParts.1 hArgs
+            have hArgsAll :=
+              Structured.Code.all_false_of_usesCallCreate_false hArgsNo
+            simp [Structured.Code.usesCallCreate,
+              Structured.BasicInstr.usesCallCreate, hParts.2, hArgsNo]
+            exact hArgsAll
+
+  theorem ExprSeq.compileCode_noCallCreate {results : Nat}
+      (ctx : Ctx) (offset : Nat) (exprs : ExprSeq results)
+      {code : Structured.Code}
+      (hExprs : exprs.usesCallCreate = false)
+      (hCompile : ExprSeq.compileCode ctx offset exprs = some code) :
+      code.usesCallCreate = false := by
+    cases exprs with
+    | nil =>
+        simp [ExprSeq.compileCode] at hCompile
+        cases hCompile
+        try subst stmts
+        rfl
+    | cons head tail =>
+        rename_i left right
+        have hParts :
+            head.usesCallCreate = false ∧ tail.usesCallCreate = false := by
+          simpa [ExprSeq.usesCallCreate] using hExprs
+        simp [ExprSeq.compileCode] at hCompile
+        cases hHead : Expr.compileCode ctx offset head with
+        | none =>
+            simp [hHead] at hCompile
+        | some headCode =>
+            cases hTail : ExprSeq.compileCode ctx (offset + left) tail with
+            | none =>
+                simp [hHead, hTail] at hCompile
+            | some tailCode =>
+                simp [hHead, hTail] at hCompile
+                cases hCompile
+                try subst stmts
+                have hHeadNo :=
+                  Expr.compileCode_noCallCreate ctx offset head hParts.1 hHead
+                have hTailNo :=
+                  ExprSeq.compileCode_noCallCreate ctx (offset + left) tail
+                    hParts.2 hTail
+                have hHeadAll :=
+                  Structured.Code.all_false_of_usesCallCreate_false hHeadNo
+                have hTailAll :=
+                  Structured.Code.all_false_of_usesCallCreate_false hTailNo
+                simp [Structured.Code.usesCallCreate, hHeadNo, hTailNo]
+                exact ⟨hHeadAll, hTailAll⟩
+end
+
+theorem Expr.compile_noCallCreate {results : Nat} (ctx : Ctx)
+    (expr : Expr results) {lower : Expressions.Expr results}
+    (hExpr : expr.usesCallCreate = false)
+    (hCompile : Expr.compile ctx expr = some lower) :
+    lower.usesCallCreate = false := by
+  unfold Expr.compile at hCompile
+  cases hCode : Expr.compileCode ctx 0 expr with
+  | none =>
+      simp [hCode] at hCompile
+  | some code =>
+      simp [hCode] at hCompile
+      cases hCompile
+      try subst stmts
+      have hCodeNo :=
+        Expr.compileCode_noCallCreate ctx 0 expr hExpr hCode
+      simpa [Expressions.Expr.usesCallCreate] using hCodeNo
+
+set_option linter.unusedSimpArgs false in
+mutual
+  theorem Block.compileOpen_noCallCreate (ctx : Ctx) (block : Block)
+      {stmts : List Expressions.Stmt} {final : Ctx}
+      (hBlock : block.usesCallCreate = false)
+      (hCompile : Block.compileOpen ctx block = some (stmts, final)) :
+      Expressions.StmtList.usesCallCreate stmts = false := by
+    cases block with
+    | mk list =>
+        cases list with
+        | nil =>
+            simp [Block.compileOpen] at hCompile
+            cases hCompile
+            try subst stmts
+            rfl
+        | cons stmt rest =>
+            have hParts :
+                stmt.usesCallCreate = false ∧
+                  StmtList.usesCallCreate rest = false := by
+              simpa [Block.usesCallCreate, StmtList.usesCallCreate] using
+                hBlock
+            simp [Block.compileOpen] at hCompile
+            cases hStmt : Stmt.compile ctx stmt with
+            | none =>
+                simp [hStmt] at hCompile
+            | some stmtOut =>
+                rcases stmtOut with ⟨stmtCode, ctx'⟩
+                cases hRest :
+                    Block.compileOpen ctx' { stmts := rest } with
+                | none =>
+                    simp [hStmt, hRest] at hCompile
+                | some restOut =>
+                    rcases restOut with ⟨restCode, ctx''⟩
+                    simp [hStmt, hRest] at hCompile
+                    cases hCompile
+                    try subst stmts
+                    have hStmtNo :=
+                      Stmt.compile_noCallCreate ctx stmt hParts.1 hStmt
+                    have hRestNo :=
+                      Block.compileOpen_noCallCreate ctx' { stmts := rest }
+                        hParts.2 hRest
+                    exact
+                      Expressions.StmtList.usesCallCreate_append_eq_false
+                        hStmtNo hRestNo
+  termination_by sizeOf block
+  decreasing_by
+    all_goals subst_vars
+    all_goals simp [Block.mk.sizeOf_spec, Prod.mk.sizeOf_spec,
+      List.cons.sizeOf_spec]
+    all_goals omega
+
+  theorem Stmt.compile_noCallCreate (ctx : Ctx) (stmt : Stmt)
+      {stmts : List Expressions.Stmt} {final : Ctx}
+      (hStmt : stmt.usesCallCreate = false)
+      (hCompile : Stmt.compile ctx stmt = some (stmts, final)) :
+      Expressions.StmtList.usesCallCreate stmts = false := by
+    cases stmt with
+    | expr expr =>
+        simp [Stmt.compile] at hCompile
+        cases hCode : Expr.compileCode ctx 0 expr with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            try subst stmts
+            exact codeStmt_noCallCreate
+              (Expr.compileCode_noCallCreate ctx 0 expr
+                (by simpa [Stmt.usesCallCreate] using hStmt) hCode)
+    | exprs exprs =>
+        simp [Stmt.compile] at hCompile
+        cases hCode : ExprSeq.compileCode ctx 0 exprs with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            try subst stmts
+            exact codeStmt_noCallCreate
+              (ExprSeq.compileCode_noCallCreate ctx 0 exprs
+                (by simpa [Stmt.usesCallCreate] using hStmt) hCode)
+    | let_ name value =>
+        simp [Stmt.compile] at hCompile
+        cases hCode : Expr.compileCode ctx 0 value with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            try subst stmts
+            exact codeStmt_noCallCreate
+              (Expr.compileCode_noCallCreate ctx 0 value
+                (by simpa [Stmt.usesCallCreate] using hStmt) hCode)
+    | assign name value =>
+        have hValue : value.usesCallCreate = false := by
+          simpa [Stmt.usesCallCreate] using hStmt
+        simp [Stmt.compile] at hCompile
+        cases hDepth : Layout.lookupDepth? name ctx.layout with
+        | none =>
+            simp [hDepth] at hCompile
+        | some depth =>
+            cases hValueCode : Expr.compileCode ctx 0 value with
+            | none =>
+                simp [hDepth, hValueCode] at hCompile
+            | some valueCode =>
+                cases hSwap : StackOp.swap? depth with
+                | none =>
+                    simp [hDepth, hValueCode, hSwap] at hCompile
+                | some swapOp =>
+                    simp [hDepth, hValueCode, hSwap] at hCompile
+                    cases hCompile
+                    try subst stmts
+                    have hValueNo :=
+                      Expr.compileCode_noCallCreate ctx 0 value hValue hValueCode
+                    have hSwapNo := StackOp.swap?_not_callCreate depth hSwap
+                    have hTailNo :=
+                      Structured.Code.swapPop_noCallCreate hSwapNo
+                    exact codeStmt_noCallCreate
+                      (Structured.Code.usesCallCreate_append_eq_false
+                        hValueNo hTailNo)
+    | assignTop name =>
+        simp [Stmt.compile] at hCompile
+        cases hDepth : Layout.lookupDepth? name ctx.layout with
+        | none =>
+            simp [hDepth] at hCompile
+        | some depth =>
+            cases hSwap : StackOp.swap? depth with
+            | none =>
+                simp [hDepth, hSwap] at hCompile
+            | some swapOp =>
+                simp [hDepth, hSwap] at hCompile
+                cases hCompile
+                try subst stmts
+                exact codeStmt_noCallCreate
+                  (Structured.Code.swapPop_noCallCreate
+                    (StackOp.swap?_not_callCreate depth hSwap))
+    | assignTopWithOffset offset name =>
+        simp [Stmt.compile] at hCompile
+        cases hDepth : Layout.lookupDepth? name ctx.layout with
+        | none =>
+            simp [hDepth] at hCompile
+        | some depth =>
+            cases hSwap : StackOp.swap? (offset + depth) with
+            | none =>
+                simp [hDepth, hSwap] at hCompile
+            | some swapOp =>
+                simp [hDepth, hSwap] at hCompile
+                cases hCompile
+                try subst stmts
+                exact codeStmt_noCallCreate
+                  (Structured.Code.swapPop_noCallCreate
+                    (StackOp.swap?_not_callCreate (offset + depth) hSwap))
+    | block body =>
+        have hBody : body.usesCallCreate = false := by
+          simpa [Stmt.usesCallCreate] using hStmt
+        simp [Stmt.compile] at hCompile
+        cases hBodyCompile : Block.compileOpen ctx body with
+        | none =>
+            simp [hBodyCompile] at hCompile
+        | some bodyOut =>
+            rcases bodyOut with ⟨bodyCode, bodyCtx⟩
+            cases hFinish : finishScoped ctx bodyCtx bodyCode with
+            | none =>
+                simp [hBodyCompile, hFinish] at hCompile
+            | some lowerBlock =>
+                simp [hBodyCompile, hFinish] at hCompile
+                cases hCompile
+                try subst stmts
+                have hBodyCodeNo :=
+                  Block.compileOpen_noCallCreate ctx body hBody hBodyCompile
+                have hLowerBlockNo :=
+                  finishScoped_noCallCreate hBodyCodeNo hFinish
+                rcases lowerBlock with ⟨lowerStmts⟩
+                exact hLowerBlockNo
+    | if_ cond body =>
+        have hParts :
+            cond.usesCallCreate = false ∧ body.usesCallCreate = false := by
+          simpa [Stmt.usesCallCreate] using hStmt
+        simp [Stmt.compile] at hCompile
+        cases hCond : Expr.compile ctx cond with
+        | none =>
+            simp [hCond] at hCompile
+        | some condExpr =>
+            cases hBodyCompile : Block.compileOpen ctx body with
+            | none =>
+                simp [hCond, hBodyCompile] at hCompile
+            | some bodyOut =>
+                rcases bodyOut with ⟨bodyCode, bodyCtx⟩
+                cases hFinish : finishScoped ctx bodyCtx bodyCode with
+                | none =>
+                    simp [hCond, hBodyCompile, hFinish] at hCompile
+                | some lowerBody =>
+                    simp [hCond, hBodyCompile, hFinish] at hCompile
+                    cases hCompile
+                    try subst stmts
+                    have hCondNo :=
+                      Expr.compile_noCallCreate ctx cond hParts.1 hCond
+                    have hBodyCodeNo :=
+                      Block.compileOpen_noCallCreate ctx body hParts.2
+                        hBodyCompile
+                    have hLowerBodyNo :=
+                      finishScoped_noCallCreate hBodyCodeNo hFinish
+                    simp [Expressions.StmtList.usesCallCreate,
+                      Expressions.Stmt.usesCallCreate, hCondNo, hLowerBodyNo]
+    | switch scrutinee cases defaultBody =>
+        have hParts :
+            scrutinee.usesCallCreate = false ∧
+              CaseList.usesCallCreate cases = false ∧
+                Default.usesCallCreate defaultBody = false := by
+          simpa [Stmt.usesCallCreate, Bool.or_assoc] using hStmt
+        simp [Stmt.compile] at hCompile
+        cases hScrutinee : Expr.compile ctx scrutinee with
+        | none =>
+            simp [hScrutinee] at hCompile
+        | some scrutineeExpr =>
+            cases hCases : CaseList.compile ctx cases with
+            | none =>
+                simp [hScrutinee, hCases] at hCompile
+            | some lowerCases =>
+                cases hDefault : Default.compile ctx defaultBody with
+                | none =>
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                | some lowerDefault =>
+                    simp [hScrutinee, hCases, hDefault] at hCompile
+                    cases hCompile
+                    try subst stmts
+                    have hScrutineeNo :=
+                      Expr.compile_noCallCreate ctx scrutinee hParts.1
+                        hScrutinee
+                    have hCasesNo :=
+                      CaseList.compile_noCallCreate ctx cases hParts.2.1
+                        hCases
+                    have hDefaultNo :=
+                      Default.compile_noCallCreate ctx defaultBody hParts.2.2
+                        hDefault
+                    simp [Expressions.StmtList.usesCallCreate,
+                      Expressions.Stmt.usesCallCreate, hScrutineeNo,
+                      hCasesNo, hDefaultNo]
+    | for_ init cond post body =>
+        have hParts :
+            init.usesCallCreate = false ∧ cond.usesCallCreate = false ∧
+              post.usesCallCreate = false ∧ body.usesCallCreate = false := by
+          simpa [Stmt.usesCallCreate, Bool.or_assoc] using hStmt
+        simp [Stmt.compile] at hCompile
+        let initBase := ctx.withoutLoopControl
+        cases hInit : Block.compileOpen initBase init with
+        | none =>
+            simp [initBase, hInit] at hCompile
+        | some initOut =>
+            rcases initOut with ⟨initCode, initCtx⟩
+            cases hCond : Expr.compile initCtx cond with
+            | none =>
+                simp [initBase, hInit, hCond] at hCompile
+            | some condExpr =>
+                let postBase := initCtx.withoutLoopControl
+                cases hPost : Block.compileOpen postBase post with
+                | none =>
+                    simp [initBase, postBase, hInit, hCond, hPost] at hCompile
+                | some postOut =>
+                    rcases postOut with ⟨postCode, postCtx⟩
+                    cases hLowerPost : finishScoped postBase postCtx postCode with
+                    | none =>
+                        simp [initBase, postBase, hInit, hCond, hPost,
+                          hLowerPost] at hCompile
+                    | some lowerPost =>
+                        let bodyBase := initCtx.withLoopControl initCtx.layout.length
+                        cases hBody : Block.compileOpen bodyBase body with
+                        | none =>
+                            simp [initBase, postBase, bodyBase, hInit, hCond,
+                              hPost, hLowerPost, hBody] at hCompile
+                        | some bodyOut =>
+                            rcases bodyOut with ⟨bodyCode, bodyCtx⟩
+                            cases hLowerBody :
+                                finishScoped bodyBase bodyCtx bodyCode with
+                            | none =>
+                                simp [initBase, postBase, bodyBase, hInit,
+                                  hCond, hPost, hLowerPost, hBody,
+                                  hLowerBody] at hCompile
+                            | some lowerBody =>
+                                cases hCleanup :
+                                    initCtx.cleanupTo? ctx.layout.length with
+                                | none =>
+                                    simp [initBase, postBase, bodyBase, hInit,
+                                      hCond, hPost, hLowerPost, hBody,
+                                      hLowerBody, hCleanup] at hCompile
+                                | some cleanup =>
+                                    simp [initBase, postBase, bodyBase, hInit,
+                                      hCond, hPost, hLowerPost, hBody,
+                                      hLowerBody, hCleanup] at hCompile
+                                    cases hCompile
+                                    try subst stmts
+                                    have hInitNo :=
+                                      Block.compileOpen_noCallCreate initBase
+                                        init hParts.1 hInit
+                                    have hCondNo :=
+                                      Expr.compile_noCallCreate initCtx cond
+                                        hParts.2.1 hCond
+                                    have hPostNo :=
+                                      Block.compileOpen_noCallCreate postBase
+                                        post hParts.2.2.1 hPost
+                                    have hLowerPostNo :=
+                                      finishScoped_noCallCreate hPostNo
+                                        hLowerPost
+                                    have hBodyNo :=
+                                      Block.compileOpen_noCallCreate bodyBase
+                                        body hParts.2.2.2 hBody
+                                    have hLowerBodyNo :=
+                                      finishScoped_noCallCreate hBodyNo
+                                        hLowerBody
+                                    have hCleanupNo :=
+                                      Ctx.cleanupTo?_noCallCreate hCleanup
+                                    have hCleanupStmtNo :=
+                                      codeStmt_noCallCreate hCleanupNo
+                                    have hLoopNo :
+                                        (Expressions.Stmt.for_
+                                          { stmts := initCode } condExpr
+                                          lowerPost lowerBody).usesCallCreate =
+                                          false := by
+                                      simp [Expressions.Stmt.usesCallCreate,
+                                        Expressions.Block.usesCallCreate,
+                                        hInitNo, hCondNo, hLowerPostNo,
+                                        hLowerBodyNo]
+                                    exact
+                                      Expressions.StmtList.usesCallCreate_append_eq_false
+                                        (left := [Expressions.Stmt.for_
+                                          { stmts := initCode } condExpr
+                                          lowerPost lowerBody])
+                                        (right := codeStmt cleanup)
+                                        (by
+                                          simpa [Expressions.StmtList.usesCallCreate,
+                                            hLoopNo])
+                                        hCleanupStmtNo
+    | brk =>
+        simp [Stmt.compile] at hCompile
+        cases hTarget : ctx.breakDepth? with
+        | none =>
+            simp [hTarget] at hCompile
+        | some target =>
+            cases hCleanup : ctx.cleanupTo? target with
+            | none =>
+                simp [hTarget, hCleanup] at hCompile
+            | some cleanup =>
+                simp [hTarget, hCleanup] at hCompile
+                cases hCompile
+                try subst stmts
+                exact
+                  Expressions.StmtList.usesCallCreate_append_eq_false
+                    (codeStmt_noCallCreate
+                      (Ctx.cleanupTo?_noCallCreate hCleanup))
+                    (by simp [Expressions.StmtList.usesCallCreate,
+                      Expressions.Stmt.usesCallCreate])
+    | cont =>
+        simp [Stmt.compile] at hCompile
+        cases hTarget : ctx.continueDepth? with
+        | none =>
+            simp [hTarget] at hCompile
+        | some target =>
+            cases hCleanup : ctx.cleanupTo? target with
+            | none =>
+                simp [hTarget, hCleanup] at hCompile
+            | some cleanup =>
+                simp [hTarget, hCleanup] at hCompile
+                cases hCompile
+                try subst stmts
+                exact
+                  Expressions.StmtList.usesCallCreate_append_eq_false
+                    (codeStmt_noCallCreate
+                      (Ctx.cleanupTo?_noCallCreate hCleanup))
+                    (by simp [Expressions.StmtList.usesCallCreate,
+                      Expressions.Stmt.usesCallCreate])
+    | leave =>
+        simp [Stmt.compile] at hCompile
+        cases hTarget : ctx.leaveDepth? with
+        | none =>
+            simp [hTarget] at hCompile
+        | some target =>
+            cases hCleanup :
+                ctx.cleanupToPreserving? ctx.leaveRetc target with
+            | none =>
+                simp [hTarget, hCleanup] at hCompile
+            | some cleanup =>
+                simp [hTarget, hCleanup] at hCompile
+                cases hCompile
+                try subst stmts
+                exact
+                  Expressions.StmtList.usesCallCreate_append_eq_false
+                    (codeStmt_noCallCreate
+                      (Ctx.cleanupToPreserving?_noCallCreate hCleanup))
+                    (by simp [Expressions.StmtList.usesCallCreate,
+                      Expressions.Stmt.usesCallCreate])
+    | call name =>
+        simp [Stmt.compile] at hCompile
+        cases hCompile
+        try subst stmts
+        simp [Expressions.StmtList.usesCallCreate,
+          Expressions.Stmt.usesCallCreate]
+    | terminal kind =>
+        simp [Stmt.compile] at hCompile
+        cases hCompile
+        try subst stmts
+        exact
+          Expressions.StmtList.usesCallCreate_append_eq_false
+            (codeStmt_noCallCreate (Ctx.cleanupAll_noCallCreate ctx))
+            (by simp [Expressions.StmtList.usesCallCreate,
+              Expressions.Stmt.usesCallCreate])
+    | terminalArgs kind args =>
+        have hArgs : args.usesCallCreate = false := by
+          simpa [Stmt.usesCallCreate] using hStmt
+        simp [Stmt.compile] at hCompile
+        cases hCode : ExprSeq.compileCode ctx 0 args with
+        | none =>
+            simp [hCode] at hCompile
+        | some code =>
+            simp [hCode] at hCompile
+            cases hCompile
+            try subst stmts
+            exact
+              Expressions.StmtList.usesCallCreate_append_eq_false
+                (codeStmt_noCallCreate
+                  (ExprSeq.compileCode_noCallCreate ctx 0 args hArgs hCode))
+                (by simp [Expressions.StmtList.usesCallCreate,
+                  Expressions.Stmt.usesCallCreate])
+  termination_by sizeOf stmt
+  decreasing_by
+    all_goals subst_vars
+    all_goals simp [Block.mk.sizeOf_spec, Prod.mk.sizeOf_spec,
+      List.cons.sizeOf_spec]
+    all_goals omega
+
+  theorem CaseList.compile_noCallCreate (ctx : Ctx)
+      (cases : List (Word × Block))
+      {lowerCases : List (Word × Expressions.Block)}
+      (hCases : CaseList.usesCallCreate cases = false)
+      (hCompile : CaseList.compile ctx cases = some lowerCases) :
+      Expressions.CaseList.usesCallCreate lowerCases = false := by
+    cases cases with
+    | nil =>
+        simp [CaseList.compile] at hCompile
+        cases hCompile
+        try subst stmts
+        rfl
+    | cons head rest =>
+        cases head with
+        | mk value body =>
+            have hParts :
+                body.usesCallCreate = false ∧
+                  CaseList.usesCallCreate rest = false := by
+              simpa [CaseList.usesCallCreate] using hCases
+            simp [CaseList.compile] at hCompile
+            cases hBody : Block.compileOpen ctx body with
+            | none =>
+                simp [hBody] at hCompile
+            | some bodyOut =>
+                rcases bodyOut with ⟨bodyCode, bodyCtx⟩
+                cases hFinish : finishScoped ctx bodyCtx bodyCode with
+                | none =>
+                    simp [hBody, hFinish] at hCompile
+                | some lowerBody =>
+                    cases hRest : CaseList.compile ctx rest with
+                    | none =>
+                        simp [hBody, hFinish, hRest] at hCompile
+                    | some lowerRest =>
+                        simp [hBody, hFinish, hRest] at hCompile
+                        cases hCompile
+                        try subst stmts
+                        have hBodyCodeNo :=
+                          Block.compileOpen_noCallCreate ctx body hParts.1 hBody
+                        have hLowerBodyNo :=
+                          finishScoped_noCallCreate hBodyCodeNo hFinish
+                        have hRestNo :=
+                          CaseList.compile_noCallCreate ctx rest hParts.2 hRest
+                        simp [Expressions.CaseList.usesCallCreate,
+                          hLowerBodyNo, hRestNo]
+  termination_by sizeOf cases
+  decreasing_by
+    all_goals subst_vars
+    all_goals simp [Block.mk.sizeOf_spec, Prod.mk.sizeOf_spec,
+      List.cons.sizeOf_spec]
+    all_goals omega
+
+  theorem Default.compile_noCallCreate (ctx : Ctx)
+      (defaultBody : Option Block)
+      {lowerDefault : Option Expressions.Block}
+      (hDefault : Default.usesCallCreate defaultBody = false)
+      (hCompile : Default.compile ctx defaultBody = some lowerDefault) :
+      Expressions.Default.usesCallCreate lowerDefault = false := by
+    cases defaultBody with
+    | none =>
+        simp [Default.compile] at hCompile
+        cases hCompile
+        try subst stmts
+        rfl
+    | some body =>
+        have hBody : body.usesCallCreate = false := by
+          simpa [Default.usesCallCreate] using hDefault
+        simp [Default.compile] at hCompile
+        cases hBodyCompile : Block.compileOpen ctx body with
+        | none =>
+            simp [hBodyCompile] at hCompile
+        | some bodyOut =>
+            rcases bodyOut with ⟨bodyCode, bodyCtx⟩
+            cases hFinish : finishScoped ctx bodyCtx bodyCode with
+            | none =>
+                simp [hBodyCompile, hFinish] at hCompile
+            | some lowerBody =>
+                simp [hBodyCompile, hFinish] at hCompile
+                cases hCompile
+                try subst stmts
+                have hBodyCodeNo :=
+                  Block.compileOpen_noCallCreate ctx body hBody hBodyCompile
+                exact finishScoped_noCallCreate hBodyCodeNo hFinish
+  termination_by sizeOf defaultBody
+  decreasing_by
+    all_goals subst_vars
+    all_goals simp [Block.mk.sizeOf_spec, Prod.mk.sizeOf_spec,
+      List.cons.sizeOf_spec]
+    all_goals omega
+end
+
+theorem Block.compileToPreserving_noCallCreate (ctx : Ctx)
+    (preserve targetDepth : Nat) (block : Block)
+    {lower : Expressions.Block}
+    (hBlock : block.usesCallCreate = false)
+    (hCompile :
+      Block.compileToPreserving ctx preserve targetDepth block = some lower) :
+    lower.usesCallCreate = false := by
+  unfold Block.compileToPreserving at hCompile
+  cases hOpen : Block.compileOpen ctx block with
+  | none =>
+      simp [hOpen] at hCompile
+  | some out =>
+      rcases out with ⟨stmts, final⟩
+      cases hFinish : finishToPreserving final preserve targetDepth stmts with
+      | none =>
+          simp [hOpen, hFinish] at hCompile
+      | some lowerBlock =>
+          simp [hOpen, hFinish] at hCompile
+          cases hCompile
+          have hStmtsNo :=
+            Block.compileOpen_noCallCreate ctx block hBlock hOpen
+          exact finishToPreserving_noCallCreate hStmtsNo hFinish
+
+theorem Block.compile_noCallCreate (ctx : Ctx) (block : Block)
+    {lower : Expressions.Block}
+    (hBlock : block.usesCallCreate = false)
+    (hCompile : Block.compile ctx block = some lower) :
+    lower.usesCallCreate = false := by
+  unfold Block.compile at hCompile
+  cases hOpen : Block.compileOpen ctx block with
+  | none =>
+      simp [hOpen] at hCompile
+  | some out =>
+      rcases out with ⟨stmts, final⟩
+      cases hFinish : finishScoped ctx final stmts with
+      | none =>
+          simp [hOpen, hFinish] at hCompile
+      | some lowerBlock =>
+          simp [hOpen, hFinish] at hCompile
+          cases hCompile
+          have hStmtsNo :=
+            Block.compileOpen_noCallCreate ctx block hBlock hOpen
+          exact finishScoped_noCallCreate hStmtsNo hFinish
+
+theorem Proc.toExpressions?_noCallCreate (proc : Proc)
+    {lower : Expressions.Proc}
+    (hProc : proc.usesCallCreate = false)
+    (hCompile : proc.toExpressions? = some lower) :
+    lower.usesCallCreate = false := by
+  unfold Proc.toExpressions? at hCompile
+  cases hBody :
+      Block.compileToPreserving
+        (Ctx.procEntryWithLayoutAndRetc proc.entryLayout proc.retc)
+        proc.retc 0 proc.body with
+  | none =>
+      simp [hBody] at hCompile
+  | some lowerBody =>
+      simp [hBody] at hCompile
+      cases hCompile
+      have hBodyNo :=
+        Block.compileToPreserving_noCallCreate
+          (Ctx.procEntryWithLayoutAndRetc proc.entryLayout proc.retc)
+          proc.retc 0 proc.body
+          (by simpa [Proc.usesCallCreate] using hProc) hBody
+      simpa [Expressions.Proc.usesCallCreate] using hBodyNo
+
+theorem ProcList.toExpressions?_noCallCreate :
+    ∀ {procs : List Proc} {lower : List Expressions.Proc},
+      ProcList.usesCallCreate procs = false →
+        ProcList.toExpressions? procs = some lower →
+          Expressions.ProcList.usesCallCreate lower = false
+  | [], lower, _hProcs, hCompile => by
+      simp [ProcList.toExpressions?] at hCompile
+      cases hCompile
+      rfl
+  | proc :: rest, lower, hProcs, hCompile => by
+      have hParts :
+          proc.usesCallCreate = false ∧
+            ProcList.usesCallCreate rest = false := by
+        simpa [ProcList.usesCallCreate] using hProcs
+      simp [ProcList.toExpressions?] at hCompile
+      cases hProc : proc.toExpressions? with
+      | none =>
+          simp [hProc] at hCompile
+      | some lowerProc =>
+          cases hRest : ProcList.toExpressions? rest with
+          | none =>
+              simp [hProc, hRest] at hCompile
+          | some lowerRest =>
+              simp [hProc, hRest] at hCompile
+              cases hCompile
+              have hProcNo :=
+                Proc.toExpressions?_noCallCreate proc hParts.1 hProc
+              have hRestNo :=
+                ProcList.toExpressions?_noCallCreate hParts.2 hRest
+              simp [Expressions.ProcList.usesCallCreate, hProcNo, hRestNo]
+
+theorem Program.toExpressions?_noCallCreate (program : Program)
+    {lower : Expressions.Program}
+    (hProgram : program.usesCallCreate = false)
+    (hCompile : program.toExpressions? = some lower) :
+    lower.usesCallCreate = false := by
+  have hParts :
+      ProcList.usesCallCreate program.procs = false ∧
+        program.body.usesCallCreate = false := by
+    simpa [Program.usesCallCreate] using hProgram
+  unfold Program.toExpressions? at hCompile
+  cases hProcs : ProcList.toExpressions? program.procs with
+  | none =>
+      simp [hProcs] at hCompile
+  | some lowerProcs =>
+      cases hBody : Block.compile Ctx.initial program.body with
+      | none =>
+          simp [hProcs, hBody] at hCompile
+      | some lowerBody =>
+          simp [hProcs, hBody] at hCompile
+          cases hCompile
+          have hProcsNo :=
+            ProcList.toExpressions?_noCallCreate hParts.1 hProcs
+          have hBodyNo :=
+            Block.compile_noCallCreate Ctx.initial program.body hParts.2
+              hBody
+          simp [Expressions.Program.usesCallCreate, hProcsNo, hBodyNo]
+
+theorem Program.compile_noCallCreate (program : Program)
+    {lower : Expressions.Program}
+    (hProgram : program.usesCallCreate = false)
+    (hLower : program.toExpressions? = some lower) :
+    Assembly.Program.usesCallCreate lower.compile = false := by
+  exact Expressions.CompilerFacts.Program.compile_noCallCreate lower
+    (Program.toExpressions?_noCallCreate program hProgram hLower)
+
+end CompilerFacts
+
+end Locals
+end EvmCompiler
