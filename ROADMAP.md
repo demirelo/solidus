@@ -71,7 +71,7 @@ Last updated: 2026-05-25 04:05 PDT.
        `Locals.Source.PrimitiveSemantics.structured`.
      - [x] Prove the canonical `RETURN` terminal step/existence lemmas.
      - [x] Prove the canonical `REVERT` terminal step/existence lemmas.
-     - [ ] Prove the canonical `SELFDESTRUCT` terminal step/existence lemmas.
+     - [x] Prove the canonical `SELFDESTRUCT` terminal step/existence lemmas.
    - [ ] Derive `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` from
      acceptedness/resource facts, or replace it with a smaller fundamental
      resource premise whose scope is exactly documented and exported.

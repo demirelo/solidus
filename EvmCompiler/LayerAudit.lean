@@ -536,6 +536,12 @@ abbrev localsSourcePrimitiveSemanticsStructuredTerminalRevertStep :=
 abbrev localsSourcePrimitiveSemanticsStructuredTerminalRevertStepExists :=
   @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_revert_step_exists
 
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalSelfdestructStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_selfdestruct_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalSelfdestructStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_selfdestruct_step_exists
+
 abbrev localsSourceLoweringExprAccessible :=
   @Locals.SourceLowering.Expr.Accessible
 

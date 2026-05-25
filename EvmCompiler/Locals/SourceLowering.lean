@@ -659,6 +659,110 @@ theorem structured_terminal_step_revert_of_stack
         EvmYul.EVM.State.replaceStackAndIncrPC]
       rfl
 
+open EvmYul
+
+def selfdestructShared (shared : EvmYul.SharedState .EVM)
+    (recipient : Word) : EvmYul.SharedState .EVM :=
+  let source := shared.executionEnv.codeOwner
+  let target : AccountAddress := AccountAddress.ofUInt256 recipient
+  if shared.createdAccounts.contains source then
+    let substate' : Substate :=
+      { shared.substate with
+        selfDestructSet := shared.substate.selfDestructSet.insert source
+        accessedAccounts := shared.substate.accessedAccounts.insert target }
+    let accountMap' :=
+      match shared.lookupAccount source with
+      | none =>
+          dbg_trace
+            "No 'self' found to be destructed; this should probably not be happening;"
+          shared.accountMap
+      | some sourceAccount =>
+          match shared.lookupAccount target with
+          | none =>
+              if sourceAccount.balance == ⟨0⟩ then
+                shared.accountMap
+              else
+                shared.accountMap.insert target
+                    { (default : Account .EVM) with
+                      balance := sourceAccount.balance }
+                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
+          | some targetAccount =>
+              if target = source then
+                shared.accountMap.insert target
+                    { targetAccount with balance := ⟨0⟩ }
+                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
+              else
+                shared.accountMap.insert target
+                    { targetAccount with
+                      balance := targetAccount.balance + sourceAccount.balance }
+                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
+    { shared with accountMap := accountMap', substate := substate' }
+  else
+    let substate' : Substate :=
+      { shared.substate with
+        accessedAccounts := shared.substate.accessedAccounts.insert target }
+    let accountMap' :=
+      match shared.lookupAccount source with
+      | none =>
+          dbg_trace
+            "No 'self' found to be destructed; this should probably not be happening;"
+          shared.accountMap
+      | some sourceAccount =>
+          match shared.lookupAccount target with
+          | none =>
+              if sourceAccount.balance == ⟨0⟩ then
+                shared.accountMap
+              else
+                shared.accountMap.insert target
+                    { (default : Account .EVM) with
+                      balance := sourceAccount.balance }
+                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
+          | some targetAccount =>
+              if target = source then
+                shared.accountMap
+              else
+                shared.accountMap.insert target
+                    { targetAccount with
+                      balance := targetAccount.balance + sourceAccount.balance }
+                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
+    { shared with accountMap := accountMap', substate := substate' }
+
+theorem structured_terminal_step_selfdestruct_of_stack
+    (state : EVMState) (recipient : Word) (tail : EvmYul.Stack Word)
+    (hStack : state.stack = recipient :: tail) :
+    Structured.Terminal.step .selfdestruct state =
+      .ok (({ state with
+        toSharedState := selfdestructShared state.toSharedState recipient
+      }).replaceStackAndIncrPC tail) := by
+  cases state with
+  | mk shared pc stack execLength =>
+      simp at hStack
+      subst stack
+      unfold Structured.Terminal.step Assembly.Target.stepInstr
+        Assembly.PrimOp.step
+      simp [Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM]
+      unfold EvmYul.step
+      unfold Id.run
+      simp [selfdestructShared, EvmYul.Stack.pop,
+        EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC]
+      split <;> rfl
+
+theorem structured_terminal_step_selfdestruct_nil
+    (state : EVMState) (hStack : state.stack = []) :
+    Structured.Terminal.step .selfdestruct state = .error .StackUnderflow := by
+  cases state with
+  | mk shared pc stack execLength =>
+      simp at hStack
+      subst stack
+      unfold Structured.Terminal.step Assembly.Target.stepInstr
+        Assembly.PrimOp.step
+      simp [Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM]
+      unfold EvmYul.step
+      unfold Id.run
+      simp [EvmYul.Stack.pop]
+
 theorem structured_terminal_stop_step
     {shared shared' : EvmYul.SharedState .EVM}
     {values : List Word} {evm evm' : EVMState}
@@ -905,6 +1009,97 @@ theorem structured_terminal_revert_step_exists
                   apply structured_terminal_step_revert_of_stack
                   rw [hStack, hValues]
                   simp)
+
+theorem structured_terminal_selfdestruct_step
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm evm' : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .selfdestruct shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack)
+    (hStep : Structured.Terminal.step .selfdestruct evm = .ok evm') :
+    evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      let iso : EVMState :=
+        { toSharedState := shared,
+          pc := EvmYul.UInt256.ofNat 0,
+          stack := values.reverse,
+          execLength := 0 }
+      have hIso :
+          Structured.Terminal.step .selfdestruct iso =
+            .error .StackUnderflow := by
+        apply structured_terminal_step_selfdestruct_nil
+        simp [iso, hValues]
+      simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
+  | cons recipient tail =>
+      let iso : EVMState :=
+        { toSharedState := shared,
+          pc := EvmYul.UInt256.ofNat 0,
+          stack := values.reverse,
+          execLength := 0 }
+      have hIso :
+          Structured.Terminal.step .selfdestruct iso =
+            .ok (({ iso with
+              toSharedState := selfdestructShared iso.toSharedState recipient
+            }).replaceStackAndIncrPC tail) := by
+        apply structured_terminal_step_selfdestruct_of_stack
+        simp [iso, hValues]
+      simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
+      have hTargetStack : evm.stack = recipient :: (tail ++ baseStack) := by
+        rw [hStack, hValues]
+        simp
+      have hTarget :=
+        structured_terminal_step_selfdestruct_of_stack evm recipient
+          (tail ++ baseStack) hTargetStack
+      rw [hTarget] at hStep
+      cases hStep
+      cases hEval
+      simp [hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+
+theorem structured_terminal_selfdestruct_step_exists
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .selfdestruct shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.Terminal.step .selfdestruct evm = .ok evm' ∧
+        evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      let iso : EVMState :=
+        { toSharedState := shared,
+          pc := EvmYul.UInt256.ofNat 0,
+          stack := values.reverse,
+          execLength := 0 }
+      have hIso :
+          Structured.Terminal.step .selfdestruct iso =
+            .error .StackUnderflow := by
+        apply structured_terminal_step_selfdestruct_nil
+        simp [iso, hValues]
+      simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
+  | cons recipient tail =>
+      let evm' : EVMState :=
+        ({ evm with
+          toSharedState := selfdestructShared evm.toSharedState recipient
+        }).replaceStackAndIncrPC (tail ++ baseStack)
+      refine ⟨evm', ?_, ?_⟩
+      · apply structured_terminal_step_selfdestruct_of_stack
+        rw [hStack, hValues]
+        simp
+      · exact
+          structured_terminal_selfdestruct_step
+            (baseStack := baseStack) hEval hShared hStack (by
+              apply structured_terminal_step_selfdestruct_of_stack
+              rw [hStack, hValues]
+              simp)
 
 end PrimitiveSemantics
 
