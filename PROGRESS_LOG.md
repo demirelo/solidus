@@ -3335,3 +3335,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 08:28:00 PDT - compaction resume - continuing the audit-concern goal; current checkpoint is the arity-aware checked `lower1?` primitive wrapper in `RecursiveBridgeSupport`, then exporting it through `LayerAudit`.
 
 - 2026-05-25 08:32:00 PDT - proof - added/exported the arity-aware checked `Expr.lower1?` primitive wrapper and supporting `toSeq?`/`toStackSeq?` length lemmas, so primitive expression lowering now derives source arity from checked compiler evidence; command `lake build EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
+
+- 2026-05-25 08:47:00 PDT - proof - added arity-aware one-result primitive expression-evaluation wrappers (`regularAt` and hidden-context/no-scope) and rewired the old strict wrappers through the checked arity lift; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.

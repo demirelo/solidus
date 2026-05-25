@@ -136,6 +136,8 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Add an arity-aware checked `Expr.lower1?` primitive-expression
        wrapper that derives source argument arity from successful
        `lowerBound1?` and `toStackSeq?` evidence.
+     - [x] Add arity-aware one-result primitive expression-evaluation
+       wrappers, keeping the old strict wrappers as compatibility shims.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

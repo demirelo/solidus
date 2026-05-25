@@ -28758,6 +28758,67 @@ The argument prelude theorem is source-order and source-facing; the local
 adapter converts the generated variable readback into the stack-order
 `ExprSeq` required by primitive evaluation.
 -/
+theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hScope : ctx.scope = layout)
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgListPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre argExprs)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) := by
+  have hStack :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq :=
+    sourceArgStackPreludeRegular_of_argListRegularAt_varMap_toStackSeq
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
+      (codeOverride := codeOverride) (pre := pre)
+      (lowerArgs := argExprs)
+      (results := Expressions.Structured.BasicOp.inputs op) (seq := seq)
+      hScope hArgs (Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs) hSeq
+  rcases
+      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (args := args) (codeOverride := codeOverride)
+        (freshState := freshState) (freshState' := freshState')
+        (pre := pre) (argExprs := argExprs) (seq := seq)
+        hBasic hLowerArgs hSeq hOutputs hStack.2 hPrim with
+    ⟨hLower, hValueSound⟩
+  exact
+    ⟨hLower,
+      ExprValuePreludeSound.to_evalOne_of_evalValues_single hValueSound
+        (fun hEval =>
+          evalValues_prim_call_single_of_eval_primCall_single
+            (sourceFuel := sourceFuel) (yulPrim := yulPrim) (args := args)
+            (codeOverride := codeOverride)
+            (fun hCall =>
+              safeBasicOneOutputPrimCall_ok_single hSafe hBasic hOutputs hCall)
+            hEval)⟩
+
 theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
@@ -28788,19 +28849,67 @@ theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt
         some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
       ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ
         (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) :=
+  lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_arity
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+    (op := op) (args := args) (codeOverride := codeOverride)
+    (freshState := freshState) (freshState' := freshState')
+    (pre := pre) (argExprs := argExprs) (seq := seq)
+    hScope hSafe hBasic hLowerArgs hSeq hOutputs hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt hPrim)
+
+/--
+Hidden-context variant of
+`lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt`.
+
+This is the primitive branch needed by recursive generated argument preludes:
+the visible Yul/source relation stays at `layout`, while the compiler context
+may contain hidden temporaries introduced by the surrounding argument-lowering
+code.
+-/
+theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgListPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre argExprs)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
         (Expr.cast hOutputs (.prim op seq)) := by
   have hStack :
-      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
         codeOverride pre seq :=
-    sourceArgStackPreludeRegular_of_argListRegularAt_varMap_toStackSeq
+    sourceArgStackPreludeRegularAt_of_argListRegularAt_varMap_toStackSeq
       (cfg := cfg) (layout := layout) (prim := prim) (program := program)
       (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
       (codeOverride := codeOverride) (pre := pre)
       (lowerArgs := argExprs)
       (results := Expressions.Structured.BasicOp.inputs op) (seq := seq)
-      hScope hArgs (Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs) hSeq
+      hArgs (Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs) hSeq
   rcases
-      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular
+      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
         (cfg := cfg) (layout := layout) (prim := prim) (program := program)
         (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
         (op := op) (args := args) (codeOverride := codeOverride)
@@ -28819,15 +28928,6 @@ theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt
               safeBasicOneOutputPrimCall_ok_single hSafe hBasic hOutputs hCall)
             hEval)⟩
 
-/--
-Hidden-context variant of
-`lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt`.
-
-This is the primitive branch needed by recursive generated argument preludes:
-the visible Yul/source relation stays at `layout`, while the compiler context
-may contain hidden temporaries introduced by the surrounding argument-lowering
-code.
--/
 theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
@@ -28857,36 +28957,15 @@ theorem lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope
         some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
       ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ
         (.Call (.inl yulPrim) args) codeOverride pre
-        (Expr.cast hOutputs (.prim op seq)) := by
-  have hStack :
-      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
-        codeOverride pre seq :=
-    sourceArgStackPreludeRegularAt_of_argListRegularAt_varMap_toStackSeq
-      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
-      (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
-      (codeOverride := codeOverride) (pre := pre)
-      (lowerArgs := argExprs)
-      (results := Expressions.Structured.BasicOp.inputs op) (seq := seq)
-      hArgs (Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs) hSeq
-  rcases
-      lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
-        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
-        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
-        (op := op) (args := args) (codeOverride := codeOverride)
-        (freshState := freshState) (freshState' := freshState')
-        (pre := pre) (argExprs := argExprs) (seq := seq)
-        hBasic hLowerArgs hSeq hOutputs hStack hPrim with
-    ⟨hLower, hValueSound⟩
-  exact
-    ⟨hLower,
-      ExprValuePreludeSound.to_evalOne_of_evalValues_single hValueSound
-        (fun hEval =>
-          evalValues_prim_call_single_of_eval_primCall_single
-            (sourceFuel := sourceFuel) (yulPrim := yulPrim) (args := args)
-            (codeOverride := codeOverride)
-            (fun hCall =>
-              safeBasicOneOutputPrimCall_ok_single hSafe hBasic hOutputs hCall)
-            hEval)⟩
+        (Expr.cast hOutputs (.prim op seq)) :=
+  lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope_arity
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+    (op := op) (args := args) (codeOverride := codeOverride)
+    (freshState := freshState) (freshState' := freshState')
+    (pre := pre) (argExprs := argExprs) (seq := seq)
+    hSafe hBasic hLowerArgs hSeq hOutputs hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt hPrim)
 
 /--
 Checked `lower0?` primitive-call expression soundness through the hidden
