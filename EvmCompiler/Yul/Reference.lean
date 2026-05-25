@@ -5348,6 +5348,18 @@ theorem yul_primCall_succ_mcopy_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_calldatacopy_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.CALLDATACOPY : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.ternaryCopyOp
+          EvmYul.SharedState.calldatacopy source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -5531,6 +5543,45 @@ theorem yulPrimitiveTernaryZeroSound_of_ternaryMachineStateOp
                       exact ⟨left, middle, right, rfl, rfl, rfl⟩
                   | cons extra restRestRest =>
                       simp [EvmYul.Yul.ternaryMachineStateOp] at hCall
+
+theorem yulPrimitiveTernaryZeroSound_of_ternaryCopyOp
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    (f : EvmYul.SharedState .Yul → Word → Word → Word →
+      EvmYul.SharedState .Yul)
+    (hPrim :
+      ∀ (fuel : Nat) (source : State) (args : List Word),
+        EvmYul.Yul.primCall fuel.succ source yulPrim args =
+          (match EvmYul.Yul.ternaryCopyOp f source args with
+          | .ok (state, value?) => .ok (state, value?.toList)
+          | .error err => .error err)) :
+    YulPrimitiveTernaryZeroSound sourceFuel yulPrim f := by
+  intro sourceShared store sourceValues sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [hPrim fuel (.Ok sourceShared store) sourceValues] at hCall
+      cases sourceValues with
+      | nil =>
+          simp [EvmYul.Yul.ternaryCopyOp] at hCall
+      | cons left rest =>
+          cases rest with
+          | nil =>
+              simp [EvmYul.Yul.ternaryCopyOp] at hCall
+          | cons middle restTail =>
+              cases restTail with
+              | nil =>
+                  simp [EvmYul.Yul.ternaryCopyOp] at hCall
+              | cons right restRest =>
+                  cases restRest with
+                  | nil =>
+                      simp [EvmYul.Yul.ternaryCopyOp] at hCall
+                      rcases hCall with ⟨hState, hValues⟩
+                      subst sourceAfterPrim
+                      subst values'
+                      exact ⟨left, middle, right, rfl, rfl, rfl⟩
+                  | cons extra restRestRest =>
+                      simp [EvmYul.Yul.ternaryCopyOp] at hCall
 
 theorem yulPrimitiveBinaryOneSound_add
     {sourceFuel : Nat} :
@@ -5790,6 +5841,15 @@ theorem yulPrimitiveTernaryZeroSound_mcopy
               writeStart readStart size }) :=
   yulPrimitiveTernaryZeroSound_of_ternaryMachineStateOp
     EvmYul.MachineState.mcopy yul_primCall_succ_mcopy_eq
+
+theorem yulPrimitiveTernaryZeroSound_calldatacopy
+    {sourceFuel : Nat} :
+    YulPrimitiveTernaryZeroSound sourceFuel
+      ((.Env .CALLDATACOPY : EvmYul.Operation .Yul))
+      (fun shared memStart dataStart size =>
+        EvmYul.SharedState.calldatacopy shared memStart dataStart size) :=
+  yulPrimitiveTernaryZeroSound_of_ternaryCopyOp
+    EvmYul.SharedState.calldatacopy yul_primCall_succ_calldatacopy_eq
 
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
@@ -6223,6 +6283,49 @@ theorem sourcePrimitiveTernaryZeroSound_structured_mcopy :
               writeStart readStart size }) :=
   sourcePrimitiveTernaryZeroSound_structured_of_ternaryMachineState
     EvmYul.MachineState.mcopy (by rfl)
+
+theorem sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
+    {op : Structured.BasicOp}
+    (f : EvmYul.SharedState .EVM → Word → Word → Word →
+      EvmYul.SharedState .EVM)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.ternaryCopy f)) :
+    SourcePrimitiveTernaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured op f := by
+  intro shared left middle right
+  let state' : EVMState :=
+    { toSharedState := f shared left middle right,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .ternaryCopy f)
+      (shared := shared) (shared' := f shared left middle right)
+      (values := [right, middle, left])
+      (values' := [])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.ternaryCopyOp,
+          EvmYul.Stack.pop3, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveTernaryZeroSound_structured_calldatacopy :
+    SourcePrimitiveTernaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured .calldatacopy
+      (fun shared memStart dataStart size =>
+        EvmYul.SharedState.calldatacopy shared memStart dataStart size) :=
+  sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
+    EvmYul.SharedState.calldatacopy (by rfl)
 
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -6769,6 +6872,15 @@ theorem primitiveStackSoundAt_calldatacopy
               hChain.executionEnv.calldata]
           · simpa [EvmYul.SharedState.calldatacopy] using hReturn
           · simpa [EvmYul.SharedState.calldatacopy] using hHReturn)
+
+theorem primitiveStackSoundAt_structured_calldatacopy
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CALLDATACOPY : EvmYul.Operation .Yul)) .calldatacopy :=
+  primitiveStackSoundAt_calldatacopy
+    yulPrimitiveTernaryZeroSound_calldatacopy
+    sourcePrimitiveTernaryZeroSound_structured_calldatacopy
 
 theorem primitiveStackSoundAt_returndatacopy
     {cfg : StateRelConfig} {layout : List Name}
