@@ -151100,6 +151100,33 @@ structure RecursiveBridgeSourceAccepted (program : Program) : Prop where
     Reference.SourceBridgeFacts.UserCallArity.ProgramOk program
 
 /--
+Full source-facing acceptedness for the imported recursive bridge.
+
+This is the target public shape for the full-Yul route: source validity is
+expressed with `Reference.FullAccepted`, while semantic coverage for currently
+special families is carried separately by `RecursiveBridgeFeatureCoverage`.
+-/
+structure RecursiveBridgeFullSourceAccepted (program : Program) : Prop where
+  reference : Reference.FullAccepted program
+  sourceScoped :
+    Reference.SourceBridgeFacts.SourceLexical.ProgramScoped program
+  controlScoped :
+    Reference.SourceBridgeFacts.ControlFlow.ProgramScoped program
+  userCalls :
+    Reference.SourceBridgeFacts.UserCallArity.ProgramOk program
+
+/--
+Current semantic-feature coverage needed to reuse the existing recursive bridge.
+
+This is deliberately separate from full source acceptedness. Today it is
+equivalent to the old `Reference.Safe.program` fragment predicate; the intended
+evolution is to remove one family at a time from this requirement as code-image,
+object/data, and call/create semantic contracts are proved.
+-/
+structure RecursiveBridgeFeatureCoverage (program : Program) : Prop where
+  coverage : Reference.Safe.FeatureCoverage.program program
+
+/--
 Compiler-resource acceptedness for the bridge.
 
 These assumptions are about the generated lower object program and its
@@ -151109,6 +151136,35 @@ structure RecursiveBridgeCompileResources (program : Program) : Prop where
   objectCompileAccepted :
     ∀ lowerObj : Objects.Program, program.toObjects? = some lowerObj →
       Objects.Source.Program.CompileAccepted lowerObj
+
+namespace RecursiveBridgeSourceAccepted
+
+theorem toFullAndCoverage {program : Program}
+    (hSource : RecursiveBridgeSourceAccepted program) :
+    RecursiveBridgeFullSourceAccepted program ∧
+      RecursiveBridgeFeatureCoverage program := by
+  exact
+    ⟨{ reference := Reference.fullAccepted_of_accepted hSource.reference
+       sourceScoped := hSource.sourceScoped
+       controlScoped := hSource.controlScoped
+       userCalls := hSource.userCalls },
+      { coverage :=
+          (Reference.Safe.FeatureCoverage.program_iff_safe program).mpr
+            hSource.reference.2.1 }⟩
+
+theorem ofFullAndCoverage {program : Program}
+    (hFull : RecursiveBridgeFullSourceAccepted program)
+    (hCoverage : RecursiveBridgeFeatureCoverage program) :
+    RecursiveBridgeSourceAccepted program := by
+  exact
+    { reference :=
+        (Reference.bridgeCoveredAccepted_iff_accepted).mp
+          ⟨hFull.reference, hCoverage.coverage⟩
+      sourceScoped := hFull.sourceScoped
+      controlScoped := hFull.controlScoped
+      userCalls := hFull.userCalls }
+
+end RecursiveBridgeSourceAccepted
 
 namespace RecursiveBridgeAccepted
 

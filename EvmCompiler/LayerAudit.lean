@@ -2687,6 +2687,18 @@ abbrev recursiveBridgeTopNoCallTargetJumpdestCorrect :=
 abbrev recursiveBridgeSourceAccepted :=
   @Yul.Program.RecursiveBridgeSourceAccepted
 
+abbrev recursiveBridgeFullSourceAccepted :=
+  @Yul.Program.RecursiveBridgeFullSourceAccepted
+
+abbrev recursiveBridgeFeatureCoverage :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage
+
+abbrev recursiveBridgeSourceAcceptedToFullAndCoverage :=
+  @Yul.Program.RecursiveBridgeSourceAccepted.toFullAndCoverage
+
+abbrev recursiveBridgeSourceAcceptedOfFullAndCoverage :=
+  @Yul.Program.RecursiveBridgeSourceAccepted.ofFullAndCoverage
+
 abbrev recursiveBridgeCompileResources :=
   @Yul.Program.RecursiveBridgeCompileResources
 

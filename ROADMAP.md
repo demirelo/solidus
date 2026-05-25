@@ -22,6 +22,9 @@ Last updated: 2026-05-24 23:30 PDT.
      a checked equivalence to old `Reference.Accepted`. This makes the
      remaining fragment boundary a named semantic-coverage obligation rather
      than part of source acceptedness.
+   - [x] Thread the same split into the recursive bridge boundary with
+     `RecursiveBridgeFullSourceAccepted`, `RecursiveBridgeFeatureCoverage`,
+     and checked conversions to/from old `RecursiveBridgeSourceAccepted`.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.
