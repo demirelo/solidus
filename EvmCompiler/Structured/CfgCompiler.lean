@@ -49,6 +49,12 @@ def exitBlock (label : Label) (shape : Shape) (kont? : Option Kont) :
         body := [.unwind kont.shape]
         term := .jump kont.label }
 
+def finalBlock (label : Label) (shape : Shape) : TypedCfg.Block where
+  label := label
+  input := shape
+  body := []
+  term := .fallthrough
+
 namespace BasicInstr
 
 def toCfg : BasicInstr → TypedCfg.Instr
@@ -358,16 +364,15 @@ def toCfg? (program : Program) : Option TypedCfg.Program := do
       { procs := program.procs, regular := endKont } entryLabel [] 0
   some
     { entry := entryLabel
-      blocks := result.blocks ++ [exitBlock endLabel [] (some endKont)] }
+      blocks := result.blocks ++ [finalBlock endLabel []] }
 
-def toCheckedCfg? (program : Program) : Option TypedCfg.Program := do
+def toCheckedCfg? (program : Program) : Option TypedCfg.CheckedProgram := do
   let cfg ← toCfg? program
-  let _ ← TypedCfg.Program.typeCheck? cfg
-  some cfg
+  TypedCfg.Program.check? cfg
 
 def compileCfg? (program : Program) : Option Assembly.Program := do
   let cfg ← toCheckedCfg? program
-  TypedCfg.Program.lower? cfg
+  TypedCfg.CheckedProgram.lower? cfg
 
 end Program
 

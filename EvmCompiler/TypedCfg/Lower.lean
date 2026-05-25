@@ -119,5 +119,12 @@ def Lowerable (program : Program) : Prop :=
 
 end Program
 
+namespace CheckedProgram
+
+def lower? (program : CheckedProgram) : Option Assembly.Program :=
+  program.program.lower?
+
+end CheckedProgram
+
 end TypedCfg
 end EvmCompiler

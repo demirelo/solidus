@@ -120,6 +120,21 @@ def typeCheck? (program : Program) : Option Unit :=
   else
     none
 
+end Program
+
+structure CheckedProgram where
+  program : Program
+  checked : program.typeCheck? = some ()
+  deriving Repr
+
+namespace Program
+
+def check? (program : Program) : Option CheckedProgram :=
+  if h : program.typeCheck? = some () then
+    some { program := program, checked := h }
+  else
+    none
+
 theorem wellTyped_allBlocksTyped {program : Program}
     (h : program.WellTyped) :
     program.AllBlocksTyped :=
