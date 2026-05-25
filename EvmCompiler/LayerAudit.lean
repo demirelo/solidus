@@ -506,6 +506,9 @@ abbrev localsSourceBlockOpenRegularScope :=
 abbrev localsSourceBlockRegularDropsNotMem :=
   @Locals.Source.Block.runScoped_regular_drops_not_mem
 
+abbrev localsSourcePrimitiveSemanticsStructured :=
+  Locals.Source.PrimitiveSemantics.structured
+
 abbrev localsSourceLoweringPrimitiveSound :=
   @Locals.SourceLowering.PrimitiveSound
 

@@ -56,8 +56,13 @@ Last updated: 2026-05-25 04:05 PDT.
      (`PrimitiveSound`) and imported-Yul primitive stack agreement
      (`RecursiveBridgePrimitiveStackContracts`) so the remaining bridge
      assumption is visible.
+   - [x] Define and export the canonical source-tower primitive semantics
+     `Locals.Source.PrimitiveSemantics.structured`, which projects the shared
+     EVM primitive/terminal behavior into the stack-free locals source
+     interpreter.
    - [ ] Provide a canonical `PrimitiveSound` theorem for the concrete
-     compiler primitive semantics used by the source tower.
+     compiler primitive semantics used by the source tower, specifically
+     `Locals.Source.PrimitiveSemantics.structured`.
    - [ ] Provide a canonical `RecursiveBridgePrimitiveStackContracts`
      constructor for all accepted primitives.
    - [ ] Provide canonical terminal/revert contracts for

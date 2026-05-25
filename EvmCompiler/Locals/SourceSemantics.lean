@@ -98,6 +98,40 @@ structure PrimitiveSemantics where
     Assembly.HaltKind → EvmYul.SharedState .EVM → List Word →
       Except EVMException (EvmYul.SharedState .EVM)
 
+namespace PrimitiveSemantics
+
+/--
+Canonical source primitive semantics for the compiler tower.
+
+It runs the already-verified structured/EVM primitive on an isolated concrete
+stack containing exactly the source arguments, then projects the resulting
+shared state and produced stack values back to the stack-free locals source
+interpreter. This definition is deliberately not a proof shortcut: the lowering
+proof must still show that running the same primitive inside an arbitrary caller
+stack/frame has the same projected behavior.
+-/
+def structured : PrimitiveSemantics where
+  eval op shared values :=
+    let state : EVMState :=
+      { toSharedState := shared,
+        pc := EvmYul.UInt256.ofNat 0,
+        stack := values.reverse,
+        execLength := 0 }
+    match Structured.BasicOp.step op state with
+    | .ok state' => .ok (state'.toSharedState, state'.stack.reverse)
+    | .error err => .error err
+  terminal kind shared values :=
+    let state : EVMState :=
+      { toSharedState := shared,
+        pc := EvmYul.UInt256.ofNat 0,
+        stack := values.reverse,
+        execLength := 0 }
+    match Structured.Terminal.step kind state with
+    | .ok state' => .ok state'.toSharedState
+    | .error err => .error err
+
+end PrimitiveSemantics
+
 structure Ctx where
   scope : List Name := []
   breakScope? : Option (List Name) := none
