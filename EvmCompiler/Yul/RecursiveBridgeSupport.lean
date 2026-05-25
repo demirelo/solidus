@@ -117337,6 +117337,139 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_actual_or_a
               hCovers hLower
 
 /--
+Arity-aware exact-frontier non-terminal primitive expression-statement adapter.
+-/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_actual_or_arg_terminal_frontier_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hSafeStmt :
+      Safe.stmt (.ExprStmtCall (.Call (.inl yulPrim) args)))
+    (_hScopedStmt :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave
+        (.ExprStmtCall (.Call (.inl yulPrim) args)))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.ExprStmtCall (.Call (.inl yulPrim) args)))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.ExprStmtCall (.Call (.inl yulPrim) args)))
+    (hAllowedRel :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScope : ctx.scope = layout)
+    (hTerminal : Prim.terminal? yulPrim = none)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hPrimSound :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        fuel < bound.succ →
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx bound.succ
+      (.ExprStmtCall (.Call (.inl yulPrim) args))
+      (some yulProgram.contract) allowed := by
+  have hSafePrim : Safe.primitive yulPrim := by
+    simpa [Safe.stmt, Safe.expr] using hSafeStmt.1
+  have hSafeArgs : Safe.exprs args := by
+    simpa [Safe.stmt, Safe.expr] using hSafeStmt.2
+  have hScopedArgs : SourceExprsScoped layout args := by
+    simpa [SourceLexical.StmtScoped, SourceExprScoped] using hSourceScoped
+  have hOkArgs : UserCallArity.ExprsOk yulProgram.contract args := by
+    simpa [UserCallArity.StmtOk, UserCallArity.ExprOk] using hStmtOk
+  cases bound with
+  | zero =>
+      intro freshState freshState' lowerStmts hCovers hLower
+      exact
+        (checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := 1)
+          (sourceStmt := .ExprStmtCall (.Call (.inl yulPrim) args))
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowedRel hScope
+          (by intro source compiler hInitial; simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq]))
+          hCovers hLower
+  | succ bound₁ =>
+      cases bound₁ with
+      | zero =>
+          intro freshState freshState' lowerStmts hCovers hLower
+          exact
+            (checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := 2)
+              (sourceStmt := .ExprStmtCall (.Call (.inl yulPrim) args))
+              (codeOverride := some yulProgram.contract)
+              (allowed := allowed) hAllowedRel hScope
+              (by
+                intro source compiler hInitial
+                simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq]))
+              hCovers hLower
+      | succ argFuel =>
+          intro freshState freshState' lowerStmts hCovers hLower
+          simpa [Nat.succ_eq_add_one, Nat.add_assoc] using
+            (checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_actual_or_arg_terminal_arity
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := argFuel) (yulPrim := yulPrim)
+              (op := op) (args := args)
+              (codeOverride := some yulProgram.contract) (allowed := allowed)
+              hScope hCompat hAllowedRel hSafePrim hTerminal hBasic hOutputs
+              (hArgs := by
+                intro freshState freshState' pre argExprs seq hCovers
+                  hLower hSeq
+                exact
+                  sourceArgStackPreludeRegular_of_checkedAt_lowerBound1?_toStackSeq
+                    (cfg := cfg) (reserved := reserved) (layout := layout)
+                    (prim := prim) (program := program)
+                    (contract := yulProgram.contract) (ctx := ctx)
+                    (sourceFuel := argFuel) hScope
+                    (hRecursive.args (reserved := reserved) (layout := layout)
+                      (sourceFuel := argFuel) (by omega))
+                    hCovers hSafeArgs hScopedArgs hOkArgs hLower hSeq)
+              (hArgsTerminal := by
+                intro freshState freshState' pre argExprs seq hCovers
+                  hLower _hSeq
+                exact
+                  sourceArgListPreludeTerminalAt_of_programAccepted_checkedArgs
+                    (cfg := cfg) (reserved := reserved) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (prim := prim) (yulProgram := yulProgram)
+                    (program := program) (context := context)
+                    (bound := argFuel.succ.succ) (sourceFuel := argFuel)
+                    (ctx := ctx) (freshState := freshState)
+                    (freshState' := freshState') (args := args)
+                    (pre := pre) (argExprs := argExprs)
+                    hRecursive (by omega) hCovers hSafeArgs hScopedArgs
+                    hOkArgs hLower)
+              (hPrim := hPrimSound (by omega) hSafePrim hBasic))
+              hCovers hLower
+
+/--
 Exact-frontier non-terminal primitive assignment adapter.
 -/
 theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_prim_actual_or_arg_terminal_frontier
