@@ -98081,6 +98081,137 @@ theorem sourceForGeneratedGuardBodyContinueRunScoped_of_eval_domain_nonzero
       simpa [guardStmt] using hTargetScoped
 
 /--
+Arity-aware sibling of `sourceForGeneratedGuardBodyContinueRunScoped_of_eval_domain_nonzero`.
+-/
+theorem sourceForGeneratedGuardBodyContinueRunScoped_of_eval_domain_nonzero_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Functions.Expr 1}
+    {lowerBody : Functions.Block}
+    {value : Word}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program ctx sourceFuel cond
+        codeOverride pre lowerCond)
+    (hEvalDomain :
+      StoreDomainExact layout store →
+      EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfterCond storeAfterCond, value) →
+      StoreDomainExact layout storeAfterCond)
+    (hExact :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hEvalNonzero :
+      EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfterCond storeAfterCond, value))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hBody :
+      ∀ {ctxAfterPre compilerAfterGuard},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq ctx ctxAfterPre →
+        SourceStateRel cfg layout (.Ok sharedAfterCond storeAfterCond)
+          compilerAfterGuard →
+        ∃ compilerAfterBody : Objects.Source.State,
+        ∃ bodyFuel : Nat,
+          Functions.Source.Block.runScoped prim program ctxAfterPre lowerBody
+              bodyFuel compilerAfterGuard =
+            .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+          SourceStateRel cfg layout (.Ok sharedAfterBody storeAfterBody)
+            compilerAfterBody) :
+    ∃ compilerAfterBody : Objects.Source.State,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runScoped prim program ctx
+          { stmts :=
+              pre ++
+                (Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] } ::
+                  lowerBody.stmts) }
+          targetFuel compiler =
+        .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+      SourceStateRel cfg layout (.Ok sharedAfterBody storeAfterBody)
+        compilerAfterBody := by
+  let guardStmt :=
+    Functions.Stmt.if_
+      (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+      { stmts := [Functions.Stmt.brk] }
+  rcases
+      sourceForGeneratedGuardSkipRunOpen_of_eval_domain_nonzero_arity
+        (cfg := cfg) (layout := layout) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (cond := cond) (codeOverride := codeOverride)
+        (shared := shared) (sharedAfterCond := sharedAfterCond)
+        (store := store) (storeAfterCond := storeAfterCond)
+        (compiler := compiler) (pre := pre) (lowerCond := lowerCond)
+        (value := value) hPrim hCondSound hEvalDomain hExact
+        hEvalNonzero hNonzero with
+    ⟨ctxAfterPre, compilerAfterGuard, guardFuel, hGuardRun,
+      hRelAfterGuard⟩
+  have hScopeContainsAfter :
+      ∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope :=
+    sourceScopeContains_of_runOpen_regular
+      (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfterPre) (fuel := guardFuel)
+      (block := { stmts := pre ++ [guardStmt] }) (state := compiler)
+      (stateAfter := compilerAfterGuard) hScopeContains (by
+        simpa [guardStmt] using hGuardRun)
+  have hHandlersAfter : SourceCtxHandlersEq ctx ctxAfterPre :=
+    SourceCtxHandlersEq.of_runOpen_regular
+      (by simpa [guardStmt] using hGuardRun)
+  rcases hBody hScopeContainsAfter hHandlersAfter hRelAfterGuard with
+    ⟨compilerAfterBody, bodyFuel, hBodyScoped, hRelBody⟩
+  have hBodyOpen :
+      ∃ ctxAfterBody : Functions.Source.Ctx,
+        Functions.Source.Block.runOpen prim program ctxAfterPre bodyFuel
+            lowerBody compilerAfterGuard =
+          .ok (Functions.Source.Outcome.cont compilerAfterBody,
+            ctxAfterBody) :=
+    sourceBlock_runOpen_of_runScoped_nonregular hBodyScoped
+      (by simp [Functions.Source.Outcome.cont, Locals.Source.Outcome.cont])
+  rcases hBodyOpen with ⟨ctxAfterBody, hBodyOpen⟩
+  cases lowerBody with
+  | mk lowerBodyStmts =>
+      have hBodyOpenList :
+          Functions.Source.Block.runOpen prim program ctxAfterPre bodyFuel
+              { stmts := lowerBodyStmts } compilerAfterGuard =
+            .ok (Functions.Source.Outcome.cont compilerAfterBody,
+              ctxAfterBody) := by
+        simpa using hBodyOpen
+      rcases
+          Functions.Source.Block.runOpen_append_regular_exists prim program
+            (pre ++ [guardStmt]) lowerBodyStmts
+            ctx ctxAfterPre compiler compilerAfterGuard
+            (Functions.Source.Outcome.cont compilerAfterBody)
+            ctxAfterBody
+            ⟨guardFuel, by simpa [guardStmt] using hGuardRun⟩
+            ⟨bodyFuel, hBodyOpenList⟩ with
+        ⟨targetFuel, hTargetOpen⟩
+      refine ⟨compilerAfterBody, targetFuel, ?_, hRelBody⟩
+      have hTargetOpen' :
+          Functions.Source.Block.runOpen prim program ctx targetFuel
+              { stmts := pre ++ guardStmt :: lowerBodyStmts } compiler =
+            .ok (Functions.Source.Outcome.cont compilerAfterBody,
+              ctxAfterBody) := by
+        simpa [List.append_assoc] using hTargetOpen
+      have hTargetScoped :
+          Functions.Source.Block.runScoped prim program ctx
+              { stmts := pre ++ guardStmt :: lowerBodyStmts }
+              targetFuel compiler =
+            .ok (Functions.Source.Outcome.cont compilerAfterBody) := by
+        simp [Functions.Source.Block.runScoped, hTargetOpen',
+          Functions.Source.Outcome.cont, Locals.Source.Outcome.cont]
+      simpa [guardStmt] using hTargetScoped
+
+
+/--
 Target-side nonzero-condition behavior when the generated loop body
 continues and the post block halts.
 
