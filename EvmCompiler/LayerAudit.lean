@@ -524,6 +524,18 @@ abbrev localsSourcePrimitiveSemanticsStructuredTerminalStopStep :=
 abbrev localsSourcePrimitiveSemanticsStructuredTerminalStopStepExists :=
   @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_stop_step_exists
 
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalReturnStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_return_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalReturnStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_return_step_exists
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalRevertStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_revert_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalRevertStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_revert_step_exists
+
 abbrev localsSourceLoweringExprAccessible :=
   @Locals.SourceLowering.Expr.Accessible
 

@@ -611,6 +611,54 @@ structure PrimitiveSound (prim : Source.PrimitiveSemantics) : Prop where
 
 namespace PrimitiveSemantics
 
+theorem evm_step_return_eq_binaryMachineStateOp :
+    (EvmYul.step (EvmYul.Operation.RETURN : EvmYul.Operation .EVM) none) =
+      EvmYul.EVM.binaryMachineStateOp EvmYul.MachineState.evmReturn :=
+  rfl
+
+theorem evm_step_revert_eq_binaryMachineStateOp :
+    (EvmYul.step (EvmYul.Operation.REVERT : EvmYul.Operation .EVM) none) =
+      EvmYul.EVM.binaryMachineStateOp EvmYul.MachineState.evmRevert :=
+  rfl
+
+theorem structured_terminal_step_return_of_stack
+    (state : EVMState) (offset size : Word) (tail : EvmYul.Stack Word)
+    (hStack : state.stack = offset :: size :: tail) :
+    Structured.Terminal.step .return state =
+      .ok (({ state with
+        toMachineState := state.toMachineState.evmReturn offset size
+      }).replaceStackAndIncrPC tail) := by
+  cases state with
+  | mk shared pc stack execLength =>
+      simp at hStack
+      subst stack
+      simp [Structured.Terminal.step, Assembly.Target.stepInstr,
+        Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+        Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+        evm_step_return_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+        EvmYul.EVM.State.replaceStackAndIncrPC]
+      rfl
+
+theorem structured_terminal_step_revert_of_stack
+    (state : EVMState) (offset size : Word) (tail : EvmYul.Stack Word)
+    (hStack : state.stack = offset :: size :: tail) :
+    Structured.Terminal.step .revert state =
+      .ok (({ state with
+        toMachineState := state.toMachineState.evmRevert offset size
+      }).replaceStackAndIncrPC tail) := by
+  cases state with
+  | mk shared pc stack execLength =>
+      simp at hStack
+      subst stack
+      simp [Structured.Terminal.step, Assembly.Target.stepInstr,
+        Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+        Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+        evm_step_revert_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+        EvmYul.EVM.State.replaceStackAndIncrPC]
+      rfl
+
 theorem structured_terminal_stop_step
     {shared shared' : EvmYul.SharedState .EVM}
     {values : List Word} {evm evm' : EVMState}
@@ -657,6 +705,206 @@ theorem structured_terminal_stop_step_exists
             Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
             Assembly.PrimOp.continuingStep?, Assembly.PrimOp.toEVM, evm']
           rfl)
+
+theorem structured_terminal_return_step
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm evm' : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .return shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack)
+    (hStep : Structured.Terminal.step .return evm = .ok evm') :
+    evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      simp [Source.PrimitiveSemantics.structured, Structured.Terminal.step,
+        Assembly.Target.stepInstr, Assembly.PrimOp.step,
+        Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM, evm_step_return_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2, hValues] at hEval
+  | cons offset rest =>
+      cases rest with
+      | nil =>
+          simp [Source.PrimitiveSemantics.structured,
+            Structured.Terminal.step, Assembly.Target.stepInstr,
+            Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+            Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+            evm_step_return_eq_binaryMachineStateOp,
+            EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+            hValues] at hEval
+      | cons size tail =>
+          let iso : EVMState :=
+            { toSharedState := shared,
+              pc := EvmYul.UInt256.ofNat 0,
+              stack := values.reverse,
+              execLength := 0 }
+          have hIso :
+              Structured.Terminal.step .return iso =
+                .ok (({ iso with
+                  toMachineState := iso.toMachineState.evmReturn offset size
+                }).replaceStackAndIncrPC tail) := by
+            apply structured_terminal_step_return_of_stack
+            simp [iso, hValues]
+          simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
+          have hTargetStack :
+              evm.stack = offset :: size :: (tail ++ baseStack) := by
+            rw [hStack, hValues]
+            simp
+          have hTarget :=
+            structured_terminal_step_return_of_stack evm offset size
+              (tail ++ baseStack) hTargetStack
+          rw [hTarget] at hStep
+          cases hStep
+          cases hEval
+          simp [hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+
+theorem structured_terminal_return_step_exists
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .return shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.Terminal.step .return evm = .ok evm' ∧
+        evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      simp [Source.PrimitiveSemantics.structured, Structured.Terminal.step,
+        Assembly.Target.stepInstr, Assembly.PrimOp.step,
+        Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM, evm_step_return_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2, hValues] at hEval
+  | cons offset rest =>
+      cases rest with
+      | nil =>
+          simp [Source.PrimitiveSemantics.structured,
+            Structured.Terminal.step, Assembly.Target.stepInstr,
+            Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+            Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+            evm_step_return_eq_binaryMachineStateOp,
+            EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+            hValues] at hEval
+      | cons size tail =>
+          let evm' : EVMState :=
+            ({ evm with
+              toMachineState := evm.toMachineState.evmReturn offset size
+            }).replaceStackAndIncrPC (tail ++ baseStack)
+          refine ⟨evm', ?_, ?_⟩
+          · apply structured_terminal_step_return_of_stack
+            rw [hStack, hValues]
+            simp
+          · exact
+              structured_terminal_return_step
+                (baseStack := baseStack) hEval hShared hStack (by
+                  apply structured_terminal_step_return_of_stack
+                  rw [hStack, hValues]
+                  simp)
+
+theorem structured_terminal_revert_step
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm evm' : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .revert shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack)
+    (hStep : Structured.Terminal.step .revert evm = .ok evm') :
+    evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      simp [Source.PrimitiveSemantics.structured, Structured.Terminal.step,
+        Assembly.Target.stepInstr, Assembly.PrimOp.step,
+        Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM, evm_step_revert_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2, hValues] at hEval
+  | cons offset rest =>
+      cases rest with
+      | nil =>
+          simp [Source.PrimitiveSemantics.structured,
+            Structured.Terminal.step, Assembly.Target.stepInstr,
+            Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+            Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+            evm_step_revert_eq_binaryMachineStateOp,
+            EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+            hValues] at hEval
+      | cons size tail =>
+          let iso : EVMState :=
+            { toSharedState := shared,
+              pc := EvmYul.UInt256.ofNat 0,
+              stack := values.reverse,
+              execLength := 0 }
+          have hIso :
+              Structured.Terminal.step .revert iso =
+                .ok (({ iso with
+                  toMachineState := iso.toMachineState.evmRevert offset size
+                }).replaceStackAndIncrPC tail) := by
+            apply structured_terminal_step_revert_of_stack
+            simp [iso, hValues]
+          simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
+          have hTargetStack :
+              evm.stack = offset :: size :: (tail ++ baseStack) := by
+            rw [hStack, hValues]
+            simp
+          have hTarget :=
+            structured_terminal_step_revert_of_stack evm offset size
+              (tail ++ baseStack) hTargetStack
+          rw [hTarget] at hStep
+          cases hStep
+          cases hEval
+          simp [hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+
+theorem structured_terminal_revert_step_exists
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .revert shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.Terminal.step .revert evm = .ok evm' ∧
+        evm'.toSharedState = shared' := by
+  cases hValues : values.reverse with
+  | nil =>
+      simp [Source.PrimitiveSemantics.structured, Structured.Terminal.step,
+        Assembly.Target.stepInstr, Assembly.PrimOp.step,
+        Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
+        Assembly.PrimOp.toEVM, evm_step_revert_eq_binaryMachineStateOp,
+        EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2, hValues] at hEval
+  | cons offset rest =>
+      cases rest with
+      | nil =>
+          simp [Source.PrimitiveSemantics.structured,
+            Structured.Terminal.step, Assembly.Target.stepInstr,
+            Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+            Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+            evm_step_revert_eq_binaryMachineStateOp,
+            EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+            hValues] at hEval
+      | cons size tail =>
+          let evm' : EVMState :=
+            ({ evm with
+              toMachineState := evm.toMachineState.evmRevert offset size
+            }).replaceStackAndIncrPC (tail ++ baseStack)
+          refine ⟨evm', ?_, ?_⟩
+          · apply structured_terminal_step_revert_of_stack
+            rw [hStack, hValues]
+            simp
+          · exact
+              structured_terminal_revert_step
+                (baseStack := baseStack) hEval hShared hStack (by
+                  apply structured_terminal_step_revert_of_stack
+                  rw [hStack, hValues]
+                  simp)
 
 end PrimitiveSemantics
 
