@@ -3471,6 +3471,12 @@ abbrev yulPrimitiveBinaryOneSoundShr :=
 abbrev yulPrimitiveBinaryOneSoundSar :=
   @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_sar
 
+abbrev yulPrimitiveUnaryOneSoundIszero :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveUnaryOneSound_iszero
+
+abbrev yulPrimitiveUnaryOneSoundNot :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveUnaryOneSound_not
+
 abbrev sourcePrimitiveBinaryOneSoundStructuredOfBin :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_of_bin
 
@@ -3537,6 +3543,15 @@ abbrev sourcePrimitiveBinaryOneSoundStructuredShr :=
 abbrev sourcePrimitiveBinaryOneSoundStructuredSar :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_sar
 
+abbrev sourcePrimitiveUnaryOneSoundStructuredOfUn :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveUnaryOneSound_structured_of_un
+
+abbrev sourcePrimitiveUnaryOneSoundStructuredIszero :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveUnaryOneSound_structured_iszero
+
+abbrev sourcePrimitiveUnaryOneSoundStructuredNot :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveUnaryOneSound_structured_not
+
 abbrev primitiveStackSoundAtStructuredAdd :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_add
 
@@ -3602,6 +3617,15 @@ abbrev primitiveStackSoundAtStructuredShr :=
 
 abbrev primitiveStackSoundAtStructuredSar :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_sar
+
+abbrev primitiveStackSoundAtStructuredOfPureUn :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_of_pure_un
+
+abbrev primitiveStackSoundAtStructuredIszero :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_iszero
+
+abbrev primitiveStackSoundAtStructuredNot :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_not
 
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound

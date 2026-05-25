@@ -95,6 +95,8 @@ Last updated: 2026-05-25 06:52 PDT.
        one-result arithmetic/comparison/bitwise primitives:
        `SDIV`/`SMOD`/`EXP`/`SIGNEXTEND` and
        `LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`.
+     - [x] Add the reusable unary-one-result bridge shape and instantiate it
+       for the pure comparison/bitwise primitives `ISZERO` and `NOT`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

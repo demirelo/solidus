@@ -3308,3 +3308,4 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 
 - 2026-05-25 06:41:42 PDT - compaction resume - continuing the imported primitive stack bridge; last checkpoint covered ADD/MUL/SUB/DIV/MOD, and the current uncommitted edit adds Yul primCall equations for the remaining pure binary one-result ops before instantiating canonical stack-agreement facts.
 - 2026-05-25 06:48:45 PDT - proof - extended the canonical pure binary primitive stack bridge through SDIV/SMOD/EXP/SIGNEXTEND and LT/GT/SLT/SGT/EQ/AND/OR/XOR/BYTE/SHL/SHR/SAR; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit`; result green; `git diff --check` and local sorry/admit/axiom scan passed.
+- 2026-05-25 06:55:41 PDT - proof - added/exported the canonical unary-one primitive stack bridge for ISZERO and NOT; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit`; result green; `git diff --check` and local sorry/admit/axiom scan passed.
