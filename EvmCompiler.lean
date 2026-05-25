@@ -1,4 +1,5 @@
 import EvmCompiler.Assembly
+import EvmCompiler.TypedCfg
 import EvmCompiler.Structured
 import EvmCompiler.Expressions
 import EvmCompiler.Locals

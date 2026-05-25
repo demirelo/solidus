@@ -10,6 +10,14 @@ external execution certificate.
 
 Last updated: 2026-05-25 06:52 PDT.
 
+Architecture checkpoint: the proof tower is being refactored to route
+structured control through an explicit typed CFG middle layer before labeled
+assembly. `EvmCompiler.TypedCfg` is the new target for this boundary: blocks own
+input stack shapes, terminators type-check against target block shapes, and
+EVM halts are terminal outcomes rather than continuations. The old
+`Structured.TypedContinuations` facade should be retired or bridged through
+this IR as the refactor proceeds.
+
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
      `Reference.Safe.Full.*` so code-image, object/data, and external
