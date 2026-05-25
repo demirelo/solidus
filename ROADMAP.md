@@ -164,6 +164,12 @@ Current assumption-cleanup checkpoint:
     target decode-window bound, and target jumpdest correctness, so the
     preferred top package has the same no-hidden-evidence audit surface as the
     older resource package.
+  - [x] Add a canonical top-level observation relation for the imported
+    dispatcher bridge and a checked constructor from
+    `RecursiveBridgeSemanticCoreContracts` to
+    `RecursiveBridgeSemanticContracts`, so callers of the preferred
+    source-compile package no longer need to provide the observation field as
+    arbitrary semantic evidence when using the canonical outcome relation.
 - [x] Promote the actual result-level `EVM.X` theorem as the preferred public
   gas-aware alias.
   - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and

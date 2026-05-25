@@ -258,6 +258,61 @@ structure RecursiveBridgeTopNoCallSourceCompileAssumptions
 
 namespace RecursiveBridgeTopNoCallSourceCompileAssumptions
 
+def withCanonicalObservation
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSourceAccepted : RecursiveBridgeSourceAccepted program)
+    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hSemantics :
+      RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+        program)
+    (hInitialSharedRel :
+      Reference.SharedStateRel cfg
+        { shared with
+          executionEnv :=
+            { shared.executionEnv with code := program.contract } }
+        initial.toSharedState)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCompileTarget :
+      compileCheckedAssemblyTarget? program = some (asm, target))
+    (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
+    (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
+    (gasOracle : Assembly.GasOracleAssumption asm initial)
+    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
+    (currentContractProjection :
+      Assembly.CurrentContractProjectionAssumption asm initial)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
+      revertRel prim
+      (RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg terminalRel
+        revertRel program (.Ok shared store))
+      program asm target shared store sourceFuel initial referenceResult where
+  sourceAccepted := hSourceAccepted
+  sourceCompileAccepted := hSourceCompileAccepted
+  semantics := hSemantics.toSemanticContracts
+  initialShared := hInitialSharedRel
+  sourceRun := hSourceRun
+  compileTarget := hCompileTarget
+  decodeWindow := decodeWindow
+  jumpdestCorrect := jumpdestCorrect
+  gasOracle := gasOracle
+  outOfGasPolicy := outOfGasPolicy
+  currentContractProjection := currentContractProjection
+  initialPc := hInitialPc
+  initialStack := hInitialStack
+
 theorem sourceReferenceAccepted
     {cfg : Reference.StateRelConfig}
     {terminalRel :

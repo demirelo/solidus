@@ -2564,6 +2564,9 @@ abbrev recursiveBridgeTopNoCallSourceCompileAssumptions :=
 abbrev recursiveBridgeTopNoCallSourceCompileToNoCallAssumptions :=
   @Yul.Program.RecursiveBridgeTopNoCallSourceCompileAssumptions.toNoCallAssumptions
 
+abbrev recursiveBridgeTopNoCallSourceCompileWithCanonicalObservation :=
+  @Yul.Program.RecursiveBridgeTopNoCallSourceCompileAssumptions.withCanonicalObservation
+
 abbrev recursiveBridgeTopNoCallSourceCompileSourceReferenceAccepted :=
   @Yul.Program.RecursiveBridgeTopNoCallSourceCompileAssumptions.sourceReferenceAccepted
 
@@ -2605,6 +2608,18 @@ abbrev recursiveBridgeCompileResources :=
 
 abbrev recursiveBridgeSemanticContracts :=
   @Yul.Program.RecursiveBridgeSemanticContracts
+
+abbrev recursiveBridgeSemanticCoreContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreContracts
+
+abbrev recursiveBridgeSemanticDispatcherOutcomeRel :=
+  @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+
+abbrev recursiveBridgeSemanticCanonicalObservation :=
+  @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherObservationSound_canonical
+
+abbrev recursiveBridgeSemanticCoreToContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreContracts.toSemanticContracts
 
 abbrev recursiveBridgeSourceRun :=
   @Yul.Program.RecursiveBridgeSourceRun
