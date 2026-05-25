@@ -102,6 +102,8 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Add canonical local memory write stack-agreement facts for
        `MSTORE` and `MSTORE8`, using a reusable binary machine-state source
        bridge.
+     - [x] Add canonical local memory copy stack-agreement for `MCOPY`, using
+       a reusable ternary machine-state source bridge.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
