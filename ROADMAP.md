@@ -2496,8 +2496,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Support source-complete multi-return call behavior against the Nethermind interpreter bridge.
 
 3. [ ] Objects/data
-   - Define object layout for code and data sections.
-   - Lower and prove `datasize`, `dataoffset`, and `datacopy` against that layout.
+   - [x] Define backend object layout/image helpers for executable code, child-object payloads, and data sections (`EvmCompiler.Objects.Layout`).
+   - [ ] Lower and prove `datasize`, `dataoffset`, and `datacopy` against that layout in the checked Yul/object path.
    - State any external object/account assumptions separately from compiler correctness.
 
 4. [ ] Nethermind Yul bridge
