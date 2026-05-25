@@ -170,6 +170,9 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSemanticContracts`, so callers of the preferred
     source-compile package no longer need to provide the observation field as
     arbitrary semantic evidence when using the canonical outcome relation.
+  - [x] Add the reverse projection
+    `RecursiveBridgeSemanticCoreContracts.ofSemanticContracts`, making the
+    semantic core/redundant-observation split explicit in both directions.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The

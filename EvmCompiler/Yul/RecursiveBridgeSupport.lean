@@ -151567,6 +151567,27 @@ end RecursiveBridgeSemanticContracts
 
 namespace RecursiveBridgeSemanticCoreContracts
 
+theorem ofSemanticContracts
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContracts :
+      RecursiveBridgeSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store) :
+    RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hContracts.primitiveSound
+  terminal := hContracts.terminal
+  primitiveStack := hContracts.primitiveStack
+  exprResultOk := hContracts.exprResultOk
+
 theorem toSemanticContracts
     {cfg : Reference.StateRelConfig}
     {terminalRel :

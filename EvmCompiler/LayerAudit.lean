@@ -2621,6 +2621,9 @@ abbrev recursiveBridgeSemanticCanonicalObservation :=
 abbrev recursiveBridgeSemanticCoreToContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.toSemanticContracts
 
+abbrev recursiveBridgeSemanticCoreOfContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofSemanticContracts
+
 abbrev recursiveBridgeSourceRun :=
   @Yul.Program.RecursiveBridgeSourceRun
 
