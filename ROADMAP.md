@@ -133,6 +133,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Add an arity-aware hidden-context primitive-expression bridge that
        derives runtime primitive-call arity from successful imported
        `evalArgs` and checked lowering arity.
+     - [x] Add an arity-aware checked `Expr.lower1?` primitive-expression
+       wrapper that derives source argument arity from successful
+       `lowerBound1?` and `toStackSeq?` evidence.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

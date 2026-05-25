@@ -6156,8 +6156,17 @@ abbrev exprValuePreludeSoundPrimOfArgStackPreludeRegularAt :=
 abbrev exprValuePreludeSoundPrimOfArgStackPreludeRegularAtArity :=
   @Yul.Reference.SourceBridgeFacts.exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity
 
+abbrev exprListToSeqLengthEq :=
+  @Yul.Reference.SourceBridgeFacts.exprList_toSeq?_length_eq
+
+abbrev exprListToStackSeqLengthEq :=
+  @Yul.Reference.SourceBridgeFacts.exprList_toStackSeq?_length_eq
+
 abbrev lower1PrimExprValuePreludeSoundOfLowerBound1PreludeRegularAt :=
   @Yul.Reference.SourceBridgeFacts.lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+
+abbrev lower1PrimExprValuePreludeSoundOfLowerBound1PreludeRegularAtArity :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
 
 abbrev lower1PrimExprEvalPreludeSoundOfLowerBound1RegularAt :=
   @Yul.Reference.SourceBridgeFacts.lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt

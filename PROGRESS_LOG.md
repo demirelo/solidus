@@ -3331,3 +3331,7 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 08:16:42 PDT - proof - introduced arity-aware recursive primitive-stack contracts plus a checked lift from existing strict primitive-stack contracts; command `lake build EvmCompiler.Yul.Reference EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
 
 - 2026-05-25 08:20:55 PDT - proof - added `exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity`, deriving primitive-call arity from successful imported `evalArgs` plus checked lowering arity; command `lake build EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
+
+- 2026-05-25 08:28:00 PDT - compaction resume - continuing the audit-concern goal; current checkpoint is the arity-aware checked `lower1?` primitive wrapper in `RecursiveBridgeSupport`, then exporting it through `LayerAudit`.
+
+- 2026-05-25 08:32:00 PDT - proof - added/exported the arity-aware checked `Expr.lower1?` primitive wrapper and supporting `toSeq?`/`toStackSeq?` length lemmas, so primitive expression lowering now derives source arity from checked compiler evidence; command `lake build EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.

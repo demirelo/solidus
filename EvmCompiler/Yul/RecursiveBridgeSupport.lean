@@ -28535,6 +28535,43 @@ theorem exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity
               Locals.Source.State.withShared],
           hRelAfter⟩
 
+theorem exprList_toSeq?_length_eq
+    {exprs : List (Locals.Expr 1)} {results : Nat}
+    {seq : Locals.ExprSeq results}
+    (hSeq : Expr.List.toSeq? exprs results = some seq) :
+    exprs.length = results := by
+  induction exprs generalizing results with
+  | nil =>
+      cases results with
+      | zero =>
+          simp [Expr.List.toSeq?] at hSeq
+          rfl
+      | succ results =>
+          simp [Expr.List.toSeq?] at hSeq
+  | cons head rest ih =>
+      cases results with
+      | zero =>
+          simp [Expr.List.toSeq?] at hSeq
+      | succ results =>
+          cases hTailRaw :
+              Expr.List.toSeq? rest results with
+          | none =>
+              simp [Expr.List.toSeq?, hTailRaw] at hSeq
+          | some tail =>
+              simp [Expr.List.toSeq?, hTailRaw] at hSeq
+              have hTailLen := ih hTailRaw
+              simp [hTailLen]
+
+theorem exprList_toStackSeq?_length_eq
+    {exprs : List (Locals.Expr 1)} {results : Nat}
+    {seq : Locals.ExprSeq results}
+    (hSeq : Expr.List.toStackSeq? exprs results = some seq) :
+    exprs.length = results := by
+  have hRevLen :
+      exprs.reverse.length = results :=
+    exprList_toSeq?_length_eq hSeq
+  simpa [Expr.List.toStackSeq?, List.length_reverse] using hRevLen
+
 /--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
@@ -28622,6 +28659,54 @@ theorem lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
           (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
           (op := op) (args := args) (codeOverride := codeOverride)
           (pre := pre) (lowerArgs := seq) hArgs hPrim)
+
+theorem lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+        (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) := by
+  have hArgArity :
+      args.length = Expressions.Structured.BasicOp.inputs op := by
+    have hLowerLen :=
+      Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+    have hSeqLen :=
+      exprList_toStackSeq?_length_eq hSeq
+    exact hLowerLen.symm.trans hSeqLen
+  constructor
+  · exact
+      Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      exprValuePreludeSound_cast hOutputs
+        (exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity
+          (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+          (op := op) (args := args) (codeOverride := codeOverride)
+          (pre := pre) (lowerArgs := seq) hArgArity hArgs hPrim)
 
 theorem evalValues_prim_call_single_of_eval_primCall_single
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
