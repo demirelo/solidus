@@ -176,6 +176,10 @@ Current assumption-cleanup checkpoint:
     public spine now constructs the canonical dispatcher outcome relation from
     the semantic core instead of accepting an arbitrary `outcomeRel`/observation
     pair at the preferred top boundary.
+  - [x] Add the matching canonical no-out-of-gas corollary
+    `compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
+    so both public gas-aware result theorems have a canonical-observation
+    surface.
 - [x] Promote the actual result-level `EVM.X` theorem as the preferred public
   gas-aware alias.
   - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and

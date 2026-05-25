@@ -962,6 +962,79 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       outOfGasPolicy currentContractProjection hInitialPc hInitialStack)
     hX
 
+theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSourceAccepted : RecursiveBridgeSourceAccepted program)
+    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hSemantics :
+      RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+        program)
+    (hInitialSharedRel :
+      Reference.SharedStateRel cfg
+        { shared with
+          executionEnv :=
+            { shared.executionEnv with code := program.contract } }
+        initial.toSharedState)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCompileTarget :
+      compileCheckedAssemblyTarget? program = some (asm, target))
+    (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
+    (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
+    (gasOracle : Assembly.GasOracleAssumption asm initial)
+    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
+    (currentContractProjection :
+      Assembly.CurrentContractProjectionAssumption asm initial)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg terminalRel
+        revertRel program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel initial targetOutcome ∧
+        ∀ gas,
+          gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas initial) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound, hRun,
+      hOutcome, hWholeRel, _hAccepted, _hBytes, _hEncoding, _hGasBoundary,
+      _hGasOracle, _hOutOfGas, _hProjection, hTrace, hRuns⟩ :=
+    compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
+      hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
+      hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
+      outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
+  exact
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound, hRun,
+      hOutcome, hWholeRel, hTrace, fun gas hGas hUInt256 => by
+        obtain ⟨result, hRunX, _hAgree⟩ := hRuns gas hGas hUInt256
+        rw [hRunX]
+        intro hImpossible
+        cases hImpossible⟩
+
 end Program
 end Yul
 end EvmCompiler
