@@ -130,6 +130,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Introduce an arity-aware recursive primitive-stack contract package
        and a checked lift from the old strict package, so permissive imported
        nullaries and strict dispatcher primitives can coexist during migration.
+     - [x] Add an arity-aware hidden-context primitive-expression bridge that
+       derives runtime primitive-call arity from successful imported
+       `evalArgs` and checked lowering arity.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

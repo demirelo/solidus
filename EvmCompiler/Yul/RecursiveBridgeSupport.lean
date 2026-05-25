@@ -28466,6 +28466,76 @@ theorem exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt
           hRelAfter⟩
 
 /--
+Arity-aware hidden-context primitive-call bridge.
+
+The additional `hArgArity` premise is supplied by checked lowering: the
+generated stack argument sequence has exactly the input arity of the lowered
+primitive. The source-side runtime arity fed to the primitive contract is then
+derived from successful imported `evalArgs`, via `Imported.evalArgs_length_of_ok`.
+-/
+theorem exprValuePreludeSound_prim_of_arg_stack_preludeRegularAt_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hArgArity : args.length = Expressions.Structured.BasicOp.inputs op)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre lowerArgs)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    ExprValuePreludeSound cfg layout prim program ctx sourceFuel.succ
+      (.Call (.inl yulPrim) args) codeOverride pre
+      (Locals.Expr.prim op lowerArgs) := by
+  intro source compiler sourceAfter values hInitial hEval
+  cases hArgRaw :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source with
+  | error err =>
+      simp [EvmYul.Yul.evalValues, EvmYul.Yul.reverse', hArgRaw] at hEval
+  | ok argResult =>
+      rcases argResult with ⟨sourceAfterArgs, rawValues⟩
+      have hArgForBridge :
+          EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+            .ok (sourceAfterArgs, rawValues.reverse.reverse) := by
+        simpa using hArgRaw
+      rcases hArgs hInitial hArgForBridge with
+        ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+          hPreludeRun, hCompilerArgs, hRelArgs⟩
+      have hPrimCall :
+          EvmYul.Yul.primCall sourceFuel sourceAfterArgs yulPrim
+              rawValues.reverse =
+            .ok (sourceAfter, values) := by
+        simpa [EvmYul.Yul.evalValues, EvmYul.Yul.reverse', hArgRaw] using hEval
+      have hArity :
+          rawValues.reverse.length =
+            Expressions.Structured.BasicOp.inputs op := by
+        have hLen :=
+          Imported.evalArgs_length_of_ok hArgForBridge
+        simpa [List.length_reverse, hArgArity] using hLen
+      rcases hPrim hRelArgs hArity hPrimCall with
+        ⟨sharedAfter, hPrimEval, hRelAfter⟩
+      exact
+        ⟨compilerAfterPre, compilerAfterArgs.withShared sharedAfter,
+          ctxAfter, targetFuel, hPreludeRun,
+          by
+            have hCompilerArgsRaw :
+                Locals.Source.Expr.ExprSeq.eval prim lowerArgs
+                    compilerAfterPre =
+                  .ok (compilerAfterArgs, rawValues) := by
+              simpa using hCompilerArgs
+            have hPrimEvalRaw :
+                prim.eval op compilerAfterArgs.shared rawValues =
+                  .ok (sharedAfter, values) := by
+              simpa using hPrimEval
+            simp [Locals.Source.Expr.eval, hCompilerArgsRaw, hPrimEvalRaw,
+              Locals.Source.State.withShared],
+          hRelAfter⟩
+
+/--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
 -/
