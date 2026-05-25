@@ -5312,6 +5312,30 @@ theorem yul_primCall_succ_mulmod_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_mstore_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.MSTORE : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.binaryMachineStateOp
+          EvmYul.MachineState.mstore source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_mstore8_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.MSTORE8 : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.binaryMachineStateOp
+          EvmYul.MachineState.mstore8 source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -5416,6 +5440,43 @@ theorem yulPrimitiveTernaryOneSound_of_execTriOp
                       exact ⟨left, middle, right, rfl, rfl, rfl⟩
                   | cons extra restRestRest =>
                       simp [EvmYul.Yul.execTriOp] at hCall
+
+theorem yulPrimitiveBinaryZeroSound_of_binaryMachineStateOp
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    (f : EvmYul.MachineState → Word → Word → EvmYul.MachineState)
+    (hPrim :
+      ∀ (fuel : Nat) (source : State) (args : List Word),
+        EvmYul.Yul.primCall fuel.succ source yulPrim args =
+          (match EvmYul.Yul.binaryMachineStateOp f source args with
+          | .ok (state, value?) => .ok (state, value?.toList)
+          | .error err => .error err)) :
+    YulPrimitiveBinaryZeroSound sourceFuel yulPrim
+      (fun shared left right =>
+        { shared with
+          toMachineState := f shared.toMachineState left right }) := by
+  intro sourceShared store sourceValues sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [hPrim fuel (.Ok sourceShared store) sourceValues] at hCall
+      cases sourceValues with
+      | nil =>
+          simp [EvmYul.Yul.binaryMachineStateOp] at hCall
+      | cons left rest =>
+          cases rest with
+          | nil =>
+              simp [EvmYul.Yul.binaryMachineStateOp] at hCall
+          | cons right restTail =>
+              cases restTail with
+              | nil =>
+                  simp [EvmYul.Yul.binaryMachineStateOp] at hCall
+                  rcases hCall with ⟨hState, hValues⟩
+                  subst sourceAfterPrim
+                  subst values'
+                  exact ⟨left, right, rfl, rfl, rfl⟩
+              | cons extra restRest =>
+                  simp [EvmYul.Yul.binaryMachineStateOp] at hCall
 
 theorem yulPrimitiveBinaryOneSound_add
     {sourceFuel : Nat} :
@@ -5641,6 +5702,28 @@ theorem yulPrimitiveTernaryOneSound_mulmod
       EvmYul.UInt256.mulMod :=
   yulPrimitiveTernaryOneSound_of_execTriOp
     EvmYul.UInt256.mulMod yul_primCall_succ_mulmod_eq
+
+theorem yulPrimitiveBinaryZeroSound_mstore
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryZeroSound sourceFuel
+      ((.StackMemFlow .MSTORE : EvmYul.Operation .Yul))
+      (fun shared slot value =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.mstore shared.toMachineState slot value }) :=
+  yulPrimitiveBinaryZeroSound_of_binaryMachineStateOp
+    EvmYul.MachineState.mstore yul_primCall_succ_mstore_eq
+
+theorem yulPrimitiveBinaryZeroSound_mstore8
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryZeroSound sourceFuel
+      ((.StackMemFlow .MSTORE8 : EvmYul.Operation .Yul))
+      (fun shared slot value =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.mstore8 shared.toMachineState slot value }) :=
+  yulPrimitiveBinaryZeroSound_of_binaryMachineStateOp
+    EvmYul.MachineState.mstore8 yul_primCall_succ_mstore8_eq
 
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
@@ -5956,6 +6039,69 @@ theorem sourcePrimitiveTernaryOneSound_structured_mulmod :
       (fun shared _left _middle _right => shared) EvmYul.UInt256.mulMod :=
   sourcePrimitiveTernaryOneSound_structured_of_tri
     EvmYul.UInt256.mulMod (by rfl)
+
+theorem sourcePrimitiveBinaryZeroSound_structured_of_binaryMachineState
+    {op : Structured.BasicOp}
+    (f : EvmYul.MachineState → Word → Word → EvmYul.MachineState)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.binaryMachineState f)) :
+    SourcePrimitiveBinaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared left right =>
+        { shared with
+          toMachineState := f shared.toMachineState left right }) := by
+  intro shared left right
+  let state' : EVMState :=
+    { toSharedState :=
+        { shared with
+          toMachineState := f shared.toMachineState left right },
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .binaryMachineState f)
+      (shared := shared)
+      (shared' :=
+        { shared with
+          toMachineState := f shared.toMachineState left right })
+      (values := [right, left])
+      (values' := [])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run,
+          EvmYul.EVM.binaryMachineStateOp, EvmYul.Stack.pop2,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveBinaryZeroSound_structured_mstore :
+    SourcePrimitiveBinaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured .mstore
+      (fun shared slot value =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.mstore shared.toMachineState slot value }) :=
+  sourcePrimitiveBinaryZeroSound_structured_of_binaryMachineState
+    EvmYul.MachineState.mstore (by rfl)
+
+theorem sourcePrimitiveBinaryZeroSound_structured_mstore8 :
+    SourcePrimitiveBinaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured .mstore8
+      (fun shared slot value =>
+        { shared with
+          toMachineState :=
+            EvmYul.MachineState.mstore8 shared.toMachineState slot value }) :=
+  sourcePrimitiveBinaryZeroSound_structured_of_binaryMachineState
+    EvmYul.MachineState.mstore8 (by rfl)
 
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -6354,6 +6500,15 @@ theorem primitiveStackSoundAt_mstore
         rcases hShared with ⟨hChain, hMachine⟩
         exact ⟨hChain, MachineStateRel.mstore hMachine⟩)
 
+theorem primitiveStackSoundAt_structured_mstore
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .MSTORE : EvmYul.Operation .Yul)) .mstore :=
+  primitiveStackSoundAt_mstore
+    yulPrimitiveBinaryZeroSound_mstore
+    sourcePrimitiveBinaryZeroSound_structured_mstore
+
 theorem primitiveStackSoundAt_mstore8
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
@@ -6393,6 +6548,15 @@ theorem primitiveStackSoundAt_mstore8
         intro sourceShared targetShared slot value hShared
         rcases hShared with ⟨hChain, hMachine⟩
         exact ⟨hChain, MachineStateRel.mstore8 hMachine⟩)
+
+theorem primitiveStackSoundAt_structured_mstore8
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .MSTORE8 : EvmYul.Operation .Yul)) .mstore8 :=
+  primitiveStackSoundAt_mstore8
+    yulPrimitiveBinaryZeroSound_mstore8
+    sourcePrimitiveBinaryZeroSound_structured_mstore8
 
 theorem primitiveStackSoundAt_mcopy
     {cfg : StateRelConfig} {layout : List Name}

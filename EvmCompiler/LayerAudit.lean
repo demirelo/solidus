@@ -3483,6 +3483,12 @@ abbrev yulPrimitiveTernaryOneSoundAddmod :=
 abbrev yulPrimitiveTernaryOneSoundMulmod :=
   @Yul.Reference.SourceBridgeFacts.yulPrimitiveTernaryOneSound_mulmod
 
+abbrev yulPrimitiveBinaryZeroSoundMstore :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryZeroSound_mstore
+
+abbrev yulPrimitiveBinaryZeroSoundMstore8 :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryZeroSound_mstore8
+
 abbrev sourcePrimitiveBinaryOneSoundStructuredOfBin :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryOneSound_structured_of_bin
 
@@ -3567,6 +3573,15 @@ abbrev sourcePrimitiveTernaryOneSoundStructuredAddmod :=
 abbrev sourcePrimitiveTernaryOneSoundStructuredMulmod :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveTernaryOneSound_structured_mulmod
 
+abbrev sourcePrimitiveBinaryZeroSoundStructuredOfBinaryMachineState :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryZeroSound_structured_of_binaryMachineState
+
+abbrev sourcePrimitiveBinaryZeroSoundStructuredMstore :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryZeroSound_structured_mstore
+
+abbrev sourcePrimitiveBinaryZeroSoundStructuredMstore8 :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveBinaryZeroSound_structured_mstore8
+
 abbrev primitiveStackSoundAtStructuredAdd :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_add
 
@@ -3650,6 +3665,12 @@ abbrev primitiveStackSoundAtStructuredAddmod :=
 
 abbrev primitiveStackSoundAtStructuredMulmod :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_mulmod
+
+abbrev primitiveStackSoundAtStructuredMstore :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_mstore
+
+abbrev primitiveStackSoundAtStructuredMstore8 :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_mstore8
 
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound

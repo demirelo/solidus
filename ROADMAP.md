@@ -99,6 +99,9 @@ Last updated: 2026-05-25 06:52 PDT.
        for the pure comparison/bitwise primitives `ISZERO` and `NOT`.
      - [x] Add the reusable ternary-one-result bridge shape and instantiate it
        for the pure arithmetic primitives `ADDMOD` and `MULMOD`.
+     - [x] Add canonical local memory write stack-agreement facts for
+       `MSTORE` and `MSTORE8`, using a reusable binary machine-state source
+       bridge.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
