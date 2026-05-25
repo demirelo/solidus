@@ -108,6 +108,8 @@ Last updated: 2026-05-25 06:52 PDT.
        `CALLDATACOPY`, using a reusable ternary shared-copy source bridge.
      - [x] Add canonical return-data-to-memory stack-agreement for
        `RETURNDATACOPY`, including its special imported dispatcher equation.
+     - [x] Add canonical memory read stack-agreement for `MLOAD`, using a
+       reusable unary shared-state-dependent result bridge.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
