@@ -61552,6 +61552,147 @@ theorem lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
               hScoped hOk hResultOk hLower
 
 
+/--
+Arity-aware regular single-expression dispatcher for checked `Expr.lower1?`
+under the checked-argument interface.
+-/
+theorem lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_arity
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {coverLayout layout : List Name}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hCallFuel : sourceFuel.succ ≤ bound)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hArgs :
+      SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
+        yulProgram.contract coverLayout sourceFuel)
+    (hPrimSound :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hOk : UserCallArity.ExprOk yulProgram.contract expr)
+    (hResultOk :
+      ExprEvalResultOkAt cfg layout sourceFuel.succ expr
+        (some yulProgram.contract))
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lowerExpr, freshState')) :
+    ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ expr
+      (some yulProgram.contract) pre lowerExpr := by
+  cases expr with
+  | Lit value =>
+      simp [Expr.lower1?, Expr.lower?] at hLower
+      rcases hLower with ⟨hPreEq, hLowerEq, _hStateEq⟩
+      cases hPreEq
+      cases hLowerEq
+      exact exprEvalPreludeSound_lit
+  | Var name =>
+      simp [Expr.lower1?, Expr.lower?] at hLower
+      rcases hLower with ⟨hPreEq, hLowerEq, _hStateEq⟩
+      cases hPreEq
+      cases hLowerEq
+      have hMem : identName name ∈ layout := by
+        simpa [SourceExprScoped] using hScoped
+      unfold ExprEvalPreludeSound
+      intro source compiler sourceAfter value hInitial hEval
+      exact
+        (exprEvalPreludeSound_var (cfg := cfg) (layout := layout)
+          (prim := prim) (program := program) (ctx := ctx)
+          (sourceFuel := sourceFuel.succ)
+          (codeOverride := some yulProgram.contract) hMem)
+          hInitial hEval
+  | Call fn args =>
+      cases fn with
+      | inl yulPrim =>
+          unfold ExprEvalPreludeSound
+          intro source compiler sourceAfter value hInitial hEval
+          have hSafePrim : Safe.primitive yulPrim := by
+            simpa [Safe.expr] using hSafe.1
+          have hSafeArgs : Safe.exprs args := by
+            simpa [Safe.expr] using hSafe.2
+          have hScopedArgs : SourceExprsScoped layout args := by
+            simpa [SourceExprScoped] using hScoped
+          have hOkArgs : UserCallArity.ExprsOk yulProgram.contract args := by
+            simpa [UserCallArity.ExprOk] using hOk
+          simp [Expr.lower1?, Expr.lower?] at hLower
+          cases hBasic : Prim.toBasicOp? yulPrim with
+          | none =>
+              simp [hBasic] at hLower
+          | some op =>
+              simp [hBasic] at hLower
+              cases hLowerArgs :
+                  Expr.List.lowerBound1? freshState args with
+              | none =>
+                  simp [hLowerArgs] at hLower
+              | some argsResult =>
+                  rcases argsResult with ⟨preArgs, argExprs, freshArgsState⟩
+                  simp [hLowerArgs] at hLower
+                  cases hSeq :
+                      Expr.List.toStackSeq? argExprs
+                          (Expressions.Structured.BasicOp.inputs op) with
+                  | none =>
+                      simp [hSeq] at hLower
+                  | some seq =>
+                      by_cases hOutputs :
+                          Expressions.Structured.BasicOp.outputs op = 1
+                      · simp [hSeq, hOutputs] at hLower
+                        rcases hLower with
+                          ⟨hPreEq, hLowerEq, hStateEq⟩
+                        have hArgsRegular :
+                            SourceArgListPreludeRegularAt cfg layout prim
+                              program ctx sourceFuel args
+                              (some yulProgram.contract) preArgs argExprs :=
+                          hArgs.lower (Nat.le_refl sourceFuel) hCovers
+                            hSafeArgs hScopedArgs hOkArgs hLowerArgs
+                        rcases
+                            lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope_arity
+                              (cfg := cfg) (layout := layout) (prim := prim)
+                              (program := program) (ctx := ctx)
+                              (sourceFuel := sourceFuel)
+                              (yulPrim := yulPrim) (op := op)
+                              (args := args)
+                              (codeOverride := some yulProgram.contract)
+                              (freshState := freshState)
+                              (freshState' := freshArgsState)
+                              (pre := preArgs) (argExprs := argExprs)
+                              (seq := seq)
+                              hSafePrim hBasic hLowerArgs hSeq hOutputs
+                              hArgsRegular
+                              (hPrimSound hSafePrim hBasic hOutputs) with
+                          ⟨_hLowerChecked, hSound⟩
+                        cases hPreEq
+                        cases hLowerEq
+                        cases hStateEq
+                        exact hSound hInitial hEval
+                      · simp [hSeq, hOutputs] at hLower
+      | inr functionName =>
+          exact
+            lower1?_user_call_exprEvalPreludeSound_of_argRegularAllCheckedAt
+              (cfg := cfg) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (yulProgram := yulProgram) (program := program)
+              (context := context) (bound := bound) (ctx := ctx)
+              (coverLayout := coverLayout) (layout := layout)
+              (sourceFuel := sourceFuel) (functionName := functionName)
+              (args := args) (freshState := freshState)
+              (freshState' := freshState') (pre := pre)
+              (lowerExpr := lowerExpr)
+              hRecursive hCallFuel hLayoutSubset hArgs hCovers hSafe
+              hScoped hOk hResultOk hLower
 theorem lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt
     {cfg : StateRelConfig}
     {terminalRel :
