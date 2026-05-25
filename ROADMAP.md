@@ -2498,6 +2498,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 3. [ ] Objects/data
    - [x] Define backend object layout/image helpers for executable code, child-object payloads, and data sections (`EvmCompiler.Objects.Layout`).
    - [x] Add checked typed-Yul front-end rewrites showing `datasize` and `dataoffset` become Yul literals, and `datacopy` becomes the Yul/EVM `codecopy` primitive after argument resolution.
+   - [x] Prove typed front-end data-section payload, named-size, and named-offset entries agree with the backend object-layout helpers after `DataSection.toObjects`.
    - [ ] Lower and prove `datasize`, `dataoffset`, and `datacopy` against that layout in the checked Yul/object path.
    - State any external object/account assumptions separately from compiler correctness.
 

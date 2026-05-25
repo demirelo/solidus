@@ -374,6 +374,18 @@ namespace ObjectData
 abbrev dataSectionPayloadBytes :=
   @Objects.DataSection.Sections.payloadBytes
 
+abbrev frontendDataSectionPayloadBytes :=
+  @Solidity.Frontend.DataSection.List.payloadBytes
+
+abbrev frontendDataToBackendPayloadBytes :=
+  @Solidity.Frontend.DataSection.List.toObjects_payloadBytes
+
+abbrev frontendDataToBackendNamedSizeEntries :=
+  @Solidity.Frontend.DataSection.List.toObjects_namedSizeEntries
+
+abbrev frontendDataToBackendNamedOffsetEntries :=
+  @Solidity.Frontend.DataSection.List.toObjects_namedOffsetEntriesFromNat
+
 noncomputable abbrev objectImageBytes :=
   @Objects.Object.imageBytes?
 

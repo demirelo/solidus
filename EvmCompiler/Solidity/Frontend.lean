@@ -1,4 +1,5 @@
 import EvmCompiler.Yul.Compiler
+import EvmCompiler.Objects.Layout
 import EvmCompiler.Assembly.Bytecode
 
 namespace EvmCompiler
@@ -185,6 +186,76 @@ def offsetEntriesFromNat : Nat → List DataSection → List (Name × Word)
       match dataSection.offsetEntryFromNat? base with
       | some entry => entry :: tail
       | none => tail
+
+namespace List
+
+def payloadBytes : List DataSection → List UInt8
+  | [] => []
+  | sect :: rest => sect.bytes ++ payloadBytes rest
+
+theorem toObjects_payloadBytes (sections : List DataSection) :
+    Objects.DataSection.Sections.payloadBytes (toObjects sections) =
+      payloadBytes sections := by
+  induction sections with
+  | nil =>
+      rfl
+  | cons sect rest ih =>
+      cases sect with
+      | mk name? bytes =>
+          have hRest :
+              Objects.DataSection.Sections.payloadBytes
+                  (List.map DataSection.toObjects rest) =
+                payloadBytes rest := by
+            simpa [toObjects] using ih
+          simp [toObjects, payloadBytes, DataSection.toObjects,
+            Objects.DataSection.Sections.payloadBytes, hRest]
+
+theorem toObjects_namedSizeEntries (sections : List DataSection) :
+    Objects.DataSection.Sections.namedSizeEntries (toObjects sections) =
+      DataSection.sizeEntries sections := by
+  induction sections with
+  | nil =>
+      rfl
+  | cons sect rest ih =>
+      cases sect with
+      | mk name? bytes =>
+          have hRest :
+              Objects.DataSection.Sections.namedSizeEntries
+                  (List.map DataSection.toObjects rest) =
+                DataSection.sizeEntries rest := by
+            simpa [toObjects] using ih
+          cases name? <;>
+            simp [toObjects, DataSection.toObjects,
+              DataSection.sizeEntries, DataSection.sizeEntry?,
+              DataSection.size, Objects.DataSection.Sections.namedSizeEntries,
+              Objects.DataSection.namedSizeEntry?, Objects.DataSection.size,
+              Objects.DataSection.byteLength, hRest]
+
+theorem toObjects_namedOffsetEntriesFromNat
+    (base : Nat) (sections : List DataSection) :
+    Objects.DataSection.Sections.namedOffsetEntriesFromNat base
+        (toObjects sections) =
+      DataSection.offsetEntriesFromNat base sections := by
+  induction sections generalizing base with
+  | nil =>
+      rfl
+  | cons sect rest ih =>
+      cases sect with
+      | mk name? bytes =>
+          have hRest :
+              Objects.DataSection.Sections.namedOffsetEntriesFromNat
+                  (base + bytes.length) (List.map DataSection.toObjects rest) =
+                DataSection.offsetEntriesFromNat (base + bytes.length) rest := by
+            simpa [toObjects] using ih (base + bytes.length)
+          cases name? <;>
+            simp [toObjects, DataSection.toObjects,
+              DataSection.offsetEntriesFromNat,
+              DataSection.offsetEntryFromNat?,
+              Objects.DataSection.Sections.namedOffsetEntriesFromNat,
+              Objects.DataSection.namedOffsetEntryFromNat?,
+              Objects.DataSection.byteLength, hRest]
+
+end List
 
 end DataSection
 
