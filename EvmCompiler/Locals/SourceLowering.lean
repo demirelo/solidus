@@ -623,6 +623,34 @@ theorem sourceContinuingStep_suffix_safe
     cases hStep
     simp [Assembly.PrimStep.SuffixSafe]
 
+theorem sourceContinuingStep_inputArity
+    {op : Structured.BasicOp} {step : Assembly.PrimStep}
+    (hStep :
+      Source.PrimitiveSemantics.sourceContinuingStep? op = some step) :
+    Assembly.PrimStep.inputArity step =
+      Expressions.Structured.BasicOp.inputs op := by
+  cases op <;>
+    simp [Source.PrimitiveSemantics.sourceContinuingStep?,
+      Structured.BasicOp.toPrimOp, Assembly.PrimOp.continuingStep?,
+      Assembly.PrimStep.inputArity, Expressions.Structured.BasicOp.inputs] at hStep ⊢
+  all_goals
+    cases hStep
+    rfl
+
+theorem sourceContinuingStep_outputArity
+    {op : Structured.BasicOp} {step : Assembly.PrimStep}
+    (hStep :
+      Source.PrimitiveSemantics.sourceContinuingStep? op = some step) :
+    Assembly.PrimStep.outputArity step =
+      Expressions.Structured.BasicOp.outputs op := by
+  cases op <;>
+    simp [Source.PrimitiveSemantics.sourceContinuingStep?,
+      Structured.BasicOp.toPrimOp, Assembly.PrimOp.continuingStep?,
+      Assembly.PrimStep.outputArity, Expressions.Structured.BasicOp.outputs] at hStep ⊢
+  all_goals
+    cases hStep
+    rfl
+
 theorem sourceContinuingStep_run_suffix_sound
     {op : Structured.BasicOp} {step : Assembly.PrimStep}
     {shared : EvmYul.SharedState .EVM}
@@ -662,39 +690,79 @@ theorem structured_eval_step
     {baseStack : EvmYul.Stack Word}
     (hEval :
       Source.PrimitiveSemantics.structured.eval op shared values =
-        .ok (shared', values'))
+      .ok (shared', values'))
     (hShared : evm.toSharedState = shared)
     (hStack : evm.stack = values.reverse ++ baseStack)
     (hStep : Structured.BasicOp.step op evm = .ok evm') :
     evm'.toSharedState = shared' ∧
       evm'.stack = values'.reverse ++ baseStack := by
-  unfold Source.PrimitiveSemantics.structured at hEval
-  cases hCont : Source.PrimitiveSemantics.sourceContinuingStep? op with
-  | none =>
-      simp [hCont] at hEval
-  | some step =>
-      simp [hCont] at hEval
-      cases hIsoRun :
-          step.run (Assembly.PrimStep.isoState shared values.reverse) with
-      | error err =>
-          simp [hIsoRun] at hEval
-      | ok iso' =>
-          simp [hIsoRun] at hEval
-          have hRun : step.run evm = .ok evm' := by
-            simpa [sourceContinuingStep_basicOp_step hCont evm] using hStep
-          have hSuffix :=
-            sourceContinuingStep_run_suffix_sound
-              (op := op) (step := step) (shared := shared)
-              (stack := values.reverse) (baseStack := baseStack)
-              (iso' := iso') (evm := evm) (evm' := evm')
-              hCont hIsoRun hShared hStack hRun
-          rcases hSuffix with ⟨hShared', hStack'⟩
-          rcases hEval with ⟨hSharedEq, hValuesEq⟩
-          subst shared'
-          subst values'
-          constructor
-          · exact hShared'
-          · simpa using hStack'
+  dsimp [Source.PrimitiveSemantics.structured] at hEval
+  by_cases hLen : values.length = Expressions.Structured.BasicOp.inputs op
+  · cases hCont : Source.PrimitiveSemantics.sourceContinuingStep? op with
+    | none =>
+        simp [hLen, hCont] at hEval
+    | some step =>
+        simp [hLen, hCont] at hEval
+        cases hIsoRun :
+            step.run (Assembly.PrimStep.isoState shared values.reverse) with
+        | error err =>
+            simp [hIsoRun] at hEval
+        | ok iso' =>
+            simp [hIsoRun] at hEval
+            have hRun : step.run evm = .ok evm' := by
+              simpa [sourceContinuingStep_basicOp_step hCont evm] using hStep
+            have hSuffix :=
+              sourceContinuingStep_run_suffix_sound
+                (op := op) (step := step) (shared := shared)
+                (stack := values.reverse) (baseStack := baseStack)
+                (iso' := iso') (evm := evm) (evm' := evm')
+                hCont hIsoRun hShared hStack hRun
+            rcases hSuffix with ⟨hShared', hStack'⟩
+            rcases hEval with ⟨hSharedEq, hValuesEq⟩
+            subst shared'
+            subst values'
+            constructor
+            · exact hShared'
+            · simpa using hStack'
+  · simp [hLen] at hEval
+
+theorem structured_eval_length
+    {op : Structured.BasicOp}
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values values' : List Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.eval op shared values =
+        .ok (shared', values')) :
+    values'.length = Expressions.Structured.BasicOp.outputs op := by
+  dsimp [Source.PrimitiveSemantics.structured] at hEval
+  by_cases hLen : values.length = Expressions.Structured.BasicOp.inputs op
+  · cases hCont : Source.PrimitiveSemantics.sourceContinuingStep? op with
+    | none =>
+        simp [hLen, hCont] at hEval
+    | some step =>
+        simp [hLen, hCont] at hEval
+        cases hIsoRun :
+            step.run (Assembly.PrimStep.isoState shared values.reverse) with
+        | error err =>
+            simp [hIsoRun] at hEval
+        | ok iso' =>
+            simp [hIsoRun] at hEval
+            rcases hEval with ⟨hSharedEq, hValuesEq⟩
+            subst shared'
+            subst values'
+            have hStackLen :
+                iso'.stack.length = Assembly.PrimStep.outputArity step := by
+              exact
+                Assembly.PrimStep.run_isolated_length_safe
+                  (step := step) (shared := shared) (stack := values.reverse)
+                  (evm' := iso') (sourceContinuingStep_suffix_safe hCont)
+                  (by
+                    simpa [sourceContinuingStep_inputArity hCont,
+                      List.length_reverse] using hLen)
+                  hIsoRun
+            simpa [sourceContinuingStep_outputArity hCont, List.length_reverse]
+              using hStackLen
+  · simp [hLen] at hEval
 
 theorem evm_step_return_eq_binaryMachineStateOp :
     (EvmYul.step (EvmYul.Operation.RETURN : EvmYul.Operation .EVM) none) =

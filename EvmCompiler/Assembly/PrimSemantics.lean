@@ -73,6 +73,17 @@ theorem pop_append_of_some {stack tail rest : EvmYul.Stack α} {a : α}
       subst a
       simp
 
+theorem length_of_pop_some {stack rest : EvmYul.Stack α} {a : α}
+    (h : EvmYul.Stack.pop stack = some (rest, a)) :
+    stack.length = rest.length + 1 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop] at h
+  | cons x xs =>
+      simp [EvmYul.Stack.pop] at h
+      rcases h with ⟨hRest, hA⟩
+      subst rest
+      simp
+
 theorem pop2_append_of_some {stack tail rest : EvmYul.Stack α}
     {a b : α}
     (h : EvmYul.Stack.pop2 stack = some (rest, a, b)) :
@@ -88,6 +99,21 @@ theorem pop2_append_of_some {stack tail rest : EvmYul.Stack α}
           subst rest
           subst a
           subst b
+          simp
+
+theorem length_of_pop2_some {stack rest : EvmYul.Stack α}
+    {a b : α}
+    (h : EvmYul.Stack.pop2 stack = some (rest, a, b)) :
+    stack.length = rest.length + 2 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop2] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop2] at h
+      | cons y ys =>
+          simp [EvmYul.Stack.pop2] at h
+          rcases h with ⟨hRest, hA, hB⟩
+          subst rest
           simp
 
 theorem pop3_append_of_some {stack tail rest : EvmYul.Stack α}
@@ -109,6 +135,24 @@ theorem pop3_append_of_some {stack tail rest : EvmYul.Stack α}
               subst a
               subst b
               subst c
+              simp
+
+theorem length_of_pop3_some {stack rest : EvmYul.Stack α}
+    {a b c : α}
+    (h : EvmYul.Stack.pop3 stack = some (rest, a, b, c)) :
+    stack.length = rest.length + 3 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop3] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop3] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop3] at h
+          | cons z zs =>
+              simp [EvmYul.Stack.pop3] at h
+              rcases h with ⟨hRest, hA, hB, hC⟩
+              subst rest
               simp
 
 theorem pop4_append_of_some {stack tail rest : EvmYul.Stack α}
@@ -134,6 +178,27 @@ theorem pop4_append_of_some {stack tail rest : EvmYul.Stack α}
                   subst b
                   subst c
                   subst d
+                  simp
+
+theorem length_of_pop4_some {stack rest : EvmYul.Stack α}
+    {a b c d : α}
+    (h : EvmYul.Stack.pop4 stack = some (rest, a, b, c, d)) :
+    stack.length = rest.length + 4 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop4] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop4] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop4] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop4] at h
+              | cons w ws =>
+                  simp [EvmYul.Stack.pop4] at h
+                  rcases h with ⟨hRest, hA, hB, hC, hD⟩
+                  subst rest
                   simp
 
 theorem pop5_append_of_some {stack tail rest : EvmYul.Stack α}
@@ -164,6 +229,30 @@ theorem pop5_append_of_some {stack tail rest : EvmYul.Stack α}
                       subst c
                       subst d
                       subst e
+                      simp
+
+theorem length_of_pop5_some {stack rest : EvmYul.Stack α}
+    {a b c d e : α}
+    (h : EvmYul.Stack.pop5 stack = some (rest, a, b, c, d, e)) :
+    stack.length = rest.length + 5 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop5] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop5] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop5] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop5] at h
+              | cons w ws =>
+                  cases ws with
+                  | nil => simp [EvmYul.Stack.pop5] at h
+                  | cons v vs =>
+                      simp [EvmYul.Stack.pop5] at h
+                      rcases h with ⟨hRest, hA, hB, hC, hD, hE⟩
+                      subst rest
                       simp
 
 theorem pop6_append_of_some {stack tail rest : EvmYul.Stack α}
@@ -198,6 +287,33 @@ theorem pop6_append_of_some {stack tail rest : EvmYul.Stack α}
                           subst d
                           subst e
                           subst f
+                          simp
+
+theorem length_of_pop6_some {stack rest : EvmYul.Stack α}
+    {a b c d e f : α}
+    (h : EvmYul.Stack.pop6 stack = some (rest, a, b, c, d, e, f)) :
+    stack.length = rest.length + 6 := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop6] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop6] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop6] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop6] at h
+              | cons w ws =>
+                  cases ws with
+                  | nil => simp [EvmYul.Stack.pop6] at h
+                  | cons v vs =>
+                      cases vs with
+                      | nil => simp [EvmYul.Stack.pop6] at h
+                      | cons u us =>
+                          simp [EvmYul.Stack.pop6] at h
+                          rcases h with ⟨hRest, hA, hB, hC, hD, hE, hF⟩
+                          subst rest
                           simp
 
 end Stack
@@ -366,6 +482,346 @@ def SuffixSafe : PrimStep → Prop
   | .dup _ | .swap _ => False
   | _ => True
 
+def inputArity : PrimStep → Nat
+  | .un _ | .unaryExecutionEnv _ | .unaryState _ | .pop | .mload => 1
+  | .bin _ | .binaryMachineState _ | .binaryMachineStateWithResult _
+  | .binaryState _ | .log0 => 2
+  | .tri _ | .ternaryMachineState _ | .ternaryCopy _ | .returndatacopy
+  | .log1 => 3
+  | .quaternaryCopy _ | .log2 => 4
+  | .log3 => 5
+  | .log4 => 6
+  | .executionEnv _ | .machineState _ | .state _ | .invalid => 0
+  | .dup n => n
+  | .swap n => n + 1
+
+def outputArity : PrimStep → Nat
+  | .un _ | .bin _ | .tri _ | .executionEnv _ | .machineState _
+  | .state _ | .unaryExecutionEnv _ | .unaryState _
+  | .binaryMachineStateWithResult _ | .mload => 1
+  | .dup n => n + 1
+  | .swap n => n + 1
+  | _ => 0
+
+theorem run_isolated_length_safe
+    {step : Assembly.PrimStep}
+    {shared : EvmYul.SharedState .EVM}
+    {stack : EvmYul.Stack Word} {evm' : EvmYul.EVM.State}
+    (hSafe : SuffixSafe step)
+    (hLen : stack.length = inputArity step)
+    (hRun : step.run (isoState shared stack) = .ok evm') :
+    evm'.stack.length = outputArity step := by
+  cases step
+  case bin f =>
+    simp [PrimStep.run, inputArity, outputArity, EvmYul.EVM.execBinOp] at hRun hLen ⊢
+    cases hPop : stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop2_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case un f =>
+    simp [PrimStep.run, inputArity, outputArity, EvmYul.EVM.execUnOp] at hRun hLen ⊢
+    cases hPop : stack.pop with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case tri f =>
+    simp [PrimStep.run, inputArity, outputArity, EvmYul.EVM.execTriOp] at hRun hLen ⊢
+    cases hPop : stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop3_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case dup n => contradiction
+  case swap n => contradiction
+  case invalid => simp [PrimStep.run] at hRun
+  all_goals
+    simp [PrimStep.run, inputArity, outputArity, EvmYul.EVM.executionEnvOp,
+      EvmYul.EVM.machineStateOp, EvmYul.EVM.stateOp,
+      EvmYul.EVM.unaryExecutionEnvOp, EvmYul.EVM.unaryStateOp,
+      EvmYul.EVM.binaryStateOp, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp', EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+      EvmYul.Stack.push] at hRun hLen ⊢
+  case executionEnv f =>
+    cases hRun
+    simp [hLen]
+  case machineState f =>
+    cases hRun
+    simp [hLen]
+  case state f =>
+    cases hRun
+    simp [hLen]
+  case unaryExecutionEnv f =>
+    cases hPop : stack.pop with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case unaryState f =>
+    cases hPop : stack.pop with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case pop =>
+    cases hPop : stack.pop with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case mload =>
+    cases hPop : stack.pop with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case binaryMachineState f =>
+    cases hPop : stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop2_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case binaryMachineStateWithResult f =>
+    cases hPop : stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push] at hRun ⊢
+        have hRestLen := Stack.length_of_pop2_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case binaryState f =>
+    cases hPop : stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop2_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case log0 =>
+    cases hPop : stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop2_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case ternaryMachineState f =>
+    cases hPop : stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop3_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case ternaryCopy f =>
+    cases hPop : stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop3_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case returndatacopy =>
+    cases hPop : stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop3_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case log1 =>
+    cases hPop : stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop3_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case quaternaryCopy f =>
+    cases hPop : stack.pop4 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop4_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case log2 =>
+    cases hPop : stack.pop4 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop4_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case log3 =>
+    cases hPop : stack.pop5 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d, e⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop5_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+  case log4 =>
+    cases hPop : stack.pop6 with
+    | none => simp [hPop] at hRun
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d, e, f⟩
+        simp [hPop, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hRun ⊢
+        have hRestLen := Stack.length_of_pop6_some hPop
+        have hRestZero : rest.length = 0 := by
+          rw [hRestLen] at hLen
+          omega
+        cases hRun
+        first
+        | exact List.eq_nil_of_length_eq_zero hRestZero
+        | simp [hRestZero]
+
 theorem run_suffix_sound_safe
     {step : Assembly.PrimStep}
     {shared : EvmYul.SharedState .EVM}
@@ -417,7 +873,7 @@ theorem run_suffix_sound_safe
       EvmYul.EVM.quaternaryCopyOp,
       EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC] at hIso hRun ⊢
-  case unaryExecutionEnv =>
+  case unaryExecutionEnv f =>
     cases hPop : stack.pop with
     | none => simp [hPop] at hIso
     | some tup =>
@@ -430,7 +886,7 @@ theorem run_suffix_sound_safe
         simp [isoState, EvmYul.Stack.push,
           EvmYul.EVM.State.replaceStackAndIncrPC,
           EvmYul.EVM.State.incrPC, hShared]
-  case unaryState =>
+  case unaryState f =>
     cases hPop : stack.pop with
     | none => simp [hPop] at hIso
     | some tup =>

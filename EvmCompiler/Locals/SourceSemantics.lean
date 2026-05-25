@@ -133,6 +133,7 @@ stack/frame has the same projected behavior.
 -/
 def structured : PrimitiveSemantics where
   eval op shared values :=
+    if values.length = Expressions.Structured.BasicOp.inputs op then
     let state : EVMState :=
       { toSharedState := shared,
         pc := EvmYul.UInt256.ofNat 0,
@@ -144,6 +145,8 @@ def structured : PrimitiveSemantics where
     match step.run state with
     | .ok state' => .ok (state'.toSharedState, state'.stack.reverse)
     | .error err => .error err
+    else
+      .error .StackUnderflow
   terminal kind shared values :=
     let state : EVMState :=
       { toSharedState := shared,

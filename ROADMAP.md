@@ -75,7 +75,9 @@ Last updated: 2026-05-25 05:18 PDT.
        shuffles by construction.
      - [x] Prove the canonical continuing-primitive `eval_step` field.
      - [ ] Prove the canonical continuing-primitive `eval_step_exists` field.
-     - [ ] Prove the continuing-primitive output-length field.
+     - [x] Prove the continuing-primitive output-length field, after making
+       canonical source primitive evaluation exact-arity and factoring the
+       proof through checked `Assembly.PrimStep` input/output arity lemmas.
    - [ ] Provide a canonical `RecursiveBridgePrimitiveStackContracts`
      constructor for all accepted primitives.
    - [ ] Provide canonical terminal/revert contracts for
