@@ -138,6 +138,9 @@ Last updated: 2026-05-25 06:52 PDT.
        `lowerBound1?` and `toStackSeq?` evidence.
      - [x] Add arity-aware one-result primitive expression-evaluation
        wrappers, keeping the old strict wrappers as compatibility shims.
+     - [x] Add arity-aware primitive and semantic contract packages, with
+       checked strict-to-arity compatibility constructors, so the public
+       boundary can migrate away from raw-`primCall` strictness.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

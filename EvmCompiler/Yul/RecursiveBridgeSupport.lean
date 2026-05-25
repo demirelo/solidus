@@ -151790,6 +151790,130 @@ structure RecursiveBridgeSemanticCoreContracts
       Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
         (some program.contract)
 
+/--
+Arity-aware semantic contract core.
+
+This is the intended public shape for the imported-Yul bridge: the primitive
+stack bridge carries the argument-arity fact derived from checked expression
+lowering and successful imported `evalArgs`, instead of requiring raw imported
+`primCall` to reject malformed arities.
+-/
+structure RecursiveBridgeSemanticCoreArityContracts
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Program) : Prop where
+  primitiveSound : Locals.SourceLowering.PrimitiveSound prim
+  terminal :
+    ∀ {layout outcomeLayout : List Name}
+      {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+      {args : List AstExpr} {rest : List AstStmt}
+      {allowed : Except Reference.Exception Reference.State → Prop}
+      {argFuel : Nat}
+      {source compiler sourceResult}
+      {sourceAfterArgs : Reference.State} {sourceValues : List Word},
+      Prim.terminal? yulPrim = some kind →
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout source
+        compiler →
+      allowed sourceResult →
+      EvmYul.Yul.execSeq argFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          (some program.contract) source =
+        sourceResult →
+      EvmYul.Yul.evalArgs argFuel args.reverse
+          (some program.contract) source =
+        .ok (sourceAfterArgs, sourceValues.reverse) →
+      ∀ {compilerAfterArgs : Objects.Source.State},
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout
+          sourceAfterArgs compilerAfterArgs →
+          ∃ sharedAfter : EvmYul.SharedState .EVM,
+            prim.terminal kind compilerAfterArgs.shared
+                sourceValues.reverse =
+              .ok sharedAfter ∧
+            Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg
+              outcomeLayout terminalRel revertRel sourceResult
+              (Functions.Source.Outcome.halt kind
+                (compilerAfterArgs.withShared sharedAfter))
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
+  exprResultOk :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr},
+      Reference.Safe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
+        (some program.contract)
+
+structure RecursiveBridgeSemanticArityContracts
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (outcomeRel : Reference.OutcomeRel)
+    (program : Program)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) : Prop where
+  primitiveSound : Locals.SourceLowering.PrimitiveSound prim
+  terminal :
+    ∀ {layout outcomeLayout : List Name}
+      {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+      {args : List AstExpr} {rest : List AstStmt}
+      {allowed : Except Reference.Exception Reference.State → Prop}
+      {argFuel : Nat}
+      {source compiler sourceResult}
+      {sourceAfterArgs : Reference.State} {sourceValues : List Word},
+      Prim.terminal? yulPrim = some kind →
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout source
+        compiler →
+      allowed sourceResult →
+      EvmYul.Yul.execSeq argFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          (some program.contract) source =
+        sourceResult →
+      EvmYul.Yul.evalArgs argFuel args.reverse
+          (some program.contract) source =
+        .ok (sourceAfterArgs, sourceValues.reverse) →
+      ∀ {compilerAfterArgs : Objects.Source.State},
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout
+          sourceAfterArgs compilerAfterArgs →
+          ∃ sharedAfter : EvmYul.SharedState .EVM,
+            prim.terminal kind compilerAfterArgs.shared
+                sourceValues.reverse =
+              .ok sharedAfter ∧
+            Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg
+              outcomeLayout terminalRel revertRel sourceResult
+              (Functions.Source.Outcome.halt kind
+                (compilerAfterArgs.withShared sharedAfter))
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
+  exprResultOk :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr},
+      Reference.Safe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
+        (some program.contract)
+  observation :
+    DispatcherObservationSound cfg [] terminalRel revertRel outcomeRel
+      program (.Ok shared store)
+
 structure RecursiveBridgePrimitiveContracts
     (cfg : Reference.StateRelConfig)
     (prim : Objects.Source.PrimitiveSemantics) : Prop where
@@ -151841,6 +151965,18 @@ structure RecursiveBridgePrimitiveStackArityContracts
       Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
         fuel yulPrim op
 
+structure RecursiveBridgePrimitiveArityContracts
+    (cfg : Reference.StateRelConfig)
+    (prim : Objects.Source.PrimitiveSemantics) : Prop where
+  primitiveSound : Locals.SourceLowering.PrimitiveSound prim
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
+
 namespace RecursiveBridgePrimitiveStackArityContracts
 
 theorem of_strict
@@ -151855,6 +151991,38 @@ theorem of_strict
         (hStack.primitiveStack hSafe hBasic)
 
 end RecursiveBridgePrimitiveStackArityContracts
+
+namespace RecursiveBridgePrimitiveArityContracts
+
+theorem of_strict
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim) :
+    RecursiveBridgePrimitiveArityContracts cfg prim where
+  primitiveSound := hPrimitive.primitiveSound
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
+        (hPrimitive.primitiveStack hSafe hBasic)
+
+theorem of_stack
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hSound : Locals.SourceLowering.PrimitiveSound prim)
+    (hStack : RecursiveBridgePrimitiveStackArityContracts cfg prim) :
+    RecursiveBridgePrimitiveArityContracts cfg prim where
+  primitiveSound := hSound
+  primitiveStack := hStack.primitiveStack
+
+theorem stack
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim) :
+    RecursiveBridgePrimitiveStackArityContracts cfg prim where
+  primitiveStack := hPrimitive.primitiveStack
+
+end RecursiveBridgePrimitiveArityContracts
 
 structure RecursiveBridgeTerminalContracts
     (cfg : Reference.StateRelConfig)
@@ -152083,6 +152251,107 @@ theorem of_canonical_observation
 
 end RecursiveBridgeSemanticContracts
 
+namespace RecursiveBridgeSemanticArityContracts
+
+abbrev dispatcherOutcomeRel :=
+  RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+
+theorem of_canonical_observation
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
+    (hTerminal :
+      ∀ {layout outcomeLayout : List Name}
+        {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+        {args : List AstExpr} {rest : List AstStmt}
+        {allowed : Except Reference.Exception Reference.State → Prop}
+        {argFuel : Nat}
+        {source compiler sourceResult}
+        {sourceAfterArgs : Reference.State} {sourceValues : List Word},
+        Prim.terminal? yulPrim = some kind →
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout source
+          compiler →
+        allowed sourceResult →
+        EvmYul.Yul.execSeq argFuel.succ.succ
+            (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+            (some program.contract) source =
+          sourceResult →
+        EvmYul.Yul.evalArgs argFuel args.reverse
+            (some program.contract) source =
+          .ok (sourceAfterArgs, sourceValues.reverse) →
+        ∀ {compilerAfterArgs : Objects.Source.State},
+          Reference.SourceBridgeFacts.SourceStateRel cfg layout
+            sourceAfterArgs compilerAfterArgs →
+            ∃ sharedAfter : EvmYul.SharedState .EVM,
+              prim.terminal kind compilerAfterArgs.shared
+                  sourceValues.reverse =
+                .ok sharedAfter ∧
+              Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg
+                outcomeLayout terminalRel revertRel sourceResult
+                (Functions.Source.Outcome.halt kind
+                  (compilerAfterArgs.withShared sharedAfter)))
+    (hPrimitiveStack :
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Reference.Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
+    (hExprResultOk :
+      ∀ {layout : List Name} {fuel : Nat}
+        {expr : AstExpr},
+        Reference.Safe.expr expr →
+        Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+        Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract
+          expr →
+        Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
+          (some program.contract)) :
+    RecursiveBridgeSemanticArityContracts cfg terminalRel revertRel prim
+      (dispatcherOutcomeRel cfg terminalRel revertRel program
+        (.Ok shared store))
+      program shared store where
+  primitiveSound := hPrimitiveSound
+  terminal := hTerminal
+  primitiveStack := hPrimitiveStack
+  exprResultOk := hExprResultOk
+  observation :=
+    RecursiveBridgeSemanticContracts.dispatcherObservationSound_canonical
+
+theorem of_strict
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContracts :
+      RecursiveBridgeSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store) :
+    RecursiveBridgeSemanticArityContracts cfg terminalRel revertRel prim
+      outcomeRel program shared store where
+  primitiveSound := hContracts.primitiveSound
+  terminal := hContracts.terminal
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
+        (hContracts.primitiveStack hSafe hBasic)
+  exprResultOk := hContracts.exprResultOk
+  observation := hContracts.observation
+
+end RecursiveBridgeSemanticArityContracts
+
 namespace RecursiveBridgeSemanticCoreContracts
 
 theorem ofBoundaries
@@ -152148,6 +152417,94 @@ theorem toSemanticContracts
     hCore.exprResultOk
 
 end RecursiveBridgeSemanticCoreContracts
+
+namespace RecursiveBridgeSemanticCoreArityContracts
+
+theorem ofBoundaries
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
+    (hTerminal :
+      RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
+        program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program) :
+    RecursiveBridgeSemanticCoreArityContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hPrimitive.primitiveSound
+  terminal := hTerminal.terminal
+  primitiveStack := hPrimitive.primitiveStack
+  exprResultOk := hExpr.exprResultOk
+
+theorem of_strict
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    (hCore :
+      RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+        program) :
+    RecursiveBridgeSemanticCoreArityContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hCore.primitiveSound
+  terminal := hCore.terminal
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
+        (hCore.primitiveStack hSafe hBasic)
+  exprResultOk := hCore.exprResultOk
+
+theorem ofSemanticContracts
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContracts :
+      RecursiveBridgeSemanticArityContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store) :
+    RecursiveBridgeSemanticCoreArityContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hContracts.primitiveSound
+  terminal := hContracts.terminal
+  primitiveStack := hContracts.primitiveStack
+  exprResultOk := hContracts.exprResultOk
+
+theorem toSemanticContracts
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hCore :
+      RecursiveBridgeSemanticCoreArityContracts cfg terminalRel revertRel prim
+        program) :
+    RecursiveBridgeSemanticArityContracts cfg terminalRel revertRel prim
+      (RecursiveBridgeSemanticArityContracts.dispatcherOutcomeRel cfg
+        terminalRel revertRel program (.Ok shared store))
+      program shared store :=
+  RecursiveBridgeSemanticArityContracts.of_canonical_observation
+    hCore.primitiveSound hCore.terminal hCore.primitiveStack
+    hCore.exprResultOk
+
+end RecursiveBridgeSemanticCoreArityContracts
 
 /--
 Concise public theorem boundary for the imported-Yul-to-gas-aware-EVM bridge.

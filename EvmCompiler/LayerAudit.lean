@@ -2754,6 +2754,12 @@ abbrev recursiveBridgeSemanticContracts :=
 abbrev recursiveBridgeSemanticCoreContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts
 
+abbrev recursiveBridgeSemanticArityContracts :=
+  @Yul.Program.RecursiveBridgeSemanticArityContracts
+
+abbrev recursiveBridgeSemanticCoreArityContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreArityContracts
+
 abbrev recursiveBridgePrimitiveContracts :=
   @Yul.Program.RecursiveBridgePrimitiveContracts
 
@@ -2765,6 +2771,18 @@ abbrev recursiveBridgePrimitiveStackArityContracts :=
 
 abbrev recursiveBridgePrimitiveStackArityContractsOfStrict :=
   @Yul.Program.RecursiveBridgePrimitiveStackArityContracts.of_strict
+
+abbrev recursiveBridgePrimitiveArityContracts :=
+  @Yul.Program.RecursiveBridgePrimitiveArityContracts
+
+abbrev recursiveBridgePrimitiveArityContractsOfStrict :=
+  @Yul.Program.RecursiveBridgePrimitiveArityContracts.of_strict
+
+abbrev recursiveBridgePrimitiveArityContractsOfStack :=
+  @Yul.Program.RecursiveBridgePrimitiveArityContracts.of_stack
+
+abbrev recursiveBridgePrimitiveArityContractsStack :=
+  @Yul.Program.RecursiveBridgePrimitiveArityContracts.stack
 
 abbrev recursiveBridgePrimitiveContractsOfStack :=
   @Yul.Program.RecursiveBridgePrimitiveContracts.of_stack
@@ -2790,6 +2808,15 @@ abbrev recursiveBridgeSemanticDispatcherOutcomeRel :=
 abbrev recursiveBridgeSemanticCanonicalObservation :=
   @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherObservationSound_canonical
 
+abbrev recursiveBridgeSemanticArityDispatcherOutcomeRel :=
+  @Yul.Program.RecursiveBridgeSemanticArityContracts.dispatcherOutcomeRel
+
+abbrev recursiveBridgeSemanticArityOfCanonicalObservation :=
+  @Yul.Program.RecursiveBridgeSemanticArityContracts.of_canonical_observation
+
+abbrev recursiveBridgeSemanticArityOfStrict :=
+  @Yul.Program.RecursiveBridgeSemanticArityContracts.of_strict
+
 abbrev recursiveBridgeSemanticCoreOfBoundaries :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofBoundaries
 
@@ -2798,6 +2825,18 @@ abbrev recursiveBridgeSemanticCoreToContracts :=
 
 abbrev recursiveBridgeSemanticCoreOfContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofSemanticContracts
+
+abbrev recursiveBridgeSemanticCoreArityOfBoundaries :=
+  @Yul.Program.RecursiveBridgeSemanticCoreArityContracts.ofBoundaries
+
+abbrev recursiveBridgeSemanticCoreArityOfStrict :=
+  @Yul.Program.RecursiveBridgeSemanticCoreArityContracts.of_strict
+
+abbrev recursiveBridgeSemanticCoreArityToContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreArityContracts.toSemanticContracts
+
+abbrev recursiveBridgeSemanticCoreArityOfContracts :=
+  @Yul.Program.RecursiveBridgeSemanticCoreArityContracts.ofSemanticContracts
 
 abbrev recursiveBridgeSourceRun :=
   @Yul.Program.RecursiveBridgeSourceRun
