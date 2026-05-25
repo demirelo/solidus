@@ -119223,6 +119223,376 @@ a larger source sequence.  It deliberately has no `allowedInner` premise: the
 surrounding sequence's allowed predicate applies to the final result after the
 tail runs, not to this regular loop state.
 -/
+
+theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_loop_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    {allowedInner : Except Exception State → Prop}
+    (hAllowedRel :
+      ∀ {sourceResult}, allowedInner sourceResult →
+        SourceResultRelatable sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hBodyRegular :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.regular compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hBodyContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hPostRegular :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        ∀ {compilerAfterBody},
+          SourceStateExactRel cfg layout
+            (.Ok sharedAfterBody storeAfterBody) compilerAfterBody →
+          ∃ compilerAfterPost : Objects.Source.State,
+          ∃ postFuel : Nat,
+            Functions.Source.Block.runScoped prim program
+                (ctx.withoutLoopControl) pieces.lowerPost postFuel
+                compilerAfterBody =
+              .ok (Functions.Source.Outcome.regular compilerAfterPost) ∧
+            SourceStateExactRel cfg layout
+              (.Ok sharedAfterPost storeAfterPost) compilerAfterPost)
+    (hLoopRegular :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore}
+        {compilerAfterPost : Objects.Source.State},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body)
+          codeOverride (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        SourceStateExactRel cfg layout
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost →
+        SourceRegularGeneratedForLoopStmtRun cfg layout prim program ctx
+          sourceFuel cond post body codeOverride pieces.preCond
+          pieces.lowerCond pieces.lowerPost pieces.lowerBody
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost)
+    (hLoopNonregular :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {compilerAfterPost : Objects.Source.State}
+        {loopResult : Except Exception State},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) = loopResult →
+        SourceStateExactRel cfg layout
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost →
+        allowedInner loopResult →
+        SourceResultRelatable loopResult →
+        SourceResultNotRegularOk loopResult →
+        SourceNonregularGeneratedForLoopStmtRun cfg layout outcomeLayout
+          terminalRel revertRel prim program ctx sourceFuel cond post body
+          codeOverride pieces.preCond pieces.lowerCond pieces.lowerPost
+          pieces.lowerBody (.Ok sharedAfterPost storeAfterPost)
+          compilerAfterPost) :
+    GeneratedForLoopPostRegularBranchContract cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel cond post body
+      codeOverride reserved pieces allowedInner := by
+  intro shared sharedAfterCond sharedAfterBody sharedAfterPost store
+    storeAfterCond storeAfterBody storeAfterPost compiler value
+    bodyWasContinue loopResult hExact hEval hNonzero hSourceBody hSourcePost
+    hSourceLoop hAllowed
+  have hCondDomain : StoreDomainExact layout storeAfterCond :=
+    hEvalDomain (SourceStateExactRel.domain hExact) hEval
+  cases bodyWasContinue with
+  | false =>
+      have hBodyOk :
+          EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+            (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) := by
+        simpa using hSourceBody
+      have hBodyDomain : StoreDomainExact layout storeAfterBody :=
+        hBodyDomainOk hCondDomain hBodyOk
+      have hPostDomain : StoreDomainExact layout storeAfterPost :=
+        hPostDomainOk hBodyDomain hSourcePost
+      cases loopResult with
+      | ok loopState =>
+          cases loopState with
+          | Ok sharedLoop storeLoop =>
+              left
+              simpa [generatedForLowerBlock, List.append_assoc] using
+                sourceRegularStmtRunHiddenExact_for_generated_body_regular_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+                  (cfg := cfg) (layout := layout) (prim := prim)
+                  (program := program) (ctx := ctx)
+                  (sourceFuel := sourceFuel) (cond := cond) (post := post)
+                  (body := body) (codeOverride := codeOverride)
+                  (shared := shared) (sharedAfterCond := sharedAfterCond)
+                  (sharedAfterBody := sharedAfterBody)
+                  (sharedAfterPost := sharedAfterPost) (store := store)
+                  (storeAfterCond := storeAfterCond)
+                  (storeAfterBody := storeAfterBody)
+                  (storeAfterPost := storeAfterPost) (compiler := compiler)
+                  (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+                  (lowerPost := pieces.lowerPost)
+                  (lowerBody := pieces.lowerBody) (value := value)
+                  hScopeContains hPrim hCondSound hEvalDomain hExact hEval
+                  hNonzero hBodyOk hSourcePost hBodyDomain
+                  (hBodyRegular hCondDomain hBodyDomain hBodyOk)
+                  (hPostRegular hPostDomain hSourcePost)
+                  (by
+                    intro compilerAfterPost hExactPost
+                    exact
+                      hLoopRegular hPostDomain hSourceLoop hExactPost)
+          | OutOfFuel =>
+              exact False.elim
+                (sourceResultRelatable_stateOutOfFuel_false
+                  (hAllowedRel hAllowed))
+          | Checkpoint jump =>
+              right
+              simpa [generatedForLowerBlock, List.append_assoc] using
+                sourceNonregularStmtRunHiddenExact_for_generated_body_regular_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+                  (cfg := cfg) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (program := program) (ctx := ctx)
+                  (sourceFuel := sourceFuel) (cond := cond) (post := post)
+                  (body := body) (codeOverride := codeOverride)
+                  (shared := shared) (sharedAfterCond := sharedAfterCond)
+                  (sharedAfterBody := sharedAfterBody)
+                  (sharedAfterPost := sharedAfterPost) (store := store)
+                  (storeAfterCond := storeAfterCond)
+                  (storeAfterBody := storeAfterBody)
+                  (storeAfterPost := storeAfterPost) (compiler := compiler)
+                  (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+                  (lowerPost := pieces.lowerPost)
+                  (lowerBody := pieces.lowerBody) (value := value)
+                  hScopeContains hPrim hCondSound hEvalDomain hExact hEval
+                  hNonzero hBodyOk hSourcePost hBodyDomain
+                  (hBodyRegular hCondDomain hBodyDomain hBodyOk)
+                  (hPostRegular hPostDomain hSourcePost)
+                  (by
+                    intro compilerAfterPost hExactPost
+                    exact
+                      hLoopNonregular hPostDomain hSourceLoop hExactPost
+                        hAllowed
+                        (hAllowedRel hAllowed)
+                        (by simp [SourceResultNotRegularOk]))
+      | error err =>
+          right
+          simpa [generatedForLowerBlock, List.append_assoc] using
+            sourceNonregularStmtRunHiddenExact_for_generated_body_regular_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+              (cfg := cfg) (layout := layout)
+              (outcomeLayout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              (prim := prim) (program := program) (ctx := ctx)
+              (sourceFuel := sourceFuel) (cond := cond) (post := post)
+              (body := body) (codeOverride := codeOverride)
+              (shared := shared) (sharedAfterCond := sharedAfterCond)
+              (sharedAfterBody := sharedAfterBody)
+              (sharedAfterPost := sharedAfterPost) (store := store)
+              (storeAfterCond := storeAfterCond)
+              (storeAfterBody := storeAfterBody)
+              (storeAfterPost := storeAfterPost) (compiler := compiler)
+              (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+              (lowerPost := pieces.lowerPost) (lowerBody := pieces.lowerBody)
+              (value := value) hScopeContains hPrim hCondSound hEvalDomain
+              hExact hEval hNonzero hBodyOk hSourcePost hBodyDomain
+              (hBodyRegular hCondDomain hBodyDomain hBodyOk)
+              (hPostRegular hPostDomain hSourcePost)
+              (by
+                intro compilerAfterPost hExactPost
+                exact
+                  hLoopNonregular hPostDomain hSourceLoop hExactPost
+                    hAllowed
+                    (hAllowedRel hAllowed)
+                    (by simp [SourceResultNotRegularOk]))
+  | true =>
+      have hBodyCont :
+          EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+            (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) := by
+        simpa using hSourceBody
+      have hBodyDomain : StoreDomainExact layout storeAfterBody :=
+        hBodyDomainContinue hCondDomain hBodyCont
+      have hPostDomain : StoreDomainExact layout storeAfterPost :=
+        hPostDomainOk hBodyDomain hSourcePost
+      cases loopResult with
+      | ok loopState =>
+          cases loopState with
+          | Ok sharedLoop storeLoop =>
+              left
+              simpa [generatedForLowerBlock, List.append_assoc] using
+                sourceRegularStmtRunHiddenExact_for_generated_body_continue_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+                  (cfg := cfg) (layout := layout) (prim := prim)
+                  (program := program) (ctx := ctx)
+                  (sourceFuel := sourceFuel) (cond := cond) (post := post)
+                  (body := body) (codeOverride := codeOverride)
+                  (shared := shared) (sharedAfterCond := sharedAfterCond)
+                  (sharedAfterBody := sharedAfterBody)
+                  (sharedAfterPost := sharedAfterPost) (store := store)
+                  (storeAfterCond := storeAfterCond)
+                  (storeAfterBody := storeAfterBody)
+                  (storeAfterPost := storeAfterPost) (compiler := compiler)
+                  (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+                  (lowerPost := pieces.lowerPost)
+                  (lowerBody := pieces.lowerBody) (value := value)
+                  hScopeContains hPrim hCondSound hEvalDomain hExact hEval
+                  hNonzero hBodyCont hSourcePost hBodyDomain
+                  (hBodyContinue hCondDomain hBodyDomain hBodyCont)
+                  (hPostRegular hPostDomain hSourcePost)
+                  (by
+                    intro compilerAfterPost hExactPost
+                    exact
+                      hLoopRegular hPostDomain hSourceLoop hExactPost)
+          | OutOfFuel =>
+              exact False.elim
+                (sourceResultRelatable_stateOutOfFuel_false
+                  (hAllowedRel hAllowed))
+          | Checkpoint jump =>
+              right
+              simpa [generatedForLowerBlock, List.append_assoc] using
+                sourceNonregularStmtRunHiddenExact_for_generated_body_continue_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+                  (cfg := cfg) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (program := program) (ctx := ctx)
+                  (sourceFuel := sourceFuel) (cond := cond) (post := post)
+                  (body := body) (codeOverride := codeOverride)
+                  (shared := shared) (sharedAfterCond := sharedAfterCond)
+                  (sharedAfterBody := sharedAfterBody)
+                  (sharedAfterPost := sharedAfterPost) (store := store)
+                  (storeAfterCond := storeAfterCond)
+                  (storeAfterBody := storeAfterBody)
+                  (storeAfterPost := storeAfterPost) (compiler := compiler)
+                  (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+                  (lowerPost := pieces.lowerPost)
+                  (lowerBody := pieces.lowerBody) (value := value)
+                  hScopeContains hPrim hCondSound hEvalDomain hExact hEval
+                  hNonzero hBodyCont hSourcePost hBodyDomain
+                  (hBodyContinue hCondDomain hBodyDomain hBodyCont)
+                  (hPostRegular hPostDomain hSourcePost)
+                  (by
+                    intro compilerAfterPost hExactPost
+                    exact
+                      hLoopNonregular hPostDomain hSourceLoop hExactPost
+                        hAllowed
+                        (hAllowedRel hAllowed)
+                        (by simp [SourceResultNotRegularOk]))
+      | error err =>
+          right
+          simpa [generatedForLowerBlock, List.append_assoc] using
+            sourceNonregularStmtRunHiddenExact_for_generated_body_continue_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+              (cfg := cfg) (layout := layout)
+              (outcomeLayout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              (prim := prim) (program := program) (ctx := ctx)
+              (sourceFuel := sourceFuel) (cond := cond) (post := post)
+              (body := body) (codeOverride := codeOverride)
+              (shared := shared) (sharedAfterCond := sharedAfterCond)
+              (sharedAfterBody := sharedAfterBody)
+              (sharedAfterPost := sharedAfterPost) (store := store)
+              (storeAfterCond := storeAfterCond)
+              (storeAfterBody := storeAfterBody)
+              (storeAfterPost := storeAfterPost) (compiler := compiler)
+              (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+              (lowerPost := pieces.lowerPost) (lowerBody := pieces.lowerBody)
+              (value := value) hScopeContains hPrim hCondSound hEvalDomain
+              hExact hEval hNonzero hBodyCont hSourcePost hBodyDomain
+              (hBodyContinue hCondDomain hBodyDomain hBodyCont)
+              (hPostRegular hPostDomain hSourcePost)
+              (by
+                intro compilerAfterPost hExactPost
+                exact
+                  hLoopNonregular hPostDomain hSourceLoop hExactPost
+                    hAllowed
+                    (hAllowedRel hAllowed)
+                    (by simp [SourceResultNotRegularOk]))
+
+/--
+Regular-only hidden-context post-regular generated-loop branch contract.
+
+This is the half of
+`generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_loop_arity`
+that is safe to use when the recursive loop result is an intermediate state in
+a larger source sequence.  It deliberately has no `allowedInner` premise: the
+surrounding sequence's allowed predicate applies to the final result after the
+tail runs, not to this regular loop state.
+-/
 theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_loop
     {cfg : StateRelConfig} {reserved layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
@@ -119396,6 +119766,208 @@ theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_l
         hPostDomainOk hBodyDomain hSourcePost
       simpa [generatedForLowerBlock, List.append_assoc] using
         sourceRegularStmtRunHiddenExact_for_generated_body_continue_post_regular_of_eval_domain_nonzero_hidden_scope
+          (cfg := cfg) (layout := layout) (prim := prim)
+          (program := program) (ctx := ctx)
+          (sourceFuel := sourceFuel) (cond := cond) (post := post)
+          (body := body) (codeOverride := codeOverride) (shared := shared)
+          (sharedAfterCond := sharedAfterCond)
+          (sharedAfterBody := sharedAfterBody)
+          (sharedAfterPost := sharedAfterPost) (store := store)
+          (storeAfterCond := storeAfterCond)
+          (storeAfterBody := storeAfterBody)
+          (storeAfterPost := storeAfterPost) (compiler := compiler)
+          (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+          (lowerPost := pieces.lowerPost) (lowerBody := pieces.lowerBody)
+          (value := value) hScopeContains hPrim hCondSound hEvalDomain hExact
+          hEval hNonzero hBodyCont hSourcePost hBodyDomain
+          (hBodyContinue hCondDomain hBodyDomain hBodyCont)
+          (hPostRegular hPostDomain hSourcePost)
+          (by
+            intro compilerAfterPost hExactPost
+            exact hLoopRegular hPostDomain hSourceLoop hExactPost)
+
+/--
+Regular-only hidden-context post-regular generated-loop branch contract from a
+hidden singleton recursive-loop block theorem.
+
+This keeps the recursive regular-loop evidence behind the hidden block
+interface, matching the non-regular branch wrapper while avoiding any
+`allowedInner` premise for the intermediate regular loop state.
+-/
+
+theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_loop_arity
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hBodyRegular :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.regular compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hBodyContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hPostRegular :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        ∀ {compilerAfterBody},
+          SourceStateExactRel cfg layout
+            (.Ok sharedAfterBody storeAfterBody) compilerAfterBody →
+          ∃ compilerAfterPost : Objects.Source.State,
+          ∃ postFuel : Nat,
+            Functions.Source.Block.runScoped prim program
+                (ctx.withoutLoopControl) pieces.lowerPost postFuel
+                compilerAfterBody =
+              .ok (Functions.Source.Outcome.regular compilerAfterPost) ∧
+            SourceStateExactRel cfg layout
+              (.Ok sharedAfterPost storeAfterPost) compilerAfterPost)
+    (hLoopRegular :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore}
+        {compilerAfterPost : Objects.Source.State},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        SourceStateExactRel cfg layout
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost →
+        SourceRegularGeneratedForLoopStmtRun cfg layout prim program ctx
+          sourceFuel cond post body codeOverride pieces.preCond
+          pieces.lowerCond pieces.lowerPost pieces.lowerBody
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost) :
+    GeneratedForLoopPostRegularOkBranchContract cfg layout prim program ctx
+      sourceFuel cond post body codeOverride reserved pieces := by
+  intro shared sharedAfterCond sharedAfterBody sharedAfterPost sharedLoop
+    store storeAfterCond storeAfterBody storeAfterPost storeLoop compiler
+    value bodyWasContinue hExact hEval hNonzero hSourceBody hSourcePost
+    hSourceLoop
+  have hCondDomain : StoreDomainExact layout storeAfterCond :=
+    hEvalDomain (SourceStateExactRel.domain hExact) hEval
+  cases bodyWasContinue with
+  | false =>
+      have hBodyOk :
+          EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+            (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) := by
+        simpa using hSourceBody
+      have hBodyDomain : StoreDomainExact layout storeAfterBody :=
+        hBodyDomainOk hCondDomain hBodyOk
+      have hPostDomain : StoreDomainExact layout storeAfterPost :=
+        hPostDomainOk hBodyDomain hSourcePost
+      simpa [generatedForLowerBlock, List.append_assoc] using
+        sourceRegularStmtRunHiddenExact_for_generated_body_regular_post_regular_of_eval_domain_nonzero_hidden_scope_arity
+          (cfg := cfg) (layout := layout) (prim := prim)
+          (program := program) (ctx := ctx)
+          (sourceFuel := sourceFuel) (cond := cond) (post := post)
+          (body := body) (codeOverride := codeOverride) (shared := shared)
+          (sharedAfterCond := sharedAfterCond)
+          (sharedAfterBody := sharedAfterBody)
+          (sharedAfterPost := sharedAfterPost) (store := store)
+          (storeAfterCond := storeAfterCond)
+          (storeAfterBody := storeAfterBody)
+          (storeAfterPost := storeAfterPost) (compiler := compiler)
+          (pre := pieces.preCond) (lowerCond := pieces.lowerCond)
+          (lowerPost := pieces.lowerPost) (lowerBody := pieces.lowerBody)
+          (value := value) hScopeContains hPrim hCondSound hEvalDomain hExact
+          hEval hNonzero hBodyOk hSourcePost hBodyDomain
+          (hBodyRegular hCondDomain hBodyDomain hBodyOk)
+          (hPostRegular hPostDomain hSourcePost)
+          (by
+            intro compilerAfterPost hExactPost
+            exact hLoopRegular hPostDomain hSourceLoop hExactPost)
+  | true =>
+      have hBodyCont :
+          EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+            (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) := by
+        simpa using hSourceBody
+      have hBodyDomain : StoreDomainExact layout storeAfterBody :=
+        hBodyDomainContinue hCondDomain hBodyCont
+      have hPostDomain : StoreDomainExact layout storeAfterPost :=
+        hPostDomainOk hBodyDomain hSourcePost
+      simpa [generatedForLowerBlock, List.append_assoc] using
+        sourceRegularStmtRunHiddenExact_for_generated_body_continue_post_regular_of_eval_domain_nonzero_hidden_scope_arity
           (cfg := cfg) (layout := layout) (prim := prim)
           (program := program) (ctx := ctx)
           (sourceFuel := sourceFuel) (cond := cond) (post := post)
@@ -119627,6 +120199,210 @@ Regular-only hidden-context post-regular generated-loop branch contract from
 mode-facing body/post contracts and a hidden singleton recursive-loop block
 theorem.
 -/
+
+theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_hidden_loop_arity
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hLoopDomainOk :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        StoreDomainExact layout storeLoop)
+    (hBodyRegular :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.regular compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hBodyContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hPostRegular :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        ∀ {compilerAfterBody},
+          SourceStateExactRel cfg layout
+            (.Ok sharedAfterBody storeAfterBody) compilerAfterBody →
+          ∃ compilerAfterPost : Objects.Source.State,
+          ∃ postFuel : Nat,
+            Functions.Source.Block.runScoped prim program
+                (ctx.withoutLoopControl) pieces.lowerPost postFuel
+                compilerAfterBody =
+              .ok (Functions.Source.Outcome.regular compilerAfterPost) ∧
+            SourceStateExactRel cfg layout
+              (.Ok sharedAfterPost storeAfterPost) compilerAfterPost)
+    (hLoopBlock :
+      ∀ {loopOutcomeLayout : List Name}
+        {allowedLoop : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout loopOutcomeLayout
+            sourceResult) →
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout
+          loopOutcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop) :
+    GeneratedForLoopPostRegularOkBranchContract cfg layout prim program ctx
+      sourceFuel cond post body codeOverride reserved pieces := by
+  refine
+    generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_loop_arity
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := sourceFuel) (cond := cond) (post := post)
+      (body := body) (codeOverride := codeOverride) (pieces := pieces)
+      hScopeContains hPrim hCondSound hEvalDomain hBodyDomainOk
+      hBodyDomainContinue hPostDomainOk hBodyRegular hBodyContinue
+      hPostRegular ?regularLoop
+  · intro sharedAfterPost sharedLoop storeAfterPost storeLoop
+      compilerAfterPost hPostDomain hSourceLoop hExactPost
+    let allowedLoop : Except Exception State → Prop :=
+      fun result =>
+        result =
+          .ok ((.Ok sharedLoop storeLoop : State).restrictStoreTo
+            storeAfterPost)
+    have hAllowedLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [allowedLoop, SourceResultRelatable,
+        EvmYul.Yul.State.restrictStoreTo]
+    have hCompatLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout layout
+            sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [allowedLoop, SourceResultOutcomeLayoutCompatible,
+        EvmYul.Yul.State.restrictStoreTo]
+    have hBlock :
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout layout
+          terminalRel revertRel prim program ctx sourceFuel.succ.succ
+          [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop :=
+      hLoopBlock hAllowedLoop hCompatLoop
+    have hLoopDomain : StoreDomainExact layout storeLoop :=
+      hLoopDomainOk hPostDomain hSourceLoop
+    have hHidden :
+        SourceRegularStmtRunHiddenExact cfg layout layout prim program ctx
+          sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) :=
+      sourceRegularStmtRunHiddenExact_for_of_singleton_hiddenBlockSound_ok
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (prim := prim) (program := program) (ctx := ctx)
+        (sourceFuel := sourceFuel) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (pieces := pieces)
+        (shared := sharedAfterPost) (sharedAfter := sharedLoop)
+        (store := storeAfterPost) (storeAfter := storeLoop)
+        (compiler := compilerAfterPost) hScopeContains hBlock hExactPost
+        hSourceLoop hLoopDomain
+    exact
+      sourceRegularGeneratedForLoopStmtRun_of_hiddenExact_singleton
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (prim := prim) (program := program) (ctx := ctx)
+        (sourceFuel := sourceFuel) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (pieces := pieces)
+        (source := (.Ok sharedAfterPost storeAfterPost : State))
+        (target := compilerAfterPost) hHidden
+
+/--
+Regular-only hidden-context post-regular generated-loop branch contract from
+mode-facing body/post contracts and a hidden singleton recursive-loop block
+theorem.
+-/
 theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_modeSound_and_hidden_loop
     {cfg : StateRelConfig} {reserved layout : List Name}
     {terminalRel :
@@ -119740,6 +120516,125 @@ singleton recursive-loop block theorem.
 
 This wrapper discharges the raw recursive loop callbacks in
 `generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_loop`
+using the hidden singleton adapters.  The remaining body/post callbacks are
+still stated explicitly because generated loop bodies install hidden
+break/continue handlers whose source-visible projection is the key invariant
+handled by the surrounding `for` sequence frontier.
+-/
+
+theorem generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_modeSound_and_hidden_loop_arity
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hLoopDomainOk :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        StoreDomainExact layout storeLoop)
+    (hBodyMode :
+      GeneratedForBodyModeSound cfg layout layout terminalRel
+        revertRel prim program ctx sourceFuel body codeOverride
+        pieces.lowerBody)
+    (hPostMode :
+      GeneratedForPostModeSound cfg layout layout terminalRel
+        revertRel prim program ctx sourceFuel post codeOverride
+        pieces.lowerPost)
+    (hLoopBlock :
+      ∀ {loopOutcomeLayout : List Name}
+        {allowedLoop : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout loopOutcomeLayout
+            sourceResult) →
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout
+          loopOutcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop) :
+    GeneratedForLoopPostRegularOkBranchContract cfg layout prim program ctx
+      sourceFuel cond post body codeOverride reserved pieces :=
+  generatedForLoopPostRegularOkBranchContract_of_hiddenCtx_callbacks_and_hidden_loop_arity
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+    (cond := cond) (post := post) (body := body)
+    (codeOverride := codeOverride) (pieces := pieces) hScopeContains hPrim
+    hCondSound hEvalDomain hBodyDomainOk hBodyDomainContinue hPostDomainOk
+    hLoopDomainOk
+    (by
+      intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+        hCondDomain hBodyDomain hSourceBody ctxAfterPre compilerAfterGuard
+        hScopeAfter hHandlersAfter hRelAfterGuard
+      exact
+        hBodyMode.regular hCondDomain hBodyDomain hSourceBody hScopeAfter
+          hHandlersAfter hRelAfterGuard)
+    (by
+      intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+        hCondDomain hBodyDomain hSourceBody ctxAfterPre compilerAfterGuard
+        hScopeAfter hHandlersAfter hRelAfterGuard
+      exact
+        hBodyMode.cont hCondDomain hBodyDomain hSourceBody hScopeAfter
+          hHandlersAfter hRelAfterGuard)
+    (by
+      intro sharedAfterBody sharedAfterPost storeAfterBody storeAfterPost
+        hPostDomain hSourcePost compilerAfterBody hExactBody
+      exact hPostMode.regular hPostDomain hSourcePost hExactBody)
+    hLoopBlock
+
+/--
+Hidden-context post-regular generated-loop branch contract from a hidden
+singleton recursive-loop block theorem.
+
+This wrapper discharges the raw recursive loop callbacks in
+`generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_loop_arity`
 using the hidden singleton adapters.  The remaining body/post callbacks are
 still stated explicitly because generated loop bodies install hidden
 break/continue handlers whose source-visible projection is the key invariant
@@ -120039,6 +120934,301 @@ theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_hid
 Hidden-context post-regular generated-loop branch contract from mode-facing
 body/post contracts and a hidden singleton recursive-loop block theorem.
 -/
+
+theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_hidden_loop_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    {allowedInner : Except Exception State → Prop}
+    (hAllowedRel :
+      ∀ {sourceResult}, allowedInner sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompatibleInner :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {sourceResult : Except Exception State},
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) = sourceResult →
+        allowedInner sourceResult →
+        SourceResultNotRegularOk sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hLoopDomainOk :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        StoreDomainExact layout storeLoop)
+    (hBodyRegular :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.regular compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hBodyContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        ∀ {ctxAfterPre compilerAfterGuard},
+          (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+          SourceCtxHandlersEq
+            (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+            ctxAfterPre →
+          SourceStateRel cfg layout
+            (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard →
+          ∃ compilerAfterBody : Objects.Source.State,
+          ∃ bodyFuel : Nat,
+            Functions.Source.Block.runScoped prim program ctxAfterPre
+                pieces.lowerBody bodyFuel compilerAfterGuard =
+              .ok (Functions.Source.Outcome.cont compilerAfterBody) ∧
+            SourceStateRel cfg layout
+              (.Ok sharedAfterBody storeAfterBody) compilerAfterBody)
+    (hPostRegular :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        ∀ {compilerAfterBody},
+          SourceStateExactRel cfg layout
+            (.Ok sharedAfterBody storeAfterBody) compilerAfterBody →
+          ∃ compilerAfterPost : Objects.Source.State,
+          ∃ postFuel : Nat,
+            Functions.Source.Block.runScoped prim program
+                (ctx.withoutLoopControl) pieces.lowerPost postFuel
+                compilerAfterBody =
+              .ok (Functions.Source.Outcome.regular compilerAfterPost) ∧
+            SourceStateExactRel cfg layout
+              (.Ok sharedAfterPost storeAfterPost) compilerAfterPost)
+    (hLoopBlock :
+      ∀ {loopOutcomeLayout : List Name}
+        {allowedLoop : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout loopOutcomeLayout
+            sourceResult) →
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout
+          loopOutcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop) :
+    GeneratedForLoopPostRegularBranchContract cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel cond post body
+      codeOverride reserved pieces allowedInner := by
+  refine
+    generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_loop_arity
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+      (post := post) (body := body) (codeOverride := codeOverride)
+      (pieces := pieces) (allowedInner := allowedInner)
+      hAllowedRel hScopeContains hPrim hCondSound hEvalDomain
+      hBodyDomainOk hBodyDomainContinue hPostDomainOk hBodyRegular
+      hBodyContinue hPostRegular ?regularLoop ?nonregularLoop
+  · intro sharedAfterPost sharedLoop storeAfterPost storeLoop
+      compilerAfterPost hPostDomain hSourceLoop hExactPost
+    let allowedLoop : Except Exception State → Prop :=
+      fun result =>
+        result =
+          .ok ((.Ok sharedLoop storeLoop : State).restrictStoreTo
+            storeAfterPost)
+    have hAllowedLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [allowedLoop, SourceResultRelatable,
+        EvmYul.Yul.State.restrictStoreTo]
+    have hCompatLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout layout
+            sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [allowedLoop, SourceResultOutcomeLayoutCompatible,
+        EvmYul.Yul.State.restrictStoreTo]
+    have hBlock :
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout layout
+          terminalRel revertRel prim program ctx sourceFuel.succ.succ
+          [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop :=
+      hLoopBlock hAllowedLoop hCompatLoop
+    have hLoopDomain : StoreDomainExact layout storeLoop :=
+      hLoopDomainOk hPostDomain hSourceLoop
+    have hHidden :
+        SourceRegularStmtRunHiddenExact cfg layout layout prim program ctx
+          sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) :=
+      sourceRegularStmtRunHiddenExact_for_of_singleton_hiddenBlockSound_ok
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (prim := prim) (program := program) (ctx := ctx)
+        (sourceFuel := sourceFuel) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (pieces := pieces)
+        (shared := sharedAfterPost) (sharedAfter := sharedLoop)
+        (store := storeAfterPost) (storeAfter := storeLoop)
+        (compiler := compilerAfterPost) hScopeContains hBlock hExactPost
+        hSourceLoop hLoopDomain
+    exact
+      sourceRegularGeneratedForLoopStmtRun_of_hiddenExact_singleton
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (prim := prim) (program := program) (ctx := ctx)
+        (sourceFuel := sourceFuel) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (pieces := pieces)
+        (source := (.Ok sharedAfterPost storeAfterPost : State))
+        (target := compilerAfterPost) hHidden
+  · intro sharedAfterPost storeAfterPost compilerAfterPost loopResult
+      hPostDomain hSourceLoop hExactPost hAllowedResult hRelatable
+      hNotRegularOk
+    let allowedLoop : Except Exception State → Prop :=
+      fun result => result = restrictSourceResultTo storeAfterPost loopResult
+    have hAllowedLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      exact SourceResultRelatable.restrictStoreTo hRelatable
+    have hCompatLoop :
+        ∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      have hCompatOriginal :
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            loopResult :=
+        hCompatibleInner hSourceLoop hAllowedResult hNotRegularOk
+      cases loopResult with
+      | error err =>
+          simpa [restrictSourceResultTo,
+            SourceResultOutcomeLayoutCompatible] using hCompatOriginal
+      | ok source =>
+          cases source with
+          | Ok shared store =>
+              have hFalse : False := hNotRegularOk
+              exact False.elim hFalse
+          | OutOfFuel =>
+              simp [restrictSourceResultTo,
+                EvmYul.Yul.State.restrictStoreTo,
+                SourceResultOutcomeLayoutCompatible]
+          | Checkpoint jump =>
+              cases jump <;>
+                simpa [restrictSourceResultTo,
+                  EvmYul.Yul.State.restrictStoreTo,
+                  SourceResultOutcomeLayoutCompatible] using hCompatOriginal
+    have hBlock :
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout outcomeLayout
+          terminalRel revertRel prim program ctx sourceFuel.succ.succ
+          [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop :=
+      hLoopBlock hAllowedLoop hCompatLoop
+    have hHidden :
+        SourceNonregularStmtRunHiddenExact cfg layout outcomeLayout
+          terminalRel revertRel prim program ctx sourceFuel
+          (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) compilerAfterPost
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) :=
+      sourceNonregularStmtRunHiddenExact_for_of_singleton_hiddenBlockSound
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+        (post := post) (body := body) (codeOverride := codeOverride)
+        (pieces := pieces) (shared := sharedAfterPost)
+        (store := storeAfterPost) (compiler := compilerAfterPost)
+        (loopResult := loopResult) hBlock hExactPost
+        (by
+          exact hCompatibleInner hSourceLoop hAllowedResult hNotRegularOk)
+        hSourceLoop hRelatable hNotRegularOk
+    exact
+      sourceNonregularGeneratedForLoopStmtRun_of_hiddenExact_singleton
+        (cfg := cfg) (reserved := reserved) (layout := layout)
+        (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+        (post := post) (body := body) (codeOverride := codeOverride)
+        (pieces := pieces)
+        (source := (.Ok sharedAfterPost storeAfterPost : State))
+        (target := compilerAfterPost) hHidden
+
+/--
+Hidden-context post-regular generated-loop branch contract from mode-facing
+body/post contracts and a hidden singleton recursive-loop block theorem.
+-/
 theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_modeSound_and_hidden_loop
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
@@ -120134,6 +121324,134 @@ theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_modeSound_and_hid
       terminalRel revertRel prim program ctx sourceFuel cond post body
       codeOverride reserved pieces allowedInner :=
   generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_hidden_loop
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+    (post := post) (body := body) (codeOverride := codeOverride)
+    (pieces := pieces) (allowedInner := allowedInner)
+    hAllowedRel hCompatibleInner hScopeContains hPrim hCondSound hEvalDomain
+    hBodyDomainOk hBodyDomainContinue hPostDomainOk hLoopDomainOk
+    (by
+      intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+        hCondDomain hBodyDomain hSourceBody ctxAfterPre compilerAfterGuard
+        hScopeAfter hHandlersAfter hRelAfterGuard
+      exact
+        hBodyMode.regular hCondDomain hBodyDomain hSourceBody hScopeAfter
+          hHandlersAfter hRelAfterGuard)
+    (by
+      intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+        hCondDomain hBodyDomain hSourceBody ctxAfterPre compilerAfterGuard
+        hScopeAfter hHandlersAfter hRelAfterGuard
+      exact
+        hBodyMode.cont hCondDomain hBodyDomain hSourceBody hScopeAfter
+          hHandlersAfter hRelAfterGuard)
+    (by
+      intro sharedAfterBody sharedAfterPost storeAfterBody storeAfterPost
+        hPostDomain hSourcePost compilerAfterBody hExactBody
+      exact hPostMode.regular hPostDomain hSourcePost hExactBody)
+    hLoopBlock
+
+/--
+Full generated-loop branch bundle from hidden-context mode contracts and a
+hidden singleton recursive-loop block theorem.
+-/
+
+theorem generatedForLoopPostRegularBranchContract_of_hiddenCtx_modeSound_and_hidden_loop_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    {allowedInner : Except Exception State → Prop}
+    (hAllowedRel :
+      ∀ {sourceResult}, allowedInner sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompatibleInner :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {sourceResult : Except Exception State},
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) = sourceResult →
+        allowedInner sourceResult →
+        SourceResultNotRegularOk sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hLoopDomainOk :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        StoreDomainExact layout storeLoop)
+    (hBodyMode :
+      GeneratedForBodyModeSound cfg layout outcomeLayout terminalRel
+        revertRel prim program ctx sourceFuel body codeOverride
+        pieces.lowerBody)
+    (hPostMode :
+      GeneratedForPostModeSound cfg layout outcomeLayout terminalRel
+        revertRel prim program ctx sourceFuel post codeOverride
+        pieces.lowerPost)
+    (hLoopBlock :
+      ∀ {loopOutcomeLayout : List Name}
+        {allowedLoop : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout loopOutcomeLayout
+            sourceResult) →
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout
+          loopOutcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop) :
+    GeneratedForLoopPostRegularBranchContract cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel cond post body
+      codeOverride reserved pieces allowedInner :=
+  generatedForLoopPostRegularBranchContract_of_hiddenCtx_callbacks_and_hidden_loop_arity
     (cfg := cfg) (reserved := reserved) (layout := layout)
     (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
     (revertRel := revertRel) (prim := prim) (program := program)
@@ -120285,6 +121603,136 @@ theorem generatedForLoopBranchContracts_of_hiddenCtx_modeSound_and_hidden_loop
       hBodyDomainOk hBodyDomainBreak hBodyDomainContinue hBodyMode
       hPostMode)
     (generatedForLoopPostRegularBranchContract_of_hiddenCtx_modeSound_and_hidden_loop
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+      (post := post) (body := body) (codeOverride := codeOverride)
+      (pieces := pieces) (allowedInner := allowedInner)
+      hAllowedRel hCompatibleInner hScopeContains hPrim hCondSound hEvalDomain
+      hBodyDomainOk hBodyDomainContinue hPostDomainOk hLoopDomainOk
+      hBodyMode hPostMode hLoopBlock)
+
+
+theorem generatedForLoopBranchContracts_of_hiddenCtx_modeSound_and_hidden_loop_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pieces : GeneratedForCompiled reserved layout cond post body}
+    {allowedInner : Except Exception State → Prop}
+    (hAllowedRel :
+      ∀ {sourceResult}, allowedInner sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompatibleInner :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {sourceResult : Except Exception State},
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) = sourceResult →
+        allowedInner sourceResult →
+        SourceResultNotRegularOk sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        sourceFuel cond codeOverride pieces.preCond pieces.lowerCond)
+    (hEvalDomain :
+      ∀ {shared store sharedAfter storeAfter value},
+        StoreDomainExact layout store →
+        EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, value) →
+        StoreDomainExact layout storeAfter)
+    (hBodyDomainOk :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Ok sharedAfterBody storeAfterBody) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainBreak :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Break sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hBodyDomainContinue :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterCond →
+        EvmYul.Yul.exec sourceFuel (.Block body) codeOverride
+          (.Ok sharedAfterCond storeAfterCond) =
+            .ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        StoreDomainExact layout storeAfterBody)
+    (hPostDomainOk :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterBody →
+        EvmYul.Yul.exec sourceFuel (.Block post) codeOverride
+          (.Ok sharedAfterBody storeAfterBody) =
+            .ok (.Ok sharedAfterPost storeAfterPost) →
+        StoreDomainExact layout storeAfterPost)
+    (hLoopDomainOk :
+      ∀ {sharedAfterPost sharedLoop : EvmYul.SharedState .Yul}
+        {storeAfterPost storeLoop : EvmYul.Yul.VarStore},
+        StoreDomainExact layout storeAfterPost →
+        EvmYul.Yul.exec sourceFuel (.For cond post body) codeOverride
+          (.Ok sharedAfterPost storeAfterPost) =
+            .ok (.Ok sharedLoop storeLoop) →
+        StoreDomainExact layout storeLoop)
+    (hBodyMode :
+      GeneratedForBodyModeSound cfg layout outcomeLayout terminalRel
+        revertRel prim program ctx sourceFuel body codeOverride
+        pieces.lowerBody)
+    (hPostMode :
+      GeneratedForPostModeSound cfg layout outcomeLayout terminalRel
+        revertRel prim program ctx sourceFuel post codeOverride
+        pieces.lowerPost)
+    (hLoopBlock :
+      ∀ {loopOutcomeLayout : List Name}
+        {allowedLoop : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedLoop sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout loopOutcomeLayout
+            sourceResult) →
+        SourceResultBlockSoundWhenAtExactHiddenScope cfg layout
+          loopOutcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ [(.For cond post body)] codeOverride
+          (generatedForLowerBlock pieces.preCond pieces.lowerCond
+            pieces.lowerPost pieces.lowerBody) allowedLoop) :
+    GeneratedForLoopBranchContracts cfg layout outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel cond post body codeOverride
+      reserved pieces allowedInner :=
+  generatedForLoopBranchContracts_of_nonrecursive_and_postRegular
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (program := program) (ctx := ctx)
+    (sourceFuel := sourceFuel) (cond := cond) (post := post)
+    (body := body) (codeOverride := codeOverride) (reserved := reserved)
+    (pieces := pieces) (allowedInner := allowedInner)
+    (generatedForLoopNonrecursiveBranchContracts_of_hiddenCtx_modeSound_arity
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+      (post := post) (body := body) (codeOverride := codeOverride)
+      (pieces := pieces) hScopeContains hPrim hCondSound hEvalDomain
+      hBodyDomainOk hBodyDomainBreak hBodyDomainContinue hBodyMode
+      hPostMode)
+    (generatedForLoopPostRegularBranchContract_of_hiddenCtx_modeSound_and_hidden_loop_arity
       (cfg := cfg) (reserved := reserved) (layout := layout)
       (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
       (revertRel := revertRel) (prim := prim) (program := program)
