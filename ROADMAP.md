@@ -11,6 +11,10 @@ external execution certificate.
 Last updated: 2026-05-24 23:30 PDT.
 
 1. [ ] Full Yul accepted language, not a fragment
+   - [x] Add a non-rejecting full-Yul safety surface
+     `Reference.Safe.Full.*` so code-image, object/data, and external
+     call/create primitives are no longer conflated with the narrower
+     already-proved local bridge predicate.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.

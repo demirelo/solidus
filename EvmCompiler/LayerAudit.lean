@@ -427,6 +427,18 @@ end ObjectData
 abbrev yulAccepted :=
   @Yul.Program.Accepted
 
+abbrev yulFullSafePrimitive :=
+  @Yul.Reference.Safe.Full.primitive
+
+abbrev yulFullSafeExpr :=
+  @Yul.Reference.Safe.Full.expr
+
+abbrev yulFullSafeStmt :=
+  @Yul.Reference.Safe.Full.stmt
+
+abbrev yulFullSafeProgram :=
+  @Yul.Reference.Safe.Full.program
+
 abbrev yulSourceAccepted :=
   @Yul.Program.SourceAccepted
 

@@ -159,6 +159,72 @@ noncomputable def contract (contract : AstContract) : Prop :=
 noncomputable def program (program : Program) : Prop :=
   contract program.contract
 
+namespace Full
+
+/--
+Source-language acceptance surface for full imported Yul syntax.
+
+Unlike `Safe.primitive`, this predicate does not reject code-image or
+call/create primitives.  Those operations must be discharged by semantic
+bridge/oracle contracts, not hidden by the accepted-language predicate.
+-/
+def primitive (_op : EvmYul.Operation .Yul) : Prop :=
+  True
+
+mutual
+  def expr : AstExpr → Prop
+    | .Lit _value => True
+    | .Var _name => True
+    | .Call (.inl prim) args => primitive prim ∧ exprs args
+    | .Call (.inr _functionName) args => exprs args
+
+  def exprs : List AstExpr → Prop
+    | [] => True
+    | head :: rest => expr head ∧ exprs rest
+
+  def stmt : AstStmt → Prop
+    | .Block body => stmts body
+    | .Let _names none => True
+    | .Let _names (some value) => expr value
+    | .Assign _names value => expr value
+    | .ExprStmtCall value => expr value
+    | .Switch scrutinee cases defaultBody =>
+        expr scrutinee ∧ casesSafe cases ∧ stmts defaultBody
+    | .For cond post body =>
+        expr cond ∧ stmts post ∧ stmts body
+    | .If cond body =>
+        expr cond ∧ stmts body
+    | .Continue | .Break | .Leave => True
+
+  def stmts : List AstStmt → Prop
+    | [] => True
+    | head :: rest => stmt head ∧ stmts rest
+
+  def casesSafe : List (Word × List AstStmt) → Prop
+    | [] => True
+    | (_value, body) :: rest => stmts body ∧ casesSafe rest
+end
+
+def functionDefinition : AstFunctionDefinition → Prop
+  | .Def _params _returns body => stmts body
+
+def functionEntries : List (Name × AstFunctionDefinition) → Prop
+  | [] => True
+  | (_name, fn) :: rest => functionDefinition fn ∧ functionEntries rest
+
+noncomputable def contract (contract : AstContract) : Prop :=
+  stmt contract.dispatcher ∧
+    functionEntries (Contract.functionEntries contract)
+
+noncomputable def program (program : Program) : Prop :=
+  contract program.contract
+
+theorem primitive_all (op : EvmYul.Operation .Yul) :
+    primitive op := by
+  trivial
+
+end Full
+
 theorem switch_default_safe_of_stmt {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
     (hSafe : stmt (.Switch scrutinee cases defaultBody)) :
