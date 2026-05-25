@@ -223,6 +223,61 @@ theorem primitive_all (op : EvmYul.Operation .Yul) :
     primitive op := by
   trivial
 
+mutual
+  def expr_all : (expr' : AstExpr) → expr expr'
+    | .Lit _value => True.intro
+    | .Var _name => True.intro
+    | .Call (.inl prim) args => ⟨primitive_all prim, exprs_all args⟩
+    | .Call (.inr _functionName) args => exprs_all args
+
+  def exprs_all : (exprs' : List AstExpr) → exprs exprs'
+    | [] => True.intro
+    | head :: rest => ⟨expr_all head, exprs_all rest⟩
+
+  def stmt_all : (stmt' : AstStmt) → stmt stmt'
+    | .Block body => stmts_all body
+    | .Let _names none => True.intro
+    | .Let _names (some value) => expr_all value
+    | .Assign _names value => expr_all value
+    | .ExprStmtCall value => expr_all value
+    | .Switch scrutinee cases defaultBody =>
+        ⟨expr_all scrutinee, cases_all cases, stmts_all defaultBody⟩
+    | .For cond post body =>
+        ⟨expr_all cond, stmts_all post, stmts_all body⟩
+    | .If cond body => ⟨expr_all cond, stmts_all body⟩
+    | .Continue | .Break | .Leave => True.intro
+
+  def stmts_all : (stmts' : List AstStmt) → stmts stmts'
+    | [] => True.intro
+    | head :: rest => ⟨stmt_all head, stmts_all rest⟩
+
+  def cases_all :
+      (cases' : List (Word × List AstStmt)) → casesSafe cases'
+    | [] => True.intro
+    | (_value, body) :: rest => ⟨stmts_all body, cases_all rest⟩
+end
+
+def functionDefinition_all :
+    (fn : AstFunctionDefinition) → functionDefinition fn
+  | .Def _params _returns body => stmts_all body
+
+def functionEntries_all :
+    (entries : List (Name × AstFunctionDefinition)) →
+      functionEntries entries
+  | [] => True.intro
+  | (_name, fn) :: rest =>
+      ⟨functionDefinition_all fn, functionEntries_all rest⟩
+
+theorem contract_all (contract : AstContract) :
+    Full.contract contract := by
+  exact
+    ⟨stmt_all contract.dispatcher,
+      functionEntries_all (Contract.functionEntries contract)⟩
+
+theorem program_all (program : Program) :
+    Full.program program := by
+  exact contract_all program.contract
+
 end Full
 
 theorem switch_default_safe_of_stmt {scrutinee : AstExpr}
@@ -405,6 +460,10 @@ noncomputable def Accepted (program : Program) : Prop :=
   Program.Accepted program ∧ Safe.program program ∧
     Safe.NoShadowing.program program
 
+noncomputable def FullAccepted (program : Program) : Prop :=
+  Program.Accepted program ∧ Safe.Full.program program ∧
+    Safe.NoShadowing.program program
+
 theorem programAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     Program.Accepted program :=
@@ -419,6 +478,11 @@ theorem noShadowingProgram_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     Safe.NoShadowing.program program :=
   hAccepted.2.2
+
+theorem fullAccepted_of_accepted {program : Program}
+    (hAccepted : Accepted program) :
+    FullAccepted program := by
+  exact ⟨hAccepted.1, Safe.Full.program_all program, hAccepted.2.2⟩
 
 def installContract (program : Program) : State → State :=
   Program.installContract program

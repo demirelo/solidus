@@ -15,6 +15,8 @@ Last updated: 2026-05-24 23:30 PDT.
      `Reference.Safe.Full.*` so code-image, object/data, and external
      call/create primitives are no longer conflated with the narrower
      already-proved local bridge predicate.
+   - [x] Add `Reference.FullAccepted` and the checked compatibility theorem
+     from old `Reference.Accepted` to the new full acceptedness surface.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.

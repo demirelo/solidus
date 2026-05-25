@@ -439,6 +439,12 @@ abbrev yulFullSafeStmt :=
 abbrev yulFullSafeProgram :=
   @Yul.Reference.Safe.Full.program
 
+abbrev yulReferenceFullAccepted :=
+  @Yul.Reference.FullAccepted
+
+abbrev yulReferenceFullAcceptedOfAccepted :=
+  @Yul.Reference.fullAccepted_of_accepted
+
 abbrev yulSourceAccepted :=
   @Yul.Program.SourceAccepted
 
