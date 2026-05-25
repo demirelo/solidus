@@ -170,11 +170,17 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSemanticContracts`, so callers of the preferred
     source-compile package no longer need to provide the observation field as
     arbitrary semantic evidence when using the canonical outcome relation.
+  - [x] Add the result-level canonical `EVM.X` wrapper
+    `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
+    and route the preferred `LayerAudit` gas-aware aliases through it. The
+    public spine now constructs the canonical dispatcher outcome relation from
+    the semantic core instead of accepting an arbitrary `outcomeRel`/observation
+    pair at the preferred top boundary.
 - [x] Promote the actual result-level `EVM.X` theorem as the preferred public
   gas-aware alias.
   - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and
     `recursiveBridgeTopNoCallToGasAwareEVM` now point at the source-compile
-    no-call/create result-level `EVM.X` theorem.
+    no-call/create canonical-observation result-level `EVM.X` theorem.
   - [x] The older gasless result bridge remains exported under the explicit
     names `recursiveBridgeTopToGaslessEVMResult` and
     `recursiveBridgeTopNoCallToGaslessEVMResult`.

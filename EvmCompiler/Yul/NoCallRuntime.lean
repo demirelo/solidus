@@ -876,6 +876,92 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_X
     hTop.toNoCallAssumptions hX
 
+/--
+Preferred result-level top theorem for the canonical imported-Yul observation
+relation.
+
+This wrapper exposes the irreducible semantic core directly and constructs the
+ordinary top-assumption package internally, so callers do not provide an
+arbitrary `outcomeRel`/observation pair.
+-/
+theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSourceAccepted : RecursiveBridgeSourceAccepted program)
+    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hSemantics :
+      RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+        program)
+    (hInitialSharedRel :
+      Reference.SharedStateRel cfg
+        { shared with
+          executionEnv :=
+            { shared.executionEnv with code := program.contract } }
+        initial.toSharedState)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCompileTarget :
+      compileCheckedAssemblyTarget? program = some (asm, target))
+    (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
+    (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
+    (gasOracle : Assembly.GasOracleAssumption asm initial)
+    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
+    (currentContractProjection :
+      Assembly.CurrentContractProjectionAssumption asm initial)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg terminalRel
+        revertRel program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+            target.GasOpcodeBoundary ∧
+              Assembly.GasOracleAssumption asm initial ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ result,
+                            EvmYul.EVM.X evmFuel
+                                (Assembly.GasAware.validJumps target)
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  initial) =
+                              .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X
+    (RecursiveBridgeTopNoCallSourceCompileAssumptions.withCanonicalObservation
+      hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
+      hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
+      outOfGasPolicy currentContractProjection hInitialPc hInitialStack)
+    hX
+
 end Program
 end Yul
 end EvmCompiler
