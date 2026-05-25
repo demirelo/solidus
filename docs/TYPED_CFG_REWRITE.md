@@ -177,7 +177,9 @@ compiler, not to the locals source semantics: a declaration extends the typed
 CFG shape with symbolic local slots, assignments update those slots, and every
 normal or abrupt block exit unwinds to the enclosing continuation shape. Higher
 layers should see only a varstore/scope semantics, while typed CFG sees the
-symbolic stack contract that implements it.
+symbolic stack contract that implements it. Concrete `DUP`/`SWAP`/`POP`
+sequences are not a higher-layer concern; they belong to the typed CFG backend
+that realizes symbolic local-slot operations and unwinds as labeled assembly.
 
 ## Yul Surface Audit
 

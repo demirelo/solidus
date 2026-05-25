@@ -412,12 +412,15 @@ def endLabel : Label :=
   Assembly.Label.named "control:end"
 
 def toCfg? (program : Program) : Option TypedCfg.Program := do
-  let endKont : Kont := { label := endLabel, shape := [] }
-  let result ←
-    Block.toCfgFrom program.body { regular := endKont } entryLabel [] 0
-  some
-    { entry := entryLabel
-      blocks := result.blocks ++ [finalBlock endLabel []] }
+  if !program.accepted? then
+    none
+  else
+    let endKont : Kont := { label := endLabel, shape := [] }
+    let result ←
+      Block.toCfgFrom program.body { regular := endKont } entryLabel [] 0
+    some
+      { entry := entryLabel
+        blocks := result.blocks ++ [finalBlock endLabel []] }
 
 def toCheckedCfg? (program : Program) : Option TypedCfg.CheckedProgram := do
   let cfg ← toCfg? program
