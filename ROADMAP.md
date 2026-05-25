@@ -72,6 +72,9 @@ Last updated: 2026-05-25 04:05 PDT.
      - [x] Prove the canonical `RETURN` terminal step/existence lemmas.
      - [x] Prove the canonical `REVERT` terminal step/existence lemmas.
      - [x] Prove the canonical `SELFDESTRUCT` terminal step/existence lemmas.
+     - [x] Bundle the four per-kind lemmas into the canonical
+       `PrimitiveSound` terminal-step fields for
+       `Locals.Source.PrimitiveSemantics.structured`.
    - [ ] Derive `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` from
      acceptedness/resource facts, or replace it with a smaller fundamental
      resource premise whose scope is exactly documented and exported.

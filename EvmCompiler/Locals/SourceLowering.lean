@@ -1101,6 +1101,43 @@ theorem structured_terminal_selfdestruct_step_exists
               rw [hStack, hValues]
               simp)
 
+theorem structured_terminal_step
+    {kind : Assembly.HaltKind}
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm evm' : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal kind shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack)
+    (hStep : Structured.Terminal.step kind evm = .ok evm') :
+    evm'.toSharedState = shared' := by
+  cases kind
+  · exact structured_terminal_stop_step hEval hShared hStack hStep
+  · exact structured_terminal_return_step hEval hShared hStack hStep
+  · exact structured_terminal_revert_step hEval hShared hStack hStep
+  · exact structured_terminal_selfdestruct_step hEval hShared hStack hStep
+
+theorem structured_terminal_step_exists
+    {kind : Assembly.HaltKind}
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal kind shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.Terminal.step kind evm = .ok evm' ∧
+        evm'.toSharedState = shared' := by
+  cases kind
+  · exact structured_terminal_stop_step_exists hEval hShared hStack
+  · exact structured_terminal_return_step_exists hEval hShared hStack
+  · exact structured_terminal_revert_step_exists hEval hShared hStack
+  · exact structured_terminal_selfdestruct_step_exists hEval hShared hStack
+
 end PrimitiveSemantics
 
 mutual

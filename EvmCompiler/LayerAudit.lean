@@ -542,6 +542,12 @@ abbrev localsSourcePrimitiveSemanticsStructuredTerminalSelfdestructStep :=
 abbrev localsSourcePrimitiveSemanticsStructuredTerminalSelfdestructStepExists :=
   @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_selfdestruct_step_exists
 
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_step_exists
+
 abbrev localsSourceLoweringExprAccessible :=
   @Locals.SourceLowering.Expr.Accessible
 
