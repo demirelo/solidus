@@ -92325,6 +92325,72 @@ theorem sourceGeneratedIszeroCondition_true_of_exact_zero
     Locals.Source.Expr.eval, Locals.Source.Expr.ExprSeq.eval, hArgEval,
     hEvalPrim', hBool]
 
+/--
+Arity-aware target-side semantics of the compiler-generated `iszero` guard
+when the imported loop condition is zero.
+-/
+theorem sourceGeneratedIszeroCondition_true_of_exact_zero_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {compilerBefore compilerAfterArg : Objects.Source.State}
+    {lowerCond : Functions.Expr 1}
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hExactAfterArg :
+      SourceStateExactRel cfg layout (.Ok shared store) compilerAfterArg)
+    (hArg :
+      Locals.Source.Expr.evalOne prim lowerCond compilerBefore =
+        .ok (compilerAfterArg, EvmYul.UInt256.ofNat 0)) :
+    ∃ compilerAfterGuard : Objects.Source.State,
+      Functions.Source.Expr.evalCondition prim
+          (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+          compilerBefore =
+        .ok (compilerAfterGuard, true) ∧
+      SourceStateRel cfg layout (.Ok shared store) compilerAfterGuard := by
+  have hRelAfterArg : SourceStateRel cfg layout (.Ok shared store)
+      compilerAfterArg :=
+    hExactAfterArg.toRel
+  have hCall :
+      EvmYul.Yul.primCall sourceFuel.succ (.Ok shared store)
+          (.CompBit .ISZERO : EvmYul.Operation .Yul)
+          [EvmYul.UInt256.ofNat 0] =
+        .ok (.Ok shared store,
+          [EvmYul.UInt256.isZero (EvmYul.UInt256.ofNat 0)]) :=
+    PrimSemantics.primCall_iszero_ok sourceFuel shared store
+      (EvmYul.UInt256.ofNat 0)
+  have hArity :
+      [EvmYul.UInt256.ofNat 0].length =
+        Expressions.Structured.BasicOp.inputs .iszero := by
+    simp [Expressions.Structured.BasicOp.inputs]
+  rcases hPrim hRelAfterArg hArity hCall with
+    ⟨sharedAfter, hEvalPrim, hRelAfterGuard⟩
+  have hArgEval :
+      Locals.Source.Expr.eval prim lowerCond compilerBefore =
+        .ok (compilerAfterArg, [EvmYul.UInt256.ofNat 0]) :=
+    Locals.SourceLowering.Expr.eval_of_evalOne hArg
+  have hEvalPrim' :
+      prim.eval Structured.BasicOp.iszero compilerAfterArg.shared
+          [EvmYul.UInt256.ofNat 0] =
+        .ok (sharedAfter,
+          [EvmYul.UInt256.isZero (EvmYul.UInt256.ofNat 0)]) := by
+    simpa using hEvalPrim
+  refine ⟨compilerAfterArg.withShared sharedAfter, ?_, hRelAfterGuard⟩
+  have hBool :
+      (EvmYul.UInt256.isZero (EvmYul.UInt256.ofNat 0) !=
+          EvmYul.UInt256.ofNat 0) =
+        true :=
+    word_bne_zero_true_of_ne (by decide)
+  change
+    Locals.Source.Expr.evalCondition prim
+        (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+        compilerBefore =
+      .ok (compilerAfterArg.withShared sharedAfter, true)
+  simp [Locals.Source.Expr.evalCondition, Locals.Source.Expr.evalOne,
+    Locals.Source.Expr.eval, Locals.Source.Expr.ExprSeq.eval, hArgEval,
+    hEvalPrim', hBool]
+
 theorem uint256_isZero_eq_zero_of_ne {value : Word}
     (hNe : value ≠ EvmYul.UInt256.ofNat 0) :
     EvmYul.UInt256.isZero value = EvmYul.UInt256.ofNat 0 := by
@@ -92411,6 +92477,143 @@ theorem sourceGeneratedIszeroCondition_false_of_exact_nonzero
     hEvalPrim', hBool]
 
 /--
+Arity-aware target-side semantics of the compiler-generated `iszero` guard
+when the imported loop condition is nonzero.
+-/
+theorem sourceGeneratedIszeroCondition_false_of_exact_nonzero_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {compilerBefore compilerAfterArg : Objects.Source.State}
+    {lowerCond : Functions.Expr 1} {value : Word}
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hExactAfterArg :
+      SourceStateExactRel cfg layout (.Ok shared store) compilerAfterArg)
+    (hArg :
+      Locals.Source.Expr.evalOne prim lowerCond compilerBefore =
+        .ok (compilerAfterArg, value))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0) :
+    ∃ compilerAfterGuard : Objects.Source.State,
+      Functions.Source.Expr.evalCondition prim
+          (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+          compilerBefore =
+        .ok (compilerAfterGuard, false) ∧
+      SourceStateRel cfg layout (.Ok shared store) compilerAfterGuard := by
+  have hRelAfterArg : SourceStateRel cfg layout (.Ok shared store)
+      compilerAfterArg :=
+    hExactAfterArg.toRel
+  have hCall :
+      EvmYul.Yul.primCall sourceFuel.succ (.Ok shared store)
+          (.CompBit .ISZERO : EvmYul.Operation .Yul) [value] =
+        .ok (.Ok shared store, [EvmYul.UInt256.isZero value]) :=
+    PrimSemantics.primCall_iszero_ok sourceFuel shared store value
+  have hArity :
+      [value].length = Expressions.Structured.BasicOp.inputs .iszero := by
+    simp [Expressions.Structured.BasicOp.inputs]
+  rcases hPrim hRelAfterArg hArity hCall with
+    ⟨sharedAfter, hEvalPrim, hRelAfterGuard⟩
+  have hArgEval :
+      Locals.Source.Expr.eval prim lowerCond compilerBefore =
+        .ok (compilerAfterArg, [value]) :=
+    Locals.SourceLowering.Expr.eval_of_evalOne hArg
+  have hEvalPrim' :
+      prim.eval Structured.BasicOp.iszero compilerAfterArg.shared [value] =
+        .ok (sharedAfter, [EvmYul.UInt256.isZero value]) := by
+    simpa using hEvalPrim
+  refine ⟨compilerAfterArg.withShared sharedAfter, ?_, hRelAfterGuard⟩
+  have hIsZeroEq :
+      EvmYul.UInt256.isZero value = EvmYul.UInt256.ofNat 0 :=
+    uint256_isZero_eq_zero_of_ne hNonzero
+  have hBool :
+      (EvmYul.UInt256.isZero value != EvmYul.UInt256.ofNat 0) = false :=
+    word_bne_zero_false_of_eq hIsZeroEq
+  change
+    Locals.Source.Expr.evalCondition prim
+        (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+        compilerBefore =
+      .ok (compilerAfterArg.withShared sharedAfter, false)
+  simp [Locals.Source.Expr.evalCondition, Locals.Source.Expr.evalOne,
+    Locals.Source.Expr.eval, Locals.Source.Expr.ExprSeq.eval, hArgEval,
+    hEvalPrim', hBool]
+
+/--
+Run only the generated nonzero-condition guard prefix.
+
+After the imported condition prelude materializes a nonzero value, the inserted
+guard `if iszero(cond) { break }` falls through regularly.  The lowered loop
+body is deliberately not part of this lemma; body break/continue/regular/leave
+cases compose with this regular guard-prefix fact.
+-/
+theorem sourceForGeneratedGuardSkipRunOpen_of_exact_nonzero_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfterPre : Functions.Source.Ctx}
+    {sourceFuel preFuel : Nat}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArg : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Functions.Expr 1}
+    {value : Word}
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hPreRun :
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre))
+    (hExactAfterArg :
+      SourceStateExactRel cfg layout (.Ok shared store) compilerAfterArg)
+    (hArg :
+      Locals.Source.Expr.evalOne prim lowerCond compilerAfterPre =
+        .ok (compilerAfterArg, value))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0) :
+    ∃ compilerAfterGuard : Objects.Source.State,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] }
+          compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterGuard,
+          ctxAfterPre) ∧
+      SourceStateRel cfg layout (.Ok shared store) compilerAfterGuard := by
+  rcases
+      sourceGeneratedIszeroCondition_false_of_exact_nonzero_arity
+        (cfg := cfg) (layout := layout) (prim := prim)
+        (sourceFuel := sourceFuel) (shared := shared) (store := store)
+        (compilerBefore := compilerAfterPre)
+        (compilerAfterArg := compilerAfterArg) (lowerCond := lowerCond)
+        (value := value) hPrim hExactAfterArg hArg hNonzero with
+    ⟨compilerAfterGuard, hGuardCond, hRelAfterGuard⟩
+  have hGuardOpen :
+      Functions.Source.Block.runOpen prim program ctxAfterPre 2
+          { stmts :=
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] }
+          compilerAfterPre =
+        .ok (Functions.Source.Outcome.regular compilerAfterGuard,
+          ctxAfterPre) := by
+    simp [Functions.Source.Block.runOpen, Functions.Source.Stmt.run,
+      hGuardCond, Functions.Source.Outcome.regular,
+      Locals.Source.Outcome.regular]
+  rcases
+      Functions.Source.Block.runOpen_append_regular_exists prim program pre
+        [Functions.Stmt.if_
+          (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+          { stmts := [Functions.Stmt.brk] }]
+        ctx ctxAfterPre compiler compilerAfterPre
+        (Functions.Source.Outcome.regular compilerAfterGuard) ctxAfterPre
+        ⟨preFuel, hPreRun⟩ ⟨2, hGuardOpen⟩ with
+    ⟨targetFuel, hTarget⟩
+  exact ⟨compilerAfterGuard, targetFuel, by simpa using hTarget,
+    hRelAfterGuard⟩
+
+
+/--
 Run only the generated nonzero-condition guard prefix.
 
 After the imported condition prelude materializes a nonzero value, the inserted
@@ -92483,6 +92686,91 @@ theorem sourceForGeneratedGuardSkipRunOpen_of_exact_nonzero
     ⟨targetFuel, hTarget⟩
   exact ⟨compilerAfterGuard, targetFuel, by simpa using hTarget,
     hRelAfterGuard⟩
+
+/--
+Nonzero-condition generated-guard bridge from the ordinary
+expression-prelude soundness interface.
+
+This is the regular sibling of
+`sourceForGeneratedGuardBreakRunScoped_of_eval_domain_zero`: it runs the
+condition prelude, observes a nonzero imported condition value, derives the
+target generated `iszero` guard result from primitive soundness, and packages
+only the guard prefix as a regular open-block run.  The user body and post
+block are intentionally left to later compositional loop lemmas.
+-/
+theorem sourceForGeneratedGuardSkipRunOpen_of_eval_domain_nonzero_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond : EvmYul.SharedState .Yul}
+    {store storeAfterCond : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Functions.Expr 1}
+    {value : Word}
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hCondSound :
+      ExprEvalPreludeSound cfg layout prim program ctx sourceFuel cond
+        codeOverride pre lowerCond)
+    (hEvalDomain :
+      StoreDomainExact layout store →
+      EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfterCond storeAfterCond, value) →
+      StoreDomainExact layout storeAfterCond)
+    (hExact :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hEvalNonzero :
+      EvmYul.Yul.eval sourceFuel cond codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfterCond storeAfterCond, value))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0) :
+    ∃ ctxAfterPre : Functions.Source.Ctx,
+    ∃ compilerAfterGuard : Objects.Source.State,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] }
+          compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterGuard,
+          ctxAfterPre) ∧
+      SourceStateRel cfg layout (.Ok sharedAfterCond storeAfterCond)
+        compilerAfterGuard := by
+  cases hExact with
+  | @ok shared store compiler hShared hVars hDomain =>
+      let hInitialRel :
+          SourceStateRel cfg layout (.Ok shared store) compiler :=
+        SourceStateRel.ok hShared hVars
+      rcases
+          hCondSound.run_exact_of_eval_domain
+            (cfg := cfg) (layout := layout) (prim := prim)
+            (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+            (sourceExpr := cond) (codeOverride := codeOverride)
+            (pre := pre) (lowerExpr := lowerCond) (shared := shared)
+            (sharedAfter := sharedAfterCond) (store := store)
+            (storeAfter := storeAfterCond) (compiler := compiler)
+            (value := value) (hEvalDomain := hEvalDomain)
+            hDomain hInitialRel hEvalNonzero with
+        ⟨compilerAfterPre, compilerAfterCond, ctxAfterPre, preFuel,
+          hPreRun, hCondRun, hRelCondExact⟩
+      rcases
+          sourceForGeneratedGuardSkipRunOpen_of_exact_nonzero_arity
+            (cfg := cfg) (layout := layout) (prim := prim)
+            (program := program) (ctx := ctx) (ctxAfterPre := ctxAfterPre)
+            (sourceFuel := sourceFuel) (preFuel := preFuel)
+            (shared := sharedAfterCond) (store := storeAfterCond)
+            (compiler := compiler) (compilerAfterPre := compilerAfterPre)
+            (compilerAfterArg := compilerAfterCond) (pre := pre)
+            (lowerCond := lowerCond) (value := value)
+            hPrim hPreRun hRelCondExact hCondRun hNonzero with
+        ⟨compilerAfterGuard, targetFuel, hRun, hRelAfterGuard⟩
+      exact ⟨ctxAfterPre, compilerAfterGuard, targetFuel, hRun,
+        hRelAfterGuard⟩
+
 
 /--
 Nonzero-condition generated-guard bridge from the ordinary
