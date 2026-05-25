@@ -70,8 +70,11 @@ Last updated: 2026-05-25 05:18 PDT.
      - [x] Add reusable checked stack-pop suffix lemmas for arities 1 through
        6; these are the local proof infrastructure needed for the continuing
        primitive preservation fields without unfolding whole EVM traces.
-     - [ ] Prove the continuing-primitive step/suffix fields for every
-       `sourceContinuingStep?` case.
+     - [x] Prove safe suffix preservation for every `Assembly.PrimStep`
+       admitted by `sourceContinuingStep?`, excluding only backend stack
+       shuffles by construction.
+     - [x] Prove the canonical continuing-primitive `eval_step` field.
+     - [ ] Prove the canonical continuing-primitive `eval_step_exists` field.
      - [ ] Prove the continuing-primitive output-length field.
    - [ ] Provide a canonical `RecursiveBridgePrimitiveStackContracts`
      constructor for all accepted primitives.
