@@ -101,6 +101,27 @@ structure PrimitiveSemantics where
 namespace PrimitiveSemantics
 
 /--
+Continuing EVM primitives exposed at the source-primitive boundary.
+
+Backend stack-shuffle instructions are deliberately not source primitives here:
+they remain part of the lower stack-machine implementation and proofs. External
+call/create and control/PC-dependent primitives are still rejected by
+`continuingStep?` until their source-facing interaction semantics are wired in.
+-/
+def sourceContinuingStep? (op : Structured.BasicOp) :
+    Option Assembly.PrimStep :=
+  match op with
+  | .dup1 | .dup2 | .dup3 | .dup4
+  | .dup5 | .dup6 | .dup7 | .dup8
+  | .dup9 | .dup10 | .dup11 | .dup12
+  | .dup13 | .dup14 | .dup15 | .dup16
+  | .swap1 | .swap2 | .swap3 | .swap4
+  | .swap5 | .swap6 | .swap7 | .swap8
+  | .swap9 | .swap10 | .swap11 | .swap12
+  | .swap13 | .swap14 | .swap15 | .swap16 => none
+  | op => op.toPrimOp.continuingStep?
+
+/--
 Canonical source primitive semantics for the compiler tower.
 
 It runs the already-verified structured/EVM primitive on an isolated concrete
@@ -117,7 +138,10 @@ def structured : PrimitiveSemantics where
         pc := EvmYul.UInt256.ofNat 0,
         stack := values.reverse,
         execLength := 0 }
-    match Structured.BasicOp.step op state with
+    match sourceContinuingStep? op with
+    | none => .error .InvalidInstruction
+    | some step =>
+    match step.run state with
     | .ok state' => .ok (state'.toSharedState, state'.stack.reverse)
     | .error err => .error err
   terminal kind shared values :=

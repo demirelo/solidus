@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-25 04:05 PDT.
+Last updated: 2026-05-25 05:18 PDT.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -63,6 +63,16 @@ Last updated: 2026-05-25 04:05 PDT.
    - [ ] Provide a canonical `PrimitiveSound` theorem for the concrete
      compiler primitive semantics used by the source tower, specifically
      `Locals.Source.PrimitiveSemantics.structured`.
+     - [x] Refine the canonical source primitive evaluator to use a
+       source-facing `sourceContinuingStep?`, so backend-only stack shuffles
+       (`DUP`/`SWAP`) and still-unmodeled interaction/control primitives are
+       rejected explicitly instead of being hidden inside the source boundary.
+     - [x] Add reusable checked stack-pop suffix lemmas for arities 1 through
+       6; these are the local proof infrastructure needed for the continuing
+       primitive preservation fields without unfolding whole EVM traces.
+     - [ ] Prove the continuing-primitive step/suffix fields for every
+       `sourceContinuingStep?` case.
+     - [ ] Prove the continuing-primitive output-length field.
    - [ ] Provide a canonical `RecursiveBridgePrimitiveStackContracts`
      constructor for all accepted primitives.
    - [ ] Provide canonical terminal/revert contracts for

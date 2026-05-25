@@ -57,6 +57,151 @@ inductive PrimStep where
 
 namespace PrimStep
 
+namespace Stack
+
+variable {α : Type}
+
+theorem pop_append_of_some {stack tail rest : EvmYul.Stack α} {a : α}
+    (h : EvmYul.Stack.pop stack = some (rest, a)) :
+    EvmYul.Stack.pop (stack ++ tail) = some (rest ++ tail, a) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop] at h
+  | cons x xs =>
+      simp [EvmYul.Stack.pop] at h ⊢
+      rcases h with ⟨hRest, hA⟩
+      subst rest
+      subst a
+      simp
+
+theorem pop2_append_of_some {stack tail rest : EvmYul.Stack α}
+    {a b : α}
+    (h : EvmYul.Stack.pop2 stack = some (rest, a, b)) :
+    EvmYul.Stack.pop2 (stack ++ tail) = some (rest ++ tail, a, b) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop2] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop2] at h
+      | cons y ys =>
+          simp [EvmYul.Stack.pop2] at h ⊢
+          rcases h with ⟨hRest, hA, hB⟩
+          subst rest
+          subst a
+          subst b
+          simp
+
+theorem pop3_append_of_some {stack tail rest : EvmYul.Stack α}
+    {a b c : α}
+    (h : EvmYul.Stack.pop3 stack = some (rest, a, b, c)) :
+    EvmYul.Stack.pop3 (stack ++ tail) = some (rest ++ tail, a, b, c) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop3] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop3] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop3] at h
+          | cons z zs =>
+              simp [EvmYul.Stack.pop3] at h ⊢
+              rcases h with ⟨hRest, hA, hB, hC⟩
+              subst rest
+              subst a
+              subst b
+              subst c
+              simp
+
+theorem pop4_append_of_some {stack tail rest : EvmYul.Stack α}
+    {a b c d : α}
+    (h : EvmYul.Stack.pop4 stack = some (rest, a, b, c, d)) :
+    EvmYul.Stack.pop4 (stack ++ tail) = some (rest ++ tail, a, b, c, d) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop4] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop4] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop4] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop4] at h
+              | cons w ws =>
+                  simp [EvmYul.Stack.pop4] at h ⊢
+                  rcases h with ⟨hRest, hA, hB, hC, hD⟩
+                  subst rest
+                  subst a
+                  subst b
+                  subst c
+                  subst d
+                  simp
+
+theorem pop5_append_of_some {stack tail rest : EvmYul.Stack α}
+    {a b c d e : α}
+    (h : EvmYul.Stack.pop5 stack = some (rest, a, b, c, d, e)) :
+    EvmYul.Stack.pop5 (stack ++ tail) =
+      some (rest ++ tail, a, b, c, d, e) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop5] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop5] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop5] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop5] at h
+              | cons w ws =>
+                  cases ws with
+                  | nil => simp [EvmYul.Stack.pop5] at h
+                  | cons v vs =>
+                      simp [EvmYul.Stack.pop5] at h ⊢
+                      rcases h with ⟨hRest, hA, hB, hC, hD, hE⟩
+                      subst rest
+                      subst a
+                      subst b
+                      subst c
+                      subst d
+                      subst e
+                      simp
+
+theorem pop6_append_of_some {stack tail rest : EvmYul.Stack α}
+    {a b c d e f : α}
+    (h : EvmYul.Stack.pop6 stack = some (rest, a, b, c, d, e, f)) :
+    EvmYul.Stack.pop6 (stack ++ tail) =
+      some (rest ++ tail, a, b, c, d, e, f) := by
+  cases stack with
+  | nil => simp [EvmYul.Stack.pop6] at h
+  | cons x xs =>
+      cases xs with
+      | nil => simp [EvmYul.Stack.pop6] at h
+      | cons y ys =>
+          cases ys with
+          | nil => simp [EvmYul.Stack.pop6] at h
+          | cons z zs =>
+              cases zs with
+              | nil => simp [EvmYul.Stack.pop6] at h
+              | cons w ws =>
+                  cases ws with
+                  | nil => simp [EvmYul.Stack.pop6] at h
+                  | cons v vs =>
+                      cases vs with
+                      | nil => simp [EvmYul.Stack.pop6] at h
+                      | cons u us =>
+                          simp [EvmYul.Stack.pop6] at h ⊢
+                          rcases h with ⟨hRest, hA, hB, hC, hD, hE, hF⟩
+                          subst rest
+                          subst a
+                          subst b
+                          subst c
+                          subst d
+                          subst e
+                          subst f
+                          simp
+
+end Stack
+
 def run (step : PrimStep) (state : EvmYul.EVM.State) :
     Except EvmYul.EVM.ExecutionException EvmYul.EVM.State :=
   match step with
