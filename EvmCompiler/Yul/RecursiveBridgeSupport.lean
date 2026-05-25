@@ -32607,6 +32607,100 @@ theorem sourceRegularSeqRunBridgeHidden_cons_expr_prim_of_lower_preludeRegular_g
   simpa [hHeadEq, List.append_assoc] using hBridge
 
 /--
+Arity-aware checked non-terminal primitive expression-statement bridge through
+an arbitrary regular hidden argument prelude.
+-/
+theorem sourceRegularSeqRunBridgeHidden_cons_expr_prim_of_lower_preludeRegular_general_arity
+    {cfg : StateRelConfig} {layout layoutAfter : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {rest : List AstStmt} {lowerHead : List Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {values : List Word}
+    (sourceFuel lowerFuel : Nat)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hTerminal : Prim.terminal? yulPrim = none)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, values))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hTail :
+      ∀ {compilerAfterPre compilerAfterExpr : Objects.Source.State}
+        {ctxAfterPre : Functions.Source.Ctx} {preFuel : Nat},
+      Functions.Source.Block.runOpen prim program ctx preFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfterPre) →
+      Locals.Source.Expr.eval prim (Expr.cast hOutputs (.prim op seq))
+          compilerAfterPre =
+        .ok (compilerAfterExpr, values) →
+      SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+        compilerAfterExpr →
+      SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program
+        ctxAfterPre sourceFuel.succ rest codeOverride
+        (.Ok sharedAfter storeAfter) compilerAfterExpr lowerTail) :
+    SourceRegularSeqRunBridgeHidden cfg layout layoutAfter prim program ctx
+      sourceFuel.succ.succ
+      (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+      codeOverride (.Ok shared store) compiler
+      { stmts := lowerHead ++ lowerTail.stmts } := by
+  rcases
+      BridgeFacts.toFunctionsListFuel?_expr_prim_components hTerminal
+        hLower with
+    ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
+  rcases
+      lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegular_arity
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (args := args) (codeOverride := codeOverride)
+        (freshState := freshState) (freshState' := freshState')
+        (pre := pre) (argExprs := argExprs) (seq := seq)
+        hBasic hLowerArgs hSeq hOutputs hArgs hPrim with
+    ⟨hLowerExprExpected, hExprSound⟩
+  have hTuple :
+      (pre, Expr.cast hOutputs (.prim op seq), freshState') =
+        (lowerPre, lowerValue, freshState') := by
+    simpa [hLowerExprExpected] using hLowerExpr
+  cases hTuple
+  have hBridge :=
+    sourceRegularSeqRunBridgeHidden_cons_expr_prim_prelude_general
+      (cfg := cfg) (layout := layout) (layoutAfter := layoutAfter)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := rest) (pre := pre)
+      (lowerTail := lowerTail) (yulPrim := yulPrim) (args := args)
+      (lowerExpr := Expr.cast hOutputs (.prim op seq)) (values := values)
+      (sourceFuel := sourceFuel) (codeOverride := codeOverride)
+      hRel hEval hExprSound hTail
+  simpa [hHeadEq, List.append_assoc] using hBridge
+
+/--
 Singleton non-terminal primitive expression-statement bridge through the hidden
 stack-order prelude interface.
 
@@ -32658,6 +32752,77 @@ theorem sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular
       (.Ok shared store) compiler { stmts := lowerHead } := by
   have hBridge :=
     sourceRegularSeqRunBridgeHidden_cons_expr_prim_of_lower_preludeRegular_general
+      (cfg := cfg) (layout := layout) (layoutAfter := layout)
+      (prim := prim) (program := program) (ctx := ctx)
+      (shared := shared) (sharedAfter := sharedAfter)
+      (store := store) (storeAfter := storeAfter)
+      (compiler := compiler) (rest := []) (lowerHead := lowerHead)
+      (lowerTail := { stmts := [] }) (yulPrim := yulPrim) (op := op)
+      (args := args) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) (values := values) sourceFuel lowerFuel codeOverride
+      hLower hTerminal hBasic hLowerArgs hSeq hOutputs hRel hEval hArgs hPrim
+      (by
+        intro compilerAfterPre compilerAfterExpr _ctxAfterPre _preFuel
+          _hPreRun _hCompilerExpr hRelAfter
+        exact
+          sourceRegularSeqRunBridgeHidden_nil
+            (cfg := cfg) (layout := layout) (prim := prim)
+            (program := program) (sourceFuel := sourceFuel)
+            (codeOverride := codeOverride)
+            (source := .Ok sharedAfter storeAfter)
+            (compiler := compilerAfterExpr) hRelAfter)
+  simpa using hBridge
+
+/--
+Arity-aware singleton non-terminal primitive expression-statement bridge through
+the hidden stack-order prelude interface.
+-/
+theorem sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerHead : List Functions.Stmt}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {values : List Word}
+    (sourceFuel lowerFuel : Nat)
+    (codeOverride : Option AstContract)
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hTerminal : Prim.terminal? yulPrim = none)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hRel : SourceStateRel cfg layout (.Ok shared store) compiler)
+    (hEval :
+      EvmYul.Yul.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, values))
+    (hArgs :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    SourceRegularSeqRunBridgeHidden cfg layout layout prim program ctx
+      sourceFuel.succ.succ
+      [.ExprStmtCall (.Call (.inl yulPrim) args)] codeOverride
+      (.Ok shared store) compiler { stmts := lowerHead } := by
+  have hBridge :=
+    sourceRegularSeqRunBridgeHidden_cons_expr_prim_of_lower_preludeRegular_general_arity
       (cfg := cfg) (layout := layout) (layoutAfter := layout)
       (prim := prim) (program := program) (ctx := ctx)
       (shared := shared) (sharedAfter := sharedAfter)
@@ -63567,6 +63732,148 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_of_preludeR
                   simpa [hLowerStmts] using hBridge)
 
 /--
+Arity-aware names-aware checked wrapper for a successful non-terminal primitive
+expression statement.
+-/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_of_preludeRegular_success_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hScope : ctx.scope = layout)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hTerminal : Prim.terminal? yulPrim = none)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hArgs :
+      ∀ {freshState freshState' pre argExprs seq},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel
+          args codeOverride pre seq)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hEval :
+      ∀ {shared store compiler},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+        ∃ sharedAfter storeAfter values,
+          EvmYul.Yul.evalValues sourceFuel.succ
+              (.Call (.inl yulPrim) args) codeOverride (.Ok shared store) =
+            .ok (.Ok sharedAfter storeAfter, values)) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel.succ.succ.succ
+      (.ExprStmtCall (.Call (.inl yulPrim) args)) codeOverride allowed :=
+  checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_regularSeqRunBridgeHidden_compat
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (layoutAfter := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := sourceFuel.succ.succ)
+    (sourceStmt := .ExprStmtCall (.Call (.inl yulPrim) args))
+    (codeOverride := codeOverride) (allowed := allowed) hScope hCompat
+    (by
+      intro freshState freshState' lowerStmts source compiler hCovers hLower
+        hRel
+      have hLowerFuel :
+          Stmt.toFunctionsListFuel? 2 freshState
+              (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+            some (lowerStmts, freshState') := by
+        simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
+      cases hArgsRaw :
+          Expr.List.lowerBound1? freshState args with
+      | none =>
+          have hNone :
+              Stmt.toFunctionsListFuel? 2 freshState
+                  (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+                none := by
+            simp [Stmt.toFunctionsListFuel?, hTerminal, Expr.lower0?,
+              Expr.lower?, hBasic, hArgsRaw]
+          rw [hNone] at hLowerFuel
+          cases hLowerFuel
+      | some lowered =>
+          rcases lowered with ⟨pre, argExprs, freshAfterArgs⟩
+          cases hSeqRaw :
+              Expr.List.toStackSeq? argExprs
+                (Expressions.Structured.BasicOp.inputs op) with
+          | none =>
+              have hLowerExprNone :
+                  Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+                    none := by
+                simp [Expr.lower0?, Expr.lower?, hBasic, hArgsRaw, hSeqRaw]
+              have hNone :
+                  Stmt.toFunctionsListFuel? 2 freshState
+                      (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+                    none := by
+                simp [Stmt.toFunctionsListFuel?, hTerminal, hLowerExprNone]
+              rw [hNone] at hLowerFuel
+              cases hLowerFuel
+          | some seq =>
+              let lowerExpr : Locals.Expr 0 :=
+                Expr.cast hOutputs (.prim op seq)
+              have hLowerExpr :
+                  Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+                    some (pre, lowerExpr, freshAfterArgs) := by
+                exact
+                  Expr.lower0?_prim_of_lowerBound1?
+                    hBasic hArgsRaw hSeqRaw hOutputs
+              have hLowerFuelExpected :
+                  Stmt.toFunctionsListFuel? 2 freshState
+                      (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+                    some (pre ++ [Functions.Stmt.expr lowerExpr],
+                      freshAfterArgs) := by
+                simp [Stmt.toFunctionsListFuel?, hTerminal, hLowerExpr]
+              have hLowerPair :
+                  (pre ++ [Functions.Stmt.expr lowerExpr],
+                      freshAfterArgs) =
+                    (lowerStmts, freshState') := by
+                  have hSome :
+                      (some (pre ++ [Functions.Stmt.expr lowerExpr],
+                          freshAfterArgs) :
+                        Option (List Functions.Stmt × Fresh.State)) =
+                        some (lowerStmts, freshState') := by
+                    rw [← hLowerFuelExpected]
+                    exact hLowerFuel
+                  exact Option.some.inj hSome
+              have hLowerStmts :
+                  pre ++ [Functions.Stmt.expr lowerExpr] =
+                    lowerStmts := by
+                exact congrArg Prod.fst hLowerPair
+              cases hRel with
+              | @ok shared store compiler hShared hVars =>
+                  rcases hEval (SourceStateRel.ok hShared hVars) with
+                    ⟨sharedAfter, storeAfter, values, hEvalOk⟩
+                  have hBridge :=
+                    sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general_arity
+                      (cfg := cfg) (layout := layout) (prim := prim)
+                      (program := program) (ctx := ctx) (shared := shared)
+                      (sharedAfter := sharedAfter) (store := store)
+                      (storeAfter := storeAfter) (compiler := compiler)
+                      (lowerHead := pre ++ [Functions.Stmt.expr lowerExpr])
+                      (yulPrim := yulPrim)
+                      (op := op) (args := args)
+                      (freshState := freshState)
+                      (freshState' := freshAfterArgs) (pre := pre)
+                      (argExprs := argExprs) (seq := seq)
+                      (values := values) sourceFuel 1 codeOverride
+                      hLowerFuelExpected hTerminal hBasic hArgsRaw hSeqRaw
+                      hOutputs (SourceStateRel.ok hShared hVars) hEvalOk
+                      (hArgs hCovers hArgsRaw hSeqRaw) hPrim
+                  simpa [hLowerStmts] using hBridge)
+
+/--
 Names-aware checked wrapper for the argument-terminal branch of a
 non-terminal primitive expression statement.
 
@@ -63890,6 +64197,290 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_actual_or_a
                           hArgEval hPrimCall
                       have hBridge :=
                         sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general
+                          (cfg := cfg) (layout := layout) (prim := prim)
+                          (program := program) (ctx := ctx)
+                          (shared := shared) (store := store)
+                          (sharedAfter := sharedAfter)
+                          (storeAfter := storeAfter)
+                          (compiler := compiler)
+                          (lowerHead := pre ++ [Functions.Stmt.expr lowerExpr])
+                          (yulPrim := yulPrim) (op := op) (args := args)
+                          (freshState := freshState)
+                          (freshState' := freshAfterArgs) (pre := pre)
+                          (argExprs := argExprs) (seq := seq)
+                          (values := values) sourceFuel 1 codeOverride
+                          hLowerFuelExpected hTerminal hBasic hArgsRaw
+                          hSeqRaw hOutputs hRelInitial hEvalOk
+                          hArgsRegular hPrim
+                      rcases hBridge with
+                        ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel,
+                          hSourceSeq, hCompilerOpen, hSubset, hRelAfter⟩
+                      have hBlock :
+                          EvmYul.Yul.exec sourceFuel.succ.succ.succ
+                              (.Block
+                                [.ExprStmtCall
+                                  (.Call (.inl yulPrim) args)])
+                              codeOverride (.Ok shared store) =
+                            .ok (sourceAfter.restrictStoreTo store) := by
+                        simp [EvmYul.Yul.exec, hSourceSeq,
+                          EvmYul.Yul.State.store]
+                      rw [hBlock] at hSource
+                      subst sourceResult
+                      refine
+                        ⟨Functions.Source.Outcome.regular
+                            (compilerAfter.restrictTo layout),
+                          targetFuel, ?_, ?_⟩
+                      · unfold Functions.Source.Block.runScoped
+                        rw [← hLowerStmts]
+                        rw [hCompilerOpen]
+                        simp [Functions.Source.Outcome.regular,
+                          Locals.Source.Outcome.regular, hScope]
+                      · cases hRelAfter with
+                        | @ok sharedAfter storeAfter compilerAfter
+                            hSharedAfter hVarsAfter =>
+                            have hOutcomeLayoutEq : outcomeLayout = layout := by
+                              simpa [SourceResultOutcomeLayoutCompatible,
+                                EvmYul.Yul.State.restrictStoreTo]
+                                using hCompat hAllow
+                            subst outcomeLayout
+                            exact
+                              SourceResultOutcomeRel.ok
+                                (SourceOkOutcomeRel.regular
+                                  (sourceStateRel_restrictStoreTo_of_domain
+                                    (SourceStateRel.ok hSharedAfter hVarsAfter)
+                                    hDomain hSubset))
+              | inr hErr =>
+                  rcases hErr with ⟨err, hEvalArgs, hResultEq, hRelErr⟩
+                  rcases
+                      hArgsTerminal hCovers hArgsRaw hSeqRaw
+                        (SourceStateExactRel.ok hShared hVars hDomain)
+                        hEvalArgs hRelErr with
+                    ⟨sourceOutcome, ctxAfter, preFuel, hPreRun,
+                      hOutcomeRel⟩
+                  have hMode :
+                      sourceOutcome.mode ≠ .regular :=
+                    SourceResultOutcomeRel.mode_ne_regular_of_error
+                      hOutcomeRel
+                  rcases
+                      Functions.Source.Block.runOpen_append_nonregular_exists
+                        prim program pre [Functions.Stmt.expr lowerExpr] ctx
+                        compiler sourceOutcome ctxAfter ⟨preFuel, hPreRun⟩
+                        hMode with
+                    ⟨targetFuel, hTargetOpen⟩
+                  have hOutcomeRelSource :
+                      SourceResultOutcomeRel cfg outcomeLayout terminalRel
+                        revertRel sourceResult sourceOutcome := by
+                    rw [hResultEq]
+                    exact hOutcomeRel
+                  refine ⟨sourceOutcome, targetFuel, ?_, hOutcomeRelSource⟩
+                  cases hOutcomeRel with
+                  | yulHalt hTerminalRel =>
+                      rw [← hLowerStmts]
+                      simp [Functions.Source.Block.runScoped, hTargetOpen,
+                        Functions.Source.Outcome.halt,
+                        Locals.Source.Outcome.halt]
+                  | revert hRevert =>
+                      rw [← hLowerStmts]
+                      simp [Functions.Source.Block.runScoped, hTargetOpen,
+                        Functions.Source.Outcome.halt,
+                        Locals.Source.Outcome.halt]
+
+/--
+Arity-aware names-aware checked wrapper for non-terminal zero-output primitive
+expression statements.
+-/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_actual_or_arg_terminal_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hScope : ctx.scope = layout)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hAllowedRel :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSafePrim : Safe.primitive yulPrim)
+    (hTerminal : Prim.terminal? yulPrim = none)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 0)
+    (hArgs :
+      ∀ {freshState freshState' pre argExprs seq},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel
+          args codeOverride pre seq)
+    (hArgsTerminal :
+      ∀ {freshState freshState' pre argExprs seq},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        SourceArgListPreludeTerminalAt cfg layout outcomeLayout terminalRel
+          revertRel prim program ctx sourceFuel args codeOverride pre)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel.succ.succ.succ
+      (.ExprStmtCall (.Call (.inl yulPrim) args)) codeOverride allowed := by
+  intro freshState freshState' lowerStmts hCovers hLower
+  have hLowerFuel :
+      Stmt.toFunctionsListFuel? 2 freshState
+          (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+        some (lowerStmts, freshState') := by
+    simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
+  cases hArgsRaw :
+      Expr.List.lowerBound1? freshState args with
+  | none =>
+      have hNone :
+          Stmt.toFunctionsListFuel? 2 freshState
+              (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+            none := by
+        simp [Stmt.toFunctionsListFuel?, hTerminal, Expr.lower0?,
+          Expr.lower?, hBasic, hArgsRaw]
+      rw [hNone] at hLowerFuel
+      cases hLowerFuel
+  | some lowered =>
+      rcases lowered with ⟨pre, argExprs, freshAfterArgs⟩
+      cases hSeqRaw :
+          Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) with
+      | none =>
+          have hLowerExprNone :
+              Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+                none := by
+            simp [Expr.lower0?, Expr.lower?, hBasic, hArgsRaw, hSeqRaw]
+          have hNone :
+              Stmt.toFunctionsListFuel? 2 freshState
+                  (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+                none := by
+            simp [Stmt.toFunctionsListFuel?, hTerminal, hLowerExprNone]
+          rw [hNone] at hLowerFuel
+          cases hLowerFuel
+      | some seq =>
+          let lowerExpr : Locals.Expr 0 :=
+            Expr.cast hOutputs (.prim op seq)
+          have hLowerExpr :
+              Expr.lower0? freshState (.Call (.inl yulPrim) args) =
+                some (pre, lowerExpr, freshAfterArgs) := by
+            exact
+              Expr.lower0?_prim_of_lowerBound1?
+                hBasic hArgsRaw hSeqRaw hOutputs
+          have hLowerFuelExpected :
+              Stmt.toFunctionsListFuel? 2 freshState
+                  (.ExprStmtCall (.Call (.inl yulPrim) args)) =
+                some (pre ++ [Functions.Stmt.expr lowerExpr],
+                  freshAfterArgs) := by
+            simp [Stmt.toFunctionsListFuel?, hTerminal, hLowerExpr]
+          have hLowerPair :
+              (pre ++ [Functions.Stmt.expr lowerExpr], freshAfterArgs) =
+                (lowerStmts, freshState') := by
+            have hSome :
+                (some (pre ++ [Functions.Stmt.expr lowerExpr],
+                    freshAfterArgs) :
+                  Option (List Functions.Stmt × Fresh.State)) =
+                  some (lowerStmts, freshState') := by
+              rw [← hLowerFuelExpected]
+              exact hLowerFuel
+            exact Option.some.inj hSome
+          have hLowerStmts :
+              pre ++ [Functions.Stmt.expr lowerExpr] = lowerStmts := by
+            exact congrArg Prod.fst hLowerPair
+          refine ⟨hScope, ?_⟩
+          intro source compiler sourceResult hInitial hAllow hSource
+          cases hInitial with
+          | @ok shared store compiler hShared hVars hDomain =>
+              have hRelInitial :
+                  SourceStateRel cfg layout (.Ok shared store) compiler :=
+                SourceStateRel.ok hShared hVars
+              have hRelatable : SourceResultRelatable sourceResult :=
+                hAllowedRel hAllow
+              cases
+                  exec_block_expr_prim_call_evalArgs_split_of_relatable
+                    (sourceFuel := sourceFuel) (shared := shared)
+                    (store := store) (yulPrim := yulPrim) (args := args)
+                    (codeOverride := codeOverride) hSource hRelatable with
+              | inl hOk =>
+                  rcases hOk with ⟨sourceAfterArgs, argValues, hArgEval⟩
+                  cases hPrimCall :
+                      EvmYul.Yul.primCall sourceFuel sourceAfterArgs yulPrim
+                        argValues with
+                  | error err =>
+                      have hResultEq :
+                          sourceResult = .error err :=
+                        exec_block_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := sourceFuel)
+                          (source := (.Ok shared store))
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := yulPrim) (args := args)
+                          (codeOverride := codeOverride)
+                          (argValues := argValues) (err := err)
+                          (sourceResult := sourceResult)
+                          hArgEval hPrimCall hSource
+                      have hErrRel : SourceResultRelatable (.error err) := by
+                        simpa [hResultEq] using hRelatable
+                      exact
+                        False.elim
+                          (safeBasicZeroOutputPrimCall_error_not_relatable
+                            (sourceFuel := sourceFuel) (primOp := yulPrim)
+                            (op := op) (source := sourceAfterArgs)
+                            (args := argValues) (err := err)
+                            hSafePrim hBasic hOutputs hPrimCall hErrRel)
+                  | ok primResult =>
+                      rcases primResult with ⟨sourceAfterPrim, values⟩
+                      have hArgsRegular := hArgs hCovers hArgsRaw hSeqRaw
+                      rcases hArgsRegular.2 hRelInitial hArgEval with
+                        ⟨_compilerAfterPre, compilerAfterArgs,
+                          _ctxAfterPre, _preFuel, _hPreRun, _hSeqRun,
+                          hRelArgs⟩
+                      have hArgArity :
+                          args.length =
+                            Expressions.Structured.BasicOp.inputs op := by
+                        have hLowerLen :=
+                          Expr.List.lowerBound1?_length_lowerArgs_eq hArgsRaw
+                        have hSeqLen := exprList_toStackSeq?_length_eq hSeqRaw
+                        exact hLowerLen.symm.trans hSeqLen
+                      have hRuntimeArity :
+                          argValues.length =
+                            Expressions.Structured.BasicOp.inputs op := by
+                        have hLen := Imported.evalArgs_length_of_ok hArgEval
+                        simpa [List.length_reverse, hArgArity] using hLen
+                      rcases hPrim hRelArgs hRuntimeArity hPrimCall with
+                        ⟨_targetSharedAfter, _hPrimEval, hRelAfterPrim⟩
+                      cases hRelAfterPrim with
+                      | @ok sharedAfter storeAfter _compilerAfterExpr
+                          _hSharedAfter _hVarsAfter =>
+                      have hEvalOk :
+                          EvmYul.Yul.evalValues sourceFuel.succ
+                              (.Call (.inl yulPrim) args) codeOverride
+                              (.Ok shared store) =
+                            .ok (.Ok sharedAfter storeAfter, values) :=
+                        evalValues_prim_call_ok_of_evalArgs_ok_primCall_ok
+                          (sourceFuel := sourceFuel)
+                          (source := (.Ok shared store))
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (sourceAfterPrim := .Ok sharedAfter storeAfter)
+                          (yulPrim := yulPrim) (args := args)
+                          (codeOverride := codeOverride)
+                          (argValues := argValues) (values := values)
+                          hArgEval hPrimCall
+                      have hBridge :=
+                        sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general_arity
                           (cfg := cfg) (layout := layout) (prim := prim)
                           (program := program) (ctx := ctx)
                           (shared := shared) (store := store)
