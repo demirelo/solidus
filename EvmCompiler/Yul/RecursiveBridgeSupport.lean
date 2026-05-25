@@ -115252,6 +115252,161 @@ hidden-scope body contract from the accepted recursive bridge, so successor
 assembly can consume source-scoped `if` statements without separate generated
 argument or body callbacks.
 -/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAcceptedCondition_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program}
+    {bound : Nat} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {cond : AstExpr} {body : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel.succ ≤ bound)
+    (hSafeIf : Safe.stmt (.If cond body))
+    (hScopedIf :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.If cond body))
+    (hStmtOkIf :
+      UserCallArity.StmtOk yulProgram.contract (.If cond body))
+    (hSourceScopedIf :
+      SourceLexical.StmtScoped layout (.If cond body))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScope : ctx.scope = layout)
+    (hPrimSound :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        fuel < sourceFuel.succ →
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hResultOk :
+      ExprEvalResultOkAt cfg layout sourceFuel cond
+        (some yulProgram.contract)) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel.succ.succ.succ (.If cond body)
+      (some yulProgram.contract) allowed := by
+  have hSafeCond : Safe.expr cond := by
+    simpa [Safe.stmt] using hSafeIf.1
+  have hSafeBody : Safe.stmts body := by
+    simpa [Safe.stmt] using hSafeIf.2
+  have hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body := by
+    simpa [ControlFlow.ScopedStmt] using hScopedIf
+  have hCondOk : UserCallArity.ExprOk yulProgram.contract cond := by
+    simpa [UserCallArity.StmtOk] using hStmtOkIf.1
+  have hBodyOk : UserCallArity.StmtsOk yulProgram.contract body := by
+    simpa [UserCallArity.StmtOk] using hStmtOkIf.2
+  have hCondScoped : SourceExprScoped layout cond :=
+    SourceLexical.if_cond_scoped hSourceScopedIf
+  have hBodyScoped : SourceLexical.StmtsScoped layout body :=
+    SourceLexical.if_body_scoped hSourceScopedIf
+  have hArgs :
+      SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
+        yulProgram.contract (reserved ++ layout) sourceFuel.succ :=
+    hRecursive.args (by omega)
+  dsimp [CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact]
+  intro freshState freshState' lowerStmts hCovers hLower
+  exact
+    (checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_condition_body
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (cond := cond)
+      (body := body) (codeOverride := some yulProgram.contract)
+      (allowed := allowed) hAllowed hCompat hScope
+      (by
+        intro freshState freshState' preCond lowerCond hCovers hCondLower
+        have hTerminal :
+            ∀ {exprFuel : Nat} {ctxHead : Functions.Source.Ctx},
+              exprFuel < sourceFuel.succ →
+              SourceExprPreludeTerminalAt cfg layout outcomeLayout
+                terminalRel revertRel prim program ctxHead exprFuel cond
+                (some yulProgram.contract) preCond :=
+          sourceExprPreludeTerminalAt_of_lower1?_program_accepted_recursive_of_argRegularAllCheckedAt
+            (cfg := cfg) (reserved := reserved) (layout := layout)
+            (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim)
+            (yulProgram := yulProgram) (program := program)
+            (context := context) (bound := bound)
+            (sourceFuel := sourceFuel.succ)
+            (freshState := freshState) (freshState' := freshState')
+            (expr := cond) (pre := preCond) (lowerExpr := lowerCond)
+            (ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.of_unreserved
+              hRecursive) (by omega) hArgs hCovers hSafeCond hCondScoped
+            hCondOk hCondLower
+        exact
+          fun {source compiler err} hInitial hEval hRelatable =>
+            hTerminal (exprFuel := sourceFuel) (ctxHead := ctx)
+              (Nat.lt_succ_self sourceFuel) hInitial hEval hRelatable)
+      (by
+        intro freshState freshState' preCond lowerCond hCovers hCondLower
+        cases sourceFuel with
+        | zero =>
+            exact exprEvalPreludeSound_zero
+        | succ condFuel =>
+            exact
+              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_arity
+                (cfg := cfg) (terminalRel := terminalRel)
+                (revertRel := revertRel) (prim := prim)
+                (yulProgram := yulProgram) (program := program)
+                (context := context) (bound := bound) (ctx := ctx)
+                (coverLayout := reserved ++ layout) (layout := layout)
+                (sourceFuel := condFuel) (expr := cond)
+                (freshState := freshState) (freshState' := freshState')
+                (pre := preCond) (lowerExpr := lowerCond)
+                hRecursive (by omega)
+                (by intro name hMem; simp [hMem])
+                (SourceArgListPreludeRegularAllCheckedAt.mono
+                  (by omega) hArgs)
+                (by
+                  intro yulPrim op hSafePrim hBasic hOutputs
+                  exact hPrimSound (by omega) hSafePrim hBasic hOutputs)
+                hCovers hSafeCond hCondScoped hCondOk hResultOk hCondLower)
+      hResultOk
+      (by
+        intro shared store sharedAfter storeAfter value hDomain hEval
+        exact
+          eval_ok_domain_exact_of_safe_primitiveFamilies
+            hSafeCond hDomain hEval)
+      (by
+        intro compileFuel ctxBody allowedBody hAllowedBody hCompatBody
+          hScopeContains
+        exact
+          hRecursive.hiddenBlock
+            (reserved := reserved) (layout := layout)
+            (outcomeLayout := outcomeLayout) (ctx := ctxBody)
+            (sourceFuel := sourceFuel) (compileFuel := compileFuel)
+            (sourceStmts := body) (allowed := allowedBody)
+            (canBreak := canBreak) (canContinue := canContinue)
+            (canLeave := canLeave)
+            hSafeBody hScopedBody hBodyOk hBodyScoped hAllowedBody
+            hCompatBody (by omega) hScopeContains)
+      ) hCovers hLower
+
+
+/--
+Source-facing checked `if` adapter with the recursive expression dispatcher
+installed.
+
+This is the accepted-recursive sibling of the generic generated-prelude `if`
+frontier.  It derives condition terminal/regular prelude facts and the
+hidden-scope body contract from the accepted recursive bridge, so successor
+assembly can consume source-scoped `if` statements without separate generated
+argument or body callbacks.
+-/
 theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAcceptedCondition
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
@@ -115404,6 +115559,125 @@ The source theorem is stated at the surrounding singleton-block fuel.  Fuels
 `condFuel + 3` is exactly the productive shape consumed by the checked
 accepted-condition wrapper.
 -/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAcceptedCondition_frontier_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program}
+    {bound : Nat} {ctx : Functions.Source.Ctx}
+    {cond : AstExpr} {body : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hSafeIf : Safe.stmt (.If cond body))
+    (hScopedIf :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.If cond body))
+    (hStmtOkIf :
+      UserCallArity.StmtOk yulProgram.contract (.If cond body))
+    (hSourceScopedIf :
+      SourceLexical.StmtScoped layout (.If cond body))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScope : ctx.scope = layout)
+    (hPrimSound :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        fuel < bound.succ →
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hResultOk :
+      ∀ {fuel : Nat} {expr : AstExpr},
+        fuel < bound.succ →
+        Safe.expr expr →
+        SourceExprScoped layout expr →
+        UserCallArity.ExprOk yulProgram.contract expr →
+        ExprEvalResultOkAt cfg layout fuel expr
+          (some yulProgram.contract)) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      bound.succ (.If cond body) (some yulProgram.contract) allowed := by
+  cases bound with
+  | zero =>
+      exact
+        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := 1) (sourceStmt := .If cond body)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hScope
+          (by
+            intro source compiler hInitial
+            simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq])
+  | succ bound' =>
+      cases bound' with
+      | zero =>
+          exact
+            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := 2) (sourceStmt := .If cond body)
+              (codeOverride := some yulProgram.contract)
+              (allowed := allowed) hAllowed hScope
+              (by
+                intro source compiler hInitial
+                simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq])
+      | succ condFuel =>
+          have hSafeCond : Safe.expr cond := by
+            simpa [Safe.stmt] using hSafeIf.1
+          have hCondScoped : SourceExprScoped layout cond :=
+            SourceLexical.if_cond_scoped hSourceScopedIf
+          have hCondOk : UserCallArity.ExprOk yulProgram.contract cond := by
+            simpa [UserCallArity.StmtOk] using hStmtOkIf.1
+          have hIf :
+              CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved
+                layout outcomeLayout terminalRel revertRel prim program ctx
+                condFuel.succ.succ.succ (.If cond body)
+                (some yulProgram.contract) allowed :=
+            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAcceptedCondition_arity
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (yulProgram := yulProgram) (program := program)
+              (context := context) (bound := condFuel.succ.succ)
+              (ctx := ctx) (sourceFuel := condFuel) (cond := cond)
+              (body := body) (allowed := allowed) (canBreak := canBreak)
+              (canContinue := canContinue) (canLeave := canLeave)
+              hRecursive (by omega) hSafeIf hScopedIf hStmtOkIf
+              hSourceScopedIf hAllowed hCompat hScope
+              (by
+                intro fuel yulPrim op hFuel hSafePrim hBasic hOutputs
+                exact hPrimSound (by omega) hSafePrim hBasic hOutputs)
+              (hResultOk (by omega) hSafeCond hCondScoped hCondOk)
+          change
+            CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved
+              layout outcomeLayout terminalRel revertRel prim program ctx
+              condFuel.succ.succ.succ (.If cond body)
+              (some yulProgram.contract) allowed
+          exact hIf
+
+
+/--
+Exact-frontier `if` statement adapter.
+
+The source theorem is stated at the surrounding singleton-block fuel.  Fuels
+`1` and `2` run out before the imported `if` can evaluate its condition; fuel
+`condFuel + 3` is exactly the productive shape consumed by the checked
+accepted-condition wrapper.
+-/
 theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAcceptedCondition_frontier
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
@@ -115513,6 +115787,201 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAccepted
               condFuel.succ.succ.succ (.If cond body)
               (some yulProgram.contract) allowed
           exact hIf
+
+/--
+Source-facing checked `switch` adapter with the recursive expression
+dispatcher installed.
+
+Selected case/default bodies are recovered from the source switch selection
+evidence exposed by the generic switch frontier, then discharged by the
+accepted recursive hidden-block bridge.
+-/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_switch_of_programAcceptedScrutinee_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program}
+    {bound : Nat} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {scrutinee : AstExpr}
+    {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel.succ ≤ bound)
+    (hSafeSwitch : Safe.stmt (.Switch scrutinee cases defaultBody))
+    (hScopedSwitch :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave
+        (.Switch scrutinee cases defaultBody))
+    (hStmtOkSwitch :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Switch scrutinee cases defaultBody))
+    (hSourceScopedSwitch :
+      SourceLexical.StmtScoped layout (.Switch scrutinee cases defaultBody))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScope : ctx.scope = layout)
+    (hPrimSound :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        fuel < sourceFuel.succ →
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hResultOk :
+      ExprEvalResultOkAt cfg layout sourceFuel scrutinee
+        (some yulProgram.contract)) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel.succ.succ.succ (.Switch scrutinee cases defaultBody)
+      (some yulProgram.contract) allowed := by
+  have hSafeScrutinee : Safe.expr scrutinee := by
+    simpa [Safe.stmt] using hSafeSwitch.1
+  have hSafeCases : Safe.casesSafe cases := by
+    simpa [Safe.stmt] using hSafeSwitch.2.1
+  have hSafeDefault : Safe.stmts defaultBody := by
+    simpa [Safe.stmt] using hSafeSwitch.2.2
+  have hScopedCases :
+      ControlFlow.ScopedCases canBreak canContinue canLeave cases := by
+    simpa [ControlFlow.ScopedStmt] using hScopedSwitch.1
+  have hScopedDefault :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave defaultBody := by
+    simpa [ControlFlow.ScopedStmt] using hScopedSwitch.2
+  have hScrutineeOk : UserCallArity.ExprOk yulProgram.contract scrutinee := by
+    simpa [UserCallArity.StmtOk] using hStmtOkSwitch.1
+  have hCasesOk : UserCallArity.CasesOk yulProgram.contract cases := by
+    simpa [UserCallArity.StmtOk] using hStmtOkSwitch.2.1
+  have hDefaultOk :
+      UserCallArity.StmtsOk yulProgram.contract defaultBody := by
+    simpa [UserCallArity.StmtOk] using hStmtOkSwitch.2.2
+  have hScrutineeScoped : SourceExprScoped layout scrutinee :=
+    SourceLexical.switch_scrutinee_scoped hSourceScopedSwitch
+  have hArgs :
+      SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
+        yulProgram.contract (reserved ++ layout) sourceFuel.succ :=
+    hRecursive.args (by omega)
+  dsimp [CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact]
+  intro freshState freshState' lowerStmts hCovers hLower
+  exact
+    (checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_switch_of_scrutinee_body
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (scrutinee := scrutinee)
+      (cases := cases) (defaultBody := defaultBody)
+      (codeOverride := some yulProgram.contract) (allowed := allowed)
+      hAllowed hCompat hScope
+      (by
+        intro freshState freshState' preScrutinee lowerScrutinee hCovers
+          hScrutineeLower
+        have hTerminal :
+            ∀ {exprFuel : Nat} {ctxHead : Functions.Source.Ctx},
+              exprFuel < sourceFuel.succ →
+              SourceExprPreludeTerminalAt cfg layout outcomeLayout
+                terminalRel revertRel prim program ctxHead exprFuel
+                scrutinee (some yulProgram.contract) preScrutinee :=
+          sourceExprPreludeTerminalAt_of_lower1?_program_accepted_recursive_of_argRegularAllCheckedAt
+            (cfg := cfg) (reserved := reserved) (layout := layout)
+            (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim)
+            (yulProgram := yulProgram) (program := program)
+            (context := context) (bound := bound)
+            (sourceFuel := sourceFuel.succ)
+            (freshState := freshState) (freshState' := freshState')
+            (expr := scrutinee) (pre := preScrutinee)
+            (lowerExpr := lowerScrutinee)
+            (ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.of_unreserved
+              hRecursive) (by omega) hArgs hCovers hSafeScrutinee
+            hScrutineeScoped hScrutineeOk hScrutineeLower
+        exact
+          fun {source compiler err} hInitial hEval hRelatable =>
+            hTerminal (exprFuel := sourceFuel) (ctxHead := ctx)
+              (Nat.lt_succ_self sourceFuel) hInitial hEval hRelatable)
+      (by
+        intro freshState freshState' preScrutinee lowerScrutinee hCovers
+          hScrutineeLower
+        cases sourceFuel with
+        | zero =>
+            exact exprEvalPreludeSound_zero
+        | succ scrutineeFuel =>
+            exact
+              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_arity
+                (cfg := cfg) (terminalRel := terminalRel)
+                (revertRel := revertRel) (prim := prim)
+                (yulProgram := yulProgram) (program := program)
+                (context := context) (bound := bound) (ctx := ctx)
+                (coverLayout := reserved ++ layout) (layout := layout)
+                (sourceFuel := scrutineeFuel) (expr := scrutinee)
+                (freshState := freshState) (freshState' := freshState')
+                (pre := preScrutinee) (lowerExpr := lowerScrutinee)
+                hRecursive (by omega)
+                (by intro name hMem; simp [hMem])
+                (SourceArgListPreludeRegularAllCheckedAt.mono
+                  (by omega) hArgs)
+                (by
+                  intro yulPrim op hSafePrim hBasic hOutputs
+                  exact hPrimSound (by omega) hSafePrim hBasic hOutputs)
+                hCovers hSafeScrutinee hScrutineeScoped hScrutineeOk
+                hResultOk hScrutineeLower)
+      hResultOk
+      (by
+        intro shared store sharedAfter storeAfter value hDomain hEval
+        exact
+          eval_ok_domain_exact_of_safe_primitiveFamilies
+            hSafeScrutinee hDomain hEval)
+      (by
+        intro compileFuel ctxBody selectedBody allowedBody hSelected
+          hAllowedBody hCompatBody hScopeContains
+        rcases hSelected with ⟨value, hSelected⟩
+        have hSafeSelected : Safe.stmts selectedBody := by
+          rw [← hSelected]
+          exact
+            safe_cases_selectSwitchCase
+              (value := value) hSafeCases hSafeDefault
+        have hScopedSelected :
+            ControlFlow.ScopedStmts canBreak canContinue canLeave
+              selectedBody := by
+          rw [← hSelected]
+          exact
+            ControlFlow.scopedCases_selectSwitchCase
+              (value := value) hScopedCases hScopedDefault
+        have hOkSelected :
+            UserCallArity.StmtsOk yulProgram.contract selectedBody := by
+          rw [← hSelected]
+          exact
+            UserCallArity.casesOk_selectSwitchCase
+              (value := value) hCasesOk hDefaultOk
+        have hSourceScopedSelected :
+            SourceLexical.StmtsScoped layout selectedBody := by
+          rw [← hSelected]
+          exact
+            SourceLexical.switch_selected_scoped
+              (value := value) hSourceScopedSwitch
+        intro freshState freshState' lowerBlock hCovers hLower
+        exact
+          (hRecursive.hiddenBlock
+            (reserved := reserved) (layout := layout)
+            (outcomeLayout := outcomeLayout) (ctx := ctxBody)
+            (sourceFuel := sourceFuel) (compileFuel := compileFuel)
+            (sourceStmts := selectedBody) (allowed := allowedBody)
+            (canBreak := canBreak) (canContinue := canContinue)
+            (canLeave := canLeave)
+            hSafeSelected hScopedSelected hOkSelected
+            hSourceScopedSelected hAllowedBody hCompatBody
+            (by omega) hScopeContains)
+            hCovers hLower)
+      ) hCovers hLower
+
 
 /--
 Source-facing checked `switch` adapter with the recursive expression
@@ -115707,6 +116176,136 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_switch_of_programAcce
             (by omega) hScopeContains)
             hCovers hLower)
       ) hCovers hLower
+
+/--
+Exact-frontier `switch` statement adapter.
+
+As for `if`, fuels `1` and `2` cannot reach the scrutinee evaluation through
+the surrounding singleton source block.  At fuel `scrutineeFuel + 3`, the
+accepted scrutinee/selected-body switch wrapper supplies the productive case.
+-/
+theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_switch_of_programAcceptedScrutinee_frontier_arity
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program}
+    {bound : Nat} {ctx : Functions.Source.Ctx}
+    {scrutinee : AstExpr}
+    {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hSafeSwitch : Safe.stmt (.Switch scrutinee cases defaultBody))
+    (hScopedSwitch :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave
+        (.Switch scrutinee cases defaultBody))
+    (hStmtOkSwitch :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Switch scrutinee cases defaultBody))
+    (hSourceScopedSwitch :
+      SourceLexical.StmtScoped layout (.Switch scrutinee cases defaultBody))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCompat :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult)
+    (hScope : ctx.scope = layout)
+    (hPrimSound :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        fuel < bound.succ →
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hResultOk :
+      ∀ {fuel : Nat} {expr : AstExpr},
+        fuel < bound.succ →
+        Safe.expr expr →
+        SourceExprScoped layout expr →
+        UserCallArity.ExprOk yulProgram.contract expr →
+        ExprEvalResultOkAt cfg layout fuel expr
+          (some yulProgram.contract)) :
+    CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      bound.succ (.Switch scrutinee cases defaultBody)
+      (some yulProgram.contract) allowed := by
+  cases bound with
+  | zero =>
+      exact
+        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := 1)
+          (sourceStmt := .Switch scrutinee cases defaultBody)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hScope
+          (by
+            intro source compiler hInitial
+            simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq])
+  | succ bound' =>
+      cases bound' with
+      | zero =>
+          exact
+            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_exec_outOfFuel
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := 2)
+              (sourceStmt := .Switch scrutinee cases defaultBody)
+              (codeOverride := some yulProgram.contract)
+              (allowed := allowed) hAllowed hScope
+              (by
+                intro source compiler hInitial
+                simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq])
+      | succ scrutineeFuel =>
+          have hSafeScrutinee : Safe.expr scrutinee := by
+            simpa [Safe.stmt] using hSafeSwitch.1
+          have hScrutineeScoped : SourceExprScoped layout scrutinee :=
+            SourceLexical.switch_scrutinee_scoped hSourceScopedSwitch
+          have hScrutineeOk :
+              UserCallArity.ExprOk yulProgram.contract scrutinee := by
+            simpa [UserCallArity.StmtOk] using hStmtOkSwitch.1
+          have hSwitch :
+              CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved
+                layout outcomeLayout terminalRel revertRel prim program ctx
+                scrutineeFuel.succ.succ.succ
+                (.Switch scrutinee cases defaultBody)
+                (some yulProgram.contract) allowed :=
+            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_switch_of_programAcceptedScrutinee_arity
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (yulProgram := yulProgram) (program := program)
+              (context := context) (bound := scrutineeFuel.succ.succ)
+              (ctx := ctx) (sourceFuel := scrutineeFuel)
+              (scrutinee := scrutinee) (cases := cases)
+              (defaultBody := defaultBody) (allowed := allowed)
+              (canBreak := canBreak) (canContinue := canContinue)
+              (canLeave := canLeave)
+              hRecursive (by omega) hSafeSwitch hScopedSwitch
+              hStmtOkSwitch hSourceScopedSwitch hAllowed hCompat hScope
+              (by
+                intro fuel yulPrim op hFuel hSafePrim hBasic hOutputs
+                exact hPrimSound (by omega) hSafePrim hBasic hOutputs)
+              (hResultOk (by omega) hSafeScrutinee hScrutineeScoped
+                hScrutineeOk)
+          change
+            CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved
+              layout outcomeLayout terminalRel revertRel prim program ctx
+              scrutineeFuel.succ.succ.succ
+              (.Switch scrutinee cases defaultBody)
+              (some yulProgram.contract) allowed
+          exact hSwitch
+
 
 /--
 Exact-frontier `switch` statement adapter.
