@@ -25,6 +25,9 @@ Last updated: 2026-05-24 23:30 PDT.
    - [x] Thread the same split into the recursive bridge boundary with
      `RecursiveBridgeFullSourceAccepted`, `RecursiveBridgeFeatureCoverage`,
      and checked conversions to/from old `RecursiveBridgeSourceAccepted`.
+   - [x] Add preferred gas-aware top wrappers that take full source
+     acceptedness plus explicit feature coverage instead of the old bundled
+     source-fragment acceptedness predicate.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.
