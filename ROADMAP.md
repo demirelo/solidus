@@ -144,7 +144,7 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Migrate the recursive one-result expression dispatcher to an
        arity-aware primitive stack premise, with the old dispatcher retained
        as a checked strict-compatibility wrapper.
-   - [ ] Provide canonical terminal/revert contracts for
+   - [x] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
        `Locals.Source.PrimitiveSemantics.structured`.
