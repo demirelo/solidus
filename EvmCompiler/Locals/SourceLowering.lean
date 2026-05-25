@@ -609,6 +609,57 @@ structure PrimitiveSound (prim : Source.PrimitiveSemantics) : Prop where
           Structured.Terminal.step kind evm = .ok evm' ∧
             evm'.toSharedState = shared'
 
+namespace PrimitiveSemantics
+
+theorem structured_terminal_stop_step
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm evm' : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .stop shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack)
+    (hStep : Structured.Terminal.step .stop evm = .ok evm') :
+    evm'.toSharedState = shared' := by
+  simp [Source.PrimitiveSemantics.structured, Structured.Terminal.step,
+    Assembly.Target.stepInstr, Assembly.HaltKind.toPrimOp,
+    Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+    Assembly.PrimOp.toEVM] at hEval hStep ⊢
+  cases hStep
+  cases hEval
+  simp [hShared]
+
+theorem structured_terminal_stop_step_exists
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.terminal .stop shared values =
+        .ok shared')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.Terminal.step .stop evm = .ok evm' ∧
+        evm'.toSharedState = shared' := by
+  let evm' : EVMState :=
+    { evm with
+      toMachineState := evm.toMachineState.setReturnData .empty }
+  refine ⟨evm', ?_, ?_⟩
+  · simp [Structured.Terminal.step, Assembly.Target.stepInstr,
+      Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
+      Assembly.PrimOp.continuingStep?, Assembly.PrimOp.toEVM, evm']
+    rfl
+  · exact
+      structured_terminal_stop_step
+        (baseStack := baseStack) hEval hShared hStack (by
+          simp [Structured.Terminal.step, Assembly.Target.stepInstr,
+            Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
+            Assembly.PrimOp.continuingStep?, Assembly.PrimOp.toEVM, evm']
+          rfl)
+
+end PrimitiveSemantics
+
 mutual
   def Expr.Accessible {results : Nat} (layout : List Name) (offset : Nat)
       (expr : Expr results) : Prop :=

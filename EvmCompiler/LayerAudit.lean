@@ -518,6 +518,12 @@ abbrev localsSourceLoweringPrimitiveSoundTerminalStep :=
 abbrev localsSourceLoweringPrimitiveSoundTerminalStepExists :=
   @Locals.SourceLowering.PrimitiveSound.terminal_step_exists
 
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalStopStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_stop_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredTerminalStopStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_terminal_stop_step_exists
+
 abbrev localsSourceLoweringExprAccessible :=
   @Locals.SourceLowering.Expr.Accessible
 

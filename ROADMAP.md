@@ -67,6 +67,11 @@ Last updated: 2026-05-25 04:05 PDT.
      constructor for all accepted primitives.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
+     - [x] Prove the canonical `STOP` terminal step/existence lemmas for
+       `Locals.Source.PrimitiveSemantics.structured`.
+     - [ ] Prove the canonical `RETURN` terminal step/existence lemmas.
+     - [ ] Prove the canonical `REVERT` terminal step/existence lemmas.
+     - [ ] Prove the canonical `SELFDESTRUCT` terminal step/existence lemmas.
    - [ ] Derive `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` from
      acceptedness/resource facts, or replace it with a smaller fundamental
      resource premise whose scope is exactly documented and exported.
