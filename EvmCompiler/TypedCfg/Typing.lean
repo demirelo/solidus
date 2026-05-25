@@ -41,11 +41,12 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
         none
   | .swap depth =>
       if depth < 16 then
-        match shape, shape[depth]? with
-        | top :: rest, some slot =>
-            some (slot :: (rest.set (depth - 1) top))
-        | _, none => none
-        | [], _ => none
+        match shape with
+        | top :: rest =>
+            match rest[depth]? with
+            | some slot => some (slot :: rest.set depth top)
+            | none => none
+        | [] => none
       else
         none
   | .unwind target =>
