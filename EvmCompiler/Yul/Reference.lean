@@ -280,6 +280,149 @@ theorem program_all (program : Program) :
 
 end Full
 
+namespace FeatureCoverage
+
+/--
+Feature coverage required by the current recursive Yul bridge.
+
+This is not the full source-language acceptedness predicate. It names the
+semantic families that the current bridge has already proved locally. Code-image
+and external call/create primitives fail this predicate today; future bridge
+work should replace those failures with explicit semantic contracts while
+keeping `Safe.Full` as the source-language surface.
+-/
+def primitive : EvmYul.Operation .Yul → Prop :=
+  Safe.primitive
+
+def userCall (functionName : Name) : Prop :=
+  ObjectBuiltin.unsupported? functionName = false
+
+mutual
+  def expr : AstExpr → Prop
+    | .Lit _value => True
+    | .Var _name => True
+    | .Call (.inl prim) args => primitive prim ∧ exprs args
+    | .Call (.inr functionName) args => userCall functionName ∧ exprs args
+
+  def exprs : List AstExpr → Prop
+    | [] => True
+    | head :: rest => expr head ∧ exprs rest
+
+  def stmt : AstStmt → Prop
+    | .Block body => stmts body
+    | .Let _names none => True
+    | .Let _names (some value) => expr value
+    | .Assign _names value => expr value
+    | .ExprStmtCall value => expr value
+    | .Switch scrutinee cases defaultBody =>
+        expr scrutinee ∧ casesSafe cases ∧ stmts defaultBody
+    | .For cond post body =>
+        expr cond ∧ stmts post ∧ stmts body
+    | .If cond body =>
+        expr cond ∧ stmts body
+    | .Continue | .Break | .Leave => True
+
+  def stmts : List AstStmt → Prop
+    | [] => True
+    | head :: rest => stmt head ∧ stmts rest
+
+  def casesSafe : List (Word × List AstStmt) → Prop
+    | [] => True
+    | (_value, body) :: rest => stmts body ∧ casesSafe rest
+end
+
+def functionDefinition : AstFunctionDefinition → Prop
+  | .Def _params _returns body => stmts body
+
+def functionEntries : List (Name × AstFunctionDefinition) → Prop
+  | [] => True
+  | (_name, fn) :: rest => functionDefinition fn ∧ functionEntries rest
+
+noncomputable def contract (contract : AstContract) : Prop :=
+  stmt contract.dispatcher ∧
+    functionEntries (Contract.functionEntries contract)
+
+noncomputable def program (program : Program) : Prop :=
+  contract program.contract
+
+mutual
+  theorem expr_iff_safe : (expr' : AstExpr) →
+      expr expr' ↔ Safe.expr expr'
+    | .Lit _value => Iff.rfl
+    | .Var _name => Iff.rfl
+    | .Call (.inl prim) args => by
+        simp [expr, Safe.expr, primitive, exprs_iff_safe args]
+    | .Call (.inr functionName) args => by
+        simp [expr, Safe.expr, userCall, exprs_iff_safe args]
+
+  theorem exprs_iff_safe : (exprs' : List AstExpr) →
+      exprs exprs' ↔ Safe.exprs exprs'
+    | [] => Iff.rfl
+    | head :: rest => by
+        simp [exprs, Safe.exprs, expr_iff_safe head, exprs_iff_safe rest]
+
+  theorem stmt_iff_safe : (stmt' : AstStmt) →
+      stmt stmt' ↔ Safe.stmt stmt'
+    | .Block body => by
+        simp [stmt, Safe.stmt, stmts_iff_safe body]
+    | .Let _names none => Iff.rfl
+    | .Let _names (some value) => by
+        simp [stmt, Safe.stmt, expr_iff_safe value]
+    | .Assign _names value => by
+        simp [stmt, Safe.stmt, expr_iff_safe value]
+    | .ExprStmtCall value => by
+        simp [stmt, Safe.stmt, expr_iff_safe value]
+    | .Switch scrutinee cases defaultBody => by
+        simp [stmt, Safe.stmt, expr_iff_safe scrutinee,
+          cases_iff_safe cases, stmts_iff_safe defaultBody]
+    | .For cond post body => by
+        simp [stmt, Safe.stmt, expr_iff_safe cond, stmts_iff_safe post,
+          stmts_iff_safe body]
+    | .If cond body => by
+        simp [stmt, Safe.stmt, expr_iff_safe cond, stmts_iff_safe body]
+    | .Continue => Iff.rfl
+    | .Break => Iff.rfl
+    | .Leave => Iff.rfl
+
+  theorem stmts_iff_safe : (stmts' : List AstStmt) →
+      stmts stmts' ↔ Safe.stmts stmts'
+    | [] => Iff.rfl
+    | head :: rest => by
+        simp [stmts, Safe.stmts, stmt_iff_safe head, stmts_iff_safe rest]
+
+  theorem cases_iff_safe : (cases' : List (Word × List AstStmt)) →
+      casesSafe cases' ↔ Safe.casesSafe cases'
+    | [] => Iff.rfl
+    | (_value, body) :: rest => by
+        simp [casesSafe, Safe.casesSafe, stmts_iff_safe body,
+          cases_iff_safe rest]
+end
+
+theorem functionDefinition_iff_safe :
+    (fn : AstFunctionDefinition) →
+      functionDefinition fn ↔ Safe.functionDefinition fn
+  | .Def _params _returns body => by
+      simp [functionDefinition, Safe.functionDefinition, stmts_iff_safe body]
+
+theorem functionEntries_iff_safe :
+    (entries : List (Name × AstFunctionDefinition)) →
+      functionEntries entries ↔ Safe.functionEntries entries
+  | [] => Iff.rfl
+  | (_name, fn) :: rest => by
+      simp [functionEntries, Safe.functionEntries,
+        functionDefinition_iff_safe fn, functionEntries_iff_safe rest]
+
+theorem contract_iff_safe (contract : AstContract) :
+    FeatureCoverage.contract contract ↔ Safe.contract contract := by
+  simp [FeatureCoverage.contract, Safe.contract, stmt_iff_safe,
+    functionEntries_iff_safe]
+
+theorem program_iff_safe (program : Program) :
+    FeatureCoverage.program program ↔ Safe.program program := by
+  exact contract_iff_safe program.contract
+
+end FeatureCoverage
+
 theorem switch_default_safe_of_stmt {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
     (hSafe : stmt (.Switch scrutinee cases defaultBody)) :
@@ -464,6 +607,9 @@ noncomputable def FullAccepted (program : Program) : Prop :=
   Program.Accepted program ∧ Safe.Full.program program ∧
     Safe.NoShadowing.program program
 
+noncomputable def BridgeCoveredAccepted (program : Program) : Prop :=
+  FullAccepted program ∧ Safe.FeatureCoverage.program program
+
 theorem programAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     Program.Accepted program :=
@@ -483,6 +629,19 @@ theorem fullAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     FullAccepted program := by
   exact ⟨hAccepted.1, Safe.Full.program_all program, hAccepted.2.2⟩
+
+theorem bridgeCoveredAccepted_iff_accepted {program : Program} :
+    BridgeCoveredAccepted program ↔ Accepted program := by
+  constructor
+  · intro h
+    exact
+      ⟨h.1.1,
+        (Safe.FeatureCoverage.program_iff_safe program).mp h.2,
+        h.1.2.2⟩
+  · intro h
+    exact
+      ⟨fullAccepted_of_accepted h,
+        (Safe.FeatureCoverage.program_iff_safe program).mpr h.2.1⟩
 
 def installContract (program : Program) : State → State :=
   Program.installContract program

@@ -445,6 +445,15 @@ abbrev yulReferenceFullAccepted :=
 abbrev yulReferenceFullAcceptedOfAccepted :=
   @Yul.Reference.fullAccepted_of_accepted
 
+abbrev yulFeatureCoverageProgram :=
+  @Yul.Reference.Safe.FeatureCoverage.program
+
+abbrev yulBridgeCoveredAccepted :=
+  @Yul.Reference.BridgeCoveredAccepted
+
+abbrev yulBridgeCoveredAcceptedIffAccepted :=
+  @Yul.Reference.bridgeCoveredAccepted_iff_accepted
+
 abbrev yulSourceAccepted :=
   @Yul.Program.SourceAccepted
 

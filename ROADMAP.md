@@ -17,6 +17,11 @@ Last updated: 2026-05-24 23:30 PDT.
      already-proved local bridge predicate.
    - [x] Add `Reference.FullAccepted` and the checked compatibility theorem
      from old `Reference.Accepted` to the new full acceptedness surface.
+   - [x] Split the old safe-fragment meaning into
+     `Reference.BridgeCoveredAccepted = FullAccepted + FeatureCoverage`, with
+     a checked equivalence to old `Reference.Accepted`. This makes the
+     remaining fragment boundary a named semantic-coverage obligation rather
+     than part of source acceptedness.
    - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
      longer rejects code-image primitives solely because their bridge is
      missing.
