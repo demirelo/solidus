@@ -110,6 +110,10 @@ Last updated: 2026-05-25 06:52 PDT.
        `RETURNDATACOPY`, including its special imported dispatcher equation.
      - [x] Add canonical memory read stack-agreement for `MLOAD`, using a
        reusable unary shared-state-dependent result bridge.
+     - [x] Add arity-correct canonical nullary machine-read stack-agreement
+       for `RETURNDATASIZE`, `MSIZE`, and `GAS`; this records the imported
+       Yul dispatcher's permissive raw nullary behavior explicitly, and `GAS`
+       uses the declared `gasValueRel` oracle.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

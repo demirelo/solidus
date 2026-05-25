@@ -3399,6 +3399,9 @@ abbrev exprEvalPreludeSoundOk :=
 abbrev primitiveStackSoundAt :=
   @Yul.Reference.SourceBridgeFacts.PrimitiveStackSoundAt
 
+abbrev primitiveStackSoundAtArity :=
+  @Yul.Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity
+
 abbrev yulPrimitiveBinaryOneSound :=
   @Yul.Reference.SourceBridgeFacts.YulPrimitiveBinaryOneSound
 
@@ -3407,6 +3410,9 @@ abbrev sourcePrimitiveBinaryOneSound :=
 
 abbrev primitiveStackSoundAtOfBinaryOne :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_of_binary_one
+
+abbrev primitiveStackSoundAtArityOfNullarySharedOne :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_nullary_shared_one
 
 abbrev yulPrimitiveBinaryOneSoundAdd :=
   @Yul.Reference.SourceBridgeFacts.yulPrimitiveBinaryOneSound_add
@@ -3612,6 +3618,27 @@ abbrev sourcePrimitiveTernaryZeroSoundStructuredReturndatacopy :=
 abbrev sourcePrimitiveUnarySharedOneSoundStructuredMload :=
   @Yul.Reference.SourceBridgeFacts.sourcePrimitiveUnarySharedOneSound_structured_mload
 
+abbrev yulPrimitiveNullarySharedOneSoundAtArityReturndatasize :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveNullarySharedOneSoundAtArity_returndatasize
+
+abbrev yulPrimitiveNullarySharedOneSoundAtArityMsize :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveNullarySharedOneSoundAtArity_msize
+
+abbrev yulPrimitiveNullarySharedOneSoundAtArityGas :=
+  @Yul.Reference.SourceBridgeFacts.yulPrimitiveNullarySharedOneSoundAtArity_gas
+
+abbrev sourcePrimitiveNullarySharedOneSoundStructuredOfMachineState :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveNullarySharedOneSound_structured_of_machineState
+
+abbrev sourcePrimitiveNullarySharedOneSoundStructuredReturndatasize :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveNullarySharedOneSound_structured_returndatasize
+
+abbrev sourcePrimitiveNullarySharedOneSoundStructuredMsize :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveNullarySharedOneSound_structured_msize
+
+abbrev sourcePrimitiveNullarySharedOneSoundStructuredGas :=
+  @Yul.Reference.SourceBridgeFacts.sourcePrimitiveNullarySharedOneSound_structured_gas
+
 abbrev primitiveStackSoundAtStructuredAdd :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_add
 
@@ -3713,6 +3740,15 @@ abbrev primitiveStackSoundAtStructuredReturndatacopy :=
 
 abbrev primitiveStackSoundAtStructuredMload :=
   @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAt_structured_mload
+
+abbrev primitiveStackSoundAtArityStructuredReturndatasize :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_returndatasize
+
+abbrev primitiveStackSoundAtArityStructuredMsize :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_msize
+
+abbrev primitiveStackSoundAtArityStructuredGas :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_gas
 
 abbrev checkedBlockLoweringSound :=
   @Yul.Reference.SourceBridgeFacts.CheckedBlockLoweringSound

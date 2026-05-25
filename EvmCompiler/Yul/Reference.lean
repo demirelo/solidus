@@ -4835,6 +4835,55 @@ def SourcePrimitiveUnarySharedOneSound
     prim.eval op shared [value] =
       .ok (targetStep shared value, [targetResult shared value])
 
+def YulPrimitiveNullarySharedOneSound
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (sourceStep : EvmYul.SharedState .Yul → EvmYul.SharedState .Yul)
+    (sourceResult : EvmYul.SharedState .Yul → Word) : Prop :=
+  ∀ {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {sourceValues : List Word}
+    {sourceAfterPrim : State} {values' : List Word},
+    EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store) yulPrim
+        sourceValues =
+      .ok (sourceAfterPrim, values') →
+    sourceValues = [] ∧
+      sourceAfterPrim = .Ok (sourceStep sourceShared) store ∧
+        values' = [sourceResult sourceShared]
+
+def SourcePrimitiveNullarySharedOneSound
+    (prim : Objects.Source.PrimitiveSemantics) (op : Structured.BasicOp)
+    (targetStep : EvmYul.SharedState .EVM → EvmYul.SharedState .EVM)
+    (targetResult : EvmYul.SharedState .EVM → Word) : Prop :=
+  ∀ (shared : EvmYul.SharedState .EVM),
+    prim.eval op shared [] =
+      .ok (targetStep shared, [targetResult shared])
+
+/--
+Arity-aware version of `PrimitiveStackSoundAt`.
+
+Some imported nullary Yul machine-state helpers are permissive at the raw
+`primCall` layer and ignore extra values. The source language and compiler
+still enforce primitive arity before this bridge is used, so the compositional
+contract for those families must carry the arity fact explicitly instead of
+pretending the imported dispatcher rejects malformed calls.
+-/
+def PrimitiveStackSoundAtArity
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics) (sourceFuel : Nat)
+    (yulPrim : EvmYul.Operation .Yul) (op : Structured.BasicOp) : Prop :=
+  ∀ {sourceAfterArgs : State}
+    {compilerAfterArgs : Objects.Source.State}
+    {sourceValues : List Word} {sourceAfterPrim : State}
+    {values' : List Word},
+    SourceStateRel cfg layout sourceAfterArgs compilerAfterArgs →
+    sourceValues.length = Expressions.Structured.BasicOp.inputs op →
+    EvmYul.Yul.primCall sourceFuel sourceAfterArgs yulPrim sourceValues =
+      .ok (sourceAfterPrim, values') →
+    ∃ sharedAfter : EvmYul.SharedState .EVM,
+      prim.eval op compilerAfterArgs.shared sourceValues.reverse =
+        .ok (sharedAfter, values') ∧
+      SourceStateRel cfg layout sourceAfterPrim
+        (compilerAfterArgs.withShared sharedAfter)
+
 def YulPrimitiveTernaryOneSound
     (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
     (sourceStep :
@@ -5057,6 +5106,89 @@ theorem primitiveStackSoundAt_of_unary_shared_one
       · simpa [hResult value hShared] using
           hEval compilerAfterArgs.shared value
       · exact SourceStateRel.ok (hSharedRel value hShared) hVars
+
+theorem primitiveStackSoundAt_of_nullary_shared_one
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (sourceStep : EvmYul.SharedState .Yul → EvmYul.SharedState .Yul)
+    (targetStep : EvmYul.SharedState .EVM → EvmYul.SharedState .EVM)
+    (sourceResult : EvmYul.SharedState .Yul → Word)
+    (targetResult : EvmYul.SharedState .EVM → Word)
+    (hYul :
+      YulPrimitiveNullarySharedOneSound sourceFuel yulPrim sourceStep
+        sourceResult)
+    (hEval :
+      SourcePrimitiveNullarySharedOneSound prim op targetStep targetResult)
+    (hResult :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceResult sourceShared = targetResult targetShared)
+    (hSharedRel :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          SharedStateRel cfg (sourceStep sourceShared)
+            (targetStep targetShared)) :
+    PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim
+    values' hRel hCall
+  cases hRel with
+  | @ok sourceShared store compilerState hShared hVars =>
+      rcases hYul hCall with ⟨hValues, hAfter, hResults⟩
+      subst sourceValues
+      subst sourceAfterPrim
+      subst values'
+      refine ⟨targetStep compilerAfterArgs.shared, ?_, ?_⟩
+      · simpa [hResult hShared] using hEval compilerAfterArgs.shared
+      · exact SourceStateRel.ok (hSharedRel hShared) hVars
+
+theorem primitiveStackSoundAtArity_of_nullary_shared_one
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (sourceStep : EvmYul.SharedState .Yul → EvmYul.SharedState .Yul)
+    (targetStep : EvmYul.SharedState .EVM → EvmYul.SharedState .EVM)
+    (sourceResult : EvmYul.SharedState .Yul → Word)
+    (targetResult : EvmYul.SharedState .EVM → Word)
+    (hInputs : Expressions.Structured.BasicOp.inputs op = 0)
+    (hYul :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore} {sourceAfterPrim : State}
+        {values' : List Word},
+        EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store) yulPrim [] =
+          .ok (sourceAfterPrim, values') →
+        sourceAfterPrim = .Ok (sourceStep sourceShared) store ∧
+          values' = [sourceResult sourceShared])
+    (hEval :
+      SourcePrimitiveNullarySharedOneSound prim op targetStep targetResult)
+    (hResult :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceResult sourceShared = targetResult targetShared)
+    (hSharedRel :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          SharedStateRel cfg (sourceStep sourceShared)
+            (targetStep targetShared)) :
+    PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim
+    values' hRel hArity hCall
+  cases hRel with
+  | @ok sourceShared store compilerState hShared hVars =>
+      have hValues : sourceValues = [] := by
+        apply List.eq_nil_of_length_eq_zero
+        simpa [hInputs] using hArity
+      subst sourceValues
+      rcases hYul hCall with ⟨hAfter, hResults⟩
+      subst sourceAfterPrim
+      subst values'
+      refine ⟨targetStep compilerAfterArgs.shared, ?_, ?_⟩
+      · simpa [hResult hShared] using hEval compilerAfterArgs.shared
+      · exact SourceStateRel.ok (hSharedRel hShared) hVars
 
 theorem primitiveStackSoundAt_of_ternary_one
     {cfg : StateRelConfig} {layout : List Name}
@@ -6058,6 +6190,66 @@ theorem yulPrimitiveUnarySharedOneSound_mload
               rw [yul_primCall_succ_mload_eq] at hCall
               simp at hCall
 
+theorem yulPrimitiveNullarySharedOneSoundAtArity_returndatasize
+    {sourceFuel : Nat} :
+    ∀ {sourceShared : EvmYul.SharedState .Yul}
+      {store : EvmYul.Yul.VarStore} {sourceAfterPrim : State}
+      {values' : List Word},
+      EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store)
+          ((.Env .RETURNDATASIZE : EvmYul.Operation .Yul)) [] =
+        .ok (sourceAfterPrim, values') →
+      sourceAfterPrim = .Ok sourceShared store ∧
+        values' =
+          [EvmYul.MachineState.returndatasize sourceShared.toMachineState] := by
+  intro sourceShared store sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [PrimSemantics.primCall_returndatasize_ok] at hCall
+      cases hCall
+      exact ⟨rfl, rfl⟩
+
+theorem yulPrimitiveNullarySharedOneSoundAtArity_msize
+    {sourceFuel : Nat} :
+    ∀ {sourceShared : EvmYul.SharedState .Yul}
+      {store : EvmYul.Yul.VarStore} {sourceAfterPrim : State}
+      {values' : List Word},
+      EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store)
+          ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)) [] =
+        .ok (sourceAfterPrim, values') →
+      sourceAfterPrim = .Ok sourceShared store ∧
+        values' =
+          [EvmYul.MachineState.msize sourceShared.toMachineState] := by
+  intro sourceShared store sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [PrimSemantics.primCall_msize_ok] at hCall
+      cases hCall
+      exact ⟨rfl, rfl⟩
+
+theorem yulPrimitiveNullarySharedOneSoundAtArity_gas
+    {sourceFuel : Nat} :
+    ∀ {sourceShared : EvmYul.SharedState .Yul}
+      {store : EvmYul.Yul.VarStore} {sourceAfterPrim : State}
+      {values' : List Word},
+      EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store)
+          ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) [] =
+        .ok (sourceAfterPrim, values') →
+      sourceAfterPrim = .Ok sourceShared store ∧
+        values' =
+          [EvmYul.MachineState.gas sourceShared.toMachineState] := by
+  intro sourceShared store sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [PrimSemantics.primCall_gas_ok] at hCall
+      cases hCall
+      exact ⟨rfl, rfl⟩
+
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
     (hStep :
@@ -6606,6 +6798,65 @@ theorem sourcePrimitiveUnarySharedOneSound_structured_mload :
           EvmYul.EVM.State.replaceStackAndIncrPC,
           EvmYul.EVM.State.incrPC, EvmYul.Stack.push])
       (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_of_machineState
+    {op : Structured.BasicOp} (f : EvmYul.MachineState → Word)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.machineState f)) :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared => shared)
+      (fun shared => f shared.toMachineState) := by
+  intro shared
+  let state' : EVMState :=
+    { toSharedState := shared,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [f shared.toMachineState],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .machineState f)
+      (shared := shared) (shared' := shared)
+      (values := []) (values' := [f shared.toMachineState])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.machineStateOp,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_returndatasize :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured .returndatasize
+      (fun shared => shared)
+      (fun shared =>
+        EvmYul.MachineState.returndatasize shared.toMachineState) :=
+  sourcePrimitiveNullarySharedOneSound_structured_of_machineState
+    EvmYul.MachineState.returndatasize (by rfl)
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_msize :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured .msize
+      (fun shared => shared)
+      (fun shared => EvmYul.MachineState.msize shared.toMachineState) :=
+  sourcePrimitiveNullarySharedOneSound_structured_of_machineState
+    EvmYul.MachineState.msize (by rfl)
+
+theorem sourcePrimitiveNullarySharedOneSound_structured_gas :
+    SourcePrimitiveNullarySharedOneSound
+      Locals.Source.PrimitiveSemantics.structured .gas
+      (fun shared => shared)
+      (fun shared => EvmYul.MachineState.gas shared.toMachineState) :=
+  sourcePrimitiveNullarySharedOneSound_structured_of_machineState
+    EvmYul.MachineState.gas (by rfl)
 
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -7249,6 +7500,85 @@ theorem primitiveStackSoundAt_structured_mload
         intro sourceShared targetShared slot hShared
         rcases hShared with ⟨hChain, hMachine⟩
         exact ⟨hChain, MachineStateRel.mload hMachine⟩)
+
+theorem primitiveStackSoundAtArity_structured_returndatasize
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .RETURNDATASIZE : EvmYul.Operation .Yul))
+      .returndatasize := by
+  exact
+    primitiveStackSoundAtArity_of_nullary_shared_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.Env .RETURNDATASIZE : EvmYul.Operation .Yul)))
+      (op := .returndatasize)
+      (fun shared => shared) (fun shared => shared)
+      (fun shared =>
+        EvmYul.MachineState.returndatasize shared.toMachineState)
+      (fun shared =>
+        EvmYul.MachineState.returndatasize shared.toMachineState)
+      (by rfl)
+      yulPrimitiveNullarySharedOneSoundAtArity_returndatasize
+      sourcePrimitiveNullarySharedOneSound_structured_returndatasize
+      (by
+        intro sourceShared targetShared hShared
+        simpa [EvmYul.MachineState.returndatasize] using
+          congrArg
+            (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
+            hShared.machine.returnData)
+      (by intro sourceShared targetShared hShared; exact hShared)
+
+theorem primitiveStackSoundAtArity_structured_msize
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)) .msize := by
+  exact
+    primitiveStackSoundAtArity_of_nullary_shared_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.StackMemFlow .MSIZE : EvmYul.Operation .Yul)))
+      (op := .msize)
+      (fun shared => shared) (fun shared => shared)
+      (fun shared => EvmYul.MachineState.msize shared.toMachineState)
+      (fun shared => EvmYul.MachineState.msize shared.toMachineState)
+      (by rfl)
+      yulPrimitiveNullarySharedOneSoundAtArity_msize
+      sourcePrimitiveNullarySharedOneSound_structured_msize
+      (by
+        intro sourceShared targetShared hShared
+        simpa [EvmYul.MachineState.msize] using
+          congrArg
+            (fun activeWords : EvmYul.UInt256 =>
+              activeWords * (⟨32⟩ : EvmYul.UInt256))
+            hShared.machine.activeWords)
+      (by intro sourceShared targetShared hShared; exact hShared)
+
+theorem primitiveStackSoundAtArity_structured_gas
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) .gas := by
+  exact
+    primitiveStackSoundAtArity_of_nullary_shared_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.StackMemFlow .GAS : EvmYul.Operation .Yul)))
+      (op := .gas)
+      (fun shared => shared) (fun shared => shared)
+      (fun shared => EvmYul.MachineState.gas shared.toMachineState)
+      (fun shared => EvmYul.MachineState.gas shared.toMachineState)
+      (by rfl)
+      yulPrimitiveNullarySharedOneSoundAtArity_gas
+      sourcePrimitiveNullarySharedOneSound_structured_gas
+      (by
+        intro sourceShared targetShared hShared
+        exact cfg.gasValueRel hShared.machine.gasAvailable)
+      (by intro sourceShared targetShared hShared; exact hShared)
 
 /--
 Primitive-call expression bridge for the stack-order argument adapter.
