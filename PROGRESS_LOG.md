@@ -3343,3 +3343,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 09:18:00 PDT - proof - migrated the recursive one-result expression dispatcher to an arity-aware primitive stack premise, retaining the old strict theorem as a checked wrapper; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.
 
 - 2026-05-25 09:28:00 PDT - roadmap - marked the canonical terminal/revert contract parent item complete; the STOP/RETURN/REVERT/SELFDESTRUCT lemmas and bundle had already been checked in earlier proof slices.
+
+- 2026-05-25 09:40:00 PDT - proof - added arity-aware semantic constructors that consume `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` and derive the existing expression-result contract internally, narrowing that top semantic boundary to the actual resource premise; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.

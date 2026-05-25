@@ -157,6 +157,10 @@ Last updated: 2026-05-25 06:52 PDT.
    - [ ] Derive `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` from
      acceptedness/resource facts, or replace it with a smaller fundamental
      resource premise whose scope is exactly documented and exported.
+     - [x] Add semantic-core and canonical-observation constructors that
+       consume `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts`, making the
+       expression boundary the smaller resource premise rather than arbitrary
+       `ExprEvalResultOkAt` evidence.
    - [ ] Route the preferred top theorem through the canonical semantic
      constructors so users do not pass arbitrary semantic-contract packages.
      - [x] Add preferred gas-aware top wrappers specialized to the canonical

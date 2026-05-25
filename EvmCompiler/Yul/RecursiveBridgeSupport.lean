@@ -152377,6 +152377,34 @@ theorem of_canonical_observation
   observation :=
     RecursiveBridgeSemanticContracts.dispatcherObservationSound_canonical
 
+theorem of_canonical_observation_noSuccessfulOutOfFuel
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
+    (hTerminal :
+      RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
+        program)
+    (hPrimitiveStack :
+      RecursiveBridgePrimitiveStackArityContracts cfg prim)
+    (hExpr :
+      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program) :
+    RecursiveBridgeSemanticArityContracts cfg terminalRel revertRel prim
+      (dispatcherOutcomeRel cfg terminalRel revertRel program
+        (.Ok shared store))
+      program shared store :=
+  of_canonical_observation
+    (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (program := program) (shared := shared) (store := store)
+    hPrimitiveSound hTerminal.terminal hPrimitiveStack.primitiveStack
+    (RecursiveBridgeExprResultContracts.ofNoSuccessfulOutOfFuel hExpr).exprResultOk
+
 theorem of_strict
     {cfg : Reference.StateRelConfig}
     {terminalRel :
@@ -152426,6 +152454,28 @@ theorem ofBoundaries
   terminal := hTerminal.terminal
   primitiveStack := hPrimitive.primitiveStack
   exprResultOk := hExpr.exprResultOk
+
+theorem ofNoSuccessfulOutOfFuelBoundaries
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
+    (hTerminal :
+      RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
+        program)
+    (hExpr :
+      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program) :
+    RecursiveBridgeSemanticCoreArityContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hPrimitive.primitiveSound
+  terminal := hTerminal.terminal
+  primitiveStack := hPrimitive.primitiveStack
+  exprResultOk :=
+    (RecursiveBridgeExprResultContracts.ofNoSuccessfulOutOfFuel hExpr).exprResultOk
 
 theorem ofSemanticContracts
     {cfg : Reference.StateRelConfig}

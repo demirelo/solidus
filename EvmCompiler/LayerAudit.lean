@@ -2814,11 +2814,17 @@ abbrev recursiveBridgeSemanticArityDispatcherOutcomeRel :=
 abbrev recursiveBridgeSemanticArityOfCanonicalObservation :=
   @Yul.Program.RecursiveBridgeSemanticArityContracts.of_canonical_observation
 
+abbrev recursiveBridgeSemanticArityOfCanonicalObservationNoSuccessfulOutOfFuel :=
+  @Yul.Program.RecursiveBridgeSemanticArityContracts.of_canonical_observation_noSuccessfulOutOfFuel
+
 abbrev recursiveBridgeSemanticArityOfStrict :=
   @Yul.Program.RecursiveBridgeSemanticArityContracts.of_strict
 
 abbrev recursiveBridgeSemanticCoreOfBoundaries :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofBoundaries
+
+abbrev recursiveBridgeSemanticCoreArityOfNoSuccessfulOutOfFuelBoundaries :=
+  @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofNoSuccessfulOutOfFuelBoundaries
 
 abbrev recursiveBridgeSemanticCoreToContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.toSemanticContracts
