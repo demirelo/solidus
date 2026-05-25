@@ -1,5 +1,5 @@
 import EvmCompiler.Objects.Compiler
-import EvmCompiler.Assembly.Bytecode
+import EvmCompiler.Assembly.ByteEncoding
 
 namespace EvmCompiler
 namespace Objects

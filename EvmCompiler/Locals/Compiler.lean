@@ -1,4 +1,4 @@
-import EvmCompiler.Locals.SourceSemantics
+import EvmCompiler.Locals.Syntax
 import EvmCompiler.Expressions.Compiler
 
 namespace EvmCompiler
@@ -423,7 +423,7 @@ def Accepted (program : Program) : Prop :=
     lower.Accepted
 
 def SourceAccepted (program : Program) : Prop :=
-  program.WF ∧ Source.Program.SourceWF program
+  program.WF
 
 end Program
 

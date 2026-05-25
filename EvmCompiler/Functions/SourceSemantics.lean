@@ -1568,51 +1568,6 @@ theorem runOpen_append_nonregular_exists
                     rw [← hOutcome, ← hCtx]
                     simp [Block.runOpen, hStmt, hModeStmt]⟩
 
-theorem runScoped_regular_eq_restrict {prim : PrimitiveSemantics}
-    {program : Program} {ctx : Ctx} {block : Block} {fuel : Nat}
-    {state out : State}
-    (hRun :
-      Block.runScoped prim program ctx block fuel state =
-        .ok (Outcome.regular out)) :
-    ∃ inner finalCtx,
-      Block.runOpen prim program ctx fuel block state =
-        .ok (Outcome.regular inner, finalCtx) ∧
-        out = inner.restrictTo ctx.scope := by
-  unfold Block.runScoped at hRun
-  cases hOpen : Block.runOpen prim program ctx fuel block state with
-  | error err =>
-      simp [hOpen] at hRun
-  | ok result =>
-      rcases result with ⟨outcome, finalCtx⟩
-      cases outcome with
-      | mk outcomeState mode =>
-          cases mode
-          · simp [hOpen, Outcome.regular, Locals.Source.Outcome.regular] at hRun
-            cases hRun
-            refine ⟨outcomeState, finalCtx, ?_, rfl⟩
-            simpa [Outcome.regular, Locals.Source.Outcome.regular] using hOpen
-          · simp [hOpen, Outcome.regular, Locals.Source.Outcome.regular,
-              Outcome.brk, Locals.Source.Outcome.brk] at hRun
-          · simp [hOpen, Outcome.regular, Locals.Source.Outcome.regular,
-              Outcome.cont, Locals.Source.Outcome.cont] at hRun
-          · simp [hOpen, Outcome.regular, Locals.Source.Outcome.regular,
-              Outcome.leave, Locals.Source.Outcome.leave] at hRun
-          · simp [hOpen, Outcome.regular, Locals.Source.Outcome.regular,
-              Outcome.halt, Locals.Source.Outcome.halt] at hRun
-
-theorem runScoped_regular_drops_not_mem {prim : PrimitiveSemantics}
-    {program : Program} {ctx : Ctx} {block : Block} {fuel : Nat}
-    {state out : State} {name : Name}
-    (hRun :
-      Block.runScoped prim program ctx block fuel state =
-        .ok (Outcome.regular out))
-    (hNotMem : name ∉ ctx.scope) :
-    out.vars name = none := by
-  rcases runScoped_regular_eq_restrict hRun with
-    ⟨inner, _finalCtx, _hOpen, hOut⟩
-  rw [hOut]
-  exact Locals.Source.Store.restrictTo_not_mem hNotMem
-
 end Block
 
 namespace FunDef

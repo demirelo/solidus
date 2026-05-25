@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-25 00:20 PDT - refactor/proof-archive - User redirected the active goal to compiler-first refactoring. Created branch `codex/proof-modules-before-typed-cfg-rewrite` at commit `6fb064b2` to preserve the proof-rich state before deleting proof modules on `main`. Added `docs/TYPED_CFG_REWRITE.md` as the architecture memory for explicit stack contracts, typed continuations, lexical unwinding, and typed CFG lowering.
+
+- 2026-05-25 00:35 PDT - refactor/proof-module-removal - Deleted proof-heavy modules from `main`, moved byte encoder utilities into lightweight `Assembly.ByteEncoding`, and slimmed root imports to syntax/compiler/layout/typed-CFG modules. Verification: full `lake build EvmCompiler` passed via `/tmp/evm_noproofs_build11.log`; `git diff --check` and proof-hole grep over remaining Lean modules were clean.
+
 - 2026-05-25 00:00 PDT - compaction-resume/typed-cfg-refactor - Resumed after context compaction; current checkpoint is committing to the explicit typed CFG middle layer, tightening its lowering boundary, and preparing the existing structured-control/compiler proof stack to route through it.
 
 - 2026-05-25 00:08 PDT - refactor/typed-cfg-lowering-boundary - Added the first explicit lowering boundary from `TypedCfg` to labeled assembly. Ordinary pushes/primitives/concrete `DUP`/`SWAP` depths and static jumps lower directly; symbolic CFG-only operations such as `unwind` and `returnDispatch` deliberately return `none` until their backend evidence is implemented. Tightened CFG typing to reject `DUP`/`SWAP` depths beyond the EVM's 16-opcode window. Verification: `lake build EvmCompiler.TypedCfg` and full `lake build EvmCompiler` passed via `/tmp/evm_typedcfg_lower_build2.log` and `/tmp/evm_full_typedcfg_lower_build1.log`; touched `TypedCfg` proof-hole scan and `git diff --check` were clean.

@@ -1,6 +1,5 @@
 import EvmCompiler.Expressions.Syntax
 import EvmCompiler.Structured.Compiler
-import EvmCompiler.Structured.Preservation
 import EvmCompiler.Assembly.Accepted
 
 namespace EvmCompiler
@@ -145,7 +144,7 @@ def compile? (program : Program) : Option Assembly.TargetProgram :=
   Assembly.compile? program.compile
 
 def Accepted (program : Program) : Prop :=
-  Structured.Preservation.Program.Accepted program.toStructured
+  program.WF ∧ Assembly.Accepted program.compile
 
 def SourceAccepted (program : Program) : Prop :=
   program.WF

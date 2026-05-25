@@ -7,4 +7,3 @@ import EvmCompiler.Functions
 import EvmCompiler.Objects
 import EvmCompiler.Yul
 import EvmCompiler.Solidity
-import EvmCompiler.LayerAudit
