@@ -82,7 +82,7 @@ def type? (program : Program) (shape : Shape) : Terminator → Option Unit
       let targetShape ← program.labelShape? target
       let fallthroughShape ← program.labelShape? next
       match shape with
-      | .word :: rest =>
+      | _cond :: rest =>
           if rest = targetShape ∧ rest = fallthroughShape then some () else none
       | _ => none
   | .returnDispatch siteShape =>

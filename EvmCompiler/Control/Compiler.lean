@@ -1,12 +1,22 @@
-import EvmCompiler.Structured.Compiler
-import EvmCompiler.TypedCfg
+import EvmCompiler.Control.Semantics
 
 namespace EvmCompiler
-namespace Structured
-namespace Cfg
+namespace Control
+namespace Compiler
 
 abbrev Shape := TypedCfg.Shape
 abbrev Label := TypedCfg.Label
+abbrev LabelSupply := Nat
+
+namespace LabelSupply
+
+def label (supply : LabelSupply) (tag : Nat) : Label :=
+  Assembly.Label.generated supply tag
+
+def next (supply : LabelSupply) : LabelSupply :=
+  supply + 1
+
+end LabelSupply
 
 structure Kont where
   label : Label
@@ -14,11 +24,11 @@ structure Kont where
   deriving Repr
 
 structure Context where
-  procs : List Proc := []
   regular : Kont
   break? : Option Kont := none
   continue? : Option Kont := none
   leave? : Option Kont := none
+  deriving Repr
 
 structure Result where
   blocks : List TypedCfg.Block
@@ -55,32 +65,71 @@ def finalBlock (label : Label) (shape : Shape) : TypedCfg.Block where
   body := []
   term := .fallthrough
 
-namespace BasicInstr
+namespace Expr
 
-def toCfg : BasicInstr → TypedCfg.Instr
-  | .push value => .push value
-  | .op op => .prim op.toPrimOp
+mutual
+  def compile? (expr : Expr) (shape : Shape) :
+      Option (List TypedCfg.Instr × Shape) :=
+    match expr with
+    | .literal value =>
+        let instr := TypedCfg.Instr.push value
+        let shape' := .literal value :: shape
+        some ([instr], shape')
+    | .prim op args => do
+        let (argCode, argShape) ← compileArgs? args shape
+        let instr := TypedCfg.Instr.prim op
+        let outShape ← instr.type? argShape
+        match outShape with
+        | _value :: rest =>
+            if rest = shape then
+              some (argCode ++ [instr], outShape)
+            else
+              none
+        | _ => none
 
-end BasicInstr
+  /--
+  Compile arguments from right to left. The resulting target stack has argument
+  values in source order, with the first argument on top.
+  -/
+  def compileArgs? : List Expr → Shape →
+      Option (List TypedCfg.Instr × Shape)
+    | [], shape => some ([], shape)
+    | arg :: rest, shape => do
+        let (restCode, restShape) ← compileArgs? rest shape
+        let (argCode, argShape) ← compile? arg restShape
+        some (restCode ++ argCode, argShape)
+end
 
-namespace Code
-
-def toCfg (code : Code) : List TypedCfg.Instr :=
-  code.map BasicInstr.toCfg
-
-def type? : Code → Shape → Option Shape
-  | [], shape => some shape
-  | instr :: rest, shape => do
-      let shape' ← (BasicInstr.toCfg instr).type? shape
-      type? rest shape'
-
-def conditionShape? (code : Code) (shape : Shape) : Option Shape := do
-  let out ← type? code shape
-  match out with
-  | _cond :: rest => if rest = shape then some shape else none
+def compileCondition? (expr : Expr) (shape : Shape) :
+    Option (List TypedCfg.Instr) := do
+  let (code, outShape) ← compile? expr shape
+  match outShape with
+  | _cond :: rest => if rest = shape then some code else none
   | _ => none
 
-end Code
+def compileTerminalArgs? (args : List Expr) (shape : Shape)
+    (argc : Nat) : Option (List TypedCfg.Instr) := do
+  let (code, outShape) ← compileArgs? args shape
+  if outShape.length = shape.length + argc then
+    some code
+  else
+    none
+
+end Expr
+
+namespace PrimStmt
+
+def compile? (op : Assembly.PrimOp) (args : List Expr) (shape : Shape) :
+    Option (List TypedCfg.Instr) := do
+  let (argCode, argShape) ← Expr.compileArgs? args shape
+  let instr := TypedCfg.Instr.prim op
+  let outShape ← instr.type? argShape
+  if outShape = shape then
+    some (argCode ++ [instr])
+  else
+    none
+
+end PrimStmt
 
 mutual
   def Block.regularShape? (block : Block) (shape : Shape) : Option Shape :=
@@ -93,21 +142,22 @@ mutual
 
   def Stmt.regularShape? (stmt : Stmt) (shape : Shape) : Option Shape :=
     match stmt with
-    | .code code =>
-        Code.type? code shape
+    | .prim op args => do
+        let _ ← PrimStmt.compile? op args shape
+        some shape
     | .if_ cond body => do
-        let _ ← Code.conditionShape? cond shape
+        let _ ← Expr.compileCondition? cond shape
         match Block.regularShape? body shape with
         | none => some shape
         | some bodyShape => if bodyShape = shape then some shape else none
     | .switch scrutinee cases defaultBody => do
-        let _ ← Code.conditionShape? scrutinee shape
+        let _ ← Expr.compileCondition? scrutinee shape
         let casesOk ← SwitchCases.regularShape? cases shape
         let defaultOk ← SwitchDefault.regularShape? defaultBody shape
         if casesOk && defaultOk then some shape else none
     | .for_ init cond post body => do
         let initShape ← Block.regularShape? init shape
-        let _ ← Code.conditionShape? cond initShape
+        let _ ← Expr.compileCondition? cond initShape
         let postShape? := Block.regularShape? post initShape
         let bodyShape? := Block.regularShape? body initShape
         match postShape?, bodyShape? with
@@ -117,8 +167,7 @@ mutual
             else
               none
         | _, _ => none
-    | .brk | .cont | .leave | .terminal _ | .call _ =>
-        none
+    | .brk | .cont | .leave | .terminal _ _ => none
 
   def SwitchCases.regularShape? (cases : List (Word × Block))
       (shape : Shape) : Option Bool :=
@@ -169,17 +218,17 @@ mutual
       (stmt : Stmt) (ctx : Context) (label : Label) (shape : Shape)
       (supply : LabelSupply) : Option Result :=
     match stmt with
-    | .code code => do
-        let _ ← Code.type? code shape
+    | .prim op args => do
+        let code ← PrimStmt.compile? op args shape
         some
           { blocks :=
               [ { label := label
                   input := shape
-                  body := Code.toCfg code ++ [.unwind ctx.regular.shape]
+                  body := code ++ [.unwind ctx.regular.shape]
                   term := .jump ctx.regular.label } ]
             next := supply }
     | .if_ cond body => do
-        let _ ← Code.conditionShape? cond shape
+        let condCode ← Expr.compileCondition? cond shape
         let bodyLabel := LabelSupply.label supply 0
         let endLabel := LabelSupply.label supply 1
         let endKont : Kont := { label := endLabel, shape := shape }
@@ -190,13 +239,13 @@ mutual
           { blocks :=
               [ { label := label
                   input := shape
-                  body := Code.toCfg cond
+                  body := condCode
                   term := .jumpi bodyLabel endLabel } ] ++
                 bodyResult.blocks ++
               [exitBlock endLabel shape (some ctx.regular)]
             next := bodyResult.next }
     | .switch scrutinee cases defaultBody => do
-        let _ ← Code.conditionShape? scrutinee shape
+        let scrutineeCode ← Expr.compileCondition? scrutinee shape
         let firstTestLabel := LabelSupply.label supply 0
         let endLabel := LabelSupply.label supply 1
         let defaultLabel := LabelSupply.label supply 2
@@ -216,7 +265,7 @@ mutual
           { blocks :=
               [ { label := label
                   input := shape
-                  body := Code.toCfg scrutinee
+                  body := scrutineeCode
                   term := .jump firstTestLabel } ] ++
                 testResult.blocks ++ caseResult.blocks ++
                 defaultResult.blocks ++
@@ -224,7 +273,7 @@ mutual
             next := defaultResult.next }
     | .for_ init cond post body => do
         let initShape ← Block.regularShape? init shape
-        let _ ← Code.conditionShape? cond initShape
+        let condCode ← Expr.compileCondition? cond initShape
         let loopLabel := LabelSupply.label supply 0
         let bodyLabel := LabelSupply.label supply 1
         let postLabel := LabelSupply.label supply 2
@@ -251,7 +300,7 @@ mutual
               initResult.blocks ++
               [ { label := loopLabel
                   input := initShape
-                  body := Code.toCfg cond
+                  body := condCode
                   term := .jumpi bodyLabel endLabel } ] ++
                 bodyResult.blocks ++ postResult.blocks ++
               [exitBlock endLabel initShape (some ctx.regular)]
@@ -262,16 +311,15 @@ mutual
         some { blocks := [exitBlock label shape ctx.continue?], next := supply }
     | .leave =>
         some { blocks := [exitBlock label shape ctx.leave?], next := supply }
-    | .terminal kind =>
+    | .terminal kind args => do
+        let code ← Expr.compileTerminalArgs? args shape kind.argCount
         some
           { blocks :=
               [ { label := label
                   input := shape
-                  body := []
+                  body := code
                   term := .halt kind } ]
             next := supply }
-    | .call _name =>
-        some { blocks := [invalidBlock label shape], next := supply }
 
   def SwitchCases.toCfgTests
       (cases : List (Word × Block)) (label defaultLabel : Label)
@@ -352,16 +400,15 @@ end
 namespace Program
 
 def entryLabel : Label :=
-  Assembly.Label.named "structured:entry"
+  Assembly.Label.named "control:entry"
 
 def endLabel : Label :=
-  Assembly.Label.named "structured:end"
+  Assembly.Label.named "control:end"
 
 def toCfg? (program : Program) : Option TypedCfg.Program := do
   let endKont : Kont := { label := endLabel, shape := [] }
   let result ←
-    Block.toCfgFrom program.body
-      { procs := program.procs, regular := endKont } entryLabel [] 0
+    Block.toCfgFrom program.body { regular := endKont } entryLabel [] 0
   some
     { entry := entryLabel
       blocks := result.blocks ++ [finalBlock endLabel []] }
@@ -376,6 +423,6 @@ def compileCfg? (program : Program) : Option Assembly.Program := do
 
 end Program
 
-end Cfg
-end Structured
+end Compiler
+end Control
 end EvmCompiler

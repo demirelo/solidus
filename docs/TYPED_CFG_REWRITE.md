@@ -165,6 +165,12 @@ symbolic stack slots, where expression arity becomes stack effects, and where
 compiler boundary is in place, higher layers should not need to mention stack
 shape directly.
 
+This layer must still be a real structured-control language, not just a
+stack-free expression language. In particular it must include conditionals,
+`switch`, `for` loops, `break`, `continue`, `leave`, and terminal EVM halts
+with Yul-like mode propagation. Loops own the `break`/`continue` handlers; a
+function/procedure layer above or alongside it owns the `leave` handler.
+
 ## Yul Surface Audit
 
 The typed CFG should be broad enough that Yul does not force a redesign later:
