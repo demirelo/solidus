@@ -4932,6 +4932,28 @@ theorem yul_primCall_succ_sub_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_div_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.DIV : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.div source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_mod_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.MOD : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execBinOp EvmYul.UInt256.mod source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -4993,6 +5015,58 @@ theorem yulPrimitiveBinaryOneSound_sub
       EvmYul.UInt256.sub :=
   yulPrimitiveBinaryOneSound_of_execBinOp
     EvmYul.UInt256.sub yul_primCall_succ_sub_eq
+
+theorem yulPrimitiveBinaryOneSound_div
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .DIV : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.div :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.div yul_primCall_succ_div_eq
+
+theorem yulPrimitiveBinaryOneSound_mod
+    {sourceFuel : Nat} :
+    YulPrimitiveBinaryOneSound sourceFuel
+      ((.StopArith .MOD : EvmYul.Operation .Yul))
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.mod :=
+  yulPrimitiveBinaryOneSound_of_execBinOp
+    EvmYul.UInt256.mod yul_primCall_succ_mod_eq
+
+theorem sourcePrimitiveBinaryOneSound_structured_of_bin
+    {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.bin f)) :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared _left _right => shared) f := by
+  intro shared left right
+  let state' : EVMState :=
+    { toSharedState := shared,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [f left right],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .bin f)
+      (shared := shared) (shared' := shared)
+      (values := [right, left])
+      (values' := [f left right])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.execBinOp,
+          EvmYul.Stack.pop2, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+        rfl)
+      (by simp [state']) (by simp [state'])
 
 theorem sourcePrimitiveBinaryOneSound_structured_add :
     SourcePrimitiveBinaryOneSound
@@ -5069,6 +5143,18 @@ theorem sourcePrimitiveBinaryOneSound_structured_sub :
         rfl)
       (by simp [state']) (by simp [state'])
 
+theorem sourcePrimitiveBinaryOneSound_structured_div :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .div
+      (fun shared _left _right => shared) EvmYul.UInt256.div :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.div (by rfl)
+
+theorem sourcePrimitiveBinaryOneSound_structured_mod :
+    SourcePrimitiveBinaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .mod
+      (fun shared _left _right => shared) EvmYul.UInt256.mod :=
+  sourcePrimitiveBinaryOneSound_structured_of_bin EvmYul.UInt256.mod (by rfl)
+
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
     PrimitiveStackSoundAt cfg layout
@@ -5126,6 +5212,46 @@ theorem primitiveStackSoundAt_structured_sub
       EvmYul.UInt256.sub EvmYul.UInt256.sub
       yulPrimitiveBinaryOneSound_sub
       sourcePrimitiveBinaryOneSound_structured_sub
+      (by intro left right; rfl)
+      (by intro sourceShared targetShared left right hShared; exact hShared)
+
+theorem primitiveStackSoundAt_structured_div
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .DIV : EvmYul.Operation .Yul)) .div := by
+  exact
+    primitiveStackSoundAt_of_binary_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.StopArith .DIV : EvmYul.Operation .Yul)))
+      (op := .div)
+      (fun shared _left _right => shared)
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.div EvmYul.UInt256.div
+      yulPrimitiveBinaryOneSound_div
+      sourcePrimitiveBinaryOneSound_structured_div
+      (by intro left right; rfl)
+      (by intro sourceShared targetShared left right hShared; exact hShared)
+
+theorem primitiveStackSoundAt_structured_mod
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .MOD : EvmYul.Operation .Yul)) .mod := by
+  exact
+    primitiveStackSoundAt_of_binary_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.StopArith .MOD : EvmYul.Operation .Yul)))
+      (op := .mod)
+      (fun shared _left _right => shared)
+      (fun shared _left _right => shared)
+      EvmYul.UInt256.mod EvmYul.UInt256.mod
+      yulPrimitiveBinaryOneSound_mod
+      sourcePrimitiveBinaryOneSound_structured_mod
       (by intro left right; rfl)
       (by intro sourceShared targetShared left right hShared; exact hShared)
 
