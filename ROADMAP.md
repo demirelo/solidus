@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-25 06:06 PDT.
+Last updated: 2026-05-25 06:16 PDT.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -95,6 +95,9 @@ Last updated: 2026-05-25 06:06 PDT.
      resource premise whose scope is exactly documented and exported.
    - [ ] Route the preferred top theorem through the canonical semantic
      constructors so users do not pass arbitrary semantic-contract packages.
+     - [x] Add preferred gas-aware top wrappers specialized to the canonical
+       structured primitive semantics, discharging the lower-tower
+       `PrimitiveSound` field internally.
 
 3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
    - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
