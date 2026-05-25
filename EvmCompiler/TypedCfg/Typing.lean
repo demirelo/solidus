@@ -21,15 +21,21 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
       | [] => none
       | _ :: rest => some rest
   | .dup depth =>
-      match shape[depth]? with
-      | some slot => some (slot :: shape)
-      | none => none
+      if depth < 16 then
+        match shape[depth]? with
+        | some slot => some (slot :: shape)
+        | none => none
+      else
+        none
   | .swap depth =>
-      match shape, shape[depth]? with
-      | top :: rest, some slot =>
-          some (slot :: (rest.set (depth - 1) top))
-      | _, none => none
-      | [], _ => none
+      if depth < 16 then
+        match shape, shape[depth]? with
+        | top :: rest, some slot =>
+            some (slot :: (rest.set (depth - 1) top))
+        | _, none => none
+        | [], _ => none
+      else
+        none
   | .unwind target =>
       Shape.unwindTo target shape
 
