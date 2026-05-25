@@ -1,5 +1,64 @@
 # Roadmap
 
+## Audit Concerns To Fully Discharge
+
+This is the current active goal. These items are not complete until the public
+top theorem exports a full-Yul acceptedness surface, internally constructs the
+Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
+`EVM.X` sufficient-gas/precondition evidence instead of taking it as an
+external execution certificate.
+
+Last updated: 2026-05-24 23:30 PDT.
+
+1. [ ] Full Yul accepted language, not a fragment
+   - [ ] Replace or refine `Reference.Safe.primitive` so accepted Yul no
+     longer rejects code-image primitives solely because their bridge is
+     missing.
+   - [ ] Add checked semantics and compiler bridge support for
+     `CODESIZE`/`CODECOPY` against the compiled object byte image.
+   - [ ] Add checked semantics and compiler bridge support for
+     `EXTCODESIZE`/`EXTCODECOPY`/`EXTCODEHASH`, or state and prove the exact
+     external-account/code oracle relation that makes them full semantics
+     rather than a fragment exclusion.
+   - [ ] Add checked object/data builtin support for `datasize`, `dataoffset`,
+     and `datacopy` in the checked Yul/object path, including the backend
+     layout theorem and lowering to concrete `CODECOPY`.
+   - [ ] Add checked semantics and compiler bridge support for
+     `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` and `CREATE`/`CREATE2`, or
+     state and prove an explicit external-interaction oracle relation that is
+     part of the full source/target semantics rather than a safety rejection.
+   - [ ] Update the public acceptedness theorem so these operations are either
+     supported directly or covered by the explicit full-semantics oracle
+     contract.
+
+2. [ ] Internally derive semantic bridge contracts
+   - [x] Split primitive assumptions into lower-tower primitive preservation
+     (`PrimitiveSound`) and imported-Yul primitive stack agreement
+     (`RecursiveBridgePrimitiveStackContracts`) so the remaining bridge
+     assumption is visible.
+   - [ ] Provide a canonical `PrimitiveSound` theorem for the concrete
+     compiler primitive semantics used by the source tower.
+   - [ ] Provide a canonical `RecursiveBridgePrimitiveStackContracts`
+     constructor for all accepted primitives.
+   - [ ] Provide canonical terminal/revert contracts for
+     `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
+   - [ ] Derive `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` from
+     acceptedness/resource facts, or replace it with a smaller fundamental
+     resource premise whose scope is exactly documented and exported.
+   - [ ] Route the preferred top theorem through the canonical semantic
+     constructors so users do not pass arbitrary semantic-contract packages.
+
+3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
+   - [ ] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
+     fundamental gas/oracle assumptions from compiler-derived execution
+     evidence.
+   - [ ] Prove the needed `XResultPreconditionAssumptions` from the checked
+     bytecode trace, target encoding/jumpdest correctness, gas oracle,
+     out-of-gas policy, and explicit sufficient-gas bound.
+   - [ ] Strengthen the preferred gas-aware top theorem so it existentially
+     derives the gas bound and `EVM.X` agreement without taking an external
+     `hX` certificate.
+
 ## Final Nethermind Yul Bridge Completion Steps
 
 This is the checklist for the final blocker: construct the recursive
