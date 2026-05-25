@@ -2,6 +2,8 @@ import EvmCompiler.Yul.RecursiveBridgeSupport
 import EvmCompiler.Yul.NoCallCreate
 import EvmCompiler.Yul.NoCallRuntime
 import EvmCompiler.Functions.SourceLowering
+import EvmCompiler.Objects.Layout
+import EvmCompiler.Solidity.Frontend
 
 namespace EvmCompiler
 namespace LayerAudit
@@ -366,6 +368,31 @@ abbrev objectsSourceCompileAccepted :=
 
 abbrev objectsSourceAcceptedOfAccepted :=
   @Objects.Program.sourceAccepted_of_accepted
+
+namespace ObjectData
+
+abbrev dataSectionPayloadBytes :=
+  @Objects.DataSection.Sections.payloadBytes
+
+noncomputable abbrev objectImageBytes :=
+  @Objects.Object.imageBytes?
+
+noncomputable abbrev objectPayloadLayout :=
+  @Objects.Object.payloadLayout?
+
+noncomputable abbrev programBytecodeImage :=
+  @Objects.Program.bytecodeImage?
+
+abbrev frontendResolveDatasizeToYul :=
+  @Solidity.Frontend.Expr.toYul_after_resolveObjectBuiltins_datasize_namedData
+
+abbrev frontendResolveDataoffsetToYul :=
+  @Solidity.Frontend.Expr.toYul_after_resolveObjectBuiltins_dataoffset_namedDataBase
+
+abbrev frontendResolveDatacopyToYulCodecopy :=
+  @Solidity.Frontend.Expr.toYul_after_resolveObjectBuiltins_datacopy_codecopy
+
+end ObjectData
 
 abbrev yulAccepted :=
   @Yul.Program.Accepted
