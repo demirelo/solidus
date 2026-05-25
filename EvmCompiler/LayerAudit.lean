@@ -404,6 +404,18 @@ abbrev frontendResolveDataoffsetToYul :=
 abbrev frontendResolveDatacopyToYulCodecopy :=
   @Solidity.Frontend.Expr.toYul_after_resolveObjectBuiltins_datacopy_codecopy
 
+noncomputable abbrev frontendCompileCheckedWithLayout :=
+  @Solidity.Frontend.Program.compileCheckedWithLayout?
+
+abbrev frontendCompileCheckedWithLayoutEqSome :=
+  @Solidity.Frontend.Program.compileCheckedWithLayout?_eq_some
+
+noncomputable abbrev frontendCompileCheckedWithLocalDataBase :=
+  @Solidity.Frontend.Program.compileCheckedWithLocalDataBase?
+
+abbrev frontendCompileCheckedWithLocalDataBaseEqSome :=
+  @Solidity.Frontend.Program.compileCheckedWithLocalDataBase?_eq_some
+
 end ObjectData
 
 abbrev yulAccepted :=

@@ -1,5 +1,6 @@
 import EvmCompiler.Yul.Compiler
 import EvmCompiler.Objects.Layout
+import EvmCompiler.Objects.Preservation
 import EvmCompiler.Assembly.Bytecode
 
 namespace EvmCompiler
@@ -1846,6 +1847,20 @@ noncomputable def toObjectsWithLayout? (program : Program)
   let root ← Object.toObjectsWithLayout? program.object layout
   some { root := root }
 
+noncomputable def compileCheckedWithLayout? (program : Program)
+    (layout : ObjectLayout) : Option Assembly.Program := do
+  let lower ← program.toObjectsWithLayout? layout
+  Objects.Source.Program.compileChecked? lower
+
+theorem compileCheckedWithLayout?_eq_some
+    {program : Program} {layout : ObjectLayout}
+    {lower : Objects.Program} {asm : Assembly.Program}
+    (hLower : program.toObjectsWithLayout? layout = some lower)
+    (hCompile :
+      Objects.Source.Program.compileChecked? lower = some asm) :
+    program.compileCheckedWithLayout? layout = some asm := by
+  simp [compileCheckedWithLayout?, hLower, hCompile]
+
 def toObjectsUncheckedWithLayout? (program : Program)
     (layout : ObjectLayout) : Option Objects.Program := do
   let root ← Object.toObjectsUncheckedWithLayout? program.object layout
@@ -1877,6 +1892,21 @@ noncomputable def toObjectsWithLocalDataBase? (program : Program)
     (layout : ObjectLayout) (base : Nat) : Option Objects.Program := do
   let root ← Object.toObjectsWithLocalDataBase? program.object layout base
   some { root := root }
+
+noncomputable def compileCheckedWithLocalDataBase? (program : Program)
+    (layout : ObjectLayout) (base : Nat) : Option Assembly.Program := do
+  let lower ← program.toObjectsWithLocalDataBase? layout base
+  Objects.Source.Program.compileChecked? lower
+
+theorem compileCheckedWithLocalDataBase?_eq_some
+    {program : Program} {layout : ObjectLayout} {base : Nat}
+    {lower : Objects.Program} {asm : Assembly.Program}
+    (hLower :
+      program.toObjectsWithLocalDataBase? layout base = some lower)
+    (hCompile :
+      Objects.Source.Program.compileChecked? lower = some asm) :
+    program.compileCheckedWithLocalDataBase? layout base = some asm := by
+  simp [compileCheckedWithLocalDataBase?, hLower, hCompile]
 
 def toObjectsUncheckedWithLocalDataBase? (program : Program)
     (layout : ObjectLayout) (base : Nat) : Option Objects.Program := do
