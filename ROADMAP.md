@@ -186,6 +186,13 @@ Current assumption-cleanup checkpoint:
     and the matching no-out-of-gas corollary. `LayerAudit`'s preferred
     gas-aware aliases now route through this split-boundary surface rather than
     through the opaque semantic-core bundle.
+  - [x] Shrink the expression result-shape package to the actual remaining
+    resource premise. `ExprEvalResultOkAt.of_noSuccessfulOutOfFuelAt` derives
+    the non-checkpoint part from safe primitive checkpoint lemmas, while
+    `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` states only that safe
+    imported expression evaluation does not succeed with the historical
+    `.OutOfFuel` marker. The preferred gas-aware aliases now route through this
+    smaller expression-resource boundary.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The

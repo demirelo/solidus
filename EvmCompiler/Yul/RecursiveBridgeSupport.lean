@@ -21848,6 +21848,69 @@ def ExprEvalResultOkAt
       .ok (sourceAfter, value) →
     ∃ sharedAfter storeAfter, sourceAfter = .Ok sharedAfter storeAfter
 
+def ExprEvalNoSuccessfulOutOfFuelAt
+    (cfg : StateRelConfig)
+    (layout : List Name)
+    (sourceFuel : Nat) (expr : AstExpr)
+    (codeOverride : Option AstContract) : Prop :=
+  ∀ {source compiler sourceAfter value},
+    SourceStateRel cfg layout source compiler →
+    EvmYul.Yul.eval sourceFuel expr codeOverride source =
+      .ok (sourceAfter, value) →
+    sourceAfter ≠ .OutOfFuel
+
+theorem ExprEvalResultOkAt.of_noSuccessfulOutOfFuelAt
+    {cfg : StateRelConfig}
+    {layout : List Name}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract}
+    (hSafe : Safe.expr expr)
+    (hNoOutOfFuel :
+      ExprEvalNoSuccessfulOutOfFuelAt cfg layout sourceFuel expr
+        codeOverride) :
+    ExprEvalResultOkAt cfg layout sourceFuel expr codeOverride := by
+  intro source compiler sourceAfter value hInitial hEval
+  cases hInitial with
+  | @ok shared store compiler hShared hVars =>
+      have hCheckpoint :
+          SourcePairResultCheckpointAllowed false false false
+            (EvmYul.Yul.eval sourceFuel expr codeOverride
+              (.Ok shared store)) :=
+        (CheckpointExpressionSound.of_callSound
+          (CheckpointCallSound.of_primitiveCallCheckpointAllowedForSafe
+            PrimitiveCallCheckpointAllowedForSafe.of_primitive_families
+            PrimitiveCallCheckpointAllowedForSafeNonOk.of_primitive_families)).eval
+          hSafe (by simp [StateCheckpointAllowed])
+      cases sourceAfter with
+      | OutOfFuel =>
+          exact False.elim
+            (hNoOutOfFuel (SourceStateRel.ok hShared hVars) hEval rfl)
+      | Ok sharedAfter storeAfter =>
+          exact ⟨sharedAfter, storeAfter, rfl⟩
+      | Checkpoint jump =>
+          cases jump with
+          | Break sharedAfter storeAfter =>
+              have hAllowed :
+                  StateCheckpointAllowed false false false
+                    (.Checkpoint (.Break sharedAfter storeAfter)) := by
+                simpa [SourcePairResultCheckpointAllowed, hEval] using
+                  hCheckpoint
+              simp [StateCheckpointAllowed] at hAllowed
+          | Continue sharedAfter storeAfter =>
+              have hAllowed :
+                  StateCheckpointAllowed false false false
+                    (.Checkpoint (.Continue sharedAfter storeAfter)) := by
+                simpa [SourcePairResultCheckpointAllowed, hEval] using
+                  hCheckpoint
+              simp [StateCheckpointAllowed] at hAllowed
+          | Leave sharedAfter storeAfter =>
+              have hAllowed :
+                  StateCheckpointAllowed false false false
+                    (.Checkpoint (.Leave sharedAfter storeAfter)) := by
+                simpa [SourcePairResultCheckpointAllowed, hEval] using
+                  hCheckpoint
+              simp [StateCheckpointAllowed] at hAllowed
+
 theorem ExprEvalPreludeSoundOk.toSound
     {cfg : StateRelConfig}
     {layout : List Name}
@@ -151499,6 +151562,34 @@ structure RecursiveBridgeExprResultContracts
       Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
       Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
         (some program.contract)
+
+structure RecursiveBridgeExprNoSuccessfulOutOfFuelContracts
+    (cfg : Reference.StateRelConfig)
+    (program : Program) : Prop where
+  exprNoSuccessfulOutOfFuel :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr},
+      Reference.Safe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.ExprEvalNoSuccessfulOutOfFuelAt cfg layout
+        fuel expr (some program.contract)
+
+namespace RecursiveBridgeExprResultContracts
+
+theorem ofNoSuccessfulOutOfFuel
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    (hExpr :
+      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program) :
+    RecursiveBridgeExprResultContracts cfg program where
+  exprResultOk := by
+    intro layout fuel expr hSafe hScoped hOk
+    exact
+      Reference.SourceBridgeFacts.ExprEvalResultOkAt.of_noSuccessfulOutOfFuelAt
+        hSafe (hExpr.exprNoSuccessfulOutOfFuel hSafe hScoped hOk)
+
+end RecursiveBridgeExprResultContracts
 
 namespace RecursiveBridgeSemanticContracts
 
