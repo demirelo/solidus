@@ -80,6 +80,12 @@ def conditionShape? (code : Code) (shape : Shape) : Option Shape := do
   | _cond :: rest => if rest = shape then some shape else none
   | _ => none
 
+def valueShape? (code : Code) (shape : Shape) : Option Shape := do
+  let out ← type? code shape
+  match out with
+  | _value :: rest => if rest = shape then some out else none
+  | _ => none
+
 end Code
 
 mutual
@@ -101,7 +107,7 @@ mutual
         | none => some shape
         | some bodyShape => if bodyShape = shape then some shape else none
     | .switch scrutinee cases defaultBody => do
-        let _ ← Code.conditionShape? scrutinee shape
+        let _ ← Code.valueShape? scrutinee shape
         let casesOk ← SwitchCases.regularShape? cases shape
         let defaultOk ← SwitchDefault.regularShape? defaultBody shape
         if casesOk && defaultOk then some shape else none
@@ -196,11 +202,10 @@ mutual
               [exitBlock endLabel shape (some ctx.regular)]
             next := bodyResult.next }
     | .switch scrutinee cases defaultBody => do
-        let _ ← Code.conditionShape? scrutinee shape
+        let valueShape ← Code.valueShape? scrutinee shape
         let firstTestLabel := LabelSupply.label supply 0
         let endLabel := LabelSupply.label supply 1
         let defaultLabel := LabelSupply.label supply 2
-        let valueShape := .word :: shape
         let endKont : Kont := { label := endLabel, shape := shape }
         let testResult ←
           SwitchCases.toCfgTests cases firstTestLabel defaultLabel

@@ -171,6 +171,14 @@ stack-free expression language. In particular it must include conditionals,
 with Yul-like mode propagation. Loops own the `break`/`continue` handlers; a
 function/procedure layer above or alongside it owns the `leave` handler.
 
+Variables and scopes intentionally arrive in the next layer up. They will
+change the compiled stack shape, but that change belongs to the locals
+compiler, not to the locals source semantics: a declaration extends the typed
+CFG shape with symbolic local slots, assignments update those slots, and every
+normal or abrupt block exit unwinds to the enclosing continuation shape. Higher
+layers should see only a varstore/scope semantics, while typed CFG sees the
+symbolic stack contract that implements it.
+
 ## Yul Surface Audit
 
 The typed CFG should be broad enough that Yul does not force a redesign later:
