@@ -512,6 +512,18 @@ abbrev localsSourcePrimitiveSemanticsStructured :=
 abbrev localsSourceLoweringPrimitiveSound :=
   @Locals.SourceLowering.PrimitiveSound
 
+abbrev localsSourcePrimitiveSemanticsStructuredEvalStep :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_eval_step
+
+abbrev localsSourcePrimitiveSemanticsStructuredEvalStepExists :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_eval_step_exists
+
+abbrev localsSourcePrimitiveSemanticsStructuredEvalLength :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_eval_length
+
+abbrev localsSourcePrimitiveSemanticsStructuredPrimitiveSound :=
+  @Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
+
 abbrev localsSourceLoweringPrimitiveSoundTerminalStep :=
   @Locals.SourceLowering.PrimitiveSound.terminal_step
 

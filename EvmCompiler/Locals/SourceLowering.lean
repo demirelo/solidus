@@ -668,6 +668,24 @@ theorem sourceContinuingStep_run_suffix_sound
   Assembly.PrimStep.run_suffix_sound_safe
     (sourceContinuingStep_suffix_safe hStep) hIso hShared hStack hRun
 
+theorem sourceContinuingStep_run_suffix_exists
+    {op : Structured.BasicOp} {step : Assembly.PrimStep}
+    {shared : EvmYul.SharedState .EVM}
+    {stack baseStack : EvmYul.Stack Word}
+    {iso' evm : EVMState}
+    (hStep :
+      Source.PrimitiveSemantics.sourceContinuingStep? op = some step)
+    (hIso :
+      step.run (Assembly.PrimStep.isoState shared stack) = .ok iso')
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = stack ++ baseStack) :
+    ∃ evm',
+      step.run evm = .ok evm' ∧
+        evm'.toSharedState = iso'.toSharedState ∧
+          evm'.stack = iso'.stack ++ baseStack :=
+  Assembly.PrimStep.run_suffix_exists_safe
+    (sourceContinuingStep_suffix_safe hStep) hIso hShared hStack
+
 theorem sourceContinuingStep_basicOp_step
     {op : Structured.BasicOp} {step : Assembly.PrimStep}
     (hStep :
@@ -722,6 +740,49 @@ theorem structured_eval_step
             subst shared'
             subst values'
             constructor
+            · exact hShared'
+            · simpa using hStack'
+  · simp [hLen] at hEval
+
+theorem structured_eval_step_exists
+    {op : Structured.BasicOp}
+    {shared shared' : EvmYul.SharedState .EVM}
+    {values values' : List Word} {evm : EVMState}
+    {baseStack : EvmYul.Stack Word}
+    (hEval :
+      Source.PrimitiveSemantics.structured.eval op shared values =
+        .ok (shared', values'))
+    (hShared : evm.toSharedState = shared)
+    (hStack : evm.stack = values.reverse ++ baseStack) :
+    ∃ evm',
+      Structured.BasicOp.step op evm = .ok evm' ∧
+        evm'.toSharedState = shared' ∧
+          evm'.stack = values'.reverse ++ baseStack := by
+  dsimp [Source.PrimitiveSemantics.structured] at hEval
+  by_cases hLen : values.length = Expressions.Structured.BasicOp.inputs op
+  · cases hCont : Source.PrimitiveSemantics.sourceContinuingStep? op with
+    | none =>
+        simp [hLen, hCont] at hEval
+    | some step =>
+        simp [hLen, hCont] at hEval
+        cases hIsoRun :
+            step.run (Assembly.PrimStep.isoState shared values.reverse) with
+        | error err =>
+            simp [hIsoRun] at hEval
+        | ok iso' =>
+            simp [hIsoRun] at hEval
+            rcases
+              sourceContinuingStep_run_suffix_exists
+                (op := op) (step := step) (shared := shared)
+                (stack := values.reverse) (baseStack := baseStack)
+                (iso' := iso') (evm := evm)
+                hCont hIsoRun hShared hStack with
+            ⟨evm', hRun, hShared', hStack'⟩
+            rcases hEval with ⟨hSharedEq, hValuesEq⟩
+            subst shared'
+            subst values'
+            refine ⟨evm', ?_, ?_, ?_⟩
+            · simpa [sourceContinuingStep_basicOp_step hCont evm] using hRun
             · exact hShared'
             · simpa using hStack'
   · simp [hLen] at hEval
@@ -1290,6 +1351,19 @@ theorem structured_terminal_step_exists
   · exact structured_terminal_return_step_exists hEval hShared hStack
   · exact structured_terminal_revert_step_exists hEval hShared hStack
   · exact structured_terminal_selfdestruct_step_exists hEval hShared hStack
+
+theorem structured_primitiveSound :
+    PrimitiveSound Source.PrimitiveSemantics.structured where
+  eval_step hEval hShared hStack hStep :=
+    structured_eval_step hEval hShared hStack hStep
+  eval_step_exists hEval hShared hStack :=
+    structured_eval_step_exists hEval hShared hStack
+  eval_length hEval :=
+    structured_eval_length hEval
+  terminal_step hEval hShared hStack hStep :=
+    structured_terminal_step hEval hShared hStack hStep
+  terminal_step_exists hEval hShared hStack :=
+    structured_terminal_step_exists hEval hShared hStack
 
 end PrimitiveSemantics
 
