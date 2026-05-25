@@ -4934,6 +4934,16 @@ def PrimitiveStackSoundAtArity
       SourceStateRel cfg layout sourceAfterPrim
         (compilerAfterArgs.withShared sharedAfter)
 
+theorem primitiveStackSoundAtArity_of_stackSoundAt
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op) :
+    PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel _hArity hCall
+  exact hPrim hRel hCall
+
 def YulPrimitiveTernaryOneSound
     (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
     (sourceStep :

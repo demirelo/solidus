@@ -127,6 +127,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Prove imported `evalArgs` length preservation for successful
        argument evaluation, giving the recursive bridge the source-side arity
        evidence needed by arity-aware primitive-stack contracts.
+     - [x] Introduce an arity-aware recursive primitive-stack contract package
+       and a checked lift from the old strict package, so permissive imported
+       nullaries and strict dispatcher primitives can coexist during migration.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

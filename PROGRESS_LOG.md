@@ -3327,3 +3327,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 08:01:59 PDT - proof - instantiated the arity-aware nullary block/state primitive stack bridge for PREVRANDAO/BASEFEE/BLOBBASEFEE/COINBASE/TIMESTAMP/NUMBER/GASLIMIT/CHAINID/SELFBALANCE; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
 
 - 2026-05-25 08:10:47 PDT - proof - proved imported `evalArgs_length_of_ok` and exported it as arity evidence for the upcoming arity-aware primitive-stack contract integration; command `lake build EvmCompiler.Yul.Reference EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.
+
+- 2026-05-25 08:16:42 PDT - proof - introduced arity-aware recursive primitive-stack contracts plus a checked lift from existing strict primitive-stack contracts; command `lake build EvmCompiler.Yul.Reference EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.LayerAudit` green, `git diff --check` green, local sorry/axiom scan over touched Lean files clean.

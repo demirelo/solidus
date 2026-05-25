@@ -2760,6 +2760,12 @@ abbrev recursiveBridgePrimitiveContracts :=
 abbrev recursiveBridgePrimitiveStackContracts :=
   @Yul.Program.RecursiveBridgePrimitiveStackContracts
 
+abbrev recursiveBridgePrimitiveStackArityContracts :=
+  @Yul.Program.RecursiveBridgePrimitiveStackArityContracts
+
+abbrev recursiveBridgePrimitiveStackArityContractsOfStrict :=
+  @Yul.Program.RecursiveBridgePrimitiveStackArityContracts.of_strict
+
 abbrev recursiveBridgePrimitiveContractsOfStack :=
   @Yul.Program.RecursiveBridgePrimitiveContracts.of_stack
 
@@ -3401,6 +3407,9 @@ abbrev primitiveStackSoundAt :=
 
 abbrev primitiveStackSoundAtArity :=
   @Yul.Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity
+
+abbrev primitiveStackSoundAtArityOfStackSoundAt :=
+  @Yul.Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
 
 abbrev yulPrimitiveBinaryOneSound :=
   @Yul.Reference.SourceBridgeFacts.YulPrimitiveBinaryOneSound

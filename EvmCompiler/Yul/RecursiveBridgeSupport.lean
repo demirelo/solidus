@@ -151588,6 +151588,40 @@ structure RecursiveBridgePrimitiveStackContracts
       Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
         yulPrim op
 
+/--
+Arity-aware imported-Yul primitive stack contract.
+
+This is the correct public shape for imported primitives whose raw Nethermind
+dispatcher is permissive about extra arguments. The recursive bridge derives
+the arity premise from successful `evalArgs`; individual primitive facts do
+not need to pretend the imported dispatcher rejects malformed raw calls.
+-/
+structure RecursiveBridgePrimitiveStackArityContracts
+    (cfg : Reference.StateRelConfig)
+    (prim : Objects.Source.PrimitiveSemantics) : Prop where
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
+
+namespace RecursiveBridgePrimitiveStackArityContracts
+
+theorem of_strict
+    {cfg : Reference.StateRelConfig}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hStack : RecursiveBridgePrimitiveStackContracts cfg prim) :
+    RecursiveBridgePrimitiveStackArityContracts cfg prim where
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
+        (hStack.primitiveStack hSafe hBasic)
+
+end RecursiveBridgePrimitiveStackArityContracts
+
 structure RecursiveBridgeTerminalContracts
     (cfg : Reference.StateRelConfig)
     (terminalRel :
