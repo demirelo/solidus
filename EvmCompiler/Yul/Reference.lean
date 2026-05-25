@@ -4810,6 +4810,35 @@ def SourcePrimitiveUnaryOneSound
     prim.eval op shared [value] =
       .ok (targetStep shared value, [targetResult value])
 
+def YulPrimitiveTernaryOneSound
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (sourceStep :
+      EvmYul.SharedState .Yul → Word → Word → Word →
+        EvmYul.SharedState .Yul)
+    (sourceResult : Word → Word → Word → Word) : Prop :=
+  ∀ {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {sourceValues : List Word}
+    {sourceAfterPrim : State} {values' : List Word},
+    EvmYul.Yul.primCall sourceFuel (.Ok sourceShared store) yulPrim
+        sourceValues =
+      .ok (sourceAfterPrim, values') →
+    ∃ left : Word, ∃ middle : Word, ∃ right : Word,
+      sourceValues = [left, middle, right] ∧
+        sourceAfterPrim =
+          .Ok (sourceStep sourceShared left middle right) store ∧
+          values' = [sourceResult left middle right]
+
+def SourcePrimitiveTernaryOneSound
+    (prim : Objects.Source.PrimitiveSemantics) (op : Structured.BasicOp)
+    (targetStep :
+      EvmYul.SharedState .EVM → Word → Word → Word →
+        EvmYul.SharedState .EVM)
+    (targetResult : Word → Word → Word → Word) : Prop :=
+  ∀ (shared : EvmYul.SharedState .EVM) (left middle right : Word),
+    prim.eval op shared [right, middle, left] =
+      .ok (targetStep shared left middle right,
+        [targetResult left middle right])
+
 theorem primitiveStackSoundAt_of_binary_zero
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
@@ -4961,6 +4990,50 @@ theorem primitiveStackSoundAt_of_unary_one
       · simpa [hResult value] using
           hEval compilerAfterArgs.shared value
       · exact SourceStateRel.ok (hSharedRel value hShared) hVars
+
+theorem primitiveStackSoundAt_of_ternary_one
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (sourceStep :
+      EvmYul.SharedState .Yul → Word → Word → Word →
+        EvmYul.SharedState .Yul)
+    (targetStep :
+      EvmYul.SharedState .EVM → Word → Word → Word →
+        EvmYul.SharedState .EVM)
+    (sourceResult targetResult : Word → Word → Word → Word)
+    (hYul :
+      YulPrimitiveTernaryOneSound sourceFuel yulPrim sourceStep
+        sourceResult)
+    (hEval :
+      SourcePrimitiveTernaryOneSound prim op targetStep targetResult)
+    (hResult :
+      ∀ left middle right,
+        sourceResult left middle right = targetResult left middle right)
+    (hSharedRel :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM}
+        (left middle right : Word),
+        SharedStateRel cfg sourceShared targetShared →
+          SharedStateRel cfg
+            (sourceStep sourceShared left middle right)
+            (targetStep targetShared left middle right)) :
+    PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim
+    values' hRel hCall
+  cases hRel with
+  | @ok sourceShared store compilerState hShared hVars =>
+      rcases hYul hCall with
+        ⟨left, middle, right, hValues, hAfter, hResults⟩
+      subst sourceValues
+      subst sourceAfterPrim
+      subst values'
+      refine
+        ⟨targetStep compilerAfterArgs.shared left middle right, ?_, ?_⟩
+      · simpa [hResult left middle right] using
+          hEval compilerAfterArgs.shared left middle right
+      · exact
+          SourceStateRel.ok (hSharedRel left middle right hShared) hVars
 
 theorem yul_primCall_succ_add_eq
     (fuel : Nat) (source : State) (args : List Word) :
@@ -5217,6 +5290,28 @@ theorem yul_primCall_succ_not_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_addmod_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.ADDMOD : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execTriOp EvmYul.UInt256.addMod source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
+theorem yul_primCall_succ_mulmod_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.MULMOD : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.execTriOp EvmYul.UInt256.mulMod source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yulPrimitiveBinaryOneSound_of_execBinOp
     {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
     (f : EvmYul.Primop.Binary)
@@ -5282,6 +5377,45 @@ theorem yulPrimitiveUnaryOneSound_of_execUnOp
               exact ⟨value, rfl, rfl, rfl⟩
           | cons extra restRest =>
               simp [EvmYul.Yul.execUnOp] at hCall
+
+theorem yulPrimitiveTernaryOneSound_of_execTriOp
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    (f : EvmYul.Primop.Ternary)
+    (hPrim :
+      ∀ (fuel : Nat) (source : State) (args : List Word),
+        EvmYul.Yul.primCall fuel.succ source yulPrim args =
+          (match EvmYul.Yul.execTriOp f source args with
+          | .ok (state, value?) => .ok (state, value?.toList)
+          | .error err => .error err)) :
+    YulPrimitiveTernaryOneSound sourceFuel yulPrim
+      (fun shared _left _middle _right => shared) f := by
+  intro sourceShared store sourceValues sourceAfterPrim values' hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      rw [hPrim fuel (.Ok sourceShared store) sourceValues] at hCall
+      cases sourceValues with
+      | nil =>
+          simp [EvmYul.Yul.execTriOp] at hCall
+      | cons left rest =>
+          cases rest with
+          | nil =>
+              simp [EvmYul.Yul.execTriOp] at hCall
+          | cons middle restTail =>
+              cases restTail with
+              | nil =>
+                  simp [EvmYul.Yul.execTriOp] at hCall
+              | cons right restRest =>
+                  cases restRest with
+                  | nil =>
+                      simp [EvmYul.Yul.execTriOp] at hCall
+                      rcases hCall with ⟨hState, hValues⟩
+                      subst sourceAfterPrim
+                      subst values'
+                      exact ⟨left, middle, right, rfl, rfl, rfl⟩
+                  | cons extra restRestRest =>
+                      simp [EvmYul.Yul.execTriOp] at hCall
 
 theorem yulPrimitiveBinaryOneSound_add
     {sourceFuel : Nat} :
@@ -5489,6 +5623,24 @@ theorem yulPrimitiveUnaryOneSound_not
       EvmYul.UInt256.lnot :=
   yulPrimitiveUnaryOneSound_of_execUnOp
     EvmYul.UInt256.lnot yul_primCall_succ_not_eq
+
+theorem yulPrimitiveTernaryOneSound_addmod
+    {sourceFuel : Nat} :
+    YulPrimitiveTernaryOneSound sourceFuel
+      ((.StopArith .ADDMOD : EvmYul.Operation .Yul))
+      (fun shared _left _middle _right => shared)
+      EvmYul.UInt256.addMod :=
+  yulPrimitiveTernaryOneSound_of_execTriOp
+    EvmYul.UInt256.addMod yul_primCall_succ_addmod_eq
+
+theorem yulPrimitiveTernaryOneSound_mulmod
+    {sourceFuel : Nat} :
+    YulPrimitiveTernaryOneSound sourceFuel
+      ((.StopArith .MULMOD : EvmYul.Operation .Yul))
+      (fun shared _left _middle _right => shared)
+      EvmYul.UInt256.mulMod :=
+  yulPrimitiveTernaryOneSound_of_execTriOp
+    EvmYul.UInt256.mulMod yul_primCall_succ_mulmod_eq
 
 theorem sourcePrimitiveBinaryOneSound_structured_of_bin
     {op : Structured.BasicOp} (f : EvmYul.Primop.Binary)
@@ -5756,6 +5908,54 @@ theorem sourcePrimitiveUnaryOneSound_structured_not :
       (fun shared _value => shared) EvmYul.UInt256.lnot :=
   sourcePrimitiveUnaryOneSound_structured_of_un
     EvmYul.UInt256.lnot (by rfl)
+
+theorem sourcePrimitiveTernaryOneSound_structured_of_tri
+    {op : Structured.BasicOp} (f : EvmYul.Primop.Ternary)
+    (hStep :
+      Locals.Source.PrimitiveSemantics.sourceContinuingStep? op =
+        some (.tri f)) :
+    SourcePrimitiveTernaryOneSound
+      Locals.Source.PrimitiveSemantics.structured op
+      (fun shared _left _middle _right => shared) f := by
+  intro shared left middle right
+  let state' : EVMState :=
+    { toSharedState := shared,
+      pc := EvmYul.UInt256.ofNat 0 + EvmYul.UInt256.ofNat 1,
+      stack := [f left middle right],
+      execLength := 0 }
+  exact
+    Locals.SourceLowering.PrimitiveSemantics.structured_eval_of_sourceContinuingStep_run
+      (op := op) (step := .tri f)
+      (shared := shared) (shared' := shared)
+      (values := [right, middle, left])
+      (values' := [f left middle right])
+      (state' := state')
+      (by
+        have hInput :=
+          Locals.SourceLowering.PrimitiveSemantics.sourceContinuingStep_inputArity
+            hStep
+        simpa [Assembly.PrimStep.inputArity] using hInput)
+      hStep
+      (by
+        simp [state', Assembly.PrimStep.run, EvmYul.EVM.execTriOp,
+          EvmYul.Stack.pop3, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+        rfl)
+      (by simp [state']) (by simp [state'])
+
+theorem sourcePrimitiveTernaryOneSound_structured_addmod :
+    SourcePrimitiveTernaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .addmod
+      (fun shared _left _middle _right => shared) EvmYul.UInt256.addMod :=
+  sourcePrimitiveTernaryOneSound_structured_of_tri
+    EvmYul.UInt256.addMod (by rfl)
+
+theorem sourcePrimitiveTernaryOneSound_structured_mulmod :
+    SourcePrimitiveTernaryOneSound
+      Locals.Source.PrimitiveSemantics.structured .mulmod
+      (fun shared _left _middle _right => shared) EvmYul.UInt256.mulMod :=
+  sourcePrimitiveTernaryOneSound_structured_of_tri
+    EvmYul.UInt256.mulMod (by rfl)
 
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -6068,6 +6268,51 @@ theorem primitiveStackSoundAt_structured_not
   primitiveStackSoundAt_structured_of_pure_un
     EvmYul.UInt256.lnot yulPrimitiveUnaryOneSound_not
     sourcePrimitiveUnaryOneSound_structured_not
+
+theorem primitiveStackSoundAt_structured_of_pure_tri
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (f : EvmYul.Primop.Ternary)
+    (hYul :
+      YulPrimitiveTernaryOneSound sourceFuel yulPrim
+        (fun shared _left _middle _right => shared) f)
+    (hSource :
+      SourcePrimitiveTernaryOneSound
+        Locals.Source.PrimitiveSemantics.structured op
+        (fun shared _left _middle _right => shared) f) :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel yulPrim op := by
+  exact
+    primitiveStackSoundAt_of_ternary_one
+      (cfg := cfg) (layout := layout)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (sourceFuel := sourceFuel)
+      (yulPrim := yulPrim) (op := op)
+      (fun shared _left _middle _right => shared)
+      (fun shared _left _middle _right => shared)
+      f f hYul hSource
+      (by intro left middle right; rfl)
+      (by
+        intro sourceShared targetShared left middle right hShared
+        exact hShared)
+
+theorem primitiveStackSoundAt_structured_addmod
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .ADDMOD : EvmYul.Operation .Yul)) .addmod :=
+  primitiveStackSoundAt_structured_of_pure_tri
+    EvmYul.UInt256.addMod yulPrimitiveTernaryOneSound_addmod
+    sourcePrimitiveTernaryOneSound_structured_addmod
+
+theorem primitiveStackSoundAt_structured_mulmod
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StopArith .MULMOD : EvmYul.Operation .Yul)) .mulmod :=
+  primitiveStackSoundAt_structured_of_pure_tri
+    EvmYul.UInt256.mulMod yulPrimitiveTernaryOneSound_mulmod
+    sourcePrimitiveTernaryOneSound_structured_mulmod
 
 theorem primitiveStackSoundAt_mstore
     {cfg : StateRelConfig} {layout : List Name}

@@ -97,6 +97,8 @@ Last updated: 2026-05-25 06:52 PDT.
        `LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`.
      - [x] Add the reusable unary-one-result bridge shape and instantiate it
        for the pure comparison/bitwise primitives `ISZERO` and `NOT`.
+     - [x] Add the reusable ternary-one-result bridge shape and instantiate it
+       for the pure arithmetic primitives `ADDMOD` and `MULMOD`.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for
