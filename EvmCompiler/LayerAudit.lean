@@ -6219,6 +6219,9 @@ abbrev lower1PrimExprEvalPreludeSoundOfLowerBound1RegularAtNoScope :=
 abbrev lower1PrimExprEvalPreludeSoundOfLowerBound1RegularAtNoScopeArity :=
   @Yul.Reference.SourceBridgeFacts.lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope_arity
 
+abbrev lower1ExprEvalPreludeSoundOfArgRegularAllScopedAtArity :=
+  @Yul.Reference.SourceBridgeFacts.lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt_arity
+
 abbrev pureAliasPrimCallOkSingle :=
   @Yul.Reference.SourceBridgeFacts.pureAliasPrim_primCall_ok_single
 

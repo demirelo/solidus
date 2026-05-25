@@ -3339,3 +3339,5 @@ proof/yul-accepted-expr-terminal-user-calls: added and exported accepted-program
 - 2026-05-25 08:47:00 PDT - proof - added arity-aware one-result primitive expression-evaluation wrappers (`regularAt` and hidden-context/no-scope) and rewired the old strict wrappers through the checked arity lift; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.
 
 - 2026-05-25 09:05:00 PDT - proof - introduced arity-aware recursive primitive/semantic contract packages plus strict-to-arity compatibility constructors, giving the imported-Yul bridge a named contract boundary that can represent permissive raw nullary `primCall` semantics honestly; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.
+
+- 2026-05-25 09:18:00 PDT - proof - migrated the recursive one-result expression dispatcher to an arity-aware primitive stack premise, retaining the old strict theorem as a checked wrapper; focused `lake build EvmCompiler.Yul.RecursiveBridgeSupport` green.

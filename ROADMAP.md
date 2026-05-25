@@ -141,6 +141,9 @@ Last updated: 2026-05-25 06:52 PDT.
      - [x] Add arity-aware primitive and semantic contract packages, with
        checked strict-to-arity compatibility constructors, so the public
        boundary can migrate away from raw-`primCall` strictness.
+     - [x] Migrate the recursive one-result expression dispatcher to an
+       arity-aware primitive stack premise, with the old dispatcher retained
+       as a checked strict-compatibility wrapper.
    - [ ] Provide canonical terminal/revert contracts for
      `STOP`/`RETURN`/`REVERT`/`SELFDESTRUCT`.
      - [x] Prove the canonical `STOP` terminal step/existence lemmas for

@@ -60092,7 +60092,7 @@ stack-primitive soundness interface.  User-function calls go through the
 accepted recursive callee bridge and require the explicit ordinary-`Ok` result
 condition that rules out the imported success-valued `OutOfFuel` marker.
 -/
-theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt
+theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt_arity
     {cfg : StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -60118,7 +60118,7 @@ theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafe : Safe.expr expr)
     (hScoped : SourceExprScoped layout expr)
@@ -60194,7 +60194,7 @@ theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt
                           hArgs.lower (Nat.le_refl sourceFuel) hCovers
                             hSafeArgs hScopedArgs hLowerArgs
                         rcases
-                            lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt
+                            lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_arity
                               (cfg := cfg) (layout := layout) (prim := prim)
                               (program := program) (ctx := ctx)
                               (sourceFuel := sourceFuel)
@@ -60228,6 +60228,59 @@ theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt
               (lowerExpr := lowerExpr)
               hRecursive hCallFuel hLayoutSubset hArgs hCovers hSafe
               hScoped hOk hResultOk hLower
+
+theorem lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {coverLayout layout : List Name}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNames cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hCallFuel : sourceFuel.succ ≤ bound)
+    (hScope : ctx.scope = layout)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hArgs :
+      SourceArgListPreludeRegularAllScopedAt cfg layout prim program
+        (some yulProgram.contract) coverLayout sourceFuel)
+    (hPrimSound :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hOk : UserCallArity.ExprOk yulProgram.contract expr)
+    (hResultOk :
+      ExprEvalResultOkAt cfg layout sourceFuel.succ expr
+        (some yulProgram.contract))
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lowerExpr, freshState')) :
+    ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ expr
+      (some yulProgram.contract) pre lowerExpr :=
+  lower1?_exprEvalPreludeSound_of_argRegularAllScopedAt_arity
+    (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (yulProgram := yulProgram) (program := program)
+    (context := context) (bound := bound) (ctx := ctx)
+    (coverLayout := coverLayout) (layout := layout)
+    (sourceFuel := sourceFuel) (expr := expr) (freshState := freshState)
+    (freshState' := freshState') (pre := pre) (lowerExpr := lowerExpr)
+    hRecursive hCallFuel hScope hLayoutSubset hArgs
+    (by
+      intro yulPrim op hSafe hBasic hOutputs
+      exact
+        primitiveStackSoundAtArity_of_stackSoundAt
+          (hPrimSound hSafe hBasic hOutputs))
+    hCovers hSafe hScoped hOk hResultOk hLower
 
 /--
 Checked sibling of
