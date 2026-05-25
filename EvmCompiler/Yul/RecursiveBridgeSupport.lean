@@ -151437,6 +151437,69 @@ structure RecursiveBridgeSemanticCoreContracts
       Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
         (some program.contract)
 
+structure RecursiveBridgePrimitiveContracts
+    (cfg : Reference.StateRelConfig)
+    (prim : Objects.Source.PrimitiveSemantics) : Prop where
+  primitiveSound : Locals.SourceLowering.PrimitiveSound prim
+  primitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
+        yulPrim op
+
+structure RecursiveBridgeTerminalContracts
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Program) : Prop where
+  terminal :
+    ∀ {layout outcomeLayout : List Name}
+      {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+      {args : List AstExpr} {rest : List AstStmt}
+      {allowed : Except Reference.Exception Reference.State → Prop}
+      {argFuel : Nat}
+      {source compiler sourceResult}
+      {sourceAfterArgs : Reference.State} {sourceValues : List Word},
+      Prim.terminal? yulPrim = some kind →
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout source
+        compiler →
+      allowed sourceResult →
+      EvmYul.Yul.execSeq argFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          (some program.contract) source =
+        sourceResult →
+      EvmYul.Yul.evalArgs argFuel args.reverse
+          (some program.contract) source =
+        .ok (sourceAfterArgs, sourceValues.reverse) →
+      ∀ {compilerAfterArgs : Objects.Source.State},
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout
+          sourceAfterArgs compilerAfterArgs →
+          ∃ sharedAfter : EvmYul.SharedState .EVM,
+            prim.terminal kind compilerAfterArgs.shared
+                sourceValues.reverse =
+              .ok sharedAfter ∧
+            Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg
+              outcomeLayout terminalRel revertRel sourceResult
+              (Functions.Source.Outcome.halt kind
+                (compilerAfterArgs.withShared sharedAfter))
+
+structure RecursiveBridgeExprResultContracts
+    (cfg : Reference.StateRelConfig)
+    (program : Program) : Prop where
+  exprResultOk :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr},
+      Reference.Safe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
+        (some program.contract)
+
 namespace RecursiveBridgeSemanticContracts
 
 /--
@@ -151566,6 +151629,26 @@ theorem of_canonical_observation
 end RecursiveBridgeSemanticContracts
 
 namespace RecursiveBridgeSemanticCoreContracts
+
+theorem ofBoundaries
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Program}
+    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim)
+    (hTerminal :
+      RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
+        program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program) :
+    RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
+      program where
+  primitiveSound := hPrimitive.primitiveSound
+  terminal := hTerminal.terminal
+  primitiveStack := hPrimitive.primitiveStack
+  exprResultOk := hExpr.exprResultOk
 
 theorem ofSemanticContracts
     {cfg : Reference.StateRelConfig}

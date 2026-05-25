@@ -173,6 +173,13 @@ Current assumption-cleanup checkpoint:
   - [x] Add the reverse projection
     `RecursiveBridgeSemanticCoreContracts.ofSemanticContracts`, making the
     semantic core/redundant-observation split explicit in both directions.
+  - [x] Split the remaining semantic core into named boundary packages:
+    `RecursiveBridgePrimitiveContracts`,
+    `RecursiveBridgeTerminalContracts`, and
+    `RecursiveBridgeExprResultContracts`, with a checked constructor
+    `RecursiveBridgeSemanticCoreContracts.ofBoundaries`. This makes clear which
+    fields are shared primitive semantics, terminal/revert semantics, and
+    imported-Yul expression result-shape/resource behavior.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The

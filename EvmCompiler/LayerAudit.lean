@@ -2612,11 +2612,23 @@ abbrev recursiveBridgeSemanticContracts :=
 abbrev recursiveBridgeSemanticCoreContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts
 
+abbrev recursiveBridgePrimitiveContracts :=
+  @Yul.Program.RecursiveBridgePrimitiveContracts
+
+abbrev recursiveBridgeTerminalContracts :=
+  @Yul.Program.RecursiveBridgeTerminalContracts
+
+abbrev recursiveBridgeExprResultContracts :=
+  @Yul.Program.RecursiveBridgeExprResultContracts
+
 abbrev recursiveBridgeSemanticDispatcherOutcomeRel :=
   @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
 
 abbrev recursiveBridgeSemanticCanonicalObservation :=
   @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherObservationSound_canonical
+
+abbrev recursiveBridgeSemanticCoreOfBoundaries :=
+  @Yul.Program.RecursiveBridgeSemanticCoreContracts.ofBoundaries
 
 abbrev recursiveBridgeSemanticCoreToContracts :=
   @Yul.Program.RecursiveBridgeSemanticCoreContracts.toSemanticContracts
