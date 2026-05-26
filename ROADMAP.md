@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 18:30 PDT.
+Last updated: 2026-05-25 18:40 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -93,6 +93,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Reject raw `DUP`/`SWAP` and `PC` at this source layer: Yul does not expose
     them, and any future PC-like feature should be an explicit oracle rather
     than the isolated primitive adapter's synthetic program counter.
+  - Provide executable `Program.accepted?` for the compiler gate; theorem work
+    still needs to connect this checker to the Prop-level `Accepted`.
 - [x] Create `EvmCompiler.StackFreeCfg.Compiler`.
   - Compile StackFreeCfg to `TypedCfg`.
   - The compiler owns all stack facts: source-variable layout, typed-CFG
@@ -101,6 +103,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Current checkpoint produces checked `TypedCfg`; the typed-CFG backend now
     lowers the generated multi-local symbolic effects to labeled assembly when
     the needed `DUP`/`SWAP` accesses are representable by the current backend.
+  - Public `toCfg?`/`toCheckedCfg?` are gated by source acceptedness; the raw
+    `toUncheckedCfg?` builder remains available for compiler debugging.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.

@@ -70,6 +70,9 @@ def Contains (env : List Name) (name : Name) : Prop :=
 def containsAll (env names : List Name) : Prop :=
   ∀ name, name ∈ names → Contains env name
 
+def containsAll? (env names : List Name) : Bool :=
+  names.all (fun name => decide (name ∈ env))
+
 def disjoint (left right : List Name) : Prop :=
   ∀ name, name ∈ left → name ∉ right
 
@@ -118,6 +121,24 @@ def ExprList.AllOne (profile : PrimitiveProfile) (env : List Name) :
   | [] => True
   | expr :: rest =>
       Expr.One profile env expr ∧ ExprList.AllOne profile env rest
+
+def Expr.one? (profile : PrimitiveProfile) (env : List Name)
+    (expr : Expr) : Bool :=
+  decide (Expr.Arity profile env expr = some 1)
+
+def Expr.zero? (profile : PrimitiveProfile) (env : List Name)
+    (expr : Expr) : Bool :=
+  decide (Expr.Arity profile env expr = some 0)
+
+def Expr.arityIs? (profile : PrimitiveProfile) (env : List Name)
+    (expr : Expr) (arity : Nat) : Bool :=
+  decide (Expr.Arity profile env expr = some arity)
+
+def ExprList.allOne? (profile : PrimitiveProfile) (env : List Name) :
+    List Expr → Bool
+  | [] => true
+  | expr :: rest =>
+      Expr.one? profile env expr && ExprList.allOne? profile env rest
 
 mutual
   def Block.OutEnv (env : List Name) : Block → Option (List Name)
@@ -218,6 +239,87 @@ mutual
         Block.Accepted profile sigs canBreak canContinue canLeave env body
 end
 
+mutual
+  def Block.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+      (canBreak canContinue canLeave : Bool) (env : List Name) :
+      Block → Bool
+    | ⟨stmts⟩ =>
+        StmtList.accepted? profile sigs canBreak canContinue canLeave env stmts
+
+  def StmtList.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+      (canBreak canContinue canLeave : Bool) (env : List Name) :
+      List Stmt → Bool
+    | [] => true
+    | stmt :: rest =>
+        Stmt.accepted? profile sigs canBreak canContinue canLeave env stmt &&
+          match Stmt.OutEnv env stmt with
+          | some env' =>
+              StmtList.accepted? profile sigs canBreak canContinue canLeave
+                env' rest
+          | none => false
+
+  def Stmt.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+      (canBreak canContinue canLeave : Bool) (env : List Name) :
+      Stmt → Bool
+    | .expr expr =>
+        Expr.zero? profile env expr
+    | .decl names value? =>
+        decide names.Nodup && disjoint? names env &&
+          match value? with
+          | none => true
+          | some value => Expr.arityIs? profile env value names.length
+    | .assign names value =>
+        decide names.Nodup && containsAll? env names &&
+          Expr.arityIs? profile env value names.length
+    | .block body =>
+        Block.accepted? profile sigs canBreak canContinue canLeave env body
+    | .if_ cond body =>
+        Expr.one? profile env cond &&
+          Block.accepted? profile sigs canBreak canContinue canLeave env body
+    | .switch scrutinee cases defaultBody =>
+        Expr.one? profile env scrutinee &&
+          Cases.accepted? profile sigs canBreak canContinue canLeave env cases &&
+          Default.accepted? profile sigs canBreak canContinue canLeave env
+            defaultBody
+    | .for_ init cond post body =>
+        Block.accepted? profile sigs false false canLeave env init &&
+          match Block.OutEnv env init with
+          | some loopEnv =>
+              Expr.one? profile loopEnv cond &&
+                Block.accepted? profile sigs false false canLeave loopEnv post &&
+                Block.accepted? profile sigs true true canLeave loopEnv body
+          | none => false
+    | .brk => canBreak
+    | .cont => canContinue
+    | .leave => canLeave
+    | .call targets functionName args =>
+        match Signature.find? sigs functionName with
+        | none => false
+        | some sig =>
+            decide targets.Nodup && containsAll? env targets &&
+              decide (targets.length = sig.returns) &&
+              decide (args.length = sig.params) &&
+              ExprList.allOne? profile env args
+    | .terminal kind args =>
+        decide (args.length = profile.terminalArity kind) &&
+          ExprList.allOne? profile env args
+
+  def Cases.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+      (canBreak canContinue canLeave : Bool) (env : List Name) :
+      List (Word × Block) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        Block.accepted? profile sigs canBreak canContinue canLeave env body &&
+          Cases.accepted? profile sigs canBreak canContinue canLeave env rest
+
+  def Default.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+      (canBreak canContinue canLeave : Bool) (env : List Name) :
+      Option Block → Bool
+    | none => true
+    | some body =>
+        Block.accepted? profile sigs canBreak canContinue canLeave env body
+end
+
 end Scope
 
 namespace Proc
@@ -226,6 +328,12 @@ def Accepted (profile : PrimitiveProfile) (sigs : List Signature.T)
     (proc : Proc) : Prop :=
   (proc.returns ++ proc.params).Nodup ∧
     Scope.Block.Accepted profile sigs false false true
+      (proc.returns ++ proc.params) proc.body
+
+def accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
+    (proc : Proc) : Bool :=
+  decide ((proc.returns ++ proc.params).Nodup) &&
+    Scope.Block.accepted? profile sigs false false true
       (proc.returns ++ proc.params) proc.body
 
 end Proc
@@ -247,6 +355,15 @@ def Accepted (profile : PrimitiveProfile) (program : Program) : Prop :=
     program.ProcsAccepted profile ∧
     Scope.Block.Accepted profile program.signatures false false false []
       program.body
+
+def acceptedWith? (profile : PrimitiveProfile) (program : Program) : Bool :=
+  decide ((program.procs.map Proc.name).Nodup) &&
+    program.procs.all (fun proc => proc.accepted? profile program.signatures) &&
+    Scope.Block.accepted? profile program.signatures false false false []
+      program.body
+
+def accepted? (program : Program) : Bool :=
+  acceptedWith? {} program
 
 end Program
 

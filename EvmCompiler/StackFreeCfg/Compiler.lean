@@ -606,7 +606,7 @@ end ProcList
 
 namespace Program
 
-def toCfg? (program : Program) : Option TypedCfg.Program := do
+def toUncheckedCfg? (program : Program) : Option TypedCfg.Program := do
   let endKont : Kont := { label := Labels.endLabel, shape := [] }
   let main ←
     Block.toCfgFrom program program.body { regular := endKont }
@@ -616,6 +616,12 @@ def toCfg? (program : Program) : Option TypedCfg.Program := do
     { entry := Labels.entry
       procedures := ProcList.toTypedProcedures program.procs
       blocks := main.blocks ++ [finalBlock Labels.endLabel []] ++ procs.blocks }
+
+def toCfg? (program : Program) : Option TypedCfg.Program := do
+  if EvmCompiler.StackFreeCfg.Program.accepted? program then
+    toUncheckedCfg? program
+  else
+    none
 
 def toCheckedCfg? (program : Program) : Option TypedCfg.CheckedProgram := do
   let cfg ← toCfg? program
