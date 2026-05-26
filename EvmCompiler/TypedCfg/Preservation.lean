@@ -494,6 +494,20 @@ def targetPopMany : Nat → List Assembly.TargetInstr
   | 0 => []
   | n + 1 => .prim .pop :: targetPopMany n
 
+theorem sourceStepAt_pop_eq_targetRunList
+    (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState) :
+    Assembly.Source.stepAt full pc (.prim .pop) state =
+      Assembly.Target.runList [.prim .pop] state := by
+  change Assembly.Target.stepInstr (Assembly.TargetInstr.prim .pop) state =
+    Assembly.Target.runList [.prim .pop] state
+  unfold Assembly.Target.runList
+  cases hStep :
+      Assembly.Target.stepInstr (Assembly.TargetInstr.prim .pop) state with
+  | error err =>
+      rfl
+  | ok state' =>
+      rfl
+
 theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
     {shape : Shape} {value : Word}
@@ -633,6 +647,67 @@ theorem runPopMany_target {program : Program} {sites : List CallSite}
           · simpa [targetPopMany, Assembly.Target.runList, hTargetHeadStep]
               using hTargetTail
           · simpa [RunState.withEVM] using hRelFinal
+
+theorem popMany_emitFrom_targetPopMany
+    (full : Assembly.Program) (n pc : Nat) :
+    ∃ located,
+      Assembly.emitFrom? full (TypedCfg.Instr.popMany n) pc = some located ∧
+        located.map Assembly.LocatedTarget.instr = targetPopMany n := by
+  induction n generalizing pc with
+  | zero =>
+      refine ⟨[], ?_, ?_⟩
+      · simp [TypedCfg.Instr.popMany, Assembly.emitFrom?]
+      · simp [targetPopMany]
+  | succ n ih =>
+      rcases ih (pc + Assembly.Instr.byteSize (.prim .pop)) with
+        ⟨tail, hTailEmit, hTailMap⟩
+      refine
+        ⟨{ pc := pc, instr := Assembly.TargetInstr.prim .pop } :: tail,
+          ?_, ?_⟩
+      · simp [TypedCfg.Instr.popMany, Assembly.emitFrom?, Assembly.emitInstr?,
+          hTailEmit]
+      · simp [targetPopMany, hTailMap]
+
+theorem popMany_emitFrom_targetPopMany_of_some
+    {full : Assembly.Program} {n pc : Nat}
+    {located : List Assembly.LocatedTarget}
+    (hEmit :
+      Assembly.emitFrom? full (TypedCfg.Instr.popMany n) pc = some located) :
+    located.map Assembly.LocatedTarget.instr = targetPopMany n := by
+  induction n generalizing pc located with
+  | zero =>
+      simp [TypedCfg.Instr.popMany, Assembly.emitFrom?] at hEmit
+      cases hEmit
+      simp [targetPopMany]
+  | succ n ih =>
+      simp [TypedCfg.Instr.popMany, Assembly.emitFrom?, Assembly.emitInstr?] at hEmit
+      cases hTail :
+          Assembly.emitFrom? full (TypedCfg.Instr.popMany n)
+            (pc + Assembly.Instr.byteSize (.prim .pop)) with
+      | none =>
+          simp [hTail] at hEmit
+      | some tail =>
+          simp [hTail] at hEmit
+          cases hEmit
+          simp [targetPopMany, ih hTail]
+
+theorem runPopMany_emitted_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {sourceEVM' : EVMState} {n : Nat}
+    {full : Assembly.Program} {pc : Nat}
+    {located : List Assembly.LocatedTarget}
+    (hRel : PayloadRel program sites source target)
+    (hRun : TypedCfg.Instr.runPopMany n source.evm = .ok sourceEVM')
+    (hEmit :
+      Assembly.emitFrom? full (TypedCfg.Instr.popMany n) pc = some located) :
+    ∃ target',
+      Assembly.Target.runList (located.map Assembly.LocatedTarget.instr)
+          target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  have hMap := popMany_emitFrom_targetPopMany_of_some hEmit
+  rcases runPopMany_target hRel hRun with ⟨target', hTarget, hRel'⟩
+  refine ⟨target', ?_, hRel'⟩
+  simpa [hMap] using hTarget
 
 theorem runPopMany_stack_drop {n : Nat} {state state' : EVMState}
     (hRun : TypedCfg.Instr.runPopMany n state = .ok state') :
