@@ -167710,38 +167710,6 @@ structure RecursiveBridgeSemanticArityContracts
     DispatcherObservationSound cfg [] terminalRel revertRel outcomeRel
       program (.Ok shared store)
 
-structure RecursiveBridgePrimitiveContracts
-    (cfg : Reference.StateRelConfig)
-    (prim : Objects.Source.PrimitiveSemantics) : Prop where
-  primitiveSound : Locals.SourceLowering.PrimitiveSound prim
-  primitiveStack :
-    ∀ {layout : List Name} {fuel : Nat}
-      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
-      Reference.Safe.primitive yulPrim →
-      Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
-        fuel yulPrim op
-
-/--
-Imported-Yul primitive calls that lower to source-tower stack primitive
-evaluation.
-
-This is separated from `Locals.SourceLowering.PrimitiveSound`: the latter is
-the lower compiler tower's own primitive preservation contract, while this
-package is the semantic bridge between Nethermind's Yul primitive interpreter
-and the source tower's primitive semantics.
--/
-structure RecursiveBridgePrimitiveStackContracts
-    (cfg : Reference.StateRelConfig)
-    (prim : Objects.Source.PrimitiveSemantics) : Prop where
-  primitiveStack :
-    ∀ {layout : List Name} {fuel : Nat}
-      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
-      Reference.Safe.primitive yulPrim →
-      Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
-        fuel yulPrim op
-
 /--
 Arity-aware imported-Yul primitive stack contract.
 
@@ -167749,6 +167717,11 @@ This is the correct public shape for imported primitives whose raw Nethermind
 dispatcher is permissive about extra arguments. The recursive bridge derives
 the arity premise from successful `evalArgs`; individual primitive facts do
 not need to pretend the imported dispatcher rejects malformed raw calls.
+
+This is separated from `Locals.SourceLowering.PrimitiveSound`: the latter is
+the lower compiler tower's own primitive preservation contract, while this
+package is the semantic bridge between Nethermind's Yul primitive interpreter
+and the source tower's primitive semantics.
 -/
 structure RecursiveBridgePrimitiveStackArityContracts
     (cfg : Reference.StateRelConfig)
@@ -167760,6 +167733,12 @@ structure RecursiveBridgePrimitiveStackArityContracts
       Prim.toBasicOp? yulPrim = some op →
       Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
         fuel yulPrim op
+
+/-- Back-compat alias for the pre-flip name; the strict and arity-form stack
+contracts are now the same Prop (the strict form was unprovable for permissive
+imported nullaries against the canonical structured primitive semantics). -/
+abbrev RecursiveBridgePrimitiveStackContracts :=
+  RecursiveBridgePrimitiveStackArityContracts
 
 structure RecursiveBridgePrimitiveArityContracts
     (cfg : Reference.StateRelConfig)
@@ -167773,14 +167752,19 @@ structure RecursiveBridgePrimitiveArityContracts
       Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
         fuel yulPrim op
 
+/-- Back-compat alias for the pre-flip bundled primitive contract name. -/
+abbrev RecursiveBridgePrimitiveContracts :=
+  RecursiveBridgePrimitiveArityContracts
+
 namespace RecursiveBridgePrimitiveStackArityContracts
 
+/-- Identity adapter kept for callers spelled with the legacy strict name. -/
 theorem of_strict
     {cfg : Reference.StateRelConfig}
     {prim : Objects.Source.PrimitiveSemantics}
     (hStack : RecursiveBridgePrimitiveStackContracts cfg prim) :
-    RecursiveBridgePrimitiveStackArityContracts cfg prim where
-  primitiveStack := hStack.primitiveStack
+    RecursiveBridgePrimitiveStackArityContracts cfg prim :=
+  hStack
 
 theorem structured
     {cfg : Reference.StateRelConfig} :
@@ -167793,23 +167777,6 @@ theorem structured
         hSafe hBasic
 
 end RecursiveBridgePrimitiveStackArityContracts
-
-namespace RecursiveBridgePrimitiveStackContracts
-
-/-- After the in-place flip of the `primitiveStack` field to the arity-aware
-predicate, the canonical structured primitive semantics inhabits the
-`RecursiveBridgePrimitiveStackContracts` package directly. -/
-theorem structured
-    {cfg : Reference.StateRelConfig} :
-    RecursiveBridgePrimitiveStackContracts cfg
-      Locals.Source.PrimitiveSemantics.structured where
-  primitiveStack := by
-    intro layout fuel yulPrim op hSafe hBasic
-    exact
-      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_safe_toBasicOp
-        hSafe hBasic
-
-end RecursiveBridgePrimitiveStackContracts
 
 namespace RecursiveBridgePrimitiveArityContracts
 

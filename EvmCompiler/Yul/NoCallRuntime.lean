@@ -1872,7 +1872,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
     hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
-    RecursiveBridgePrimitiveStackContracts.structured
+    RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
     currentContractProjection hInitialPc hInitialStack hRunner
@@ -1935,7 +1935,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
     hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
-    RecursiveBridgePrimitiveStackContracts.structured
+    RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
     currentContractProjection hInitialPc hInitialStack hRunner
