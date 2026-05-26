@@ -442,6 +442,10 @@ def compileCfg? (program : Program) : Option Assembly.Program := do
   let cfg ← toCheckedCfg? program
   TypedCfg.CheckedProgram.lower? cfg
 
+def assembleCfg? (program : Program) : Option Assembly.TargetProgram := do
+  let cfg ← toCheckedCfg? program
+  TypedCfg.CheckedProgram.assemble? cfg
+
 end Program
 
 end Cfg

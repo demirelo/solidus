@@ -223,6 +223,14 @@ typed-CFG-to-assembly lowering realizes the same effect with hidden return
 tokens and generated dispatch blocks, so return-token plumbing is quarantined
 below typed CFG.
 
+There are two backend entry points:
+
+- `CheckedProgram.lower?` produces labeled assembly, preserving symbolic labels
+  for the existing assembly layer.
+- `CheckedProgram.assemble?` additionally runs the labeled-assembly acceptedness
+  and assembler gate, so generated dispatch-label collisions or unresolved
+  jumps fail at the typed-CFG backend boundary.
+
 ## Yul Surface Audit
 
 The typed CFG should be broad enough that Yul does not force a redesign later:

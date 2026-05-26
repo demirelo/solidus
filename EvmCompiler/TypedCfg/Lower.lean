@@ -1,4 +1,5 @@
 import EvmCompiler.TypedCfg.Semantics
+import EvmCompiler.Assembly.Accepted
 
 namespace EvmCompiler
 namespace TypedCfg
@@ -290,6 +291,10 @@ namespace CheckedProgram
 
 def lower? (program : CheckedProgram) : Option Assembly.Program :=
   program.program.lower?
+
+def assemble? (program : CheckedProgram) : Option Assembly.TargetProgram := do
+  let asm ← program.lower?
+  Assembly.compile? asm
 
 end CheckedProgram
 
