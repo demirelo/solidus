@@ -186,6 +186,83 @@ def CompilesTo (layout : ObjectLayout) (program : Yul.Program)
   YulToStackFreeCfg.Program.lowerGate layout program =
     .accepted target
 
+theorem coverage?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    Coverage.contract? layout program.contract = true := by
+  unfold CompilesTo at h
+  unfold YulToStackFreeCfg.Program.lowerGate at h
+  unfold Contract.lowerGate at h
+  by_cases hCoverage : Coverage.contract? layout program.contract
+  · exact hCoverage
+  · simp [hCoverage] at h
+
+theorem sourceWF?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    SourceWF.contract? layout program.contract = true := by
+  have hCoverage := coverage?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  unfold CompilesTo at h
+  unfold YulToStackFreeCfg.Program.lowerGate at h
+  unfold Contract.lowerGate at h
+  by_cases hWF : SourceWF.contract? layout program.contract
+  · exact hWF
+  · simp [hCoverage, hWF] at h
+
+theorem lower?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    YulToStackFreeCfg.Program.lower? layout program = some target := by
+  have hCoverage := coverage?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  have hWF := sourceWF?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  unfold CompilesTo at h
+  unfold YulToStackFreeCfg.Program.lowerGate at h
+  unfold Contract.lowerGate at h
+  cases hLower : Contract.lower? layout program.contract with
+  | none =>
+      simp [hCoverage, hWF, hLower] at h
+  | some lowered =>
+      by_cases hAccepted : StackFreeCfg.Program.accepted? lowered
+      · simp [hCoverage, hWF, hLower, hAccepted] at h
+        cases h
+        simp [YulToStackFreeCfg.Program.lower?, hLower]
+      · simp [hCoverage, hWF, hLower, hAccepted] at h
+
+theorem accepted?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    StackFreeCfg.Program.accepted? target = true := by
+  have hCoverage := coverage?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  have hWF := sourceWF?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  unfold CompilesTo at h
+  unfold YulToStackFreeCfg.Program.lowerGate at h
+  unfold Contract.lowerGate at h
+  cases hLower : Contract.lower? layout program.contract with
+  | none =>
+      simp [hCoverage, hWF, hLower] at h
+  | some lowered =>
+      by_cases hAccepted : StackFreeCfg.Program.accepted? lowered
+      · simp [hCoverage, hWF, hLower, hAccepted] at h
+        cases h
+        exact hAccepted
+      · simp [hCoverage, hWF, hLower, hAccepted] at h
+
+theorem lowerObserved?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target)
+    (prim : StackFreeCfg.PrimitiveSemantics) (fuel : Nat)
+    (shared : StackFreeCfg.SharedState) :
+    YulToStackFreeCfg.Program.lowerObserved? layout prim fuel program shared =
+      some (StackFreeCfg.Program.runObserved prim fuel target shared) := by
+  unfold CompilesTo at h
+  unfold YulToStackFreeCfg.Program.lowerObserved?
+  simp [h]
+
 /--
 Adjacent preservation property for one successfully lowered Yul program.
 -/

@@ -72,6 +72,40 @@ namespace Program
 def CompilesTo (program : Program) (target : TypedCfg.CheckedProgram) : Prop :=
   Compiler.Program.toCheckedCfg? program = some target
 
+theorem accepted?_of_compilesTo {program : Program}
+    {target : TypedCfg.CheckedProgram}
+    (h : CompilesTo program target) :
+    Program.accepted? program = true := by
+  unfold CompilesTo at h
+  unfold Compiler.Program.toCheckedCfg? at h
+  unfold Compiler.Program.toCfg? at h
+  by_cases hAccepted : Program.accepted? program
+  · exact hAccepted
+  · simp [hAccepted] at h
+
+theorem checked_of_compilesTo {program : Program}
+    {target : TypedCfg.CheckedProgram}
+    (_h : CompilesTo program target) :
+    target.program.typeCheck? = some () :=
+  target.checked
+
+theorem toCfg?_of_compilesTo {program : Program}
+    {target : TypedCfg.CheckedProgram}
+    (h : CompilesTo program target) :
+    Compiler.Program.toCfg? program = some target.program := by
+  unfold CompilesTo at h
+  unfold Compiler.Program.toCheckedCfg? at h
+  cases hCfg : Compiler.Program.toCfg? program with
+  | none =>
+      simp [hCfg] at h
+  | some cfg =>
+      unfold TypedCfg.Program.check? at h
+      by_cases hCheck : cfg.typeCheck? = some ()
+      · simp [hCfg, hCheck] at h
+        cases h
+        rfl
+      · simp [hCfg, hCheck] at h
+
 /--
 The adjacent whole-program preservation property we want to prove next.
 

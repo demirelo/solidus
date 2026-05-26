@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:37 PDT.
+Last updated: 2026-05-25 20:43 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -175,6 +175,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - The statement does not take generated layouts, replay certificates,
     per-callee obligations, return-token tables, or label evidence as public
     inputs.
+  - [x] Prove compiler-gate lemmas:
+    `accepted?_of_compilesTo`, `checked_of_compilesTo`, and
+    `toCfg?_of_compilesTo`.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.
@@ -272,6 +275,10 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - `Program.CompilePreserves` is the public theorem target from `lowerGate`
     success to `StackFreeCfg.Program.runObserved`, with no TypedCfg, stack,
     label, token, bytecode, PC, or gas details in the boundary.
+  - [x] Prove lowering-gate lemmas:
+    `coverage?_of_compilesTo`, `sourceWF?_of_compilesTo`,
+    `lower?_of_compilesTo`, `accepted?_of_compilesTo`, and
+    `lowerObserved?_of_compilesTo`.
 - [ ] Prove adjacent preservation:
   `YulToStackFreeCfg.compile_preserves : NethermindYul.run -> StackFreeCfg.run`.
 - [ ] Audit no lower-layer leakage:
