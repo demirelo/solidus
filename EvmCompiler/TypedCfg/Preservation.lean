@@ -494,19 +494,26 @@ def targetPopMany : Nat → List Assembly.TargetInstr
   | 0 => []
   | n + 1 => .prim .pop :: targetPopMany n
 
-theorem sourceStepAt_pop_eq_targetRunList
-    (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState) :
-    Assembly.Source.stepAt full pc (.prim .pop) state =
-      Assembly.Target.runList [.prim .pop] state := by
-  change Assembly.Target.stepInstr (Assembly.TargetInstr.prim .pop) state =
-    Assembly.Target.runList [.prim .pop] state
+theorem sourceStepAt_prim_eq_targetRunList
+    (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState)
+    (op : Assembly.PrimOp) :
+    Assembly.Source.stepAt full pc (.prim op) state =
+      Assembly.Target.runList [.prim op] state := by
+  change Assembly.Target.stepInstr (Assembly.TargetInstr.prim op) state =
+    Assembly.Target.runList [.prim op] state
   unfold Assembly.Target.runList
   cases hStep :
-      Assembly.Target.stepInstr (Assembly.TargetInstr.prim .pop) state with
+      Assembly.Target.stepInstr (Assembly.TargetInstr.prim op) state with
   | error err =>
       rfl
   | ok state' =>
       rfl
+
+theorem sourceStepAt_pop_eq_targetRunList
+    (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState) :
+    Assembly.Source.stepAt full pc (.prim .pop) state =
+      Assembly.Target.runList [.prim .pop] state := by
+  exact sourceStepAt_prim_eq_targetRunList full pc state .pop
 
 theorem sourceStepAt_push_eq_targetRunList
     (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState)
