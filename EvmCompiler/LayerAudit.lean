@@ -2695,7 +2695,10 @@ external calls is derived from accepted checked compilation, decode-window and
 jumpdest-scanner facts are constructed by an explicit bytecode check, generated
 source/direct frame resources are checked over the lowered object, and the
 remaining gas behavior is the named gas-aware runner-completeness premise for
-replaying checked block traces above a finite bound.
+replaying checked block traces above a finite bound. Source-static lexical,
+control-flow, and user-call arity facts are now constructed by the same checked
+boundary; the remaining source acceptedness input is the explicit
+`Reference.FullAccepted` premise.
 -/
 abbrev recursiveBridgeTopAssumptions :=
   @Yul.Program.RecursiveBridgeTopAssumptions
@@ -2750,6 +2753,18 @@ abbrev recursiveBridgeSourceAccepted :=
 
 abbrev recursiveBridgeFullSourceAccepted :=
   @Yul.Program.RecursiveBridgeFullSourceAccepted
+
+abbrev recursiveBridgeSourceStaticFacts :=
+  @Yul.Program.RecursiveBridgeSourceStaticFacts
+
+noncomputable abbrev recursiveBridgeSourceStaticFactsChecked :=
+  @Yul.Program.RecursiveBridgeSourceStaticFacts.checked?
+
+abbrev recursiveBridgeSourceStaticFactsOfChecked :=
+  @Yul.Program.RecursiveBridgeSourceStaticFacts.of_checked?
+
+abbrev recursiveBridgeSourceStaticFactsToFullSourceAccepted :=
+  @Yul.Program.RecursiveBridgeSourceStaticFacts.toFullSourceAccepted
 
 abbrev recursiveBridgeFeatureCoverage :=
   @Yul.Program.RecursiveBridgeFeatureCoverage
@@ -2949,6 +2964,12 @@ noncomputable abbrev recursiveBridgeCompileCheckedAssemblyTargetBytecodeResource
 abbrev recursiveBridgeCompileCheckedAssemblyTargetBytecodeResourcesFeaturesEqSome :=
   @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
 
+noncomputable abbrev recursiveBridgeCompileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+
+abbrev recursiveBridgeCompileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticEqSome :=
+  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+
 abbrev recursiveBridgeTopToGasAwareEVMWithRuntime :=
   @Yul.Program.compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
 
@@ -3048,17 +3069,23 @@ abbrev recursiveBridgeTopNoCallSourceCompileFullSourceCoveredStructuredPrimitive
 abbrev recursiveBridgeTopNoCallSourceCompileFullSourceCoveredStructuredPrimitiveCanonicalEntryToEVMXRunnerNoOutOfGas :=
   @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_featureResourceBytecodeChecked_XRunner
 
+abbrev recursiveBridgeTopNoCallSourceCompileFullReferenceStructuredPrimitiveCanonicalEntryToEVMXRunner :=
+  @Yul.Program.compile_whole_program_result_sound_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+
+abbrev recursiveBridgeTopNoCallSourceCompileFullReferenceStructuredPrimitiveCanonicalEntryToEVMXRunnerNoOutOfGas :=
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+
 abbrev recursiveBridgeTopNoCallToGasAwareEVM :=
-  @Yul.Program.compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_featureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_sound_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
 abbrev recursiveBridgeTopNoCallToGasAwareEVMNoOutOfGas :=
-  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_featureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
 abbrev recursiveBridgeTopToGasAwareEVM :=
-  @Yul.Program.compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_featureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_sound_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
 abbrev recursiveBridgeTopToGasAwareEVMNoOutOfGas :=
-  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_featureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_fullReferenceRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
 abbrev functionEntryListFind :=
   @Yul.Reference.SourceBridgeFacts.FunctionEntryList.find?
@@ -3107,6 +3134,12 @@ abbrev noShadowingContractLookupParamReturnFacts :=
 
 abbrev userCallArityExprsOkMem :=
   @Yul.Reference.SourceBridgeFacts.UserCallArity.exprsOk_mem
+
+noncomputable abbrev userCallArityProgramOkCheck :=
+  @Yul.Reference.SourceBridgeFacts.UserCallArity.ProgramOk?
+
+abbrev userCallArityProgramOkOfCheck :=
+  @Yul.Reference.SourceBridgeFacts.UserCallArity.ProgramOk.of_check
 
 abbrev userCallArityFunctionListFunctionOkOfFind :=
   @Yul.Reference.SourceBridgeFacts.UserCallArity.FunctionListOk.functionOk_of_find?
@@ -4980,6 +5013,12 @@ abbrev sourceLexicalStmtsScoped :=
 abbrev sourceLexicalProgramScoped :=
   @Yul.Reference.SourceBridgeFacts.SourceLexical.ProgramScoped
 
+noncomputable abbrev sourceLexicalProgramScopedCheck :=
+  @Yul.Reference.SourceBridgeFacts.SourceLexical.ProgramScoped?
+
+abbrev sourceLexicalProgramScopedOfCheck :=
+  @Yul.Reference.SourceBridgeFacts.SourceLexical.ProgramScoped.of_check
+
 abbrev sourceLexicalExprStmtUserCallArgs :=
   @Yul.Reference.SourceBridgeFacts.SourceLexical.exprStmt_user_call_args
 
@@ -5537,6 +5576,12 @@ abbrev yulControlContractScoped :=
 
 abbrev yulControlProgramScoped :=
   @Yul.Reference.SourceBridgeFacts.ControlFlow.ProgramScoped
+
+noncomputable abbrev yulControlProgramScopedCheck :=
+  @Yul.Reference.SourceBridgeFacts.ControlFlow.ProgramScoped?
+
+abbrev yulControlProgramScopedOfCheck :=
+  @Yul.Reference.SourceBridgeFacts.ControlFlow.ProgramScoped.of_check
 
 abbrev yulControlScopedBlock :=
   @Yul.Reference.SourceBridgeFacts.ControlFlow.scoped_block

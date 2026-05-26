@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 05:07 PDT.
+Last updated: 2026-05-26 05:34 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -47,13 +47,22 @@ this IR as the refactor proceeds.
        that bound with `RecursiveBridgeCompileResources.checked?` through
        `compileCheckedAssemblyTargetBytecodeResources?` instead of taking it as
        a separate premise.
-     - [x] Add `Reference.Safe.FeatureCoverage.checked?` and the combined
-       `compileCheckedAssemblyTargetBytecodeResourcesFeatures?` boundary, so
-       the preferred public theorem checks the four remaining source
-       feature-family exclusions structurally instead of asking callers to
-       prove `RecursiveBridgeFeatureCoverage`. These exclusions remain honest
-       unsupported-feature semantic boundaries until their source/target
-       contracts are proved.
+    - [x] Add `Reference.Safe.FeatureCoverage.checked?` and the combined
+      `compileCheckedAssemblyTargetBytecodeResourcesFeatures?` boundary, so
+      the preferred public theorem checks the four remaining source
+      feature-family exclusions structurally instead of asking callers to
+      prove `RecursiveBridgeFeatureCoverage`. These exclusions remain honest
+      unsupported-feature semantic boundaries until their source/target
+      contracts are proved.
+    - [x] Add checked constructors for the source-static
+      `SourceLexical.ProgramScoped`, `ControlFlow.ProgramScoped`, and
+      `UserCallArity.ProgramOk` facts, bundle them as
+      `RecursiveBridgeSourceStaticFacts`, and route the preferred public
+      theorem through
+      `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?`.
+      The preferred theorem now takes only `Reference.FullAccepted` for source
+      acceptedness, rather than a caller-provided
+      `RecursiveBridgeFullSourceAccepted` package.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.

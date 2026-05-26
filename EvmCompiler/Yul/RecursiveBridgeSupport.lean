@@ -1549,6 +1549,365 @@ noncomputable def ContractOk (contract : AstContract) : Prop :=
 noncomputable def ProgramOk (program : Program) : Prop :=
   ContractOk program.contract
 
+mutual
+  def ExprOk? (contract : AstContract) : AstExpr → Bool
+    | .Lit _value => true
+    | .Var _name => true
+    | .Call (.inl _prim) args => ExprsOk? contract args
+    | .Call (.inr functionName) args =>
+        match contract.functions.lookup functionName with
+        | some (.Def params returns _body) =>
+            decide (returns.length = 1) &&
+              (decide (args.length = params.length) &&
+                ExprsOk? contract args)
+        | none => false
+
+  def ExprsOk? (contract : AstContract) : List AstExpr → Bool
+    | [] => true
+    | head :: rest => ExprOk? contract head && ExprsOk? contract rest
+
+  def StmtOk? (contract : AstContract) : AstStmt → Bool
+    | .Block body => StmtsOk? contract body
+    | .Let _names none => true
+    | .Let names (some (.Call (.inr functionName) args)) =>
+        match contract.functions.lookup functionName with
+        | some (.Def params returns _body) =>
+            decide (names.length = returns.length) &&
+              (decide (args.length = params.length) &&
+                ExprsOk? contract args)
+        | none => false
+    | .Let _names (some value) => ExprOk? contract value
+    | .Assign names (.Call (.inr functionName) args) =>
+        match contract.functions.lookup functionName with
+        | some (.Def params returns _body) =>
+            decide (names.length = returns.length) &&
+              (decide (args.length = params.length) &&
+                ExprsOk? contract args)
+        | none => false
+    | .Assign _names value => ExprOk? contract value
+    | .ExprStmtCall (.Call (.inr functionName) args) =>
+        match contract.functions.lookup functionName with
+        | some (.Def params [] _body) =>
+            decide (args.length = params.length) &&
+              ExprsOk? contract args
+        | some (.Def _params (_return :: _returns) _body) => false
+        | none => false
+    | .ExprStmtCall value => ExprOk? contract value
+    | .Switch scrutinee cases defaultBody =>
+        ExprOk? contract scrutinee &&
+          (CasesOk? contract cases && StmtsOk? contract defaultBody)
+    | .For cond post body =>
+        ExprOk? contract cond &&
+          (StmtsOk? contract post && StmtsOk? contract body)
+    | .If cond body =>
+        ExprOk? contract cond && StmtsOk? contract body
+    | .Continue | .Break | .Leave => true
+
+  def StmtsOk? (contract : AstContract) : List AstStmt → Bool
+    | [] => true
+    | head :: rest => StmtOk? contract head && StmtsOk? contract rest
+
+  def CasesOk? (contract : AstContract) :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        StmtsOk? contract body && CasesOk? contract rest
+end
+
+mutual
+  theorem ExprOk.of_check
+      {contract : AstContract} {expr : AstExpr}
+      (hCheck : ExprOk? contract expr = true) :
+      ExprOk contract expr := by
+    cases expr with
+    | Lit value =>
+        trivial
+    | Var name =>
+        trivial
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            exact ExprsOk.of_check hCheck
+        | inr functionName =>
+            cases hLookup : contract.functions.lookup functionName with
+            | none =>
+                simp [ExprOk?, hLookup] at hCheck
+            | some fn =>
+                cases fn with
+                | Def params returns body =>
+                    have hAnd :
+                        decide (returns.length = 1) = true ∧
+                          (decide (args.length = params.length) &&
+                            ExprsOk? contract args) = true :=
+                      by simpa [ExprOk?, hLookup] using hCheck
+                    have hTail :
+                        decide (args.length = params.length) = true ∧
+                          ExprsOk? contract args = true :=
+                      by simpa using hAnd.2
+                    exact
+                      ⟨⟨params, returns, body, hLookup,
+                          of_decide_eq_true hAnd.1,
+                          of_decide_eq_true hTail.1⟩,
+                        ExprsOk.of_check hTail.2⟩
+
+  theorem ExprsOk.of_check
+      {contract : AstContract} {exprs : List AstExpr}
+      (hCheck : ExprsOk? contract exprs = true) :
+      ExprsOk contract exprs := by
+    cases exprs with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            ExprOk? contract head = true ∧
+              ExprsOk? contract rest = true :=
+          by simpa [ExprsOk?] using hCheck
+        exact
+          ⟨ExprOk.of_check hAnd.1, ExprsOk.of_check hAnd.2⟩
+
+  theorem StmtOk.of_check
+      {contract : AstContract} {stmt : AstStmt}
+      (hCheck : StmtOk? contract stmt = true) :
+      StmtOk contract stmt := by
+    cases stmt with
+    | Block body =>
+        exact StmtsOk.of_check hCheck
+    | Let names value? =>
+        cases value? with
+        | none =>
+            trivial
+        | some value =>
+            cases value with
+            | Lit value =>
+                exact ExprOk.of_check hCheck
+            | Var name =>
+                exact ExprOk.of_check hCheck
+            | Call callee args =>
+                cases callee with
+                | inl prim =>
+                    exact ExprOk.of_check hCheck
+                | inr functionName =>
+                    cases hLookup :
+                        contract.functions.lookup functionName with
+                    | none =>
+                        simp [StmtOk?, hLookup] at hCheck
+                    | some fn =>
+                        cases fn with
+                        | Def params returns body =>
+                            have hAnd :
+                                decide (names.length = returns.length) =
+                                    true ∧
+                                  (decide
+                                      (args.length = params.length) &&
+                                    ExprsOk? contract args) = true :=
+                              by simpa [StmtOk?, hLookup] using hCheck
+                            have hTail :
+                                decide (args.length = params.length) =
+                                    true ∧
+                                  ExprsOk? contract args = true :=
+                              by simpa using hAnd.2
+                            exact
+                              ⟨⟨params, returns, body, hLookup,
+                                  of_decide_eq_true hAnd.1,
+                                  of_decide_eq_true hTail.1⟩,
+                                ExprsOk.of_check hTail.2⟩
+    | Assign names value =>
+        cases value with
+        | Lit value =>
+            exact ExprOk.of_check hCheck
+        | Var name =>
+            exact ExprOk.of_check hCheck
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                exact ExprOk.of_check hCheck
+            | inr functionName =>
+                cases hLookup : contract.functions.lookup functionName with
+                | none =>
+                    simp [StmtOk?, hLookup] at hCheck
+                | some fn =>
+                    cases fn with
+                    | Def params returns body =>
+                        have hAnd :
+                            decide (names.length = returns.length) =
+                                true ∧
+                              (decide (args.length = params.length) &&
+                                ExprsOk? contract args) = true :=
+                          by simpa [StmtOk?, hLookup] using hCheck
+                        have hTail :
+                            decide (args.length = params.length) =
+                                true ∧
+                              ExprsOk? contract args = true :=
+                          by simpa using hAnd.2
+                        exact
+                          ⟨⟨params, returns, body, hLookup,
+                              of_decide_eq_true hAnd.1,
+                              of_decide_eq_true hTail.1⟩,
+                            ExprsOk.of_check hTail.2⟩
+    | ExprStmtCall value =>
+        cases value with
+        | Lit value =>
+            exact ExprOk.of_check hCheck
+        | Var name =>
+            exact ExprOk.of_check hCheck
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                exact ExprOk.of_check hCheck
+            | inr functionName =>
+                cases hLookup : contract.functions.lookup functionName with
+                | none =>
+                    simp [StmtOk?, hLookup] at hCheck
+                | some fn =>
+                    cases fn with
+                    | Def params returns body =>
+                        cases returns with
+                        | nil =>
+                            have hAnd :
+                                decide (args.length = params.length) =
+                                    true ∧
+                                  ExprsOk? contract args = true :=
+                              by simpa [StmtOk?, hLookup] using hCheck
+                            exact
+                              ⟨⟨params, body, hLookup,
+                                  of_decide_eq_true hAnd.1⟩,
+                                ExprsOk.of_check hAnd.2⟩
+                        | cons ret returnsTail =>
+                            simp [StmtOk?, hLookup] at hCheck
+    | Switch scrutinee cases defaultBody =>
+        have hAnd :
+            ExprOk? contract scrutinee = true ∧
+              (CasesOk? contract cases &&
+                StmtsOk? contract defaultBody) = true :=
+          by simpa [StmtOk?] using hCheck
+        have hTail :
+            CasesOk? contract cases = true ∧
+              StmtsOk? contract defaultBody = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨ExprOk.of_check hAnd.1,
+            CasesOk.of_check hTail.1,
+            StmtsOk.of_check hTail.2⟩
+    | For cond post body =>
+        have hAnd :
+            ExprOk? contract cond = true ∧
+              (StmtsOk? contract post &&
+                StmtsOk? contract body) = true :=
+          by simpa [StmtOk?] using hCheck
+        have hTail :
+            StmtsOk? contract post = true ∧
+              StmtsOk? contract body = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨ExprOk.of_check hAnd.1,
+            StmtsOk.of_check hTail.1,
+            StmtsOk.of_check hTail.2⟩
+    | If cond body =>
+        have hAnd :
+            ExprOk? contract cond = true ∧
+              StmtsOk? contract body = true :=
+          by simpa [StmtOk?] using hCheck
+        exact
+          ⟨ExprOk.of_check hAnd.1, StmtsOk.of_check hAnd.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem StmtsOk.of_check
+      {contract : AstContract} {stmts : List AstStmt}
+      (hCheck : StmtsOk? contract stmts = true) :
+      StmtsOk contract stmts := by
+    cases stmts with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            StmtOk? contract head = true ∧
+              StmtsOk? contract rest = true :=
+          by simpa [StmtsOk?] using hCheck
+        exact
+          ⟨StmtOk.of_check hAnd.1, StmtsOk.of_check hAnd.2⟩
+
+  theorem CasesOk.of_check
+      {contract : AstContract}
+      {cases : List (Word × List AstStmt)}
+      (hCheck : CasesOk? contract cases = true) :
+      CasesOk contract cases := by
+    cases cases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            StmtsOk? contract body = true ∧
+              CasesOk? contract rest = true :=
+          by simpa [CasesOk?] using hCheck
+        exact
+          ⟨StmtsOk.of_check hAnd.1, CasesOk.of_check hAnd.2⟩
+end
+
+def FunctionOk? (contract : AstContract) :
+    AstFunctionDefinition → Bool
+  | .Def _params _returns body => StmtsOk? contract body
+
+def FunctionListOk? (contract : AstContract) :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      FunctionOk? contract fn && FunctionListOk? contract rest
+
+noncomputable def ContractOk? (contract : AstContract) : Bool :=
+  StmtOk? contract contract.dispatcher &&
+    FunctionListOk? contract (Contract.functionEntries contract)
+
+noncomputable def ProgramOk? (program : Program) : Bool :=
+  ContractOk? program.contract
+
+theorem FunctionOk.of_check {contract : AstContract}
+    {fn : AstFunctionDefinition}
+    (hCheck : FunctionOk? contract fn = true) :
+    FunctionOk contract fn := by
+  cases fn with
+  | Def params returns body =>
+      exact StmtsOk.of_check hCheck
+
+theorem FunctionListOk.of_check {contract : AstContract}
+    {entries : List (Name × AstFunctionDefinition)}
+    (hCheck : FunctionListOk? contract entries = true) :
+    FunctionListOk contract entries := by
+  induction entries with
+  | nil =>
+      exact FunctionListOk.nil
+  | cons entry rest ih =>
+      rcases entry with ⟨name, fn⟩
+      have hAnd :
+          FunctionOk? contract fn = true ∧
+            FunctionListOk? contract rest = true :=
+        by simpa [FunctionListOk?] using hCheck
+      exact
+        FunctionListOk.cons
+          (FunctionOk.of_check hAnd.1) (ih hAnd.2)
+
+theorem ContractOk.of_check {contract : AstContract}
+    (hCheck : ContractOk? contract = true) :
+    ContractOk contract := by
+  have hAnd :
+      StmtOk? contract contract.dispatcher = true ∧
+        FunctionListOk? contract (Contract.functionEntries contract) =
+          true :=
+    by simpa [ContractOk?] using hCheck
+  exact
+    ⟨StmtOk.of_check hAnd.1,
+      FunctionListOk.of_check hAnd.2⟩
+
+theorem ProgramOk.of_check {program : Program}
+    (hCheck : ProgramOk? program = true) :
+    ProgramOk program :=
+  ContractOk.of_check hCheck
+
 theorem exprsOk_mem {contract : AstContract} {args : List AstExpr}
     {expr : AstExpr}
     (hOk : ExprsOk contract args) (hMem : expr ∈ args) :
@@ -7513,6 +7872,172 @@ noncomputable def ContractScoped (contract : AstContract) : Prop :=
 
 noncomputable def ProgramScoped (program : Program) : Prop :=
   ContractScoped program.contract
+
+mutual
+  def ScopedStmt? : Bool → Bool → Bool → AstStmt → Bool
+    | canBreak, canContinue, canLeave, .Block body =>
+        ScopedStmts? canBreak canContinue canLeave body
+    | _canBreak, _canContinue, _canLeave, .Let _names none => true
+    | _canBreak, _canContinue, _canLeave, .Let _names (some _value) => true
+    | _canBreak, _canContinue, _canLeave, .Assign _names _value => true
+    | _canBreak, _canContinue, _canLeave, .ExprStmtCall _value => true
+    | canBreak, canContinue, canLeave, .Switch _scrutinee cases defaultBody =>
+        ScopedCases? canBreak canContinue canLeave cases &&
+          ScopedStmts? canBreak canContinue canLeave defaultBody
+    | _canBreak, _canContinue, canLeave, .For _cond post body =>
+        ScopedStmts? false false canLeave post &&
+          ScopedStmts? true true canLeave body
+    | canBreak, canContinue, canLeave, .If _cond body =>
+        ScopedStmts? canBreak canContinue canLeave body
+    | canBreak, _canContinue, _canLeave, .Break => canBreak
+    | _canBreak, canContinue, _canLeave, .Continue => canContinue
+    | _canBreak, _canContinue, canLeave, .Leave => canLeave
+
+  def ScopedStmts? : Bool → Bool → Bool → List AstStmt → Bool
+    | _canBreak, _canContinue, _canLeave, [] => true
+    | canBreak, canContinue, canLeave, head :: tail =>
+        ScopedStmt? canBreak canContinue canLeave head &&
+          ScopedStmts? canBreak canContinue canLeave tail
+
+  def ScopedCases? : Bool → Bool → Bool →
+      List (Word × List AstStmt) → Bool
+    | _canBreak, _canContinue, _canLeave, [] => true
+    | canBreak, canContinue, canLeave, (_value, body) :: rest =>
+        ScopedStmts? canBreak canContinue canLeave body &&
+          ScopedCases? canBreak canContinue canLeave rest
+end
+
+mutual
+  theorem ScopedStmt.of_check
+      {canBreak canContinue canLeave : Bool} {stmt : AstStmt}
+      (hCheck :
+        ScopedStmt? canBreak canContinue canLeave stmt = true) :
+      ScopedStmt canBreak canContinue canLeave stmt := by
+    cases stmt with
+    | Block body =>
+        exact ScopedStmts.of_check hCheck
+    | Let names value? =>
+        cases value? <;> trivial
+    | Assign names value =>
+        trivial
+    | ExprStmtCall value =>
+        trivial
+    | Switch scrutinee cases defaultBody =>
+        have hAnd :
+            ScopedCases? canBreak canContinue canLeave cases = true ∧
+              ScopedStmts? canBreak canContinue canLeave defaultBody = true :=
+          by simpa [ScopedStmt?] using hCheck
+        exact
+          ⟨ScopedCases.of_check hAnd.1,
+            ScopedStmts.of_check hAnd.2⟩
+    | For cond post body =>
+        have hAnd :
+            ScopedStmts? false false canLeave post = true ∧
+              ScopedStmts? true true canLeave body = true :=
+          by simpa [ScopedStmt?] using hCheck
+        exact
+          ⟨ScopedStmts.of_check hAnd.1,
+            ScopedStmts.of_check hAnd.2⟩
+    | If cond body =>
+        exact ScopedStmts.of_check hCheck
+    | Continue =>
+        simpa [ScopedStmt?, ScopedStmt] using hCheck
+    | Break =>
+        simpa [ScopedStmt?, ScopedStmt] using hCheck
+    | Leave =>
+        simpa [ScopedStmt?, ScopedStmt] using hCheck
+
+  theorem ScopedStmts.of_check
+      {canBreak canContinue canLeave : Bool} {stmts : List AstStmt}
+      (hCheck :
+        ScopedStmts? canBreak canContinue canLeave stmts = true) :
+      ScopedStmts canBreak canContinue canLeave stmts := by
+    cases stmts with
+    | nil =>
+        trivial
+    | cons head tail =>
+        have hAnd :
+            ScopedStmt? canBreak canContinue canLeave head = true ∧
+              ScopedStmts? canBreak canContinue canLeave tail = true :=
+          by simpa [ScopedStmts?] using hCheck
+        exact
+          ⟨ScopedStmt.of_check hAnd.1,
+            ScopedStmts.of_check hAnd.2⟩
+
+  theorem ScopedCases.of_check
+      {canBreak canContinue canLeave : Bool}
+      {cases : List (Word × List AstStmt)}
+      (hCheck :
+        ScopedCases? canBreak canContinue canLeave cases = true) :
+      ScopedCases canBreak canContinue canLeave cases := by
+    cases cases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            ScopedStmts? canBreak canContinue canLeave body = true ∧
+              ScopedCases? canBreak canContinue canLeave rest = true :=
+          by simpa [ScopedCases?] using hCheck
+        exact
+          ⟨ScopedStmts.of_check hAnd.1,
+            ScopedCases.of_check hAnd.2⟩
+end
+
+def FunctionScoped? : AstFunctionDefinition → Bool
+  | .Def _params _returns body => ScopedStmts? false false true body
+
+def FunctionListScoped? :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      FunctionScoped? fn && FunctionListScoped? rest
+
+noncomputable def ContractScoped? (contract : AstContract) : Bool :=
+  ScopedStmt? false false false contract.dispatcher &&
+    FunctionListScoped? (Contract.functionEntries contract)
+
+noncomputable def ProgramScoped? (program : Program) : Bool :=
+  ContractScoped? program.contract
+
+theorem FunctionScoped.of_check {fn : AstFunctionDefinition}
+    (hCheck : FunctionScoped? fn = true) :
+    FunctionScoped fn := by
+  cases fn with
+  | Def params returns body =>
+      exact ScopedStmts.of_check hCheck
+
+theorem FunctionListScoped.of_check
+    {entries : List (Name × AstFunctionDefinition)}
+    (hCheck : FunctionListScoped? entries = true) :
+    FunctionListScoped entries := by
+  induction entries with
+  | nil =>
+      exact FunctionListScoped.nil
+  | cons entry rest ih =>
+      rcases entry with ⟨name, fn⟩
+      have hAnd :
+          FunctionScoped? fn = true ∧ FunctionListScoped? rest = true :=
+        by simpa [FunctionListScoped?] using hCheck
+      exact
+        FunctionListScoped.cons
+          (FunctionScoped.of_check hAnd.1) (ih hAnd.2)
+
+theorem ContractScoped.of_check {contract : AstContract}
+    (hCheck : ContractScoped? contract = true) :
+    ContractScoped contract := by
+  have hAnd :
+      ScopedStmt? false false false contract.dispatcher = true ∧
+        FunctionListScoped? (Contract.functionEntries contract) = true :=
+    by simpa [ContractScoped?] using hCheck
+  exact
+    ⟨ScopedStmt.of_check hAnd.1,
+      FunctionListScoped.of_check hAnd.2⟩
+
+theorem ProgramScoped.of_check {program : Program}
+    (hCheck : ProgramScoped? program = true) :
+    ProgramScoped program :=
+  ContractScoped.of_check hCheck
 
 theorem scoped_block {canBreak canContinue canLeave body}
     (hBody : ScopedStmts canBreak canContinue canLeave body) :
@@ -22017,6 +22542,55 @@ theorem SourceExprsScoped.mem
       · exact ih hScoped.2 hTail
 
 mutual
+  def SourceExprScoped? (layout : List Name) : AstExpr → Bool
+    | .Lit _value => true
+    | .Var name => decide (identName name ∈ layout)
+    | .Call (.inl _prim) args => SourceExprsScoped? layout args
+    | .Call (.inr _functionName) args => SourceExprsScoped? layout args
+
+  def SourceExprsScoped? (layout : List Name) : List AstExpr → Bool
+    | [] => true
+    | head :: rest =>
+        SourceExprScoped? layout head && SourceExprsScoped? layout rest
+end
+
+mutual
+  theorem SourceExprScoped.of_check
+      {layout : List Name} {expr : AstExpr}
+      (hCheck : SourceExprScoped? layout expr = true) :
+      SourceExprScoped layout expr := by
+    cases expr with
+    | Lit value =>
+        trivial
+    | Var name =>
+        have hMem : identName name ∈ layout :=
+          of_decide_eq_true (by simpa [SourceExprScoped?] using hCheck)
+        simpa [SourceExprScoped] using hMem
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            exact SourceExprsScoped.of_check hCheck
+        | inr functionName =>
+            exact SourceExprsScoped.of_check hCheck
+
+  theorem SourceExprsScoped.of_check
+      {layout : List Name} {exprs : List AstExpr}
+      (hCheck : SourceExprsScoped? layout exprs = true) :
+      SourceExprsScoped layout exprs := by
+    cases exprs with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            SourceExprScoped? layout head = true ∧
+              SourceExprsScoped? layout rest = true :=
+          by simpa [SourceExprsScoped?] using hCheck
+        exact
+          ⟨SourceExprScoped.of_check hAnd.1,
+            SourceExprsScoped.of_check hAnd.2⟩
+end
+
+mutual
   theorem SourceExprScoped.of_mem_iff
       {layout layout' : List Name} {expr : AstExpr}
       (hMem : ∀ name, name ∈ layout ↔ name ∈ layout')
@@ -22099,6 +22673,216 @@ mutual
     | (_value, body) :: rest =>
         StmtsScoped layout body ∧ CasesScoped layout rest
 end
+
+def namesNodup? (names : List Name) : Bool :=
+  decide names.Nodup
+
+def namesFresh? (layout names : List Name) : Bool :=
+  names.all fun name => decide (name ∉ layout)
+
+def namesInLayout? (layout names : List Name) : Bool :=
+  names.all fun name => decide (name ∈ layout)
+
+theorem namesNodup_of_check {names : List Name}
+    (hCheck : namesNodup? names = true) :
+    names.Nodup :=
+  of_decide_eq_true hCheck
+
+theorem namesFresh_of_check {layout names : List Name}
+    (hCheck : namesFresh? layout names = true) :
+    ∀ name, name ∈ names → name ∉ layout := by
+  intro name hName
+  exact
+    of_decide_eq_true
+      ((List.all_eq_true.mp hCheck) name hName)
+
+theorem namesInLayout_of_check {layout names : List Name}
+    (hCheck : namesInLayout? layout names = true) :
+    ∀ name, name ∈ names → name ∈ layout := by
+  intro name hName
+  exact
+    of_decide_eq_true
+      ((List.all_eq_true.mp hCheck) name hName)
+
+mutual
+  def StmtScoped? (layout : List Name) : AstStmt → Bool
+    | .Block body => StmtsScoped? layout body
+    | .Let names none =>
+        namesNodup? (identNames names) &&
+          namesFresh? layout (identNames names)
+    | .Let names (some value) =>
+        (namesNodup? (identNames names) &&
+          namesFresh? layout (identNames names)) &&
+            SourceExprScoped? layout value
+    | .Assign names value =>
+        (namesNodup? (identNames names) &&
+          namesInLayout? layout (identNames names)) &&
+            SourceExprScoped? layout value
+    | .ExprStmtCall value => SourceExprScoped? layout value
+    | .Switch scrutinee cases defaultBody =>
+        SourceExprScoped? layout scrutinee &&
+          (CasesScoped? layout cases && StmtsScoped? layout defaultBody)
+    | .For cond post body =>
+        SourceExprScoped? layout cond &&
+          (StmtsScoped? layout post && StmtsScoped? layout body)
+    | .If cond body =>
+        SourceExprScoped? layout cond && StmtsScoped? layout body
+    | .Continue | .Break | .Leave => true
+
+  def StmtsScoped? (layout : List Name) : List AstStmt → Bool
+    | [] => true
+    | head :: tail =>
+        StmtScoped? layout head &&
+          StmtsScoped? (StmtOutLayout layout head) tail
+
+  def CasesScoped? (layout : List Name) :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        StmtsScoped? layout body && CasesScoped? layout rest
+end
+
+mutual
+  theorem StmtScoped.of_check
+      {layout : List Name} {stmt : AstStmt}
+      (hCheck : StmtScoped? layout stmt = true) :
+      StmtScoped layout stmt := by
+    cases stmt with
+    | Block body =>
+        exact StmtsScoped.of_check hCheck
+    | Let names value? =>
+        cases value? with
+        | none =>
+            have hNames :
+                namesNodup? (identNames names) = true ∧
+                  namesFresh? layout (identNames names) = true :=
+              by simpa [StmtScoped?] using hCheck
+            exact
+              ⟨namesNodup_of_check hNames.1,
+                namesFresh_of_check hNames.2⟩
+        | some value =>
+            have hAnd :
+                (namesNodup? (identNames names) &&
+                  namesFresh? layout (identNames names)) = true ∧
+                    SourceExprScoped? layout value = true :=
+              by simpa [StmtScoped?] using hCheck
+            have hNames :
+                namesNodup? (identNames names) = true ∧
+                  namesFresh? layout (identNames names) = true :=
+              by simpa using hAnd.1
+            exact
+              ⟨⟨namesNodup_of_check hNames.1,
+                  namesFresh_of_check hNames.2⟩,
+                SourceExprScoped.of_check hAnd.2⟩
+    | Assign names value =>
+        have hAnd :
+            (namesNodup? (identNames names) &&
+              namesInLayout? layout (identNames names)) = true ∧
+                SourceExprScoped? layout value = true :=
+          by simpa [StmtScoped?] using hCheck
+        have hNames :
+            namesNodup? (identNames names) = true ∧
+              namesInLayout? layout (identNames names) = true :=
+          by simpa using hAnd.1
+        exact
+          ⟨⟨namesNodup_of_check hNames.1,
+              namesInLayout_of_check hNames.2⟩,
+            SourceExprScoped.of_check hAnd.2⟩
+    | ExprStmtCall value =>
+        exact SourceExprScoped.of_check hCheck
+    | Switch scrutinee cases defaultBody =>
+        have hAnd :
+            SourceExprScoped? layout scrutinee = true ∧
+              (CasesScoped? layout cases &&
+                StmtsScoped? layout defaultBody) = true :=
+          by simpa [StmtScoped?] using hCheck
+        have hTail :
+            CasesScoped? layout cases = true ∧
+              StmtsScoped? layout defaultBody = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨SourceExprScoped.of_check hAnd.1,
+            CasesScoped.of_check hTail.1,
+            StmtsScoped.of_check hTail.2⟩
+    | For cond post body =>
+        have hAnd :
+            SourceExprScoped? layout cond = true ∧
+              (StmtsScoped? layout post &&
+                StmtsScoped? layout body) = true :=
+          by simpa [StmtScoped?] using hCheck
+        have hTail :
+            StmtsScoped? layout post = true ∧
+              StmtsScoped? layout body = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨SourceExprScoped.of_check hAnd.1,
+            StmtsScoped.of_check hTail.1,
+            StmtsScoped.of_check hTail.2⟩
+    | If cond body =>
+        have hAnd :
+            SourceExprScoped? layout cond = true ∧
+              StmtsScoped? layout body = true :=
+          by simpa [StmtScoped?] using hCheck
+        exact
+          ⟨SourceExprScoped.of_check hAnd.1,
+            StmtsScoped.of_check hAnd.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem StmtsScoped.of_check
+      {layout : List Name} {stmts : List AstStmt}
+      (hCheck : StmtsScoped? layout stmts = true) :
+      StmtsScoped layout stmts := by
+    cases stmts with
+    | nil =>
+        trivial
+    | cons head tail =>
+        have hAnd :
+            StmtScoped? layout head = true ∧
+              StmtsScoped? (StmtOutLayout layout head) tail = true :=
+          by simpa [StmtsScoped?] using hCheck
+        exact
+          ⟨StmtScoped.of_check hAnd.1,
+            StmtsScoped.of_check hAnd.2⟩
+
+  theorem CasesScoped.of_check
+      {layout : List Name} {cases : List (Word × List AstStmt)}
+      (hCheck : CasesScoped? layout cases = true) :
+      CasesScoped layout cases := by
+    cases cases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            StmtsScoped? layout body = true ∧
+              CasesScoped? layout rest = true :=
+          by simpa [CasesScoped?] using hCheck
+        exact
+          ⟨StmtsScoped.of_check hAnd.1,
+            CasesScoped.of_check hAnd.2⟩
+end
+
+def FunctionScoped? : AstFunctionDefinition → Bool
+  | .Def params returns body =>
+      StmtsScoped? (identNames returns ++ identNames params) body
+
+def FunctionListScoped? :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      FunctionScoped? fn && FunctionListScoped? rest
+
+noncomputable def ContractScoped? (contract : AstContract) : Bool :=
+  StmtScoped? [] contract.dispatcher &&
+    FunctionListScoped? (Contract.functionEntries contract)
+
+noncomputable def ProgramScoped? (program : Program) : Bool :=
+  ContractScoped? program.contract
 
 mutual
   theorem StmtScoped.of_mem_iff
@@ -22236,6 +23020,45 @@ noncomputable def ContractScoped (contract : AstContract) : Prop :=
 
 noncomputable def ProgramScoped (program : Program) : Prop :=
   ContractScoped program.contract
+
+theorem FunctionScoped.of_check {fn : AstFunctionDefinition}
+    (hCheck : FunctionScoped? fn = true) :
+    FunctionScoped fn := by
+  cases fn with
+  | Def params returns body =>
+      exact StmtsScoped.of_check hCheck
+
+theorem FunctionListScoped.of_check
+    {entries : List (Name × AstFunctionDefinition)}
+    (hCheck : FunctionListScoped? entries = true) :
+    FunctionListScoped entries := by
+  induction entries with
+  | nil =>
+      exact FunctionListScoped.nil
+  | cons entry rest ih =>
+      rcases entry with ⟨name, fn⟩
+      have hAnd :
+          FunctionScoped? fn = true ∧ FunctionListScoped? rest = true :=
+        by simpa [FunctionListScoped?] using hCheck
+      exact
+        FunctionListScoped.cons
+          (FunctionScoped.of_check hAnd.1) (ih hAnd.2)
+
+theorem ContractScoped.of_check {contract : AstContract}
+    (hCheck : ContractScoped? contract = true) :
+    ContractScoped contract := by
+  have hAnd :
+      StmtScoped? [] contract.dispatcher = true ∧
+        FunctionListScoped? (Contract.functionEntries contract) = true :=
+    by simpa [ContractScoped?] using hCheck
+  exact
+    ⟨StmtScoped.of_check hAnd.1,
+      FunctionListScoped.of_check hAnd.2⟩
+
+theorem ProgramScoped.of_check {program : Program}
+    (hCheck : ProgramScoped? program = true) :
+    ProgramScoped program :=
+  ContractScoped.of_check hCheck
 
 theorem exprStmt_user_call_args
     {layout : List Name} {functionName : Name} {args : List AstExpr}
@@ -167436,6 +168259,67 @@ structure RecursiveBridgeFullSourceAccepted (program : Program) : Prop where
     Reference.SourceBridgeFacts.UserCallArity.ProgramOk program
 
 /--
+Source-static bridge facts that can be checked directly from the imported Yul
+program syntax.
+
+These facts are separated from `Reference.FullAccepted`: lexical scoping,
+control-flow scoping, and user-call arity are finite syntactic checks, while
+source acceptedness remains the semantic/wellformedness boundary.
+-/
+structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
+  sourceScoped :
+    Reference.SourceBridgeFacts.SourceLexical.ProgramScoped program
+  controlScoped :
+    Reference.SourceBridgeFacts.ControlFlow.ProgramScoped program
+  userCalls :
+    Reference.SourceBridgeFacts.UserCallArity.ProgramOk program
+
+namespace RecursiveBridgeSourceStaticFacts
+
+noncomputable def checked? (program : Program) : Bool :=
+  Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+    (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+      Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)
+
+theorem of_checked? {program : Program}
+    (hCheck : checked? program = true) :
+    RecursiveBridgeSourceStaticFacts program := by
+  have hAnd :
+      Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program =
+          true ∧
+        (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+          Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program) =
+            true :=
+    by simpa [checked?] using hCheck
+  have hTail :
+      Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program =
+          true ∧
+        Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program =
+          true :=
+    by simpa using hAnd.2
+  exact
+    { sourceScoped :=
+        Reference.SourceBridgeFacts.SourceLexical.ProgramScoped.of_check
+          hAnd.1
+      controlScoped :=
+        Reference.SourceBridgeFacts.ControlFlow.ProgramScoped.of_check
+          hTail.1
+      userCalls :=
+        Reference.SourceBridgeFacts.UserCallArity.ProgramOk.of_check
+          hTail.2 }
+
+theorem toFullSourceAccepted {program : Program}
+    (hFacts : RecursiveBridgeSourceStaticFacts program)
+    (hReference : Reference.FullAccepted program) :
+    RecursiveBridgeFullSourceAccepted program :=
+  { reference := hReference
+    sourceScoped := hFacts.sourceScoped
+    controlScoped := hFacts.controlScoped
+    userCalls := hFacts.userCalls }
+
+end RecursiveBridgeSourceStaticFacts
+
+/--
 Current semantic-feature coverage needed to reuse the existing recursive bridge.
 
 This is deliberately separate from full source acceptedness. Today it is
@@ -169154,6 +170038,51 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
         ⟨by simpa using hBase,
           RecursiveBridgeFeatureCoverage.of_checked?
             (by simpa using hCoverage)⟩
+
+/--
+Checked compiler/source boundary that also validates the source-static bridge
+facts.  Source acceptedness itself is still an explicit semantic boundary,
+but lexical scoping, control-flow scoping, and user-call arity are constructed
+from this check.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTargetBytecodeResourcesFeatures? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeSourceStaticFacts.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeatures? program =
+        some (asm, target) ∧
+      RecursiveBridgeSourceStaticFacts program := by
+  unfold compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+    at hCompileTarget
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeatures? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hFacts :
+          RecursiveBridgeSourceStaticFacts.checked? program <;>
+        simp [hFacts] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeSourceStaticFacts.of_checked?
+            (by simpa using hFacts)⟩
 
 /--
 Public theorem using one checked compile-and-assemble success premise.
