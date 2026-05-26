@@ -33,6 +33,13 @@ this IR as the refactor proceeds.
    - [x] Thread the same split into the recursive bridge boundary with
      `RecursiveBridgeFullSourceAccepted`, `RecursiveBridgeFeatureCoverage`,
      and checked conversions to/from old `RecursiveBridgeSourceAccepted`.
+     - [x] Audit `RecursiveBridgeFeatureCoverage`: it cannot be constructed
+       from `RecursiveBridgeFullSourceAccepted`, because full source validity
+       deliberately accepts all primitives and user calls. Successful checked
+       compilation constructs only the object-builtin user-call coverage;
+       local code-image, external account-code inspection, create, and
+       external-call coverage remain semantic bridge boundaries until their
+       explicit contracts are proved.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
@@ -215,6 +222,13 @@ Current assumption-cleanup checkpoint:
 - [x] Record the current preferred top-boundary assumptions explicitly:
   - Source validity: `RecursiveBridgeSourceAccepted` bundles imported Yul
     acceptedness, lexical scoping, control-flow scoping, and user-call arity.
+  - Full source/feature split: the preferred surface takes
+    `RecursiveBridgeFullSourceAccepted` plus `RecursiveBridgeFeatureCoverage`.
+    Full acceptedness is source validity; feature coverage carries the four
+    currently-unproved bridge families. `LayerAudit` exports the four field
+    projections and the checked reconstruction of old
+    `Reference.Safe.FeatureCoverage.program` from feature coverage plus
+    successful checked compilation.
   - Lower resource validity: `RecursiveBridgeCompileResources` supplies
     `Objects.Source.Program.CompileAccepted` for the generated lower object;
     this is the stack/frame/accessibility resource boundary for the lower

@@ -2739,6 +2739,24 @@ abbrev recursiveBridgeFullSourceAccepted :=
 abbrev recursiveBridgeFeatureCoverage :=
   @Yul.Program.RecursiveBridgeFeatureCoverage
 
+abbrev recursiveBridgeFeatureCoverageLocalCodeImage :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.localCodeImage
+
+abbrev recursiveBridgeFeatureCoverageExternalCodeImage :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.externalCodeImage
+
+abbrev recursiveBridgeFeatureCoverageCreateBoundary :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.createBoundary
+
+abbrev recursiveBridgeFeatureCoverageExternalBoundary :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.externalBoundary
+
+abbrev recursiveBridgeFeatureCoverageToProgramOfCompileChecked :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.to_program_of_compileChecked?
+
+abbrev recursiveBridgeFeatureCoverageOfProgram :=
+  @Yul.Program.RecursiveBridgeFeatureCoverage.of_program
+
 abbrev recursiveBridgeSourceAcceptedToFullAndCoverage :=
   @Yul.Program.RecursiveBridgeSourceAccepted.toFullAndCoverage
 
