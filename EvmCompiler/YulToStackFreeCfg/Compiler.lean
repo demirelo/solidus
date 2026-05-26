@@ -102,6 +102,10 @@ def terminal? : EvmYul.Operation .Yul → Option Assembly.HaltKind
   | .System .SELFDESTRUCT => some .selfdestruct
   | _ => none
 
+def invalid? : EvmYul.Operation .Yul → Bool
+  | .System .INVALID => true
+  | _ => false
+
 end Prim
 
 structure ObjectLayout where
@@ -300,9 +304,12 @@ mutual
             let (pre, lowerArgs, state') ← lowerExprArgs? env state args
             some (pre ++ [.terminal kind lowerArgs], state')
         | none => do
-            let (pre, lowerExpr, state') ← lowerExpr? env state
-              (.Call (.inl prim) args)
-            some (pre ++ [.expr lowerExpr], state')
+            if Prim.invalid? prim && args.isEmpty then
+              some ([.invalid], state)
+            else
+              let (pre, lowerExpr, state') ← lowerExpr? env state
+                (.Call (.inl prim) args)
+              some (pre ++ [.expr lowerExpr], state')
     | .ExprStmtCall (.Call (.inr functionName) args) =>
         if functionName = "datacopy" then
           match args with

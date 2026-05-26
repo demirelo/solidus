@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 18:56 PDT.
+Last updated: 2026-05-25 19:02 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -72,7 +72,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Blocks = statement sequences.
   - Statements include value-level primitives, declarations, assignments,
     `if`, `switch`, `for`, `break`, `continue`, `leave`, procedure calls,
-    terminal EVM halts, and explicit bracketed scopes if needed.
+    terminal EVM halts, exceptional `invalid`, and explicit bracketed scopes if
+    needed.
   - No `pop`, `dup`, `swap`, stack shapes, return tokens, concrete stack tails,
     byte offsets, or raw jumps in source syntax.
 - [x] Create `EvmCompiler.StackFreeCfg.Semantics`.
@@ -81,7 +82,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Primitive operations reuse shared EVM/Yul meaning through value-level
     adapters, not stack fragments.
   - Outcomes are `regular`, `break`, `continue`, `leave`, procedure return,
-    terminal halt, error, and out-of-fuel/resource result.
+    terminal halt, exceptional `invalid`, error, and out-of-fuel/resource
+    result.
   - Blocks own lexical scope cleanup.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`
@@ -135,7 +137,8 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Compile `leave` to source-level procedure exit, not EVM `RETURN`.
   - Compile `break`/`continue` with Yul loop scoping.
   - Compile EVM terminal builtins `stop`, `return`, `revert`,
-    `selfdestruct` to StackFreeCfg terminal halts.
+    `selfdestruct` to StackFreeCfg terminal halts, and `invalid` to the
+    source-level exceptional invalid terminator.
   - Pass ordinary EVM/Yul primitives through shared primitive semantics.
   - Resolve object/data builtins `datasize`, `dataoffset`, and `datacopy`
     before or during this pass, with explicit object byte-layout evidence.

@@ -173,6 +173,7 @@ inductive Mode where
   | cont
   | leave
   | halt (kind : Assembly.HaltKind)
+  | invalid
   | outOfFuel
   deriving DecidableEq, Repr
 
@@ -198,6 +199,9 @@ def leave (state : State) (scope : List Name) : Outcome :=
 def halt (kind : Assembly.HaltKind) (state : State) (scope : List Name) :
     Outcome :=
   { state, scope, mode := .halt kind }
+
+def invalid (state : State) (scope : List Name) : Outcome :=
+  { state, scope, mode := .invalid }
 
 def outOfFuel (state : State) (scope : List Name) : Outcome :=
   { state, scope, mode := .outOfFuel }
@@ -301,7 +305,7 @@ mutual
             | .regular =>
                 StmtList.run fuel' prim program (ctx.withScope head.scope)
                   rest head.state
-            | .brk | .cont | .leave | .halt _ | .outOfFuel =>
+            | .brk | .cont | .leave | .halt _ | .invalid | .outOfFuel =>
                 .ok head
 
   def Stmt.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
@@ -361,7 +365,7 @@ mutual
                 For.run fuel' prim program ctx.scope cond post body
                   (initCtx.withScope initOutcome.scope) initOutcome.state
             | .brk | .cont => invalid
-            | .leave | .halt _ | .outOfFuel =>
+            | .leave | .halt _ | .invalid | .outOfFuel =>
                 .ok (initOutcome.restrictTo ctx.scope)
         | .brk =>
             if ctx.canBreak then
@@ -423,6 +427,10 @@ mutual
                       .ok (Outcome.outOfFuel
                         { stateAfterArgs with shared := outcome.state.shared }
                         ctx.scope)
+                  | .invalid =>
+                      .ok (Outcome.invalid
+                        { stateAfterArgs with shared := outcome.state.shared }
+                        ctx.scope)
                   | .brk | .cont => invalid
                 else
                   invalid
@@ -430,6 +438,8 @@ mutual
             let (stateAfterArgs, values) ← Expr.evalArgs prim args state
             let shared ← prim.terminal kind stateAfterArgs.shared values
             .ok (Outcome.halt kind (stateAfterArgs.withShared shared) ctx.scope)
+        | .invalid =>
+            .ok (Outcome.invalid state ctx.scope)
 
   def For.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (outerScope : List Name) (cond : Expr) (post body : Block)
@@ -452,13 +462,13 @@ mutual
               | .regular =>
                   For.run fuel' prim program outerScope cond post body loopCtx
                     postOutcome.state
-              | .leave | .halt _ | .outOfFuel =>
+              | .leave | .halt _ | .invalid | .outOfFuel =>
                   .ok (postOutcome.restrictTo outerScope)
               | .brk | .cont => invalid
           | .brk =>
               .ok ((Outcome.regular bodyOutcome.state loopCtx.scope).restrictTo
                 outerScope)
-          | .leave | .halt _ | .outOfFuel =>
+          | .leave | .halt _ | .invalid | .outOfFuel =>
               .ok (bodyOutcome.restrictTo outerScope)
         else
           .ok ((Outcome.regular stateAfterCond loopCtx.scope).restrictTo

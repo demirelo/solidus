@@ -265,7 +265,7 @@ mutual
           some shape
         else
           none
-    | .brk | .cont | .leave | .terminal _ _ => none
+    | .brk | .cont | .leave | .terminal _ _ | .invalid => none
 
   def SwitchCases.regularShape? (cases : List (Word × Block))
       (shape : Shape) : Option Bool :=
@@ -475,6 +475,14 @@ mutual
                   input := shape
                   body := code
                   term := .halt kind } ]
+            next := supply }
+    | .invalid =>
+        some
+          { blocks :=
+              [ { label := label
+                  input := shape
+                  body := []
+                  term := .invalid } ]
             next := supply }
 
   def SwitchCases.toCfgTests

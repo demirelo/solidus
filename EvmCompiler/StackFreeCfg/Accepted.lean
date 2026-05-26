@@ -222,6 +222,7 @@ mutual
     | .terminal kind args =>
         args.length = profile.terminalArity kind ∧
           ExprList.AllOne profile env args
+    | .invalid => True
 
   def Cases.Accepted (profile : PrimitiveProfile) (sigs : List Signature.T)
       (canBreak canContinue canLeave : Bool) (env : List Name) :
@@ -303,6 +304,7 @@ mutual
     | .terminal kind args =>
         decide (args.length = profile.terminalArity kind) &&
           ExprList.allOne? profile env args
+    | .invalid => true
 
   def Cases.accepted? (profile : PrimitiveProfile) (sigs : List Signature.T)
       (canBreak canContinue canLeave : Bool) (env : List Name) :

@@ -30,13 +30,16 @@ def primStmt? (prim : EvmYul.Operation .Yul) (argc : Nat) : Bool :=
   match Prim.terminal? prim with
   | some kind => argc = kind.argCount
   | none =>
-      match Prim.toAssembly? prim with
-      | none => false
-      | some op =>
-          match StackFreeCfg.Prim.sourceArity? op with
-          | some (inputArity, outputArity) =>
-              inputArity = argc && outputArity = 0
-          | none => false
+      if Prim.invalid? prim then
+        argc = 0
+      else
+        match Prim.toAssembly? prim with
+        | none => false
+        | some op =>
+            match StackFreeCfg.Prim.sourceArity? op with
+            | some (inputArity, outputArity) =>
+                inputArity = argc && outputArity = 0
+            | none => false
 
 def objectExpr? (layout : ObjectLayout) (name : Name)
     (args : List AstExpr) : Bool :=

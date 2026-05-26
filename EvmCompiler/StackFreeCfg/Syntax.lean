@@ -47,6 +47,7 @@ mutual
     | leave
     | call (targets : List Name) (functionName : Name) (args : List Expr)
     | terminal (kind : Assembly.HaltKind) (args : List Expr)
+    | invalid
     deriving Repr
 end
 
