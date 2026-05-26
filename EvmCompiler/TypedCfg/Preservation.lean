@@ -170,6 +170,132 @@ theorem lower?_fallthrough {program : Program} {sites : List CallSite}
 
 end Terminator
 
+namespace Instr
+
+theorem lowerWithShape?_type? {instr : TypedCfg.Instr} {shape : Shape}
+    {code : Assembly.Program} {output : Shape}
+    (hLower : instr.lowerWithShape? shape = some (code, output)) :
+    instr.type? shape = some output := by
+  unfold TypedCfg.Instr.lowerWithShape? at hLower
+  cases hType : instr.type? shape with
+  | none =>
+      simp [hType] at hLower
+  | some typedOutput =>
+      cases instr <;> simp [hType, TypedCfg.Instr.lower?] at hLower
+      case push value =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case prim op =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case pop =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case dup depth =>
+        cases hCode : TypedCfg.Instr.dup? depth with
+        | none =>
+            simp [hCode] at hLower
+        | some lowered =>
+            simp [hCode] at hLower
+            rcases hLower with ⟨_hCode, hOutput⟩
+            rw [hOutput]
+      case swap depth =>
+        cases hCode : TypedCfg.Instr.swap? depth with
+        | none =>
+            simp [hCode] at hLower
+        | some lowered =>
+            simp [hCode] at hLower
+            rcases hLower with ⟨_hCode, hOutput⟩
+            rw [hOutput]
+      case declareLocal name =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case declareLocals names =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case initLocals names =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+      case loadLocal name depth =>
+        cases hCode : TypedCfg.Instr.dup? depth with
+        | none =>
+            simp [hCode] at hLower
+        | some lowered =>
+            simp [hCode] at hLower
+            rcases hLower with ⟨_hCode, hOutput⟩
+            rw [hOutput]
+      case storeLocal name depth =>
+        cases hCode : TypedCfg.Instr.storeLocalCode? depth with
+        | none =>
+            simp [hCode] at hLower
+        | some lowered =>
+            simp [hCode] at hLower
+            rcases hLower with ⟨_hCode, hOutput⟩
+            rw [hOutput]
+      case assignLocals names =>
+        cases hAssign :
+            TypedCfg.Instr.lowerAssignLocalsWithShape? names shape with
+        | none =>
+            simp [hAssign] at hLower
+        | some result =>
+            cases result with
+            | mk assignCode assignOutput =>
+                by_cases hEq : assignOutput = typedOutput
+                · simp [hAssign, hEq] at hLower
+                  rcases hLower with ⟨_hCode, hOutput⟩
+                  rw [hOutput]
+                · simp [hAssign, hEq] at hLower
+      case returnLocals names =>
+        cases hReturn :
+            TypedCfg.Instr.lowerReturnLocalsWithShape? names shape with
+        | none =>
+            simp [hReturn] at hLower
+        | some returnCode =>
+            simp [hReturn] at hLower
+            rcases hLower with ⟨_hCode, hOutput⟩
+            rw [hOutput]
+      case unwind target =>
+        rcases hLower with ⟨_hCode, hOutput⟩
+        rw [hOutput]
+
+end Instr
+
+namespace Block
+
+theorem lowerBodyWithShape?_type? {body : List TypedCfg.Instr}
+    {shape : Shape} {code : Assembly.Program} {output : Shape}
+    (hLower : TypedCfg.Block.lowerBodyWithShape? body shape =
+      some (code, output)) :
+    TypedCfg.Block.bodyType? body shape = some output := by
+  induction body generalizing shape code output with
+  | nil =>
+      simp [TypedCfg.Block.lowerBodyWithShape?] at hLower
+      rcases hLower with ⟨_hCode, hOutput⟩
+      rw [hOutput]
+      simp [TypedCfg.Block.bodyType?]
+  | cons instr rest ih =>
+      unfold TypedCfg.Block.lowerBodyWithShape? at hLower
+      cases hHead : instr.lowerWithShape? shape with
+      | none =>
+          simp [hHead] at hLower
+      | some headResult =>
+          cases headResult with
+          | mk headCode headShape =>
+              cases hTail :
+                  TypedCfg.Block.lowerBodyWithShape? rest headShape with
+              | none =>
+                  simp [hHead, hTail] at hLower
+              | some tailResult =>
+                  cases tailResult with
+                  | mk tailCode tailShape =>
+                      simp [hHead, hTail] at hLower
+                      rcases hLower with ⟨_hCode, hOutput⟩
+                      rw [← hOutput]
+                      simp [TypedCfg.Block.bodyType?,
+                        Instr.lowerWithShape?_type? hHead, ih hTail]
+
+end Block
+
 namespace Program
 
 theorem runFrom_zero_resultRel {program : Program} {asm : Assembly.Program}
