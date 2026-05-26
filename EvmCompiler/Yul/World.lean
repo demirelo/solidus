@@ -143,10 +143,10 @@ theorem CompiledAccountRel.default_with_balance
 
 inductive CompiledToExecuteRel :
     EvmYul.ToExecute .Yul → EvmYul.ToExecute .EVM → Prop
-  | precompiled (addr : EvmYul.AccountAddress) :
+  | precompiled (precompiled : EvmYul.PrecompiledContract) :
       CompiledToExecuteRel
-        (EvmYul.ToExecute.Precompiled addr)
-        (EvmYul.ToExecute.Precompiled addr)
+        (EvmYul.ToExecute.Precompiled precompiled)
+        (EvmYul.ToExecute.Precompiled precompiled)
   | code {contract : AstContract} {bytes : ByteArray}
       (hCode : CompiledCodeRel contract bytes) :
       CompiledToExecuteRel
@@ -190,6 +190,22 @@ theorem CompiledAccountMapRel.find_evm
       yul.find? addr = some yulAccount ∧
         CompiledAccountRel yulAccount evmAccount :=
   hWorld.evm_to_yul addr evmAccount hFind
+
+theorem CompiledAccountMapRel.empty :
+    CompiledAccountMapRel
+      (∅ : EvmYul.AccountMap .Yul)
+      (∅ : EvmYul.AccountMap .EVM) := by
+  refine
+    { yul_to_evm := ?_
+      evm_to_yul := ?_ }
+  · intro _addr _yulAccount hFind
+    rcases Batteries.RBMap.find?_some_mem_toList hFind with
+      ⟨_, hMem, _⟩
+    simp at hMem
+  · intro _addr _evmAccount hFind
+    rcases Batteries.RBMap.find?_some_mem_toList hFind with
+      ⟨_, hMem, _⟩
+    simp at hMem
 
 theorem CompiledAccountMapRel.not_find_yul_of_not_find_evm
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -798,7 +814,9 @@ theorem sharedStateRel_addAccessedAccount
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     {addr : EvmYul.AccountAddress}
-    (hPrecompile : addr ∈ EvmYul.π) :
+    {precompiled : EvmYul.PrecompiledContract}
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress? addr = some precompiled) :
     CompiledToExecuteRel
       (EvmYul.toExecute .Yul yul addr)
       (EvmYul.toExecute .EVM evm addr) := by
@@ -809,7 +827,8 @@ theorem CompiledAccountMapRel.toExecute_code_of_find_yul
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     (hWorld : CompiledAccountMapRel yul evm)
     {addr : EvmYul.AccountAddress} {yulAccount : EvmYul.Account .Yul}
-    (hNotPrecompile : addr ∉ EvmYul.π)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress? addr = none)
     (hFind : yul.find? addr = some yulAccount) :
     ∃ evmAccount,
       evm.find? addr = some evmAccount ∧
@@ -829,19 +848,271 @@ theorem CompiledAccountMapRel.toExecute
     CompiledToExecuteRel
       (EvmYul.toExecute .Yul yul addr)
       (EvmYul.toExecute .EVM evm addr) := by
-  by_cases hPrecompile : addr ∈ EvmYul.π
-  · exact CompiledAccountMapRel.toExecute_precompiled hPrecompile
-  · simp [EvmYul.toExecute, hPrecompile]
-    cases hYul : yul.find? addr with
-    | none =>
-        have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
-        simp [hEvm]
-        exact CompiledToExecuteRel.code CompiledCodeRel.empty
-    | some yulAccount =>
-        rcases hWorld.find_yul hYul with
-          ⟨evmAccount, hEvmFind, hAccount⟩
-        simp [hEvmFind]
-        exact CompiledToExecuteRel.code hAccount.code
+  cases hPrecompile : EvmYul.PrecompiledContract.ofAddress? addr with
+  | some precompiled =>
+      exact CompiledAccountMapRel.toExecute_precompiled hPrecompile
+  | none =>
+      simp [EvmYul.toExecute, hPrecompile]
+      cases hYul : yul.find? addr with
+      | none =>
+          have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+          simp [hEvm]
+          exact CompiledToExecuteRel.code CompiledCodeRel.empty
+      | some yulAccount =>
+          rcases hWorld.find_yul hYul with
+            ⟨evmAccount, hEvmFind, hAccount⟩
+          simp [hEvmFind]
+          exact CompiledToExecuteRel.code hAccount.code
+
+structure CompiledPrecompileResultRel
+    (yulRes :
+      Bool × EvmYul.AccountMap .Yul × EvmYul.UInt256 ×
+        EvmYul.Substate × ByteArray)
+    (evmRes :
+      Bool × EvmYul.AccountMap .EVM × EvmYul.UInt256 ×
+        EvmYul.Substate × ByteArray) : Prop where
+  success : yulRes.1 = evmRes.1
+  accountMap : CompiledAccountMapRel yulRes.2.1 evmRes.2.1
+  gas : yulRes.2.2.1 = evmRes.2.2.1
+  substate : yulRes.2.2.2.1 = evmRes.2.2.2.1
+  output : yulRes.2.2.2.2 = evmRes.2.2.2.2
+
+theorem CompiledPrecompileResultRel.same
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (success : Bool) (gas : EvmYul.UInt256)
+    (substate : EvmYul.Substate) (output : ByteArray) :
+    CompiledPrecompileResultRel
+      (success, yul, gas, substate, output)
+      (success, evm, gas, substate, output) :=
+  ⟨rfl, hWorld, rfl, rfl, rfl⟩
+
+theorem CompiledPrecompileResultRel.empty
+    (success : Bool) (gas : EvmYul.UInt256)
+    (substate : EvmYul.Substate) (output : ByteArray) :
+    CompiledPrecompileResultRel
+      (success, (∅ : EvmYul.AccountMap .Yul), gas, substate, output)
+      (success, (∅ : EvmYul.AccountMap .EVM), gas, substate, output) :=
+  ⟨rfl, CompiledAccountMapRel.empty, rfl, rfl, rfl⟩
+
+theorem CompiledAccountMapRel.precompile_ecrec
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_ECREC yul gas substate yI)
+      (Ξ_ECREC evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 3000
+  · simp [Ξ_ECREC, hGas]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_ECREC, hGas, hCalldata]
+    exact
+      CompiledPrecompileResultRel.same hWorld true
+        (gas - EvmYul.UInt256.ofNat 3000) substate _
+
+theorem CompiledAccountMapRel.precompile_sha256
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_SHA256 yul gas substate yI)
+      (Ξ_SHA256 evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 60 + 12 * ((eI.calldata.size + 31) / 32)
+  · simp [Ξ_SHA256, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_SHA256, hGas, hCalldata]
+    exact
+      CompiledPrecompileResultRel.same hWorld true
+        (gas -
+          EvmYul.UInt256.ofNat (60 + 12 * ((eI.calldata.size + 31) / 32)))
+        substate _
+
+theorem CompiledAccountMapRel.precompile_rip160
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_RIP160 yul gas substate yI)
+      (Ξ_RIP160 evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 600 + 120 * ((eI.calldata.size + 31) / 32)
+  · simp [Ξ_RIP160, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_RIP160, hGas, hCalldata]
+    exact
+      CompiledPrecompileResultRel.same hWorld true
+        (gas -
+          EvmYul.UInt256.ofNat
+            (600 + 120 * ((eI.calldata.size + 31) / 32)))
+        substate _
+
+theorem CompiledAccountMapRel.precompile_id
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_ID yul gas substate yI)
+      (Ξ_ID evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 15 + 3 * ((eI.calldata.size + 31) / 32)
+  · simp [Ξ_ID, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_ID, hGas, hCalldata]
+    exact
+      CompiledPrecompileResultRel.same hWorld true
+        (gas -
+          EvmYul.UInt256.ofNat (15 + 3 * ((eI.calldata.size + 31) / 32)))
+        substate eI.calldata
+
+theorem CompiledAccountMapRel.precompile_expmod
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_EXPMOD yul gas substate yI)
+      (Ξ_EXPMOD evm gas substate eI) := by
+  by_cases hGas : gas.toNat < Ξ_EXPMOD_gasCost eI.calldata
+  · simp [Ξ_EXPMOD, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_EXPMOD, hGas, hCalldata]
+    exact
+      CompiledPrecompileResultRel.same hWorld true
+        (gas -
+          EvmYul.UInt256.ofNat (Ξ_EXPMOD_gasCost eI.calldata))
+        substate (Ξ_EXPMOD_output eI.calldata)
+
+theorem CompiledAccountMapRel.precompile_bn_add
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_BN_ADD yul gas substate yI)
+      (Ξ_BN_ADD evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 150
+  · simp [Ξ_BN_ADD, hGas]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_BN_ADD, hGas, hCalldata]
+    split
+    · exact
+        CompiledPrecompileResultRel.same hWorld true
+          (gas - EvmYul.UInt256.ofNat 150) substate _
+    · exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+
+theorem CompiledAccountMapRel.precompile_bn_mul
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_BN_MUL yul gas substate yI)
+      (Ξ_BN_MUL evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 6000
+  · simp [Ξ_BN_MUL, hGas]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_BN_MUL, hGas, hCalldata]
+    split
+    · exact
+        CompiledPrecompileResultRel.same hWorld true
+          (gas - EvmYul.UInt256.ofNat 6000) substate _
+    · exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+
+theorem CompiledAccountMapRel.precompile_snarkv
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_SNARKV yul gas substate yI)
+      (Ξ_SNARKV evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 34000 * (eI.calldata.size / 192) + 45000
+  · simp [Ξ_SNARKV, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_SNARKV, hGas, hCalldata]
+    split
+    · exact
+        CompiledPrecompileResultRel.same hWorld true
+          (gas -
+            EvmYul.UInt256.ofNat
+              (34000 * (eI.calldata.size / 192) + 45000))
+          substate _
+    · exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+
+theorem CompiledAccountMapRel.precompile_blake2_f
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_BLAKE2_F yul gas substate yI)
+      (Ξ_BLAKE2_F evm gas substate eI) := by
+  by_cases hGas :
+      gas.toNat < EvmYul.fromByteArrayBigEndian (eI.calldata.extract 0 4)
+  · simp [Ξ_BLAKE2_F, hGas, hCalldata]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_BLAKE2_F, hGas, hCalldata]
+    split
+    · exact
+        CompiledPrecompileResultRel.same hWorld true
+          (gas -
+            EvmYul.UInt256.ofNat
+              (EvmYul.fromByteArrayBigEndian (eI.calldata.extract 0 4)))
+          substate _
+    · exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+
+theorem CompiledAccountMapRel.precompile_point_eval
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hCalldata : yI.calldata = eI.calldata)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (Ξ_PointEval yul gas substate yI)
+      (Ξ_PointEval evm gas substate eI) := by
+  by_cases hGas : gas.toNat < 50000
+  · simp [Ξ_PointEval, hGas]
+    exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+  · simp [Ξ_PointEval, hGas, hCalldata]
+    split
+    · exact
+        CompiledPrecompileResultRel.same hWorld true
+          (gas - EvmYul.UInt256.ofNat 50000) substate _
+    · exact CompiledPrecompileResultRel.empty false ⟨0⟩ substate .empty
+
+theorem CompiledAccountMapRel.runPrecompiledContract_preserve
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {cfg : Reference.StateRelConfig}
+    {yI : EvmYul.ExecutionEnv .Yul} {eI : EvmYul.ExecutionEnv .EVM}
+    (hEnv : Reference.ExecutionEnvRel cfg yI eI)
+    (precompiled : EvmYul.PrecompiledContract)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate) :
+    CompiledPrecompileResultRel
+      (runPrecompiledContract precompiled yul gas substate yI)
+      (runPrecompiledContract precompiled evm gas substate eI) := by
+  cases precompiled
+  · exact hWorld.precompile_ecrec hEnv.calldata gas substate
+  · exact hWorld.precompile_sha256 hEnv.calldata gas substate
+  · exact hWorld.precompile_rip160 hEnv.calldata gas substate
+  · exact hWorld.precompile_id hEnv.calldata gas substate
+  · exact hWorld.precompile_expmod hEnv.calldata gas substate
+  · exact hWorld.precompile_bn_add hEnv.calldata gas substate
+  · exact hWorld.precompile_bn_mul hEnv.calldata gas substate
+  · exact hWorld.precompile_snarkv hEnv.calldata gas substate
+  · exact hWorld.precompile_blake2_f hEnv.calldata gas substate
+  · exact hWorld.precompile_point_eval hEnv.calldata gas substate
 
 end World
 
