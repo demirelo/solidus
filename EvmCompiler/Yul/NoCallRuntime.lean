@@ -1626,8 +1626,10 @@ Preferred canonical-entry wrapper after checking source static facts and the
 lowered source acceptedness core. `Program.SourceAccepted`, feature coverage,
 bytecode bridge facts, and lower frame resources are constructed by the
 successful `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?`
-check. The remaining target-side premise is the exact trace-to-`X`
-gas-precondition theorem consumed by the lower gas-aware bridge.
+check. The expression premise is the remaining source-fuel boundary: successful
+expression evaluation must not surface the imported `.OutOfFuel` state. The
+remaining target-side premise is the exact trace-to-`X` gas-precondition theorem
+consumed by the lower gas-aware bridge.
 -/
 theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
     {cfg : Reference.StateRelConfig}
@@ -1644,7 +1646,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     (hTerminal :
       RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialWorld :
       RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
@@ -1711,7 +1713,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
   exact
     compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_X
       (hStatic.2.toFullSourceAccepted hProgramAccepted) hFeatures.2
-      hResources.2 hTerminal hExpr
+      hResources.2 hTerminal hExpr.to_resultContracts
       (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
       hSourceRun hBytecode.1 hBytecode.2.1 hBytecode.2.2
       (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
@@ -1732,7 +1734,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
     (hTerminal :
       RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialWorld :
       RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
@@ -1782,7 +1784,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
   exact
     compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_X
       (hStatic.2.toFullSourceAccepted hProgramAccepted) hFeatures.2
-      hResources.2 hTerminal hExpr
+      hResources.2 hTerminal hExpr.to_resultContracts
       (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
       hSourceRun hBytecode.1 hBytecode.2.1 hBytecode.2.2
       (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)

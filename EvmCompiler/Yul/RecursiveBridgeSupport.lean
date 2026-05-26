@@ -169187,14 +169187,10 @@ structure RecursiveBridgeTerminalObservationContracts
     ∀ {layout outcomeLayout : List Name}
       {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
       {args : List AstExpr} {rest : List AstStmt}
-      {allowed : Except Reference.Exception Reference.State → Prop}
       {argFuel : Nat}
-      {source compiler sourceResult}
+      {source sourceResult}
       {sourceAfterArgs : Reference.State} {sourceValues : List Word},
       Prim.terminal? yulPrim = some kind →
-      Reference.SourceBridgeFacts.SourceStateRel cfg layout source
-        compiler →
-      allowed sourceResult →
       Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
@@ -169245,8 +169241,8 @@ theorem structured_of_observation
       ⟨sharedAfter, hTerminalRun⟩
     exact
       ⟨sharedAfter, hTerminalRun,
-        hObservation.terminal hTerminal hInitial hAllowed hRelatable
-          hExecSeq hEvalArgs hArgsRel hTerminalRun⟩
+        hObservation.terminal hTerminal hRelatable hExecSeq hEvalArgs
+          hArgsRel hTerminalRun⟩
 
 end RecursiveBridgeTerminalContracts
 
@@ -169261,6 +169257,57 @@ structure RecursiveBridgeExprResultContracts
       Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
       Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
         (some program.contract)
+
+structure RecursiveBridgeExprNoOutOfFuelContracts
+    (cfg : Reference.StateRelConfig)
+    (program : Program) : Prop where
+  noSuccessfulOutOfFuel :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr} {source : Reference.State}
+      {compiler : Objects.Source.State}
+      {value : Word},
+      Reference.Safe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout source compiler →
+      EvmYul.Yul.eval fuel expr (some program.contract) source =
+        .ok (.OutOfFuel, value) →
+      False
+
+namespace RecursiveBridgeExprNoOutOfFuelContracts
+
+theorem to_resultContracts
+    {cfg : Reference.StateRelConfig} {program : Program}
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program) :
+    RecursiveBridgeExprResultContracts cfg program where
+  exprResultOk := by
+    intro layout fuel expr hSafe hScoped hOk source compiler sourceAfter value
+      hInitial hEval
+    have hAllowed :
+        Reference.SourceBridgeFacts.SourcePairResultCheckpointAllowed false
+          false false
+          (EvmYul.Yul.eval fuel expr (some program.contract) source) := by
+      cases hInitial with
+      | ok hShared hVars =>
+          exact
+            Reference.SourceBridgeFacts.CheckpointExpressionSound.of_primitive_families.eval
+              hSafe (by simp [Reference.SourceBridgeFacts.StateCheckpointAllowed])
+    have hStateAllowed :
+        Reference.SourceBridgeFacts.StateCheckpointAllowed false false false
+          sourceAfter :=
+      Reference.SourceBridgeFacts.StateCheckpointAllowed.of_pair_result_ok
+        hAllowed hEval
+    cases sourceAfter with
+    | Ok sharedAfter storeAfter =>
+        exact ⟨sharedAfter, storeAfter, rfl⟩
+    | OutOfFuel =>
+        exact False.elim
+          (hExpr.noSuccessfulOutOfFuel hSafe hScoped hOk hInitial hEval)
+    | Checkpoint jump =>
+      cases jump <;>
+        simp [Reference.SourceBridgeFacts.StateCheckpointAllowed] at hStateAllowed
+
+end RecursiveBridgeExprNoOutOfFuelContracts
 
 namespace RecursiveBridgePrimitiveContracts
 

@@ -218,14 +218,13 @@ this IR as the refactor proceeds.
      - [x] Bundle the four per-kind lemmas into the canonical
        `PrimitiveSound` terminal-step fields for
        `Locals.Source.PrimitiveSemantics.structured`.
-   - [x] Replace the no-successful-`.OutOfFuel` expression route with the
-     smaller fundamental `RecursiveBridgeExprResultContracts` premise whose
-     scope is documented and exported.
-     - [x] Remove the no-successful-`.OutOfFuel` constructors and public wrappers
-       once the preferred top theorem consumed `RecursiveBridgeExprResultContracts`
-       directly.
-     - [x] Audit the premise against the imported evaluator. It is not
-       constructible from source acceptedness alone: safe user-function
+   - [x] Split the expression result-shape premise into constructible
+     checkpoint preservation plus the remaining source-fuel boundary.
+     - [x] Prove the old `RecursiveBridgeExprResultContracts` package from the
+       imported safe-expression checkpoint theorem plus a smaller
+       `RecursiveBridgeExprNoOutOfFuelContracts` premise.
+     - [x] Audit the remaining premise against the imported evaluator. It is
+       not constructible from source acceptedness alone: safe user-function
        expression calls can still expose the imported interpreter's
        success-valued `.OutOfFuel` marker at insufficient source fuel. The
        honest removal path is a sufficient-source-fuel theorem, or a smaller
@@ -259,7 +258,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 06:55 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 07:32 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -304,14 +303,15 @@ Current assumption-cleanup checkpoint:
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
     `RecursiveBridgeTargetRuntime` is no longer the preferred public input.
   - Remaining preferred inputs after the checked source/static, canonical-entry,
-    expression-result, and gas-boundary checkpoints:
+    expression-resource, and gas-boundary checkpoints:
     `RecursiveBridgeSourceRun` is the concrete imported source execution;
     `RecursiveBridgeInitialWorldRel` is the source/target environment
     relation; `RecursiveBridgeTerminalObservationContracts` is the terminal
-    and revert observation relation; `RecursiveBridgeExprResultContracts` is
-    the source-facing expression result/resource boundary; and the exact
-    trace-to-`X` gas-precondition callback is the target runtime/gas bridge
-    theorem still to be proved below the compiler.
+    and revert observation relation without the recursive proof's initial
+    relation/checkpoint filter; `RecursiveBridgeExprNoOutOfFuelContracts` is
+    the source-facing expression fuel boundary used to construct the old result
+    package internally; and the exact trace-to-`X` gas-precondition callback is
+    the target runtime/gas bridge theorem still to be proved below the compiler.
 - [x] Classify the remaining `Reference.Safe.primitive` exclusions exactly.
   The public feature package now distinguishes local code-image operations
   (`CODESIZE`/`CODECOPY`), external account-code inspection (`EXTCODESIZE` /
@@ -332,10 +332,11 @@ Current assumption-cleanup checkpoint:
   `CurrentContractProjectionAssumption.trivial` now populate the old runtime
   package internally; the remaining target-side runtime premise is now the
   exact trace-to-`X` gas precondition callback.
-- [x] Re-express the preferred expression result-shape premise as the
-  source-facing resource boundary. The default gas-aware audit alias now takes
-  `RecursiveBridgeExprResultContracts` directly, and the older
-  no-successful-`.OutOfFuel` package has been removed.
+- [x] Re-express the preferred expression result-shape premise as the narrower
+  source-fuel resource boundary. The default gas-aware audit alias now takes
+  `RecursiveBridgeExprNoOutOfFuelContracts` directly and constructs
+  `RecursiveBridgeExprResultContracts` internally from checked safe-expression
+  checkpoint preservation.
 - [x] Construct canonical target entry state in the preferred gas-aware wrapper.
   The default audit alias now takes an initial shared-state relation against an
   arbitrary EVM state and runs the target from `canonicalEntryState initial`,
@@ -515,8 +516,9 @@ Current assumption-cleanup checkpoint:
     through the opaque semantic-core bundle.
   - [x] Shrink the expression result-shape package to the actual remaining
     resource premise. The preferred gas-aware aliases now take
-    `RecursiveBridgeExprResultContracts` directly, and the intermediate
-    no-successful-`.OutOfFuel` route has been removed.
+    `RecursiveBridgeExprNoOutOfFuelContracts` directly; checkpoint preservation
+    for safe expressions constructs `RecursiveBridgeExprResultContracts`
+    internally, leaving only the successful `.OutOfFuel` source-fuel boundary.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The
@@ -3098,10 +3100,11 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   - [x] `RecursiveBridgeSourceRun` remains a fundamental input-execution and source-fuel boundary: the compiler cannot prove that an arbitrary imported run with a caller-chosen fuel and result occurred, nor that it avoided the imported successful `.OutOfFuel` marker.
   - [x] `RecursiveBridgeInitialWorldRel` remains a fundamental initial-state boundary: for an arbitrary `StateRelConfig`, source shared state, and EVM state, only the caller can supply the account/code/storage/machine-state relation.
   - [x] `RecursiveBridgeTerminalObservationContracts` remains a semantic observation boundary: it relates imported `YulHalt`/`Revert` results to source-tower halt states under caller-chosen terminal/revert relations, so it is not compiler-generated evidence.
-  - [x] The public route takes the source-facing
-    `RecursiveBridgeExprResultContracts` boundary directly. This is still a
-    semantic/resource boundary for successful imported expression evaluation
-    returning an ordinary `Ok` state, pending a sufficient-source-fuel or
+  - [x] The public route takes the narrower source-facing
+    `RecursiveBridgeExprNoOutOfFuelContracts` boundary directly. The old
+    expression result-shape package is constructed internally from the imported
+    safe-expression checkpoint theorem, leaving only the successful
+    `.OutOfFuel` resource case pending a sufficient-source-fuel or
     actual-run-scoped theorem.
   - [x] The public route exposes the exact trace-to-`X` gas-precondition callback
     for the compiler-derived block trace, pending the real sufficient-gas proof

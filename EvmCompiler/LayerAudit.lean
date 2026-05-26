@@ -2714,7 +2714,10 @@ arity, existing no-shadowing/source-expression facts, and the full
 `Yul.Program.SourceAccepted` boundary. The preferred gas-aware route exposes the
 exact trace-to-`X` gas precondition callback needed to replay the compiler's
 checked block trace above a finite gas bound. The remaining expression premise
-is the source-facing `RecursiveBridgeExprResultContracts`.
+is the narrower source-fuel boundary
+`RecursiveBridgeExprNoOutOfFuelContracts`; the old result-shape package is
+constructed internally using checked checkpoint preservation for safe
+expressions.
 -/
 abbrev recursiveBridgeTopAssumptions :=
   @Yul.Program.RecursiveBridgeTopAssumptions
@@ -2886,6 +2889,12 @@ abbrev recursiveBridgeTerminalContracts :=
 
 abbrev recursiveBridgeExprResultContracts :=
   @Yul.Program.RecursiveBridgeExprResultContracts
+
+abbrev recursiveBridgeExprNoOutOfFuelContracts :=
+  @Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts
+
+abbrev recursiveBridgeExprNoOutOfFuelContractsToResultContracts :=
+  @Yul.Program.RecursiveBridgeExprNoOutOfFuelContracts.to_resultContracts
 
 abbrev recursiveBridgeSemanticDispatcherOutcomeRel :=
   @Yul.Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
