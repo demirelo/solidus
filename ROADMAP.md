@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 19:31 PDT.
+Last updated: 2026-05-25 19:40 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -166,6 +166,9 @@ StackFreeCfg, not directly into TypedCfg or assembly.
     sites.
   - [x] Add `YulToStackFreeCfg.Program.lowerAccepted?`, which gates lowering
     by coverage and the generated StackFreeCfg program's acceptedness.
+  - [x] Add executable source-facing Yul WF (`YulToStackFreeCfg.SourceWF`)
+    for lexical declarations/assignments, break/continue/leave placement,
+    function signatures, expression arities, and object/data builtin shapes.
   - [ ] Connect coverage/acceptedness to imported Yul validity and to
     successful lowering with checked theorems.
 - [ ] Prove adjacent preservation:
