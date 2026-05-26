@@ -64,6 +64,9 @@ Proof rule:
   - Zero-fuel `outOfFuel` is only produced at a valid block boundary whose
     runtime stack conforms to that block's declared input shape; missing labels
     or shape violations still produce semantic `invalid`.
+  - Public raw execution rejects duplicate labels, duplicate procedure names,
+    and missing entry blocks before stepping, avoiding accidental first-match
+    lookup semantics for malformed CFGs.
   - Raw `PC` is rejected at this layer because typed CFG has symbolic labels,
     not concrete byte offsets; concrete PC behavior belongs below this
     boundary.

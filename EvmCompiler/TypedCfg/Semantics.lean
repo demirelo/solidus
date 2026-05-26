@@ -315,17 +315,28 @@ end Block
 
 namespace Program
 
+def runtimeWellFormed? (program : Program) : Bool :=
+  labelsUnique? program.blocks &&
+    procNamesUnique? program.procedures &&
+    (program.findBlock? program.entry).isSome
+
 def suspendedAt? (program : Program) (label : Label) (state : RunState) :
     Bool :=
-  match program.findBlock? label with
-  | none => false
-  | some block => block.input.matchesStack state.evm.stack
+  if program.runtimeWellFormed? then
+    match program.findBlock? label with
+    | none => false
+    | some block => block.input.matchesStack state.evm.stack
+  else
+    false
 
 def step (program : Program) (label : Label) (state : RunState) :
     Except EVMException Outcome :=
-  match program.findBlock? label with
-  | none => .ok (.invalid state)
-  | some block => block.run program state
+  if program.runtimeWellFormed? then
+    match program.findBlock? label with
+    | none => .ok (.invalid state)
+    | some block => block.run program state
+  else
+    .ok (.invalid state)
 
 def runFrom : Nat → Program → Label → RunState → Except EVMException Outcome
   | 0, program, label, state =>
