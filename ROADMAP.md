@@ -149,6 +149,10 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Full Yul acceptedness should not reject features merely because later
     proofs are unfinished.
   - Feature coverage obligations must be named separately.
+  - [x] Add executable `YulToStackFreeCfg.Coverage` checker that names the
+    currently lowerable source-surface shapes before proof work.
+  - [ ] Connect coverage/acceptedness to imported Yul validity and to
+    successful lowering with checked theorems.
 - [ ] Prove adjacent preservation:
   `YulToStackFreeCfg.compile_preserves : NethermindYul.run -> StackFreeCfg.run`.
 - [ ] Audit no lower-layer leakage:
