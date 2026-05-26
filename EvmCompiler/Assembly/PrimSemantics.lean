@@ -1530,6 +1530,108 @@ theorem run_suffix_exists_safe_from_run
             rw [hStack, hPopTarget] at hTarget
             simp [hPop, hShared] at hSource hTarget
 
+theorem run_suffix_exists_dup_from_run
+    {n : Nat}
+    {base : EvmYul.Stack Word}
+    {source target source' : EvmYul.EVM.State}
+    (hShared : target.toSharedState = source.toSharedState)
+    (hStack : target.stack = source.stack ++ base)
+    (hSource : (PrimStep.dup n).run source = .ok source') :
+    ∃ target',
+      (PrimStep.dup n).run target = .ok target' ∧
+        target'.toSharedState = source'.toSharedState ∧
+          target'.stack = source'.stack ++ base := by
+  simp [PrimStep.run, EvmYul.dup] at hSource ⊢
+  by_cases hLen : n ≤ source.stack.length
+  · have hTargetLen : n ≤ target.stack.length := by
+      rw [hStack, List.length_append]
+      omega
+    have hTargetCond : n ≤ source.stack.length + base.length := by
+      omega
+    have hTargetTake :
+        (target.stack.take n) = source.stack.take n := by
+      rw [hStack]
+      exact List.take_append_of_le_length hLen
+    simp [hLen] at hSource
+    cases hSource
+    refine
+      ⟨target.replaceStackAndIncrPC
+          ((source.stack.take n).getLast! :: source.stack ++ base),
+        ?_, ?_, ?_⟩
+    · simp [hStack, hTargetCond, List.take_append_of_le_length hLen,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, hShared]
+    · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, hStack]
+  · simp [hLen] at hSource
+
+theorem run_suffix_exists_swap_from_run
+    {n : Nat}
+    {base : EvmYul.Stack Word}
+    {source target source' : EvmYul.EVM.State}
+    (hShared : target.toSharedState = source.toSharedState)
+    (hStack : target.stack = source.stack ++ base)
+    (hSource : (PrimStep.swap n).run source = .ok source') :
+    ∃ target',
+      (PrimStep.swap n).run target = .ok target' ∧
+        target'.toSharedState = source'.toSharedState ∧
+          target'.stack = source'.stack ++ base := by
+  simp [PrimStep.run, EvmYul.swap] at hSource ⊢
+  by_cases hLen : n + 1 ≤ source.stack.length
+  · have hTargetLen : n + 1 ≤ target.stack.length := by
+      rw [hStack, List.length_append]
+      omega
+    have hTargetCond : n + 1 ≤ source.stack.length + base.length := by
+      omega
+    have hTargetTake :
+        (target.stack.take (n + 1)) = source.stack.take (n + 1) := by
+      rw [hStack]
+      exact List.take_append_of_le_length hLen
+    have hTargetDrop :
+        (target.stack.drop (n + 1)) =
+          source.stack.drop (n + 1) ++ base := by
+      rw [hStack]
+      exact List.drop_append_of_le_length hLen
+    simp [hLen] at hSource
+    cases hSource
+    refine
+      ⟨target.replaceStackAndIncrPC
+          ((source.stack.take (n + 1)).getLast! ::
+            (source.stack.take (n + 1)).tail!.dropLast ++
+              (source.stack.take (n + 1)).head! ::
+                source.stack.drop (n + 1) ++ base),
+        ?_, ?_, ?_⟩
+    · simp [hStack, hTargetCond, List.take_append_of_le_length hLen,
+        List.drop_append_of_le_length hLen,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, hShared]
+    · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, hStack, List.append_assoc]
+  · simp [hLen] at hSource
+
+theorem run_suffix_exists_from_run
+    {step : Assembly.PrimStep}
+    {base : EvmYul.Stack Word}
+    {source target source' : EvmYul.EVM.State}
+    (hShared : target.toSharedState = source.toSharedState)
+    (hStack : target.stack = source.stack ++ base)
+    (hSource : step.run source = .ok source') :
+    ∃ target',
+      step.run target = .ok target' ∧
+        target'.toSharedState = source'.toSharedState ∧
+          target'.stack = source'.stack ++ base := by
+  cases step
+  case dup n =>
+    exact run_suffix_exists_dup_from_run hShared hStack hSource
+  case swap n =>
+    exact run_suffix_exists_swap_from_run hShared hStack hSource
+  all_goals
+    exact run_suffix_exists_safe_from_run (by trivial) hShared hStack hSource
+
 theorem run_suffix_exists_safe
     {step : Assembly.PrimStep}
     {shared : EvmYul.SharedState .EVM}
