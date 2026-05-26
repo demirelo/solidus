@@ -981,6 +981,58 @@ theorem sharedStateRel_freshExternalCallWithWorld
     · exact hCreated
   · exact machineStateRel_freshExternalCall hGas
 
+theorem sharedStateRel_freshExternalCallWithWorldFromFreshEvmFrame
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulEnv : EvmYul.ExecutionEnv .Yul}
+    {evmEnv : EvmYul.ExecutionEnv .EVM}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {yulGas evmGas : EvmYul.UInt256}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hExecutionEnv : Reference.ExecutionEnvRel cfg yulEnv evmEnv)
+    (hCreated : yulCreated = evmCreated)
+    (hGas : cfg.gasAvailableRel yulGas evmGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        executionEnv := yulEnv
+        createdAccounts := yulCreated }
+      ({ (default : EvmYul.EVM.State) with
+        accountMap := evmAccountMap
+        σ₀ := evm.σ₀
+        totalGasUsedInBlock := evm.totalGasUsedInBlock
+        transactionReceipts := evm.transactionReceipts
+        substate := evmSubstate
+        executionEnv := evmEnv
+        blocks := evm.blocks
+        genesisBlockHeader := evm.genesisBlockHeader
+        createdAccounts := evmCreated
+        toMachineState := EvmYul.MachineState.freshExternalCall evmGas }
+        : EvmYul.EVM.State).toSharedState := by
+  rcases hShared with ⟨hChain, _hMachine⟩
+  rcases hChain with
+    ⟨_hAccountMap, hSigma, hTotal, hReceipts, _hSubstate, _hEnv,
+      hBlocks, hGenesis, _hCreated⟩
+  constructor
+  · constructor
+    · exact hAccountMap
+    · simpa using hSigma
+    · simpa using hTotal
+    · simpa using hReceipts
+    · exact hSubstate
+    · exact hExecutionEnv
+    · simpa using hBlocks
+    · simpa using hGenesis
+    · exact hCreated
+  · exact machineStateRel_freshExternalCall hGas
+
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}
     {yulAccountMap : EvmYul.AccountMap τ}

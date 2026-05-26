@@ -5,7 +5,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "2de3f00be56ba0e20e312504ddca68cf8d2b624a",
+   "rev": "15731561aaf0d61918379c4fd7b3f1e3df3b27f3",
    "name": "evmyul",
    "manifestFile": "lake-manifest.json",
    "inputRev": "codex/chain-call-semantics",
