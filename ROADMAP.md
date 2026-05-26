@@ -2999,8 +2999,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
      emitted assembly syntactically contains no call/create opcodes discharge
      `ExternalInteractionAssumption` without a separate agreement premise.
    - [ ] Add explicit external-world/account-code call semantics and state relation before re-admitting `CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, or `STATICCALL`.
-     - [x] Add a concrete compiled-code/account/account-map relation for external worlds, plus call-target lookup lemmas for precompile and ordinary compiled-account cases.
-     - [ ] Correct or explicitly model the precompile mismatch: EVM `CALL` uses `toExecute` and addresses 1-10 as precompiles, while the imported Yul `CALL` path currently account-lookups and dispatches Yul code.
+     - [x] Add a concrete compiled-code/account/account-map relation for external worlds, plus a total `toExecute` relation covering precompiled addresses, ordinary compiled-account code, and missing/default-code accounts.
+     - [ ] Correct or explicitly model the remaining imported-interpreter precompile mismatch: EVM `CALL` executes `toExecute` precompiles for addresses 1-10, while the imported Yul `CALL` path still account-lookups and dispatches Yul code directly.
      - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
        - [x] Prove compiled-world preservation for account insertion, balance increase/decrease, and source-successful balance transfer, including default empty accounts materialized by balance increases.
        - [x] Prove concrete compiled-world `StateRelConfig` hooks for `SELFBALANCE`, `BALANCE`, `SLOAD`, `SSTORE`, `TLOAD`, and `TSTORE`, including `SSTORE` refund/substate agreement.

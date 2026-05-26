@@ -822,6 +822,27 @@ theorem CompiledAccountMapRel.toExecute_code_of_find_yul
   simp [EvmYul.toExecute, hNotPrecompile, hEvmFind]
   exact CompiledToExecuteRel.code hAccount.code
 
+theorem CompiledAccountMapRel.toExecute
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) :
+    CompiledToExecuteRel
+      (EvmYul.toExecute .Yul yul addr)
+      (EvmYul.toExecute .EVM evm addr) := by
+  by_cases hPrecompile : addr ∈ EvmYul.π
+  · exact CompiledAccountMapRel.toExecute_precompiled hPrecompile
+  · simp [EvmYul.toExecute, hPrecompile]
+    cases hYul : yul.find? addr with
+    | none =>
+        have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+        simp [hEvm]
+        exact CompiledToExecuteRel.code CompiledCodeRel.empty
+    | some yulAccount =>
+        rcases hWorld.find_yul hYul with
+          ⟨evmAccount, hEvmFind, hAccount⟩
+        simp [hEvmFind]
+        exact CompiledToExecuteRel.code hAccount.code
+
 end World
 
 end Yul
