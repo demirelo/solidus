@@ -186,6 +186,50 @@ theorem push {program : Program} {sites : List CallSite}
       EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
     exact ReturnEncoding.stack?_push_current h.stack_eq
 
+theorem pop_step_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState} {sourceEVM' : EVMState}
+    (hRel : PayloadRel program sites source target)
+    (hStep : Assembly.PrimOp.pop.step source.evm = .ok sourceEVM') :
+    ∃ target',
+      Assembly.Target.runList [.prim .pop] target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases hRel.hidden_suffix with ⟨suffix, hTargetStack, hSuffix⟩
+  cases hSourceStack : source.evm.stack with
+  | nil =>
+      simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+        Assembly.PrimStep.run, EvmYul.Stack.pop, hSourceStack] at hStep
+  | cons value rest =>
+      simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+        Assembly.PrimStep.run, EvmYul.Stack.pop, hSourceStack,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] at hStep
+      cases hStep
+      let target' := target.replaceStackAndIncrPC (rest ++ suffix)
+      refine ⟨target', ?_, ?_⟩
+      · simp [Assembly.Target.runList, Assembly.Target.stepInstr,
+          Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+          Assembly.PrimStep.run, EvmYul.Stack.pop, hTargetStack,
+          hSourceStack, target',
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+        rfl
+      · exact
+          PayloadRel.with_visible_evm_from_suffix
+            (program := program) (sites := sites) (source := source)
+            (sourceEVM' :=
+              { source.evm with
+                pc := source.evm.pc + EvmYul.UInt256.ofNat 1
+                stack := rest })
+            (target' := target') (suffix := suffix) hSuffix
+            (by
+              simp [target',
+                EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC, hRel.shared_eq])
+            (by
+              simp [target',
+                EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC])
+
 end PayloadRel
 
 /--
@@ -383,6 +427,10 @@ end Instr
 
 namespace InstrSemantics
 
+def targetPopMany : Nat → List Assembly.TargetInstr
+  | 0 => []
+  | n + 1 => .prim .pop :: targetPopMany n
+
 theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
     {shape : Shape} {value : Word}
@@ -432,7 +480,6 @@ theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
           .ok (sourceEVM', shape) ∧
         Assembly.Target.runList [.prim .pop] target = .ok target' ∧
           PayloadRel program sites (source.withEVM sourceEVM') target' := by
-  rcases hRel.hidden_suffix with ⟨suffix, hTargetStack, hSuffix⟩
   cases hSourceStack : source.evm.stack with
   | nil =>
       simp [Shape.matchesStack, hSourceStack] at hMatches
@@ -444,8 +491,15 @@ theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
           simpa [Shape.matchesStack, hSourceStack] using hMatches
         exact hSplit.2
       let sourceEVM' := source.evm.replaceStackAndIncrPC rest
-      let target' := target.replaceStackAndIncrPC (rest ++ suffix)
-      refine ⟨sourceEVM', target', ?_, ?_, ?_⟩
+      have hSourceStep :
+          Assembly.PrimOp.pop.step source.evm = .ok sourceEVM' := by
+        simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+          Assembly.PrimStep.run, EvmYul.Stack.pop, hSourceStack,
+          sourceEVM', EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      rcases PayloadRel.pop_step_target hRel hSourceStep with
+        ⟨target', hTargetRun, hTargetRel⟩
+      refine ⟨sourceEVM', target', ?_, hTargetRun, hTargetRel⟩
       · simp [TypedCfg.Instr.runWithShape?, TypedCfg.Instr.type?,
           TypedCfg.Instr.run, Assembly.PrimOp.step,
           Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
@@ -466,26 +520,56 @@ theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
                   stack := rest }, shape)
         rw [hRestMatches]
         simp
-      · simp [Assembly.Target.runList, Assembly.Target.stepInstr,
-          Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
-          Assembly.PrimStep.run, EvmYul.Stack.pop, hTargetStack,
-          hSourceStack, target',
-          EvmYul.EVM.State.replaceStackAndIncrPC,
-          EvmYul.EVM.State.incrPC]
-        rfl
-      · exact
-          PayloadRel.with_visible_evm_from_suffix
-            (program := program) (sites := sites) (source := source)
-            (sourceEVM' := sourceEVM') (target' := target')
-            (suffix := suffix) hSuffix
-            (by
-              simp [sourceEVM', target',
-                EvmYul.EVM.State.replaceStackAndIncrPC,
-                EvmYul.EVM.State.incrPC, hRel.shared_eq])
-            (by
-              simp [sourceEVM', target',
-                EvmYul.EVM.State.replaceStackAndIncrPC,
-                EvmYul.EVM.State.incrPC])
+
+theorem runPopMany_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {sourceEVM' : EVMState} {n : Nat}
+    (hRel : PayloadRel program sites source target)
+    (hRun : TypedCfg.Instr.runPopMany n source.evm = .ok sourceEVM') :
+    ∃ target',
+      Assembly.Target.runList (targetPopMany n) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  induction n generalizing source target sourceEVM' with
+  | zero =>
+      simp [TypedCfg.Instr.runPopMany] at hRun
+      cases hRun
+      refine ⟨target, rfl, ?_⟩
+      constructor
+      · simpa [RunState.withEVM] using hRel.shared_eq
+      · simpa [RunState.withEVM] using hRel.stack_eq
+  | succ n ih =>
+      simp [TypedCfg.Instr.runPopMany] at hRun
+      cases hStep : Assembly.PrimOp.pop.step source.evm with
+      | error err =>
+          simp [hStep] at hRun
+          change (Except.error err : Except EVMException EVMState) =
+            Except.ok sourceEVM' at hRun
+          cases hRun
+      | ok mid =>
+          simp [hStep] at hRun
+          change TypedCfg.Instr.runPopMany n mid = .ok sourceEVM' at hRun
+          rcases PayloadRel.pop_step_target hRel hStep with
+            ⟨targetMid, hTargetHead, hRelMid⟩
+          rcases ih hRelMid hRun with
+            ⟨targetFinal, hTargetTail, hRelFinal⟩
+          have hTargetHeadStep :
+              Assembly.Target.stepInstr (.prim .pop) target =
+                .ok targetMid := by
+            cases hStepTarget :
+                Assembly.Target.stepInstr (.prim .pop) target with
+            | error err =>
+                simp [Assembly.Target.runList, hStepTarget] at hTargetHead
+                change (Except.error err : Except EVMException EVMState) =
+                  Except.ok targetMid at hTargetHead
+                cases hTargetHead
+            | ok stepped =>
+                simp [Assembly.Target.runList, hStepTarget] at hTargetHead
+                cases hTargetHead
+                rfl
+          refine ⟨targetFinal, ?_, ?_⟩
+          · simpa [targetPopMany, Assembly.Target.runList, hTargetHeadStep]
+              using hTargetTail
+          · simpa [RunState.withEVM] using hRelFinal
 
 end InstrSemantics
 
