@@ -66,7 +66,7 @@ Proof rule:
 
 Goal: define the first true stack-free compiler target above `TypedCfg`.
 
-- [ ] Create `EvmCompiler.StackFreeCfg.Syntax`.
+- [x] Create `EvmCompiler.StackFreeCfg.Syntax`.
   - Program = procedures + main block.
   - Procedures = params, returns, body.
   - Blocks = statement sequences.
@@ -75,7 +75,7 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     terminal EVM halts, and explicit bracketed scopes if needed.
   - No `pop`, `dup`, `swap`, stack shapes, return tokens, concrete stack tails,
     byte offsets, or raw jumps in source syntax.
-- [ ] Create `EvmCompiler.StackFreeCfg.Semantics`.
+- [x] Create `EvmCompiler.StackFreeCfg.Semantics`.
   - Independent interpreter over source values, varstore, scopes, procedures,
     and shared EVM/Yul state.
   - Primitive operations reuse shared EVM/Yul meaning through value-level
@@ -86,7 +86,7 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`
     as procedure exit, and keep EVM `RETURN` as terminal halt.
-- [ ] Create `EvmCompiler.StackFreeCfg.Accepted`.
+- [x] Create `EvmCompiler.StackFreeCfg.Accepted`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage
     obligations rather than hidden proof conveniences.
@@ -116,7 +116,7 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Inventory every statement, expression, function, object/data, primitive,
     terminal, and error/resource outcome.
   - Reject or separately contract `verbatim`; do not silently include it.
-- [ ] Define `EvmCompiler.YulToStackFreeCfg.Compiler`.
+- [x] Define `EvmCompiler.YulToStackFreeCfg.Compiler`.
   - Convert Yul blocks to StackFreeCfg blocks.
   - Convert Yul variable declarations and assignments to StackFreeCfg
     declarations/assignments over a varstore.
@@ -132,6 +132,9 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Model external calls/create/code queries either by direct shared semantics
     or by an explicit external-world oracle relation shared with the EVM
     target.
+  - Preserve effectful loop-condition evaluation by placing generated
+    condition preludes inside the loop body before a generated false-condition
+    `break`, while keeping the Yul post block as the loop post continuation.
 - [ ] Define Yul-to-StackFreeCfg acceptedness.
   - Full Yul acceptedness should not reject features merely because later
     proofs are unfinished.

@@ -1,5 +1,6 @@
 import EvmCompiler.Assembly
 import EvmCompiler.TypedCfg
+import EvmCompiler.StackFreeCfg
 import EvmCompiler.Control
 import EvmCompiler.Structured
 import EvmCompiler.Expressions
@@ -7,4 +8,5 @@ import EvmCompiler.Locals
 import EvmCompiler.Functions
 import EvmCompiler.Objects
 import EvmCompiler.Yul
+import EvmCompiler.YulToStackFreeCfg
 import EvmCompiler.Solidity
