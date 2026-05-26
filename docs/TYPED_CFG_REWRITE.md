@@ -9,12 +9,24 @@ compiler architecture before rebuilding preservation proofs.
 Control flow carries an explicit stack contract. The compiler should not recover
 stack shape from generated EVM jumps after the fact.
 
-This document uses "CFG" in the typed stack-machine sense. The typed CFG is not
-stack-free internally: it is the boundary where symbolic stack shapes become
-explicit and checked. The abstraction goal is that layers above it do not expose
-concrete stack slots, `DUP`/`SWAP`, return-token encodings, or bytecode jumps in
-their source semantics. If we later want a stack-free block-parameter CFG, it
-should sit above this typed stack CFG and lower into it.
+This document uses "CFG" in the typed stack-machine sense. The current
+`EvmCompiler.TypedCfg` is **not** the layer that abstracts the stack away from
+its own syntax. It is the stack-quarantine layer: symbolic stack shapes become
+explicit, checked, and then lowered to concrete EVM stack code.
+
+The abstraction goal is one layer higher. Layers above typed CFG should not
+expose concrete stack slots, raw `DUP`/`SWAP`/`POP`, return-token encodings, or
+bytecode jumps in their source semantics. If we want a CFG that is itself
+stack-free, it should sit above this typed stack CFG and lower into it.
+
+Put differently:
+
+```text
+stack-free source/control/locals/functions semantics
+  -> typed stack CFG with explicit symbolic shapes and stack effects
+  -> labeled assembly
+  -> concrete EVM bytecode
+```
 
 Use the judgment:
 
@@ -170,6 +182,42 @@ stack-free expression language. In particular it must include conditionals,
 `switch`, `for` loops, `break`, `continue`, `leave`, and terminal EVM halts
 with Yul-like mode propagation. Loops own the `break`/`continue` handlers; a
 function/procedure layer above or alongside it owns the `leave` handler.
+
+The current `EvmCompiler.Control` module is a first stack-free structured
+control source layer with an independent interpreter. It is not yet the full
+stack-free CFG/block-parameter abstraction we want for the rest of the tower.
+That future layer should have no `pop`/`dup`/`swap`, no stack shapes, no return
+tokens, and no bytecode jumps in its source semantics. Its blocks should talk
+in terms of source values, variables, scopes, control modes, and procedure
+results; its compiler should be the only place that chooses typed-CFG shapes,
+local depths, unwinds, and procedure entry/return layouts.
+
+A good target shape for that layer is:
+
+```text
+StackFreeCfg.Program
+  procedures : name -> params/results/body
+  blocks     : label -> statements + source-level terminator
+
+Statement effects:
+  primitive expression/statement effects over source values and EVM state
+  lexical scope entry/exit over a varstore
+  assignment/declaration/function-call binding once locals/functions are added
+
+Terminators:
+  goto label
+  branch condition thenLabel elseLabel
+  switch value cases defaultLabel
+  break / continue / leave as Yul-style modes at structured boundaries
+  procedure return with result values
+  terminal EVM halt
+```
+
+The compiler from this stack-free CFG to `TypedCfg` should establish the first
+real stack abstraction theorem: every source continuation/value environment is
+realized by a declared typed-CFG shape, and every source control transfer lowers
+to an `unwind` plus typed jump/call/ret without exposing that machinery above
+the boundary.
 
 Variables and scopes intentionally arrive in the next layer up. They will
 change the compiled stack shape, but that change belongs to the locals

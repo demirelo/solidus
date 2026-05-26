@@ -127,7 +127,7 @@ def run (instr : Instr) (state : EVMState) : Except EVMException EVMState :=
       let state' ← runSwap depth state
       Assembly.PrimOp.pop.step state'
   | .unwind _target =>
-      .ok state
+      .error .InvalidInstruction
 
 def runWithShape? (instr : Instr) (shape : Shape) (state : EVMState) :
     Except EVMException (EVMState × Shape) :=
