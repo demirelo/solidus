@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 06:26 PDT.
+Last updated: 2026-05-26 06:46 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3117,7 +3117,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   - [x] `RecursiveBridgeSourceRun` remains a fundamental input-execution and source-fuel boundary: the compiler cannot prove that an arbitrary imported run with a caller-chosen fuel and result occurred, nor that it avoided the imported successful `.OutOfFuel` marker.
   - [x] `RecursiveBridgeInitialWorldRel` remains a fundamental initial-state boundary: for an arbitrary `StateRelConfig`, source shared state, and EVM state, only the caller can supply the account/code/storage/machine-state relation.
   - [x] `RecursiveBridgeTerminalObservationContracts` remains a semantic observation boundary: it relates imported `YulHalt`/`Revert` results to source-tower halt states under caller-chosen terminal/revert relations, so it is not compiler-generated evidence.
-  - [x] `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` remains a resource-discipline boundary until the recursive expression dispatcher is refactored/proved with a sufficient-source-fuel or actual-run-scoped theorem.
+  - [x] The preferred public route no longer exposes
+    `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts`; it takes the weaker
+    source-facing `RecursiveBridgeExprResultContracts` boundary directly.
+    This is still a semantic/resource boundary for successful imported
+    expression evaluation returning an ordinary `Ok` state, pending a
+    sufficient-source-fuel or actual-run-scoped theorem.
   - [x] `Assembly.GasAware.XResultRunnerCompleteness` remains the target-runtime completeness theorem: checked compilation produces a gasless block trace, while this package says EVMYulLean's gas-aware `X` runner replays that trace above a finite gas bound.
 - [x] Layer audit gate: build, proof-hole scan, theorem names, remaining assumptions, and progress-log entry.
 - [x] Root imports `EvmCompiler.LayerAudit`, a checked theorem-spine tripwire naming each adjacent preservation theorem and keeping the imported-Yul `SourceBridge` boundary visually separate from completed adjacent proofs.
