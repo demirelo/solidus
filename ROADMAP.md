@@ -1,5 +1,186 @@
 # Roadmap
 
+## Current Roadmap: Airtight Adjacent Layers
+
+Last updated: 2026-05-25 17:45 PDT.
+
+Principle: every layer has its own independent source semantics, and every
+compiler proof targets exactly the next lower layer. No theorem above a layer
+may mention implementation details hidden below that layer.
+
+Current target tower:
+
+```text
+Nethermind Yul semantics
+  -> StackFreeCfg
+  -> TypedCfg
+  -> labeled assembly
+  -> concrete EVM bytecode / gas-aware EVM boundary
+```
+
+Layer boundaries:
+
+- Yul to StackFreeCfg: hides imported-Yul syntax quirks, parser/object layout,
+  function declarations, Yul argument order, and object/data builtins.
+- StackFreeCfg to TypedCfg: hides variables/scopes/procedure values/control
+  modes behind a typed symbolic stack layout.
+- TypedCfg to labeled assembly: hides symbolic stack effects, typed labels,
+  lexical `unwind`, typed procedure call/return, and generated return-token
+  dispatch.
+- Labeled assembly to EVM: hides byte offsets, `JUMPDEST` placement, byte
+  encoding, concrete PCs, and gas-aware execution preconditions.
+
+Proof rule:
+
+- Each preservation theorem relates only adjacent interpreters.
+- Each layer's source interpreter is independent; it must not run by compiling
+  itself to the lower layer.
+- Public theorem statements must not expose lower-layer layouts, stack depths,
+  return tokens, dispatch tables, replay certificates, generated label tables,
+  or callee-preservation oracles. Compiler-generated evidence must be
+  constructed internally or remain an unfinished checkpoint.
+
+### Stage 0: Typed Stack CFG Checkpoint
+
+- [x] Preserve proof-heavy pre-refactor work on
+  `codex/proof-modules-before-typed-cfg-rewrite`.
+- [x] Remove proof-heavy modules from `main` while keeping the compiler
+  refactor buildable.
+- [x] Record the explicit stack-contract design in
+  `docs/TYPED_CFG_REWRITE.md`.
+- [x] Implement `EvmCompiler.TypedCfg` syntax with symbolic `Shape`s, typed
+  labels, lexical `unwind`, terminal halts, and first-class procedures.
+- [x] Implement a typed CFG checker.
+- [x] Implement independent shape-aware typed CFG semantics.
+- [x] Keep EVM terminal halts distinct from structured `leave`.
+- [x] Implement typed-CFG-to-labeled-assembly lowering as a separate backend
+  boundary.
+- [x] Add checked assembly backend entry point
+  `TypedCfg.CheckedProgram.assemble?`.
+- [x] Refactor `Structured.Cfg` and `Control` to lower through checked typed
+  CFG.
+- [x] Audit that `TypedCfg` is a typed stack CFG / stack quarantine layer, not
+  the future stack-free source layer.
+
+### Stage 1: StackFreeCfg Layer
+
+Goal: define the first true stack-free compiler target above `TypedCfg`.
+
+- [ ] Create `EvmCompiler.StackFreeCfg.Syntax`.
+  - Program = procedures + main block.
+  - Procedures = params, returns, body.
+  - Blocks = statement sequences.
+  - Statements include value-level primitives, declarations, assignments,
+    `if`, `switch`, `for`, `break`, `continue`, `leave`, procedure calls,
+    terminal EVM halts, and explicit bracketed scopes if needed.
+  - No `pop`, `dup`, `swap`, stack shapes, return tokens, concrete stack tails,
+    byte offsets, or raw jumps in source syntax.
+- [ ] Create `EvmCompiler.StackFreeCfg.Semantics`.
+  - Independent interpreter over source values, varstore, scopes, procedures,
+    and shared EVM/Yul state.
+  - Primitive operations reuse shared EVM/Yul meaning through value-level
+    adapters, not stack fragments.
+  - Outcomes are `regular`, `break`, `continue`, `leave`, procedure return,
+    terminal halt, error, and out-of-fuel/resource result.
+  - Blocks own lexical scope cleanup.
+  - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
+  - Procedures allocate params/returns, zero return variables, treat `leave`
+    as procedure exit, and keep EVM `RETURN` as terminal halt.
+- [ ] Create `EvmCompiler.StackFreeCfg.Accepted`.
+  - Reject only malformed/ill-scoped/ill-typed programs.
+  - Record explicit unsupported features, if any, as source-language coverage
+    obligations rather than hidden proof conveniences.
+- [ ] Create `EvmCompiler.StackFreeCfg.Compiler`.
+  - Compile StackFreeCfg to `TypedCfg`.
+  - The compiler owns all stack facts: source-variable layout, typed-CFG
+    shape, local depths, unwind targets, procedure entry/return shapes, call
+    return labels, and terminal argument placement.
+- [ ] Prove stack-free CFG successor theorem.
+  - `SeqSound []` base case.
+  - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.
+  - Regular head results enter the tail continuation.
+  - `break`/`continue`/`leave`/halt/error/out-of-fuel short-circuit the tail.
+- [ ] Prove adjacent preservation:
+  `StackFreeCfg.compile_preserves : StackFreeCfg.run -> TypedCfg.run`.
+- [ ] Audit no stack leakage above StackFreeCfg:
+  public semantics/proofs mention no `TypedCfg.Shape`, local depth, EVM stack
+  suffix, `DUP`/`SWAP`/`POP`, return token, or dispatch label.
+
+### Stage 2: Yul To StackFreeCfg Compiler Design
+
+Goal: compile the targeted Nethermind/Solidity Yul semantics into
+StackFreeCfg, not directly into TypedCfg or assembly.
+
+- [ ] Define the exact imported Yul source surface.
+  - Name the Nethermind Yul semantics version/patch being targeted.
+  - Inventory every statement, expression, function, object/data, primitive,
+    terminal, and error/resource outcome.
+  - Reject or separately contract `verbatim`; do not silently include it.
+- [ ] Define `EvmCompiler.YulToStackFreeCfg.Compiler`.
+  - Convert Yul blocks to StackFreeCfg blocks.
+  - Convert Yul variable declarations and assignments to StackFreeCfg
+    declarations/assignments over a varstore.
+  - Preserve Yul argument evaluation order exactly.
+  - Convert Yul functions to StackFreeCfg procedures.
+  - Compile `leave` to source-level procedure exit, not EVM `RETURN`.
+  - Compile `break`/`continue` with Yul loop scoping.
+  - Compile EVM terminal builtins `stop`, `return`, `revert`,
+    `selfdestruct` to StackFreeCfg terminal halts.
+  - Pass ordinary EVM/Yul primitives through shared primitive semantics.
+  - Resolve object/data builtins `datasize`, `dataoffset`, and `datacopy`
+    before or during this pass, with explicit object byte-layout evidence.
+  - Model external calls/create/code queries either by direct shared semantics
+    or by an explicit external-world oracle relation shared with the EVM
+    target.
+- [ ] Define Yul-to-StackFreeCfg acceptedness.
+  - Full Yul acceptedness should not reject features merely because later
+    proofs are unfinished.
+  - Feature coverage obligations must be named separately.
+- [ ] Prove adjacent preservation:
+  `YulToStackFreeCfg.compile_preserves : NethermindYul.run -> StackFreeCfg.run`.
+- [ ] Audit no lower-layer leakage:
+  this theorem may mention Yul state, StackFreeCfg state, acceptedness,
+  resource bounds, and explicit external/object layout contracts; it must not
+  mention typed-CFG shapes, EVM stack layouts, assembly labels, or bytecode PCs.
+
+### Stage 3: TypedCfg To Labeled Assembly Proof
+
+- [ ] Prove instruction lowering soundness for push/prim/pop/dup/swap.
+- [ ] Prove symbolic local effects:
+  `declareLocal`, `loadLocal`, `storeLocal`.
+- [ ] Prove lexical `unwind` lowers to the corresponding `POP` sequence.
+- [ ] Prove typed `jump`/`jumpi` target valid labels with declared shapes.
+- [ ] Prove typed procedure `call`/`ret` lowers to generated token/dispatch
+  assembly.
+- [ ] Prove generated call tokens and dispatch labels are unique or accepted
+  by the checked assembly boundary.
+- [ ] Prove adjacent preservation:
+  `TypedCfg.lower_preserves : TypedCfg.run -> Assembly.Source.run`.
+
+### Stage 4: Labeled Assembly To EVM Proof
+
+- [ ] Reuse/restore the archived labeled-assembly proof shape where it still
+  applies.
+- [ ] Prove label resolution maps every symbolic target to a `JUMPDEST`.
+- [ ] Prove byte encoding and concrete PC preservation.
+- [ ] Prove gasless source assembly run agrees with EVM execution after erasing
+  gas-only behavior.
+- [ ] Keep gas/resource assumptions explicit at the final gas-aware boundary.
+
+### Stage 5: End-To-End Composition
+
+- [ ] Compose only adjacent theorems:
+  Yul -> StackFreeCfg -> TypedCfg -> labeled assembly -> EVM.
+- [ ] Public top theorem exposes only:
+  acceptedness, initial-state relation, explicit object/data layout contract,
+  explicit external-world oracle relation if needed, and gas/resource bounds.
+- [ ] Public top theorem does not expose:
+  generated layout witnesses, replay certificates, call obligations, return
+  token tables, dispatch evidence, stack-depth proofs, or lower-layer semantic
+  packages that the compiler can construct internally.
+
+## Historical Backlog: Old Audit Concerns
+
 ## Audit Concerns To Fully Discharge
 
 This is the current active goal. These items are not complete until the public
