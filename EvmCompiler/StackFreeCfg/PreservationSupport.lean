@@ -316,23 +316,23 @@ theorem matchesStack {vars : Store.T} {shape : Shape}
           simp [TypedCfg.Shape.matchesStack,
             SlotMatchesStore.matchesValue h.1, ih h.2]
 
-theorem append {vars : Store.T} {shape₁ shape₂ : Shape}
-    {stack₁ stack₂ : EvmYul.Stack Word}
-    (h₁ : ShapeMatchesStore vars shape₁ stack₁)
-    (h₂ : ShapeMatchesStore vars shape₂ stack₂) :
-    ShapeMatchesStore vars (shape₁ ++ shape₂) (stack₁ ++ stack₂) := by
-  induction shape₁ generalizing stack₁ with
+theorem append {vars : Store.T} {shape1 shape2 : Shape}
+    {stack1 stack2 : EvmYul.Stack Word}
+    (h1 : ShapeMatchesStore vars shape1 stack1)
+    (h2 : ShapeMatchesStore vars shape2 stack2) :
+    ShapeMatchesStore vars (shape1 ++ shape2) (stack1 ++ stack2) := by
+  induction shape1 generalizing stack1 with
   | nil =>
-      cases stack₁ with
-      | nil => simpa using h₂
-      | cons _ _ => simp [ShapeMatchesStore] at h₁
+      cases stack1 with
+      | nil => simpa using h2
+      | cons _ _ => simp [ShapeMatchesStore] at h1
   | cons slot rest ih =>
-      cases stack₁ with
+      cases stack1 with
       | nil =>
-          simp [ShapeMatchesStore] at h₁
+          simp [ShapeMatchesStore] at h1
       | cons value stackRest =>
-          simp [ShapeMatchesStore] at h₁ ⊢
-          exact ⟨h₁.1, ih h₁.2⟩
+          simp [ShapeMatchesStore] at h1 ⊢
+          exact ⟨h1.1, ih h1.2⟩
 
 theorem pushWords {vars : Store.T} {n : Nat} {values : List Word}
     {shape : Shape} {stack : EvmYul.Stack Word}
@@ -531,7 +531,7 @@ theorem compileCondition?_code {expr : StackFreeCfg.Expr}
               by_cases hRest : rest = shape
               · simp [hCompile, hRest] at h
                 cases h
-                exact ⟨slot, by simpa [hRest] using hCompile⟩
+                exact ⟨slot, by simp [hRest]⟩
               · simp [hCompile, hRest] at h
 
 end ExprCompiler

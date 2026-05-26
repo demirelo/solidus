@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-05-25 21:22 PDT.
+Last updated: 2026-05-25 21:30 PDT.
 
 This roadmap describes the current plan after the proof-tower reset. The old
 plan tried to harden the previous compiler directly. The current plan is
@@ -72,6 +72,9 @@ Current status:
 - [x] Contract/observation surface exists.
 - [x] Initial adjacent preservation interface exists.
 - [x] Local state/shape vocabulary exists for the proof below this boundary.
+- [x] Adjacent proof support has been extracted to
+  `EvmCompiler.StackFreeCfg.PreservationSupport`, keeping stack-shape lemmas
+  out of the public preservation interface.
 - [ ] Complete adjacent proof: `StackFreeCfg -> TypedCfg`.
 - [ ] Audit final public theorem for stack leakage.
 
