@@ -1570,6 +1570,24 @@ theorem CompiledAccountMapRel.dead_eq_of_missing
   rw [hMissing, hEvmMissing]
   rfl
 
+theorem CompiledAccountMapRel.Ccallgas_eq_of_missing_recipient
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yulMachine evmMachine : EvmYul.MachineState}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {target recipient : EvmYul.AccountAddress}
+    {value gas : EvmYul.UInt256}
+    (hGas : yulMachine.gasAvailable = evmMachine.gasAvailable)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hMissing : yul.find? recipient = none) :
+    EvmYul.EVM.Ccallgas target recipient value gas
+        yul yulMachine yulSubstate =
+      EvmYul.EVM.Ccallgas target recipient value gas
+        evm evmMachine evmSubstate := by
+  exact
+    Ccallgas_eq_of_dead_eq hGas hSubstate
+      (hWorld.dead_eq_of_missing hMissing)
+
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     {addr : EvmYul.AccountAddress}
