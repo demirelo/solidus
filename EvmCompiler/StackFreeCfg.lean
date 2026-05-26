@@ -4,3 +4,4 @@ import EvmCompiler.StackFreeCfg.Contract
 import EvmCompiler.StackFreeCfg.PrimitiveAdapter
 import EvmCompiler.StackFreeCfg.Accepted
 import EvmCompiler.StackFreeCfg.Compiler
+import EvmCompiler.StackFreeCfg.Preservation

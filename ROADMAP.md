@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:27 PDT.
+Last updated: 2026-05-25 20:37 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -162,6 +162,19 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     the needed `DUP`/`SWAP` accesses are representable by the current backend.
   - Public `toCfg?`/`toCheckedCfg?` are gated by source acceptedness; the raw
     `toUncheckedCfg?` builder remains available for compiler debugging.
+- [x] Define the top-down adjacent preservation interface in
+  `EvmCompiler.StackFreeCfg.Preservation`.
+  - `InitialRel` relates source shared state to a typed-CFG initial EVM state
+    with empty entry stack.
+  - `ResultRel` relates source `Observation`s/errors to typed-CFG outcomes at
+    exactly this adjacent boundary.
+  - `Program.CompilePreserves` is the public theorem target: if
+    `Compiler.Program.toCheckedCfg? program = some target`, then source
+    `Program.runObserved PrimitiveSemantics.canonical` and
+    `TypedCfg.Program.run target.program` are related.
+  - The statement does not take generated layouts, replay certificates,
+    per-callee obligations, return-token tables, or label evidence as public
+    inputs.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.
@@ -243,6 +256,22 @@ StackFreeCfg, not directly into TypedCfg or assembly.
     case literals, and user function names reserved for object/data builtins.
   - [ ] Connect coverage/acceptedness to imported Yul validity and to
     successful lowering with checked theorems.
+- [x] Define the top-down adjacent preservation interface in
+  `EvmCompiler.YulToStackFreeCfg.Preservation`.
+  - The interface uses the imported EVMYul Yul interpreter directly through a
+    lightweight `Reference.run`, avoiding old proof-heavy compiler modules
+    while the new adjacent tower is rebuilt.
+  - `InitialRel` is an explicit source/target initial-state relation, not
+    compiler evidence.
+  - `ExceptionRel` names the imported-Yul-exception to StackFreeCfg-exception
+    semantic glue that must be instantiated by the bridge proof.
+  - `ResultRel` relates imported-Yul regular/revert/generic non-reverting
+    `YulHalt`/out-of-fuel/error observations to StackFreeCfg observations.
+  - `FuelBudget` is explicit because lowering may introduce StackFreeCfg
+    temporaries and generated source statements.
+  - `Program.CompilePreserves` is the public theorem target from `lowerGate`
+    success to `StackFreeCfg.Program.runObserved`, with no TypedCfg, stack,
+    label, token, bytecode, PC, or gas details in the boundary.
 - [ ] Prove adjacent preservation:
   `YulToStackFreeCfg.compile_preserves : NethermindYul.run -> StackFreeCfg.run`.
 - [ ] Audit no lower-layer leakage:
