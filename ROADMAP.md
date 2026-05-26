@@ -419,13 +419,11 @@ Current assumption-cleanup checkpoint:
       `compileChecked?_noCallCreate_of_loweredFunctions` at the public
       theorem boundary with the accepted-program theorem, so no generated
       no-call premise remains.
-  - [x] Add a top-theorem wrapper
-    `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top_withAcceptedNoCallCreate`
-    whose target-side inputs are only code-size decode-window,
-    jumpdest/gas/out-of-gas/current-contract projection plus canonical entry
-    PC/stack; it derives
+  - [x] Add the no-call/create target construction that derives
     `asm.usesCallCreate = false` internally from source acceptedness and
-    checked compile-target success.
+    checked compile-target success. The temporary accepted-no-call-create
+    public wrapper was later removed once the bundled no-call/create package
+    became the spine.
   - [x] Add the bundled public no-call/create top package
     `RecursiveBridgeTopNoCallAssumptions` and theorem
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall`,
@@ -474,11 +472,9 @@ Current assumption-cleanup checkpoint:
     which composes the imported-Yul bridge, verified compiler stack, bytecode
     bridge, and explicit result-level sufficient-gas contract into an `EVM.X`
     run theorem.
-  - [x] Add the no-out-of-gas corollary
-    `compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_X`.
-  - [x] Export `LayerAudit` aliases
-    `recursiveBridgeTopNoCallToEVMX` and
-    `recursiveBridgeTopNoCallToEVMXNoOutOfGas`.
+  - [x] Add the result-level theorem for the no-call/create package. The early
+    no-out-of-gas corollary and its `LayerAudit` aliases were later removed
+    once the canonical checked no-out route became the preferred public spine.
 - [x] Expose the lower compiler-resource boundary through the standard
   source-facing package instead of only through a bespoke recursive-bridge
   resource record.
@@ -486,12 +482,10 @@ Current assumption-cleanup checkpoint:
   - [x] Add the projection
     `RecursiveBridgeTopNoCallAssumptions.sourceCompileAccepted`.
   - [x] Add `RecursiveBridgeTopNoCallSourceCompileAssumptions`, whose public
-    resource field is `Yul.Program.SourceCompileAccepted program`, and checked
-    wrappers to the gasless result theorem and result-level `EVM.X` theorem.
-  - [x] Export `LayerAudit` aliases
-    `recursiveBridgeTopNoCallSourceCompileAssumptions`,
-    `recursiveBridgeTopNoCallSourceCompileToGasAwareEVM`, and
-    `recursiveBridgeTopNoCallSourceCompileToEVMX`.
+    resource field is `Yul.Program.SourceCompileAccepted program`, and the
+    checked wrapper to the result-level `EVM.X` theorem. The intermediate
+    gasless/source-compile public wrapper and aliases were later removed when
+    they stopped being part of the preferred surface.
   - [x] Export source-compile package audit projections for source
     acceptedness, source compile acceptedness, emitted no-call/create,
     target decode-window bound, and target jumpdest correctness, so the
@@ -540,9 +534,8 @@ Current assumption-cleanup checkpoint:
     no-call/create canonical-observation result-level `EVM.X` theorem, with
     the bytecode decode-window and jumpdest-scanner premises constructed from
     `compileCheckedAssemblyTargetBytecode?`.
-  - [x] The older gasless result bridge remains exported under the explicit
-    names `recursiveBridgeTopToGaslessEVMResult` and
-    `recursiveBridgeTopNoCallToGaslessEVMResult`.
+  - [x] The older gasless result bridge remains as an internal spine theorem,
+    but is no longer exported as an alternate `LayerAudit` route.
 - [x] Run final proof-hygiene audit for the current public theorem surface.
   - [x] No declaration-level `axiom`, `admit`, `sorry`, `sorryAx`, `unsafe`,
     or `partial` was found in `EvmCompiler` Lean modules.
@@ -2060,16 +2053,14 @@ Successor theorem readiness gate:
     and lower object compile acceptance into one explicit boundary contract.
   - [x] Re-run `lake build EvmCompiler.LayerAudit` after theorem-boundary
     cleanup. Check: `/tmp/evm_post_cleanup_layeraudit_check1.log`.
-  - [x] Add the new public wrapper names to the `#print axioms` audit tail and
-    verify they report no `sorryAx`. Check:
+  - [x] Verify the new public wrapper names report no `sorryAx`. Check:
     `/tmp/evm_new_public_axioms_check1.log`.
-  - [x] Add the initial-shared wrapper to the `#print axioms` audit tail and
-    verify it reports no `sorryAx`. Check:
+  - [x] Verify the initial-shared wrapper reports no `sorryAx`. Check:
     `/tmp/evm_initial_shared_axioms_check1.log`.
   - [x] Re-run `lake build EvmCompiler.LayerAudit` after the initial-shared
     wrapper. Check: `/tmp/evm_initial_shared_layeraudit_check1.log`.
-  - [x] Add the bridge-accepted wrapper to the `#print axioms` audit tail and
-    verify it reports no `sorryAx`; rerun the layer audit. Checks:
+  - [x] Verify the bridge-accepted wrapper reports no `sorryAx`; rerun the
+    layer audit. Checks:
     `/tmp/evm_bridge_accepted_axioms_check1.log`,
     `/tmp/evm_bridge_accepted_layeraudit_check1.log`.
   - [x] Replace the public dispatcher-body no-out-of-fuel premise with the
@@ -2125,10 +2116,10 @@ Successor theorem readiness gate:
     `EvmCompiler.LayerAudit.ImportedYulBoundary`, including
     `recursiveBridgeTopAssumptions`, source/resource/semantic/run/runtime
     assumption packages, checked compile-and-assemble boundary, and the
-    original runtime-bundled result surface. The current default
-    `recursiveBridgeTopToGasAwareEVM` alias is now the stricter source-compile
-    no-call/create result-level `EVM.X` theorem; the gasless result bridge is
-    retained under `recursiveBridgeTopToGaslessEVMResult`.
+    remaining current boundary packages. The current default
+    `recursiveBridgeTopToGasAwareEVM` alias is the stricter source-compile
+    no-call/create result-level `EVM.X` theorem; alternate runtime-bundled and
+    gasless compatibility exports have been removed.
     Checks:
     `/tmp/evm_layeraudit_top_alias_check2.log`,
     `/tmp/evm_top_after_layeraudit_alias_axioms_check1.log`.
