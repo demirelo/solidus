@@ -106,36 +106,6 @@ structure SufficientGasForXResult
 abbrev XResultPreconditionAssumptions :=
   SufficientGasForXResult
 
-/--
-Gas-aware runner completeness for one assembled program/target/initial state.
-
-This is the remaining imported-runtime theorem shape, not a compiler
-certificate.  The compiler side produces a checked `BlockTraceResult`; this
-package says that EVMYulLean's gas-aware `X` runner replays any such gasless
-block trace above some finite gas bound and with enough `X` fuel.
--/
-structure XResultRunnerCompleteness
-    (program : Program) (target : TargetProgram) (initial : EVMState) where
-  sufficientGas :
-    ∀ {targetFuel : Nat} {targetResult : StepResult},
-      Preservation.BlockTraceResult program target targetFuel initial
-        targetResult →
-      XResultPreconditionAssumptions target initial targetResult
-
-namespace XResultRunnerCompleteness
-
-def toPreconditions
-    {program : Program} {target : TargetProgram} {initial : EVMState}
-    (hRunner : XResultRunnerCompleteness program target initial)
-    {targetFuel : Nat} {targetResult : StepResult}
-    (hTrace :
-      Preservation.BlockTraceResult program target targetFuel initial
-        targetResult) :
-    XResultPreconditionAssumptions target initial targetResult :=
-  hRunner.sufficientGas hTrace
-
-end XResultRunnerCompleteness
-
 theorem XRunsSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
     {initial sourceFinal : EVMState} {evmFuel gasBound gas : Nat}
     (hRuns : XRunsSuccessfullyAbove target initial sourceFinal evmFuel gasBound)
