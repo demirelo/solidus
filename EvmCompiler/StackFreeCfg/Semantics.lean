@@ -82,6 +82,15 @@ def canDeclare? (state : State) (names : List Name) : Bool :=
 def canAssign? (state : State) (names : List Name) : Bool :=
   decide names.Nodup && Store.containsAll? state.vars names
 
+def nonempty? (names : List Name) : Bool :=
+  !names.isEmpty
+
+def canDeclareNonempty? (state : State) (names : List Name) : Bool :=
+  nonempty? names && state.canDeclare? names
+
+def canAssignNonempty? (state : State) (names : List Name) : Bool :=
+  nonempty? names && state.canAssign? names
+
 end State
 
 def zero : Word :=
@@ -289,7 +298,7 @@ mutual
             let state' ← Expr.evalZero prim expr state
             .ok (Outcome.regular state' ctx.scope)
         | .decl names value? => do
-            if !(state.canDeclare? names) then
+            if !(state.canDeclareNonempty? names) then
               invalid
             else
             let (stateAfterValue, values) ←
@@ -307,7 +316,7 @@ mutual
               | none => invalid
             .ok (Outcome.regular state' (names ++ ctx.scope))
         | .assign names value => do
-            if !(state.canAssign? names) then
+            if !(state.canAssignNonempty? names) then
               invalid
             else
             let (stateAfterValue, out) ← Expr.eval prim value state
@@ -414,7 +423,7 @@ mutual
                 else
                   invalid
         | .callDecl names functionName args => do
-            if !(state.canDeclare? names) then
+            if !(state.canDeclareNonempty? names) then
               invalid
             else
             let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state

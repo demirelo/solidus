@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 19:48 PDT.
+Last updated: 2026-05-25 19:56 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -96,6 +96,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Declaration targets are not in scope while their initializer/call
     arguments are evaluated; assignment targets are checked before evaluating
     the right-hand side, matching the Yul evaluation boundary.
+  - Empty declaration and assignment target lists are source errors; empty
+    procedure-call target lists remain valid only for zero-return calls.
 - [x] Create `EvmCompiler.StackFreeCfg.Accepted`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage
@@ -103,6 +105,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Reject raw `DUP`/`SWAP` and `PC` at this source layer: Yul does not expose
     them, and any future PC-like feature should be an explicit oracle rather
     than the isolated primitive adapter's synthetic program counter.
+  - Reject empty declaration, assignment, and declaration-by-call targets
+    while preserving statement calls to zero-return procedures.
   - Provide executable `Program.accepted?` for the compiler gate; theorem work
     still needs to connect this checker to the Prop-level `Accepted`.
 - [x] Create `EvmCompiler.StackFreeCfg.Compiler`.

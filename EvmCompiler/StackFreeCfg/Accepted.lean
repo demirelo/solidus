@@ -79,6 +79,9 @@ def disjoint (left right : List Name) : Prop :=
 def disjoint? (left right : List Name) : Bool :=
   left.all (fun name => decide (name ∉ right))
 
+def nonempty? (names : List Name) : Bool :=
+  !names.isEmpty
+
 def extend (env names : List Name) : List Name :=
   names ++ env
 
@@ -146,12 +149,12 @@ mutual
 
   def Stmt.OutEnv (env : List Name) : Stmt → Option (List Name)
     | .decl names _value? =>
-        if decide names.Nodup && disjoint? names env then
+        if nonempty? names && decide names.Nodup && disjoint? names env then
           some (extend env names)
         else
           none
     | .callDecl names _functionName _args =>
-        if decide names.Nodup && disjoint? names env then
+        if nonempty? names && decide names.Nodup && disjoint? names env then
           some (extend env names)
         else
           none
@@ -189,12 +192,12 @@ mutual
     | .expr expr =>
         Expr.Zero profile env expr
     | .decl names value? =>
-        names.Nodup ∧ disjoint names env ∧
+        names ≠ [] ∧ names.Nodup ∧ disjoint names env ∧
           match value? with
           | none => True
           | some value => Expr.Arity profile env value = some names.length
     | .assign names value =>
-        names.Nodup ∧ containsAll env names ∧
+        names ≠ [] ∧ names.Nodup ∧ containsAll env names ∧
           Expr.Arity profile env value = some names.length
     | .block body =>
         Block.Accepted profile sigs canBreak canContinue canLeave env body
@@ -228,7 +231,7 @@ mutual
         match Signature.find? sigs functionName with
         | none => False
         | some sig =>
-            names.Nodup ∧ disjoint names env ∧
+            names ≠ [] ∧ names.Nodup ∧ disjoint names env ∧
               names.length = sig.returns ∧ args.length = sig.params ∧
               ExprList.AllOne profile env args
     | .terminal kind args =>
@@ -277,12 +280,12 @@ mutual
     | .expr expr =>
         Expr.zero? profile env expr
     | .decl names value? =>
-        decide names.Nodup && disjoint? names env &&
+        nonempty? names && decide names.Nodup && disjoint? names env &&
           match value? with
           | none => true
           | some value => Expr.arityIs? profile env value names.length
     | .assign names value =>
-        decide names.Nodup && containsAll? env names &&
+        nonempty? names && decide names.Nodup && containsAll? env names &&
           Expr.arityIs? profile env value names.length
     | .block body =>
         Block.accepted? profile sigs canBreak canContinue canLeave env body
@@ -317,7 +320,7 @@ mutual
         match Signature.find? sigs functionName with
         | none => false
         | some sig =>
-            decide names.Nodup && disjoint? names env &&
+            nonempty? names && decide names.Nodup && disjoint? names env &&
               decide (names.length = sig.returns) &&
               decide (args.length = sig.params) &&
               ExprList.allOne? profile env args
