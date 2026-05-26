@@ -827,6 +827,42 @@ noncomputable def stateRelConfig
   gasValueRel := gasValueRel
   totalGasRel := totalGasRel
 
+theorem chainStateRel_addAccessedAccount
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hChain : Reference.ChainStateRel cfg yul evm)
+    (addr : EvmYul.AccountAddress) :
+    Reference.ChainStateRel cfg
+      (EvmYul.State.addAccessedAccount yul addr)
+      (EvmYul.State.addAccessedAccount evm addr) := by
+  rcases hChain with
+    ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
+      hBlocks, hGenesis, hCreated⟩
+  constructor
+  · simpa [EvmYul.State.addAccessedAccount] using hAccountMap
+  · simpa [EvmYul.State.addAccessedAccount] using hSigma
+  · simpa [EvmYul.State.addAccessedAccount] using hTotal
+  · simpa [EvmYul.State.addAccessedAccount] using hReceipts
+  · simp [EvmYul.State.addAccessedAccount, EvmYul.Substate.addAccessedAccount,
+      hSubstate]
+  · simpa [EvmYul.State.addAccessedAccount] using hEnv
+  · simpa [EvmYul.State.addAccessedAccount] using hBlocks
+  · simpa [EvmYul.State.addAccessedAccount] using hGenesis
+  · simpa [EvmYul.State.addAccessedAccount] using hCreated
+
+theorem sharedStateRel_addAccessedAccount
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    (addr : EvmYul.AccountAddress) :
+    Reference.SharedStateRel cfg
+      { yul with toState := EvmYul.State.addAccessedAccount yul.toState addr }
+      { evm with toState := EvmYul.State.addAccessedAccount evm.toState addr } := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · exact chainStateRel_addAccessedAccount hChain addr
+  · simpa [EvmYul.State.addAccessedAccount] using hMachine
+
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     {addr : EvmYul.AccountAddress}
