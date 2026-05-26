@@ -303,6 +303,73 @@ theorem CompiledAccountMapRel.insert
         ⟨foundYul, hFoundYul, hFoundAccount⟩
       exact ⟨foundYul, by simp [hCmp, hFoundYul], hFoundAccount⟩
 
+theorem accountAddress_eq_of_compare_eq {a b : EvmYul.AccountAddress}
+    (h : compare a b = Ordering.eq) : a = b := by
+  apply Fin.ext
+  change compare a.val b.val = Ordering.eq at h
+  exact compare_eq_iff_eq.1 h
+
+theorem CompiledAccountMapRel.insert_insert_distinct_comm
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {a b : EvmYul.AccountAddress}
+    (hAB : compare a b ≠ Ordering.eq)
+    (hBA : compare b a ≠ Ordering.eq)
+    {yulA : EvmYul.Account .Yul} {evmA : EvmYul.Account .EVM}
+    {yulB : EvmYul.Account .Yul} {evmB : EvmYul.Account .EVM}
+    (hA : CompiledAccountRel yulA evmA)
+    (hB : CompiledAccountRel yulB evmB) :
+    CompiledAccountMapRel
+      ((yul.insert a yulA).insert b yulB)
+      ((evm.insert b evmB).insert a evmA) := by
+  refine
+    { yul_to_evm := ?_
+      evm_to_yul := ?_ }
+  · intro query foundYul hFind
+    rw [Batteries.RBMap.find?_insert] at hFind
+    split at hFind <;> rename_i hQueryB
+    · have hQueryEq : query = b := accountAddress_eq_of_compare_eq hQueryB
+      subst query
+      cases hFind
+      refine ⟨evmB, ?_, hB⟩
+      rw [Batteries.RBMap.find?_insert]
+      simp [hBA, Batteries.RBMap.find?_insert]
+    · rw [Batteries.RBMap.find?_insert] at hFind
+      split at hFind <;> rename_i hQueryA
+      · have hQueryEq : query = a := accountAddress_eq_of_compare_eq hQueryA
+        subst query
+        cases hFind
+        refine ⟨evmA, ?_, hA⟩
+        rw [Batteries.RBMap.find?_insert]
+        simp
+      · rcases hWorld.find_yul hFind with
+          ⟨foundEvm, hFoundEvm, hFoundAccount⟩
+        refine ⟨foundEvm, ?_, hFoundAccount⟩
+        rw [Batteries.RBMap.find?_insert]
+        simp [hQueryA, Batteries.RBMap.find?_insert, hQueryB, hFoundEvm]
+  · intro query foundEvm hFind
+    rw [Batteries.RBMap.find?_insert] at hFind
+    split at hFind <;> rename_i hQueryA
+    · have hQueryEq : query = a := accountAddress_eq_of_compare_eq hQueryA
+      subst query
+      cases hFind
+      refine ⟨yulA, ?_, hA⟩
+      rw [Batteries.RBMap.find?_insert]
+      simp [hAB, Batteries.RBMap.find?_insert]
+    · rw [Batteries.RBMap.find?_insert] at hFind
+      split at hFind <;> rename_i hQueryB
+      · have hQueryEq : query = b := accountAddress_eq_of_compare_eq hQueryB
+        subst query
+        cases hFind
+        refine ⟨yulB, ?_, hB⟩
+        rw [Batteries.RBMap.find?_insert]
+        simp
+      · rcases hWorld.find_evm hFind with
+          ⟨foundYul, hFoundYul, hFoundAccount⟩
+        refine ⟨foundYul, ?_, hFoundAccount⟩
+        rw [Batteries.RBMap.find?_insert]
+        simp [hQueryB, Batteries.RBMap.find?_insert, hQueryA, hFoundYul]
+
 theorem CompiledAccountMapRel.increaseBalance
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     (hWorld : CompiledAccountMapRel yul evm)
@@ -452,6 +519,165 @@ theorem CompiledAccountMapRel.transferBalance_of_yul
           ?_, ?_⟩
       · simp [hEvmDecrease]
       · exact hDecreasedWorld.increaseBalance toAddr amount
+
+/--
+Account-map part of the EVM `Θ` CALL prelude.
+
+This deliberately mirrors EVM order instead of `AccountMap.transferBalance`:
+the recipient is credited/materialized first, missing recipients are
+materialized only for nonzero value, and the sender is debited afterward.
+-/
+def evmCallTransfer (evm : EvmYul.AccountMap .EVM)
+    (source recipient : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256) : EvmYul.AccountMap .EVM :=
+  let recipientIncreased :=
+    match evm.find? recipient with
+    | none =>
+        if value != (⟨0⟩ : EvmYul.UInt256) then
+          evm.insert recipient
+            { (default : EvmYul.Account .EVM) with balance := value }
+        else
+          evm
+    | some account =>
+        evm.insert recipient { account with balance := account.balance + value }
+  match recipientIncreased.find? source with
+  | none => recipientIncreased
+  | some account =>
+      recipientIncreased.insert source
+        { account with balance := account.balance - value }
+
+theorem CompiledAccountMapRel.evmCallTransfer_of_yul_transfer_existing_distinct
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    (hSourceRecipient : compare source recipient ≠ Ordering.eq)
+    (hRecipientSource : compare recipient source ≠ Ordering.eq)
+    {value : EvmYul.UInt256}
+    {recipientAccount : EvmYul.Account .Yul}
+    (hRecipient : yul.find? recipient = some recipientAccount)
+    {yulAfter : EvmYul.AccountMap .Yul}
+    (hTransfer :
+      EvmYul.AccountMap.transferBalance .Yul yul source recipient value =
+        some yulAfter) :
+    CompiledAccountMapRel yulAfter
+      (evmCallTransfer evm source recipient value) := by
+  unfold EvmYul.AccountMap.transferBalance at hTransfer
+  unfold EvmYul.AccountMap.decreaseBalance at hTransfer
+  cases hSourceYul : yul.find? source with
+  | none =>
+      simp [hSourceYul] at hTransfer
+  | some sourceAccount =>
+      rcases hWorld.find_yul hSourceYul with
+        ⟨sourceEvmAccount, hSourceEvm, hSourceAccountRel⟩
+      rcases hWorld.find_yul hRecipient with
+        ⟨recipientEvmAccount, hRecipientEvm, hRecipientAccountRel⟩
+      by_cases hTooSmall : sourceAccount.balance < value
+      · simp [hSourceYul, hTooSmall] at hTransfer
+      · simp [hSourceYul, hTooSmall] at hTransfer
+        unfold EvmYul.AccountMap.increaseBalance at hTransfer
+        rw [Batteries.RBMap.find?_insert] at hTransfer
+        simp [hRecipientSource, hRecipient] at hTransfer
+        cases hTransfer
+        unfold evmCallTransfer
+        simp [hRecipientEvm]
+        rw [Batteries.RBMap.find?_insert]
+        simp [hSourceRecipient, hSourceEvm]
+        refine hWorld.insert_insert_distinct_comm
+          hSourceRecipient hRecipientSource ?_ ?_
+        · rw [← hSourceAccountRel.balance]
+          exact hSourceAccountRel.with_balance (sourceAccount.balance - value)
+        · rw [← hRecipientAccountRel.balance]
+          exact hRecipientAccountRel.with_balance
+            (recipientAccount.balance + value)
+
+theorem CompiledAccountMapRel.evmCallTransfer_of_yul_transfer_absent_nonzero_distinct
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    (hSourceRecipient : compare source recipient ≠ Ordering.eq)
+    (hRecipientSource : compare recipient source ≠ Ordering.eq)
+    {value : EvmYul.UInt256}
+    (hValueNonzero : (value != (⟨0⟩ : EvmYul.UInt256)) = true)
+    (hRecipient : yul.find? recipient = none)
+    {yulAfter : EvmYul.AccountMap .Yul}
+    (hTransfer :
+      EvmYul.AccountMap.transferBalance .Yul yul source recipient value =
+        some yulAfter) :
+    CompiledAccountMapRel yulAfter
+      (evmCallTransfer evm source recipient value) := by
+  have hRecipientEvm := hWorld.not_find_evm_of_not_find_yul hRecipient
+  unfold EvmYul.AccountMap.transferBalance at hTransfer
+  unfold EvmYul.AccountMap.decreaseBalance at hTransfer
+  cases hSourceYul : yul.find? source with
+  | none =>
+      simp [hSourceYul] at hTransfer
+  | some sourceAccount =>
+      rcases hWorld.find_yul hSourceYul with
+        ⟨sourceEvmAccount, hSourceEvm, hSourceAccountRel⟩
+      by_cases hTooSmall : sourceAccount.balance < value
+      · simp [hSourceYul, hTooSmall] at hTransfer
+      · simp [hSourceYul, hTooSmall] at hTransfer
+        unfold EvmYul.AccountMap.increaseBalance at hTransfer
+        rw [Batteries.RBMap.find?_insert] at hTransfer
+        simp [hRecipientSource, hRecipient] at hTransfer
+        cases hTransfer
+        unfold evmCallTransfer
+        simp [hRecipientEvm, hValueNonzero]
+        rw [Batteries.RBMap.find?_insert]
+        simp [hSourceRecipient, hSourceEvm]
+        refine hWorld.insert_insert_distinct_comm
+          hSourceRecipient hRecipientSource ?_ ?_
+        · rw [← hSourceAccountRel.balance]
+          exact hSourceAccountRel.with_balance (sourceAccount.balance - value)
+        · exact CompiledAccountRel.default_with_balance value
+
+theorem evmCallTransfer_absent_zero_no_materialize_distinct
+    {evm : EvmYul.AccountMap .EVM}
+    {source recipient : EvmYul.AccountAddress}
+    (hRecipientSource : compare recipient source ≠ Ordering.eq)
+    (hRecipient : evm.find? recipient = none) :
+    (evmCallTransfer evm source recipient
+        (⟨0⟩ : EvmYul.UInt256)).find? recipient = none := by
+  have hZeroNe :
+      (((⟨0⟩ : EvmYul.UInt256) != (⟨0⟩ : EvmYul.UInt256)) = false) := by
+    rfl
+  unfold evmCallTransfer
+  simp [hRecipient, hZeroNe]
+  cases hSource : evm.find? source with
+  | none =>
+      simp [hRecipient]
+  | some sourceAccount =>
+      rw [Batteries.RBMap.find?_insert]
+      simp [hRecipientSource, hRecipient]
+
+theorem yulCallTransfer_absent_zero_materializes_distinct
+    {yul : EvmYul.AccountMap .Yul}
+    {source recipient : EvmYul.AccountAddress}
+    (hRecipientSource : compare recipient source ≠ Ordering.eq)
+    (hRecipient : yul.find? recipient = none)
+    {yulAfter : EvmYul.AccountMap .Yul}
+    (hTransfer :
+      EvmYul.AccountMap.transferBalance .Yul yul source recipient
+        (⟨0⟩ : EvmYul.UInt256) = some yulAfter) :
+    yulAfter.find? recipient =
+      some { (default : EvmYul.Account .Yul) with
+        balance := (⟨0⟩ : EvmYul.UInt256) } := by
+  unfold EvmYul.AccountMap.transferBalance at hTransfer
+  unfold EvmYul.AccountMap.decreaseBalance at hTransfer
+  cases hSource : yul.find? source with
+  | none =>
+      simp [hSource] at hTransfer
+  | some sourceAccount =>
+      by_cases hTooSmall :
+          sourceAccount.balance < (⟨0⟩ : EvmYul.UInt256)
+      · simp [hSource, hTooSmall] at hTransfer
+      · simp [hSource, hTooSmall] at hTransfer
+        unfold EvmYul.AccountMap.increaseBalance at hTransfer
+        rw [Batteries.RBMap.find?_insert] at hTransfer
+        simp [hRecipientSource, hRecipient] at hTransfer
+        cases hTransfer
+        rw [Batteries.RBMap.find?_insert]
+        simp
 
 theorem CompiledAccountMapRel.selfbalance
     {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}

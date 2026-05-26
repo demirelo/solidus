@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 08:29 PDT.
+Last updated: 2026-05-26 12:40 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3004,6 +3004,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
      - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
        - [x] Prove compiled-world preservation for account insertion, balance increase/decrease, and source-successful balance transfer, including default empty accounts materialized by balance increases.
        - [x] Prove concrete compiled-world `StateRelConfig` hooks for `SELFBALANCE`, `BALANCE`, `SLOAD`, `SSTORE`, `TLOAD`, and `TSTORE`, including `SSTORE` refund/substate agreement.
+       - [x] Define the EVM `Θ` CALL transfer order and prove exact compiled-world preservation for distinct sender/recipient calls when the recipient already exists or when an absent recipient receives nonzero value; also prove the absent-zero mismatch explicitly (`evmCallTransfer` leaves the recipient absent while imported Yul materializes it).
+       - [ ] Resolve the absent-zero recipient-materialization mismatch, either by correcting the imported Yul CALL semantics or by replacing the exact account-map relation with a checked relation that identifies absent and default-empty accounts where EVM semantics does.
        - [ ] Prove callee entry-state construction and result/world merge for the ordinary compiled-account `CALL` path.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
