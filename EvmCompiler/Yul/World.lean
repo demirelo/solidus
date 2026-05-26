@@ -2062,6 +2062,68 @@ theorem sharedStateRel_callFrameFromFreshEvmFrame
         calldata gasPrice depth header perm blobVersionedHashes)
       hCreated hGas
 
+def xiInitialState
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate)
+    (env : EvmYul.ExecutionEnv .EVM) : EVMState :=
+  { (default : EVMState) with
+    accountMap := accountMap
+    σ₀ := sigma0
+    totalGasUsedInBlock := chainContext.totalGasUsedInBlock
+    transactionReceipts := chainContext.transactionReceipts
+    executionEnv := env
+    substate := substate
+    createdAccounts := createdAccounts
+    gasAvailable := gas
+    blocks := blocks
+    genesisBlockHeader := genesisBlockHeader }
+
+theorem Xi_succ_eq_X
+    (fuel : Nat)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate)
+    (env : EvmYul.ExecutionEnv .EVM) :
+    EvmYul.EVM.Ξ fuel.succ createdAccounts genesisBlockHeader blocks
+        accountMap sigma0 chainContext gas substate env =
+      match EvmYul.EVM.X fuel (EvmYul.EVM.D_J env.code ⟨0⟩)
+          (xiInitialState createdAccounts genesisBlockHeader blocks
+            accountMap sigma0 chainContext gas substate env) with
+      | .error err => .error err
+      | .ok (.success evmState' output) =>
+          .ok (.success
+            (evmState'.createdAccounts, evmState'.accountMap,
+              evmState'.gasAvailable, evmState'.substate) output)
+      | .ok (.revert returnedGas output) =>
+          .ok (.revert returnedGas output) := by
+  simp only [EvmYul.EVM.Ξ]
+  change
+    (do
+      let result ← EvmYul.EVM.X fuel (EvmYul.EVM.D_J env.code ⟨0⟩)
+        (xiInitialState createdAccounts genesisBlockHeader blocks
+          accountMap sigma0 chainContext gas substate env)
+      match result with
+      | EvmYul.EVM.ExecutionResult.success evmState' output =>
+          .ok (EvmYul.EVM.ExecutionResult.success
+            (evmState'.createdAccounts, evmState'.accountMap,
+              evmState'.gasAvailable, evmState'.substate) output)
+      | EvmYul.EVM.ExecutionResult.revert returnedGas output =>
+          .ok (EvmYul.EVM.ExecutionResult.revert returnedGas output)) =
+    _
+  cases EvmYul.EVM.X fuel (EvmYul.EVM.D_J env.code ⟨0⟩)
+      (xiInitialState createdAccounts genesisBlockHeader blocks
+        accountMap sigma0 chainContext gas substate env) with
+  | error err => rfl
+  | ok result =>
+      cases result <;> rfl
+
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}
     {yulAccountMap : EvmYul.AccountMap τ}
