@@ -1202,8 +1202,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1258,8 +1257,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
                               Assembly.GasAware.XResultAgrees targetOutcome
                                 result :=
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
-    hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal
-    (RecursiveBridgeExprResultContracts.ofNoSuccessfulOutOfFuel hExpr)
+    hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal hExpr
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
     gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
     hX
@@ -1284,8 +1282,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1366,8 +1363,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1408,8 +1404,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
                 (Assembly.GasAware.installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
-    hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal
-    (RecursiveBridgeExprResultContracts.ofNoSuccessfulOutOfFuel hExpr)
+    hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal hExpr
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
     gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
     hX
@@ -1434,8 +1429,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1486,9 +1480,10 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
 /--
 Preferred full-source acceptedness wrapper for the current gas-aware route.
 
-The theorem takes full Yul source validity separately from the current bridge
-feature-coverage predicate, then reuses the already-proved old route by the
-checked conversion `RecursiveBridgeSourceAccepted.ofFullAndCoverage`.
+The theorem takes full Yul source validity, current bridge feature coverage, and
+object-level compiler resources separately. The old `SourceCompileAccepted`
+package is constructed internally from those two honest boundaries instead of
+being exposed as a mixed source/compiler premise.
 -/
 theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1505,14 +1500,13 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
     (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1566,13 +1560,16 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
                               .ok result ∧
                               Assembly.GasAware.XResultAgrees targetOutcome
                                 result :=
+  let hSourceAccepted :=
+    RecursiveBridgeSourceAccepted.ofFullAndCoverage hFullSourceAccepted
+      hFeatureCoverage
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
-    (RecursiveBridgeSourceAccepted.ofFullAndCoverage
-      hFullSourceAccepted hFeatureCoverage)
-    hSourceCompileAccepted hPrimitiveSound hPrimitiveStack hTerminal hExpr
-    hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc
-    hInitialStack hX
+    hSourceAccepted
+    (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
+      hCompileResources)
+    hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
+    outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1589,14 +1586,13 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
     (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1636,13 +1632,16 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
             EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
                 (Assembly.GasAware.installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  let hSourceAccepted :=
+    RecursiveBridgeSourceAccepted.ofFullAndCoverage hFullSourceAccepted
+      hFeatureCoverage
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
-    (RecursiveBridgeSourceAccepted.ofFullAndCoverage
-      hFullSourceAccepted hFeatureCoverage)
-    hSourceCompileAccepted hPrimitiveSound hPrimitiveStack hTerminal hExpr
-    hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc
-    hInitialStack hX
+    hSourceAccepted
+    (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
+      hCompileResources)
+    hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
+    outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
 
 /--
 Preferred full-source gas-aware wrapper using the named runner-completeness
@@ -1667,14 +1666,13 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
     (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1725,7 +1723,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
                               Assembly.GasAware.XResultAgrees targetOutcome
                                 result :=
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
-    hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
+    hFullSourceAccepted hFeatureCoverage hCompileResources
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
     hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
     outOfGasPolicy currentContractProjection hInitialPc hInitialStack
@@ -1748,14 +1746,13 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
     (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1792,7 +1789,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
                 (Assembly.GasAware.installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
-    hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
+    hFullSourceAccepted hFeatureCoverage hCompileResources
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
     hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
     outOfGasPolicy currentContractProjection hInitialPc hInitialStack
@@ -1814,12 +1811,11 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel
         Locals.Source.PrimitiveSemantics.structured program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1870,7 +1866,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
                               Assembly.GasAware.XResultAgrees targetOutcome
                                 result :=
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
-    hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
+    hFullSourceAccepted hFeatureCoverage hCompileResources
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun
@@ -1891,12 +1887,11 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     {referenceResult : Reference.Result}
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
-    (hSourceCompileAccepted : SourceCompileAccepted program)
+    (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel
         Locals.Source.PrimitiveSemantics.structured program)
-    (hExpr :
-      RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
+    (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1933,7 +1928,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
                 (Assembly.GasAware.installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
-    hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
+    hFullSourceAccepted hFeatureCoverage hCompileResources
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun

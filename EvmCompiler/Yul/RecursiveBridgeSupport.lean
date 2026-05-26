@@ -157368,6 +157368,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_terminalStackPrelude_actua
         {sourceAfterArgs : State} {sourceValues : List Word},
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) sourceArgs) :: rest)
             codeOverride source =
@@ -157431,7 +157432,8 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_terminalStackPrelude_actua
                       .ok sharedAfter := by
             intro compilerAfterArgs hRelArgs
             rcases
-                hTerminal hInitialRel hAllow hSource hEvalArgs hRelArgs with
+                hTerminal hInitialRel hAllow (hAllowedRel hAllow) hSource
+                  hEvalArgs hRelArgs with
               ⟨sharedAfter, hTerminalRun, _hOutcome⟩
             exact ⟨sharedAfter, hTerminalRun⟩
           rcases
@@ -157439,7 +157441,9 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_terminalStackPrelude_actua
                 hTerminalExists with
             ⟨compilerAfterArgs, sharedAfter, ctxAfter, targetFuel,
               hTargetPrefix, hRelArgs, hTerminalRun⟩
-          rcases hTerminal hInitialRel hAllow hSource hEvalArgs hRelArgs with
+          rcases
+              hTerminal hInitialRel hAllow (hAllowedRel hAllow) hSource
+                hEvalArgs hRelArgs with
             ⟨sharedAfter', hTerminalRun', hOutcomeRel⟩
           have hSharedEq : sharedAfter = sharedAfter' := by
             rw [hTerminalRun] at hTerminalRun'
@@ -157522,6 +157526,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_termina
         {sourceAfterArgs : State} {sourceValues : List Word},
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) sourceArgs) :: rest)
             (some yulProgram.contract) source =
@@ -157675,6 +157680,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
         {sourceAfterArgs : State} {sourceValues : List Word},
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -157744,9 +157750,9 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
           hScopedArgs hArgsOk hAllowed
           (by
             intro source compiler sourceResult sourceAfterArgs sourceValues
-              hRel hAllow hExec hEval compilerAfterArgs hRelAfter
+              hRel hAllow hRelatable hExec hEval compilerAfterArgs hRelAfter
             exact
-              hTerminal (argFuel := argFuel) hRel hAllow hExec hEval
+              hTerminal (argFuel := argFuel) hRel hAllow hRelatable hExec hEval
                 hRelAfter)
           (compileFuel := compileFuel) hCovers hLower
       rcases hSound hInitial hAllow hExec' with
@@ -159967,6 +159973,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_te
         {sourceAfterArgs : State} {sourceValues : List Word},
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -161385,6 +161392,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162097,15 +162105,16 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
                         hSafe hSourceScoped hStmtOk hAllowed
                         (by
                           intro argFuel source compiler sourceResult
-                            sourceAfterArgs sourceValues hRel hAllow hExec
-                            hEval compilerAfterArgs hRelAfter
+                            sourceAfterArgs sourceValues hRel hAllow hRelatable
+                            hExec hEval compilerAfterArgs hRelAfter
                           exact
                             hTerminal (layout := layout)
                               (outcomeLayout := layout)
                               (yulPrim := yulPrim) (kind := kind)
                               (args := args) (rest := rest)
                               (allowed := allowed) (argFuel := argFuel)
-                              hTerminalOp hRel hAllow hExec hEval hRelAfter)
+                              hTerminalOp hRel hAllow hRelatable hExec hEval
+                              hRelAfter)
                         (compileFuel := compileFuel))
                       hSupported hWithin
               | none =>
@@ -162353,6 +162362,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_programAccept
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162435,6 +162445,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_programAc
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162508,13 +162519,13 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_programAc
           hSourceScoped hStmtOk hAllowed
           (by
             intro argFuel source compiler sourceResult sourceAfterArgs
-              sourceValues hRel hAllow hExec hEval compilerAfterArgs
+              sourceValues hRel hAllow hRelatable hExec hEval compilerAfterArgs
               hRelAfter
             exact
               hTerminal (layout := layout) (outcomeLayout := outcomeLayout)
                 (yulPrim := yulPrim) (kind := kind) (args := args)
                 (rest := rest) (allowed := allowed) (argFuel := argFuel)
-                hTerminalOp hRel hAllow hExec hEval hRelAfter)
+                hTerminalOp hRel hAllow hRelatable hExec hEval hRelAfter)
           (compileFuel := compileFuel))
     hPrimSound hResultOk
 
@@ -162539,6 +162550,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162680,6 +162692,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162782,6 +162795,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -162894,6 +162908,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -163004,6 +163019,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -163077,6 +163093,7 @@ theorem programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_a
         Prim.terminal? yulPrim = some kind →
         SourceStateRel cfg layout source compiler →
         allowed sourceResult →
+        SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some yulProgram.contract) source =
@@ -165977,6 +165994,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166131,6 +166149,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166284,6 +166303,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166421,6 +166441,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166570,6 +166591,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166739,6 +166761,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -166871,6 +166894,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -167001,6 +167025,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -167230,6 +167255,15 @@ theorem of_sourceCompileAccepted {program : Program}
     RecursiveBridgeCompileResources program where
   objectCompileAccepted := hAccepted.objects
 
+theorem to_sourceCompileAccepted {program : Program}
+    (hSource : RecursiveBridgeSourceAccepted program)
+    (hResources : RecursiveBridgeCompileResources program) :
+    SourceCompileAccepted program where
+  source :=
+    sourceAccepted_of_accepted
+      (Reference.programAccepted_of_accepted hSource.reference)
+  objects := hResources.objectCompileAccepted
+
 end RecursiveBridgeCompileResources
 
 /--
@@ -167273,6 +167307,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -167391,6 +167426,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -167494,6 +167530,7 @@ structure RecursiveBridgeSemanticContracts
       Reference.SourceBridgeFacts.SourceStateRel cfg layout source
         compiler →
       allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
           (some program.contract) source =
@@ -167552,6 +167589,7 @@ structure RecursiveBridgeSemanticCoreContracts
       Reference.SourceBridgeFacts.SourceStateRel cfg layout source
         compiler →
       allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
           (some program.contract) source =
@@ -167615,6 +167653,7 @@ structure RecursiveBridgeSemanticCoreArityContracts
       Reference.SourceBridgeFacts.SourceStateRel cfg layout source
         compiler →
       allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
           (some program.contract) source =
@@ -167673,6 +167712,7 @@ structure RecursiveBridgeSemanticArityContracts
       Reference.SourceBridgeFacts.SourceStateRel cfg layout source
         compiler →
       allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
           (some program.contract) source =
@@ -167834,6 +167874,7 @@ structure RecursiveBridgeTerminalContracts
       Reference.SourceBridgeFacts.SourceStateRel cfg layout source
         compiler →
       allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
       EvmYul.Yul.execSeq argFuel.succ.succ
           (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
           (some program.contract) source =
@@ -167995,6 +168036,7 @@ theorem of_canonical_observation
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
@@ -168069,6 +168111,7 @@ theorem of_canonical_observation
         Reference.SourceBridgeFacts.SourceStateRel cfg layout source
           compiler →
         allowed sourceResult →
+        Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
         EvmYul.Yul.execSeq argFuel.succ.succ
             (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
             (some program.contract) source =
