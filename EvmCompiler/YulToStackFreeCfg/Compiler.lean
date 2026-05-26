@@ -232,7 +232,7 @@ mutual
         | some expr => some ([], expr, state)
         | none => do
             let sig ← env.findSignature? functionName
-            if sig.returns = 1 then
+            if sig.returns = 1 ∧ args.length = sig.params then
               let (pre, lowerArgs, state') ← lowerExprArgs? env state args
               let (tmp, state'') ← Fresh.fresh? state'
               some
@@ -251,6 +251,15 @@ mutual
         let (preHead, lowerHead, state'') ← lowerExpr? env state' arg
         some (preRest ++ preHead, lowerHead :: lowerRest, state'')
 
+  def lowerCallArgs? (env : Env) (state : Fresh.State)
+      (targets : List Name) (functionName : Name) (args : List AstExpr) :
+      Option (List StackFreeCfg.Stmt × List StackFreeCfg.Expr × Fresh.State) := do
+    let sig ← env.findSignature? functionName
+    if targets.length = sig.returns ∧ args.length = sig.params then
+      lowerExprArgs? env state args
+    else
+      none
+
   def lowerStmt? (env : Env) (state : Fresh.State) :
       AstStmt → Option (List StackFreeCfg.Stmt × Fresh.State)
     | .Block stmts => do
@@ -263,10 +272,12 @@ mutual
         | some expr =>
             some ([.decl (identNames vars) (some expr)], state)
         | none => do
-            let (pre, lowerArgs, state') ← lowerExprArgs? env state args
+            let targets := identNames vars
+            let (pre, lowerArgs, state') ←
+              lowerCallArgs? env state targets functionName args
             some
-              (pre ++ [.decl (identNames vars) none,
-                .call (identNames vars) functionName lowerArgs],
+              (pre ++ [.decl targets none,
+                .call targets functionName lowerArgs],
                 state')
     | .Let vars (some expr) => do
         let (pre, lowerExpr, state') ← lowerExpr? env state expr
@@ -276,8 +287,10 @@ mutual
         | some expr =>
             some ([.assign (identNames vars) expr], state)
         | none => do
-            let (pre, lowerArgs, state') ← lowerExprArgs? env state args
-            some (pre ++ [.call (identNames vars) functionName lowerArgs], state')
+            let targets := identNames vars
+            let (pre, lowerArgs, state') ←
+              lowerCallArgs? env state targets functionName args
+            some (pre ++ [.call targets functionName lowerArgs], state')
     | .Assign vars expr => do
         let (pre, lowerExpr, state') ← lowerExpr? env state expr
         some (pre ++ [.assign (identNames vars) lowerExpr], state')
@@ -305,7 +318,8 @@ mutual
                   state'')
           | _ => none
         else do
-          let (pre, lowerArgs, state') ← lowerExprArgs? env state args
+          let (pre, lowerArgs, state') ←
+            lowerCallArgs? env state [] functionName args
           some (pre ++ [.call [] functionName lowerArgs], state')
     | .ExprStmtCall _ => none
     | .Switch scrutinee cases defaultBody => do
