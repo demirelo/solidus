@@ -219,6 +219,205 @@ realized by a declared typed-CFG shape, and every source control transfer lowers
 to an `unwind` plus typed jump/call/ret without exposing that machinery above
 the boundary.
 
+## Stack-Free CFG Design
+
+The next layer should be stack-free in its syntax, semantics, and public proof
+interface. It can still compile to `TypedCfg`, but no theorem above this layer
+should mention typed-CFG shapes, stack depths, concrete stack tails, `DUP`,
+`SWAP`, `POP`, or return tokens.
+
+A good source state for this layer is:
+
+```text
+State = {
+  evm      : shared EVM/Yul state with the runtime stack hidden by invariant,
+  store    : Name -> Option Word,
+  scopes   : lexical scope stack / visible-name set,
+  procs    : procedure environment
+}
+```
+
+The source semantics may reuse the shared primitive EVM/Yul meaning, but only
+through value-level adapters:
+
+```text
+evalExpr(e, state) : Except Error (state, values)
+runPrimitive(op, args, state) : Except Error (state, values)
+runTerminal(kind, args, state) : Except Error (halted state)
+```
+
+Expression evaluation returns values, not stack fragments.
+
+Suggested syntax:
+
+```text
+Program ::= procedures + main Block
+
+Proc ::= name, params, returns, body Block
+
+Block ::= List Stmt
+
+Stmt ::=
+  | expr(op, args)                    -- zero-result primitive statement
+  | let(names, optional expr)          -- initializes locals in current scope
+  | assign(names, expr)                -- updates existing locals
+  | if(cond, thenBlock)
+  | switch(scrutinee, cases, default?)
+  | for(initBlock, cond, postBlock, bodyBlock)
+  | break
+  | continue
+  | leave
+  | call(optional result names, name, args)
+  | terminal(kind, args)               -- STOP/RETURN/REVERT/SELFDESTRUCT
+  | block(body)                        -- only if we need explicit bracketed
+                                       -- lexical scope as a statement
+```
+
+If we keep this as a structured layer, `if`/`switch`/`for` stay as statements.
+If we later normalize it to a true block-parameter CFG, the equivalent
+terminators are:
+
+```text
+goto label(args)
+branch cond thenLabel(args) elseLabel(args)
+switch value cases defaultLabel(args)
+returnProcedure(values)
+halt(kind, args)
+```
+
+The important abstraction is the same in either presentation: block parameters
+and variables are source values, not stack slots.
+
+Outcomes:
+
+```text
+Outcome ::=
+  | regular(state)
+  | break(state)
+  | continue(state)
+  | leave(state)
+  | returned(values, state)            -- for procedure body semantics if useful
+  | halt(kind, state)
+  | error(error, state)
+  | outOfFuel(state)
+```
+
+Yul `leave` remains distinct from EVM `RETURN`: `leave` exits the current
+procedure through its declared return variables; EVM `RETURN` is a terminal
+halt.
+
+Block semantics should own lexical cleanup:
+
+```text
+runBlock(fuel, block, state):
+  push lexical scope
+  run statements
+  on regular/break/continue/leave/halt/error:
+    restrict/drop locals introduced by the block
+    propagate the same mode
+```
+
+Loop semantics installs source-level handlers:
+
+```text
+for init cond post body:
+  run init; break/continue from init is invalid
+  while cond != 0:
+    run body
+      regular/continue -> run post, then loop
+      break            -> regular after loop
+      leave/halt/error -> propagate
+    break/continue from post is invalid
+```
+
+Procedure semantics:
+
+```text
+call f(args):
+  evaluate args in Yul order
+  create a fresh procedure store containing params and zeroed returns
+  run f.body
+  on regular or leave:
+    read declared return variables
+    restore caller store/scope
+    bind returned values at the call site
+  on halt/error:
+    propagate terminal/error state
+  break/continue escaping a procedure is invalid
+```
+
+This source procedure model intentionally has no return PC, return token, or
+caller stack tail. The compiler to `TypedCfg` is responsible for choosing the
+procedure entry shape, epilogue label, return continuation, and `call`/`ret`
+lowering.
+
+### Successor Theorem Shape
+
+Yes: this layer should be proved with a recursive successor theorem for
+statement sequences. The public theorem should be about source runs and the
+compiled typed CFG, but the recursion should be statement-list shaped.
+
+For a statement sequence:
+
+```text
+SeqSound(layout, ctx, stmts, entryLabel, exitKont)
+```
+
+means:
+
+```text
+For any source state σ and target run state τ related by layout,
+running the compiled typed CFG from entryLabel simulates runBlock/runSeq:
+
+regular σ'   -> reaches the regular continuation with τ' related to σ'
+break σ'     -> reaches ctx.break with τ' related to σ'
+continue σ'  -> reaches ctx.continue with τ' related to σ'
+leave σ'     -> reaches ctx.leave with τ' related to σ'
+halt kind σ' -> typed CFG halts with the same terminal observation
+error/outOfFuel -> maps to the explicit target error/resource policy
+```
+
+The successor rule should be:
+
+```text
+SeqSound(ctx, []).
+
+SeqSound(ctx, s :: rest) follows from:
+  HeadSound(ctx with regular = tailEntry, s)
+  TailSound(ctx, rest, tailEntry)
+```
+
+with the critical split:
+
+```text
+if s runs regular:
+  target reaches tailEntry, then TailSound proves rest
+
+if s runs break/continue/leave/halt/error:
+  target reaches the appropriate continuation/terminal result,
+  and rest is ignored
+```
+
+This is the compositional proof shape we want. It avoids one monolithic CFG
+replay certificate and mirrors Yul's own mode-propagating statement semantics.
+
+### Compiler Responsibility
+
+The compiler from this stack-free layer to `TypedCfg` owns all stack facts:
+
+```text
+source variables/results/live values
+  -> typed-CFG Shape
+  -> local depths for load/store
+  -> unwind target shape for every abrupt edge
+  -> procedure entry/return shapes
+  -> typed call/ret labels
+```
+
+Those facts should appear in the compiler's layout relation and preservation
+proof, not in the stack-free source interpreter and not in any higher layer's
+theorem statement.
+
 Variables and scopes intentionally arrive in the next layer up. They will
 change the compiled stack shape, but that change belongs to the locals
 compiler, not to the locals source semantics: a declaration extends the typed
