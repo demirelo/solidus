@@ -7313,6 +7313,29 @@ theorem primitiveStackSoundAt_structured_iszero
     EvmYul.UInt256.isZero yulPrimitiveUnaryOneSound_iszero
     sourcePrimitiveUnaryOneSound_structured_iszero
 
+theorem primitiveStackSoundAt_iszero_of_arity
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel
+        ((.CompBit .ISZERO : EvmYul.Operation .Yul)) .iszero) :
+    PrimitiveStackSoundAt cfg layout prim sourceFuel
+      ((.CompBit .ISZERO : EvmYul.Operation .Yul)) .iszero := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hCall
+  cases hRel with
+  | @ok sourceShared store compilerState hShared hVars =>
+      rcases
+          yulPrimitiveUnaryOneSound_iszero
+            (sourceFuel := sourceFuel) hCall with
+        ⟨value, hValues, _hState, _hResult⟩
+      have hArity :
+          sourceValues.length =
+            Expressions.Structured.BasicOp.inputs .iszero := by
+        subst sourceValues
+        simp [Expressions.Structured.BasicOp.inputs]
+      exact hPrim (SourceStateRel.ok hShared hVars) hArity hCall
+
 theorem primitiveStackSoundAt_structured_not
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
     PrimitiveStackSoundAt cfg layout
