@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 15:11 PDT.
+Last updated: 2026-05-26 15:17 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3011,6 +3011,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
        - [ ] Prove callee entry-state construction and result/world merge for the ordinary compiled-account `CALL` path.
          - [x] Package callee entry-frame construction: related selected Yul/EVM code images now construct related child `ExecutionEnv`s, and the fresh-child-frame/world relation consumes that frame proof directly.
          - [ ] Prove the result/world merge after the child call returns or reverts, including account-map, substate, created-account, return-data, and success-bit agreement.
+           - [x] Add target-gas-aware external-call finish/merge lemmas, so EVM's returned-child-gas update is explicit in the proof obligation instead of hidden inside the generic finish-call relation.
+           - [x] Package the successful nonempty-child-account-map branch of EVM `Θ` result merge: when the returned EVM child account map is not `∅`, the restored Yul caller state relates to the EVM caller state using the child account map/substate/created-account set.
+           - [ ] Prove the ordinary compiled-account child map is nonempty from selected callee code/account-map facts, then discharge the remaining success/revert/failure result branches and gas-return relation.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
    - [x] Add checked lowering decomposition for bound binary primitive arguments and a compiler-output-aware `add(left, right)` bridge theorem that composes the generated hidden-argument prelude with generic `toStackSeq?` target replay and the target `ADD` proof.

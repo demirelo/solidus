@@ -878,6 +878,32 @@ theorem machineStateRel_finishExternalCall
   · simp [EvmYul.MachineState.finishExternalCall]
   · simp [EvmYul.MachineState.finishExternalCall]
 
+theorem machineStateRel_finishExternalCallWithTargetGas
+    {cfg : Reference.StateRelConfig}
+    {yul evm : EvmYul.MachineState}
+    (hMachine : Reference.MachineStateRel cfg yul evm)
+    {targetGas : EvmYul.UInt256}
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yul.finishExternalCall returnData inOffset inSize
+          outOffset outSize).gasAvailable
+        targetGas) :
+    Reference.MachineStateRel cfg
+      (yul.finishExternalCall returnData inOffset inSize outOffset outSize)
+      { evm.finishExternalCall returnData inOffset inSize outOffset outSize with
+        gasAvailable := targetGas } := by
+  rcases hMachine with ⟨_hGas, hActive, hMemory, _hReturn, _hHReturn⟩
+  constructor
+  · exact hGas
+  · simp [EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+      hActive]
+  · simp [EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+      hMemory]
+  · simp [EvmYul.MachineState.finishExternalCall]
+  · simp [EvmYul.MachineState.finishExternalCall]
+
 theorem machineStateRel_gasAvailable_eq
     {cfg : Reference.StateRelConfig}
     {yul evm : EvmYul.MachineState}
@@ -935,6 +961,34 @@ theorem sharedStateRel_finishExternalCall
       machineStateRel_finishExternalCall hMachine returnData
         inOffset inSize outOffset outSize⟩
 
+theorem sharedStateRel_finishExternalCallWithTargetGas
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {targetGas : EvmYul.UInt256}
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState :=
+          yul.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize }
+      { evm with
+        toMachineState :=
+          { evm.toMachineState.finishExternalCall returnData
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas } } := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  exact
+    ⟨hChain,
+      machineStateRel_finishExternalCallWithTargetGas hMachine
+        returnData inOffset inSize outOffset outSize hGas⟩
+
 theorem sharedStateRel_finishExternalCallWithWorld
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
@@ -981,6 +1035,110 @@ theorem sharedStateRel_finishExternalCallWithWorld
   · exact
       machineStateRel_finishExternalCall hMachine returnData
         inOffset inSize outOffset outSize
+
+theorem sharedStateRel_finishExternalCallWithWorldAndTargetGas
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {targetGas : EvmYul.UInt256}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hCreated : yulCreated = evmCreated)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState :=
+          yul.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        createdAccounts := yulCreated }
+      { evm with
+        toMachineState :=
+          { evm.toMachineState.finishExternalCall returnData
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap := evmAccountMap
+        substate := evmSubstate
+        createdAccounts := evmCreated } := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  rcases hChain with
+    ⟨_hAccountMap, hSigma, hTotal, hReceipts, _hSubstate, hEnv,
+      hBlocks, hGenesis, _hCreated⟩
+  constructor
+  · exact
+      { accountMap := hAccountMap
+        σ₀ := by simpa using hSigma
+        totalGasUsedInBlock := by simpa using hTotal
+        transactionReceipts := by simpa using hReceipts
+        substate := hSubstate
+        executionEnv := by simpa using hEnv
+        blocks := by simpa using hBlocks
+        genesisBlockHeader := by simpa using hGenesis
+        createdAccounts := hCreated }
+  · exact
+      machineStateRel_finishExternalCallWithTargetGas hMachine
+        returnData inOffset inSize outOffset outSize hGas
+
+theorem sharedStateRel_callSuccessMergeWithTargetGasOfEvmNonempty
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {targetGas : EvmYul.UInt256}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hCreated : yulCreated = evmCreated)
+    (hEvmAccountMapNonempty :
+      (evmAccountMap == (∅ : EvmYul.AccountMap .EVM)) = false)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState :=
+          yul.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        createdAccounts := yulCreated }
+      { evm with
+        toMachineState :=
+          { evm.toMachineState.finishExternalCall returnData
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+            evm.accountMap
+          else
+            evmAccountMap
+        substate :=
+          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+            evm.substate
+          else
+            evmSubstate
+        createdAccounts := evmCreated } := by
+  simpa [hEvmAccountMapNonempty] using
+    sharedStateRel_finishExternalCallWithWorldAndTargetGas hShared
+      hAccountMap hSubstate hCreated returnData inOffset inSize
+      outOffset outSize hGas
 
 theorem sharedStateRel_freshExternalCallWithWorld
     {cfg : Reference.StateRelConfig}
