@@ -167,14 +167,28 @@ def containsAll? (env names : List Name) : Bool :=
 def disjoint? (names env : List Name) : Bool :=
   names.all (fun name => decide (name ∉ env))
 
+def nonempty? (names : List Name) : Bool :=
+  !names.isEmpty
+
 def canDeclare? (env names : List Name) : Bool :=
-  decide names.Nodup && disjoint? names env
+  nonempty? names && decide names.Nodup && disjoint? names env
 
 def canAssign? (env names : List Name) : Bool :=
-  decide names.Nodup && containsAll? env names
+  nonempty? names && decide names.Nodup && containsAll? env names
 
 def extend (env names : List Name) : List Name :=
   names ++ env
+
+def reservedFunctionName? : Name → Bool
+  | "datasize" | "dataoffset" | "datacopy" => true
+  | _ => false
+
+def functionNamesAccepted? (names : List Name) : Bool :=
+  decide names.Nodup && names.all (fun name => !reservedFunctionName? name)
+
+def caseValues : List (Word × List AstStmt) → List Word
+  | [] => []
+  | (value, _body) :: rest => value :: caseValues rest
 
 mutual
   def exprArity? (env : Env) (scope : List Name) :
@@ -268,6 +282,7 @@ mutual
     | .ExprStmtCall _ => false
     | .Switch scrutinee cases defaultBody =>
         exprArityIs? env scope scrutinee 1 &&
+          decide (caseValues cases).Nodup &&
           cases? env canBreak canContinue canLeave scope cases &&
           stmtList? env canBreak canContinue canLeave scope defaultBody
     | .For cond post body =>
@@ -317,7 +332,7 @@ noncomputable def contract? (layout : ObjectLayout)
   let entries := Contract.functionEntries contract
   let env : Env :=
     { signatures := Contract.signatures entries, objectLayout := layout }
-  decide (entries.map Prod.fst).Nodup &&
+  functionNamesAccepted? (entries.map Prod.fst) &&
     stmt? env false false false [] contract.dispatcher &&
     functions? env entries
 
