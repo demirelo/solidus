@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:12 PDT.
+Last updated: 2026-05-25 20:20 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -52,6 +52,8 @@ Proof rule:
   labels, lexical `unwind`, terminal halts, and first-class procedures.
 - [x] Implement a typed CFG checker.
 - [x] Implement independent shape-aware typed CFG semantics.
+  - Block entry now checks the runtime stack conforms exactly to the declared
+    input shape, including exact values for literal slots.
 - [x] Keep EVM terminal halts distinct from structured `leave`.
 - [x] Implement typed-CFG-to-labeled-assembly lowering as a separate backend
   boundary.

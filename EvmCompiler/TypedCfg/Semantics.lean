@@ -52,6 +52,25 @@ def attachReturns? (frame : ReturnFrame) (stack : EvmYul.Stack Word) :
 
 end StackFrame
 
+namespace Slot
+
+def matchesValue (slot : Slot) (value : Word) : Bool :=
+  match slot with
+  | .literal expected => value == expected
+  | .word | .local _ | .temp _ _ | .returnPC _ | .returnValue _ _ => true
+
+end Slot
+
+namespace Shape
+
+def matchesStack : Shape → EvmYul.Stack Word → Bool
+  | [], [] => true
+  | slot :: shapeRest, value :: stackRest =>
+      slot.matchesValue value && matchesStack shapeRest stackRest
+  | _, _ => false
+
+end Shape
+
 inductive Outcome where
   | fallthrough (state : RunState)
   | jump (target : Label) (state : RunState)
@@ -279,6 +298,9 @@ def runTerm (program : Program) (term : Terminator) (state : RunState) :
 
 def run (program : Program) (block : Block) (state : RunState) :
     Except EVMException Outcome := do
+  if !block.input.matchesStack state.evm.stack then
+    .ok (.invalid state)
+  else
   let (evm, _shape) ← runBodyWithShape? block.body block.input state.evm
   runTerm program block.term (state.withEVM evm)
 
