@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 21:12 PDT.
+Last updated: 2026-05-25 21:18 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -53,7 +53,10 @@ Proof rule:
 - [x] Implement a typed CFG checker.
 - [x] Implement independent shape-aware typed CFG semantics.
   - Block entry now checks the runtime stack conforms exactly to the declared
-    input shape, including exact values for literal slots.
+    input shape. Exact-value literal slots are still available for explicit
+    contracts, but ordinary `push` instructions produce generic word slots so
+    higher layers do not accidentally inherit value-indexed continuation
+    shapes.
   - Every instruction step rechecks the runtime stack against the computed
     output shape.
   - Block terminators are checked against the body output shape before
@@ -184,6 +187,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     statement/sequence/block soundness predicates.
   - [x] Prove `initial_stateRel`, the bridge from the public initial-state
     relation into the internal state relation used by the induction.
+  - [x] Prove local scope-preservation and shape-conformance lemmas used by
+    the adjacent proof interface, including store scoping through insert/
+    assignment helpers and `StateRel.block_input_matches`.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.

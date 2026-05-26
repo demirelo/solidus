@@ -55,6 +55,40 @@ def run (fuel : Nat) (program : Yul.Program) (state : State) :
   | .error (.Revert stateBeforeRevert) => .ok (.revert stateBeforeRevert)
   | .error exception => .error exception
 
+theorem run_of_callDispatcher_ok {fuel : Nat} {program : Yul.Program}
+    {state state' : State} {rets : List Word}
+    (h :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (installContract program state) = .ok (state', rets)) :
+    run fuel program state = .ok (.regular state') := by
+  simp [run, h]
+
+theorem run_of_callDispatcher_yulHalt {fuel : Nat}
+    {program : Yul.Program} {state state' : State} {value : Word}
+    (h :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (installContract program state) =
+          .error (.YulHalt state' value)) :
+    run fuel program state = .ok (.yulHalt state' value) := by
+  simp [run, h]
+
+theorem run_of_callDispatcher_revert {fuel : Nat}
+    {program : Yul.Program} {state stateBeforeRevert : State}
+    (h :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (installContract program state) =
+          .error (.Revert stateBeforeRevert)) :
+    run fuel program state = .ok (.revert stateBeforeRevert) := by
+  simp [run, h]
+
+theorem run_of_callDispatcher_outOfFuel {fuel : Nat}
+    {program : Yul.Program} {state : State}
+    (h :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (installContract program state) = .error .OutOfFuel) :
+    run fuel program state = .error .OutOfFuel := by
+  simp [run, h]
+
 end Reference
 
 abbrev SourceResult :=
@@ -262,6 +296,125 @@ theorem lowerObserved?_of_compilesTo {layout : ObjectLayout}
   unfold CompilesTo at h
   unfold YulToStackFreeCfg.Program.lowerObserved?
   simp [h]
+
+theorem lowerAccepted?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    YulToStackFreeCfg.Program.lowerAccepted? layout program = some target := by
+  have hCoverage := coverage?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  have hWF := sourceWF?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  have hLower := lower?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  have hLowerContract :
+      Contract.lower? layout program.contract = some target := by
+    simpa [YulToStackFreeCfg.Program.lower?] using hLower
+  have hAccepted := accepted?_of_compilesTo (layout := layout)
+    (program := program) (target := target) h
+  unfold YulToStackFreeCfg.Program.lowerAccepted?
+  unfold Contract.lowerAccepted?
+  simp [hCoverage, hWF, hLowerContract, hAccepted]
+
+theorem compilesTo_of_lowerAccepted? {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h :
+      YulToStackFreeCfg.Program.lowerAccepted? layout program =
+        some target) :
+    CompilesTo layout program target := by
+  unfold YulToStackFreeCfg.Program.lowerAccepted? at h
+  unfold Contract.lowerAccepted? at h
+  unfold CompilesTo
+  unfold YulToStackFreeCfg.Program.lowerGate
+  unfold Contract.lowerGate
+  by_cases hCoverage : Coverage.contract? layout program.contract
+  · by_cases hWF : SourceWF.contract? layout program.contract
+    · cases hLower : Contract.lower? layout program.contract with
+      | none =>
+          simp [hCoverage, hWF, hLower] at h
+      | some lowered =>
+          by_cases hAccepted : StackFreeCfg.Program.accepted? lowered
+          · simp [hCoverage, hWF, hLower, hAccepted] at h
+            cases h
+            simp [hCoverage, hWF, hAccepted]
+          · simp [hCoverage, hWF, hLower, hAccepted] at h
+    · simp [hCoverage, hWF] at h
+  · simp [hCoverage] at h
+
+theorem compilesTo_iff_lowerAccepted? {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program} :
+    CompilesTo layout program target ↔
+      YulToStackFreeCfg.Program.lowerAccepted? layout program =
+        some target := by
+  constructor
+  · exact lowerAccepted?_of_compilesTo
+  · exact compilesTo_of_lowerAccepted?
+
+theorem lowerGate_toProgram?_of_compilesTo {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h : CompilesTo layout program target) :
+    (YulToStackFreeCfg.Program.lowerGate layout program).toProgram? =
+      some target := by
+  unfold CompilesTo at h
+  rw [h]
+  rfl
+
+theorem compilesTo_of_lowerGate_toProgram? {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program}
+    (h :
+      (YulToStackFreeCfg.Program.lowerGate layout program).toProgram? =
+        some target) :
+    CompilesTo layout program target := by
+  unfold CompilesTo
+  generalize hGate :
+      YulToStackFreeCfg.Program.lowerGate layout program = gate
+  rw [hGate] at h
+  cases gate with
+  | accepted lowered =>
+      simp [LoweringGate.toProgram?] at h
+      cases h
+      rfl
+  | rejected reason =>
+      simp [LoweringGate.toProgram?] at h
+
+theorem compilesTo_iff_lowerGate_toProgram? {layout : ObjectLayout}
+    {program : Yul.Program} {target : StackFreeCfg.Program} :
+    CompilesTo layout program target ↔
+      (YulToStackFreeCfg.Program.lowerGate layout program).toProgram? =
+        some target := by
+  constructor
+  · exact lowerGate_toProgram?_of_compilesTo
+  · exact compilesTo_of_lowerGate_toProgram?
+
+theorem lowerObserved?_eq_some_iff {layout : ObjectLayout}
+    {program : Yul.Program} {prim : StackFreeCfg.PrimitiveSemantics}
+    {fuel : Nat} {shared : StackFreeCfg.SharedState}
+    {result : Except StackFreeCfg.Exception StackFreeCfg.Observation} :
+    YulToStackFreeCfg.Program.lowerObserved? layout prim fuel program shared =
+      some result ↔
+      ∃ target,
+        CompilesTo layout program target ∧
+          result =
+            StackFreeCfg.Program.runObserved prim fuel target shared := by
+  unfold YulToStackFreeCfg.Program.lowerObserved?
+  cases hGate : YulToStackFreeCfg.Program.lowerGate layout program with
+  | accepted target =>
+      constructor
+      · intro h
+        simp at h
+        exact ⟨target, hGate, h.symm⟩
+      · rintro ⟨target', hCompiles, hResult⟩
+        unfold CompilesTo at hCompiles
+        simp [hGate] at hCompiles
+        cases hCompiles
+        simp [hResult]
+  | rejected reason =>
+      constructor
+      · intro h
+        simp at h
+      · rintro ⟨target, hCompiles, _hResult⟩
+        unfold CompilesTo at hCompiles
+        simp [hGate] at hCompiles
 
 /--
 Adjacent preservation property for one successfully lowered Yul program.

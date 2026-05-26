@@ -128,8 +128,10 @@ mutual
   def compile? (expr : Expr) (shape : Shape) :
       Option (List TypedCfg.Instr × Shape) :=
     match expr with
-    | .literal value =>
-        some ([.push value], .literal value :: shape)
+    | .literal value => do
+        let instr := TypedCfg.Instr.push value
+        let shape' ← instr.type? shape
+        some ([instr], shape')
     | .var name => do
         let depth ← Layout.lookupDepth? name shape 0
         let instr := TypedCfg.Instr.loadLocal name depth

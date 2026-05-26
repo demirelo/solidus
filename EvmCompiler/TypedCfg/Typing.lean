@@ -20,7 +20,7 @@ end ShapeOps
 
 def type? (instr : Instr) (shape : Shape) : Option Shape :=
   match instr with
-  | .push value => some (.literal value :: shape)
+  | .push _value => some (.word :: shape)
   | .prim .pc => none
   | .prim op =>
       match op.continuingStep? with
