@@ -78,6 +78,7 @@ program counter points at the label corresponding to the typed CFG label.
 structure StateRel (program : Program) (asm : Assembly.Program)
     (sites : List CallSite) (label : Label) (source : RunState)
     (target : Assembly.EVMState) : Prop where
+  source_suspended : program.suspendedAt? label source = true
   label_pc : ∃ pc, Assembly.Program.labelPc asm label = some pc ∧
     ∃ stack,
       ReturnEncoding.stack? program sites source.returns source.evm.stack =
@@ -168,6 +169,50 @@ theorem lower?_fallthrough {program : Program} {sites : List CallSite}
       some [.prim .stop] := rfl
 
 end Terminator
+
+namespace Program
+
+theorem runFrom_zero_resultRel {program : Program} {asm : Assembly.Program}
+    {sites : List CallSite} {label : Label} {source : RunState}
+    {target : Assembly.EVMState}
+    (hRel : StateRel program asm sites label source target) :
+    ResultRel program asm sites
+      (TypedCfg.Program.runFrom 0 program label source)
+      (Assembly.Source.runNResult asm 0 target) := by
+  simp [TypedCfg.Program.runFrom, Assembly.Source.runNResult,
+    hRel.source_suspended]
+  exact ResultRel.outOfFuel hRel
+
+theorem run_zero_resultRel {program : CheckedProgram}
+    {asm : Assembly.Program} {sourceInitial targetInitial}
+    (hRel : InitialRel program.program asm sourceInitial targetInitial) :
+    ResultRel program.program asm (TypedCfg.Program.collectCallSites program.program)
+      (TypedCfg.Program.run 0 program.program sourceInitial)
+      (Assembly.Source.runNResult asm 0 targetInitial) := by
+  simpa [TypedCfg.Program.run, InitialRel] using
+    runFrom_zero_resultRel
+      (program := program.program)
+      (asm := asm)
+      (sites := TypedCfg.Program.collectCallSites program.program)
+      (label := program.program.entry)
+      (source := RunState.initial sourceInitial)
+      (target := targetInitial)
+      hRel
+
+theorem preservesLowered_zero {program : CheckedProgram}
+    {asm : Assembly.Program} {sourceInitial targetInitial sourceResult}
+    (hRel : InitialRel program.program asm sourceInitial targetInitial)
+    (hRun : TypedCfg.Program.run 0 program.program sourceInitial = sourceResult) :
+    ∃ targetFuel targetResult,
+      Assembly.Source.runNResult asm targetFuel targetInitial = targetResult ∧
+        ResultRel program.program asm
+          (TypedCfg.Program.collectCallSites program.program)
+          sourceResult targetResult := by
+  refine ⟨0, Assembly.Source.runNResult asm 0 targetInitial, rfl, ?_⟩
+  rw [← hRun]
+  exact run_zero_resultRel (program := program) (asm := asm) hRel
+
+end Program
 
 end Preservation
 end TypedCfg
