@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:04 PDT.
+Last updated: 2026-05-25 20:12 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -158,6 +158,10 @@ StackFreeCfg, not directly into TypedCfg or assembly.
     `datacopy(t, f, l)` lowers to `codecopy(t, f, l)` after evaluating its
     three value arguments, so callers normally write
     `datacopy(t, dataoffset(name), datasize(name))`.
+  - Resolve value-level pseudo-builtins `linkersymbol(name)` and
+    `loadimmutable(name)` through explicit layout fields; normalize
+    `memoryguard(x)` to `x` as an optimizer marker. Reserve `setimmutable`
+    and `verbatim*` names until their separate contracts are added.
   - Model external calls/create/code queries either by direct shared semantics
     or by an explicit external-world oracle relation shared with the EVM
     target.

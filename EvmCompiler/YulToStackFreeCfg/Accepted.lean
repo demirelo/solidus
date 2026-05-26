@@ -55,7 +55,9 @@ mutual
         else
           none
     | .Call (.inr functionName) args =>
-        if objectExpr? env.objectLayout functionName args then
+        if functionName = "memoryguard" then
+          if args.length = 1 && exprList? env args then some 1 else none
+        else if objectExpr? env.objectLayout functionName args then
           some 1
         else
           match env.findSignature? functionName with
@@ -169,8 +171,10 @@ def extend (env names : List Name) : List Name :=
   names ++ env
 
 def reservedFunctionName? : Name → Bool
-  | "datasize" | "dataoffset" | "datacopy" => true
-  | _ => false
+  | "datasize" | "dataoffset" | "datacopy"
+  | "linkersymbol" | "loadimmutable" | "setimmutable"
+  | "memoryguard" => true
+  | name => name.startsWith "verbatim"
 
 def functionNamesAccepted? (names : List Name) : Bool :=
   decide names.Nodup && names.all (fun name => !reservedFunctionName? name)
@@ -191,7 +195,9 @@ mutual
         else
           none
     | .Call (.inr functionName) args =>
-        if Coverage.objectExpr? env.objectLayout functionName args then
+        if functionName = "memoryguard" then
+          if args.length = 1 && exprList? env scope args then some 1 else none
+        else if Coverage.objectExpr? env.objectLayout functionName args then
           some 1
         else
           match env.findSignature? functionName with

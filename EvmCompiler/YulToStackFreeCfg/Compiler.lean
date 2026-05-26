@@ -111,6 +111,8 @@ end Prim
 structure ObjectLayout where
   dataSize? : Name → Option Word := fun _ => none
   dataOffset? : Name → Option Word := fun _ => none
+  linkerSymbol? : Name → Option Word := fun _ => none
+  immutableValue? : Name → Option Word := fun _ => none
 
 namespace Fresh
 
@@ -176,6 +178,14 @@ def lowerExpr? (layout : ObjectLayout) (name : Name) (args : List AstExpr) :
       let objectName ← objectName? arg
       let value ← layout.dataOffset? objectName
       some (.literal value)
+  | "linkersymbol", [arg] => do
+      let objectName ← objectName? arg
+      let value ← layout.linkerSymbol? objectName
+      some (.literal value)
+  | "loadimmutable", [arg] => do
+      let objectName ← objectName? arg
+      let value ← layout.immutableValue? objectName
+      some (.literal value)
   | _, _ => none
 
 end ObjectBuiltin
@@ -232,18 +242,23 @@ mutual
         let (pre, lowerArgs, state') ← lowerExprArgs? env state args
         some (pre, .prim op lowerArgs, state')
     | .Call (.inr functionName) args =>
-        match ObjectBuiltin.lowerExpr? env.objectLayout functionName args with
-        | some expr => some ([], expr, state)
-        | none => do
-            let sig ← env.findSignature? functionName
-            if sig.returns = 1 ∧ args.length = sig.params then
-              let (pre, lowerArgs, state') ← lowerExprArgs? env state args
-              let (tmp, state'') ← Fresh.fresh? state'
-              some
-                (pre ++ [.callDecl [tmp] functionName lowerArgs],
-                  .var tmp, state'')
-            else
-              none
+        if functionName = "memoryguard" then
+          match args with
+          | [arg] => lowerExpr? env state arg
+          | _ => none
+        else
+          match ObjectBuiltin.lowerExpr? env.objectLayout functionName args with
+          | some expr => some ([], expr, state)
+          | none => do
+              let sig ← env.findSignature? functionName
+              if sig.returns = 1 ∧ args.length = sig.params then
+                let (pre, lowerArgs, state') ← lowerExprArgs? env state args
+                let (tmp, state'') ← Fresh.fresh? state'
+                some
+                  (pre ++ [.callDecl [tmp] functionName lowerArgs],
+                    .var tmp, state'')
+              else
+                none
 
   def lowerExprArgs? (env : Env) :
       Fresh.State → List AstExpr →
