@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-26 03:37:50 PDT - compaction-resume/initial-world-boundary - Resumed active assumption-cleanup goal during the initial-world-boundary checkpoint. The focused `NoCallRuntime` and `LayerAudit` builds were already running from the pre-compaction attempt; next steps are to finish polling, run the targeted surface/axiom and hygiene checks, and commit the named boundary only if verification stays clean.
+
+- 2026-05-26 03:36:04 PDT - checkpoint/initial-world-boundary - audited the preferred theorem's initial shared-state premise. It cannot be honestly constructed for an arbitrary `StateRelConfig`, because the config owns account-map, code-image, gas-erasure, and total-gas relations. Re-expressed the public premise as `RecursiveBridgeInitialWorldRel` and added a canonical-entry transport lemma, so the preferred surface names this as a semantic environment boundary instead of exposing the raw `Reference.SharedStateRel` expansion. Verification: `lake build EvmCompiler.Yul.NoCallRuntime` and `lake build EvmCompiler.LayerAudit` passed; targeted `#check` shows `hInitialWorld : RecursiveBridgeInitialWorldRel cfg program shared initial` on the imported-Yul gas-aware top alias, and targeted axiom checks report no `sorryAx`.
+
 - 2026-05-26 03:33:11 PDT - compaction-resume/canonical-entry-state - Resumed active assumption-cleanup goal during the canonical-entry checkpoint. The focused `NoCallRuntime` and `LayerAudit` builds were already running; next steps are to finish polling, run the targeted axiom/hygiene checks, update verification notes, and commit only if the canonical-entry wrapper stays clean.
 
 - 2026-05-25 00:00 PDT - compaction-resume/typed-cfg-refactor - Resumed after context compaction; current checkpoint is committing to the explicit typed CFG middle layer, tightening its lowering boundary, and preparing the existing structured-control/compiler proof stack to route through it.

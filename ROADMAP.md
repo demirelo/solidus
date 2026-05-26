@@ -197,7 +197,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 03:31 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 03:36 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -255,6 +255,11 @@ Current assumption-cleanup checkpoint:
   arbitrary EVM state and runs the target from `canonicalEntryState initial`,
   so `pc = pcAfter []` and `stack = []` are compiler-entry construction facts
   rather than public assumptions.
+- [x] Re-express the initial Yul/EVM world agreement as the named semantic
+  boundary `RecursiveBridgeInitialWorldRel`.
+  This is not compiler-constructible for an arbitrary `StateRelConfig`: account
+  maps, code images, gas erasure, and total-gas agreement are deliberately
+  supplied by the source/target environment relation.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail

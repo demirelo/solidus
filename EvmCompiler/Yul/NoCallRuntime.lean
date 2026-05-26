@@ -34,6 +34,17 @@ def canonicalEntryState (initial : EVMState) : EVMState :=
     pc := Assembly.Program.pcAfter []
     stack := [] }
 
+def RecursiveBridgeInitialWorldRel
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (shared : EvmYul.SharedState .Yul)
+    (initial : EVMState) : Prop :=
+  Reference.SharedStateRel cfg
+    { shared with
+      executionEnv :=
+        { shared.executionEnv with code := program.contract } }
+    initial.toSharedState
+
 @[simp] theorem canonicalEntryState_toSharedState (initial : EVMState) :
     (canonicalEntryState initial).toSharedState = initial.toSharedState :=
   rfl
@@ -45,6 +56,20 @@ def canonicalEntryState (initial : EVMState) : EVMState :=
 @[simp] theorem canonicalEntryState_stack (initial : EVMState) :
     (canonicalEntryState initial).stack = [] :=
   rfl
+
+theorem RecursiveBridgeInitialWorldRel.to_canonicalEntryState
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {initial : EVMState}
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial) :
+    Reference.SharedStateRel cfg
+      { shared with
+        executionEnv :=
+          { shared.executionEnv with code := program.contract } }
+      (canonicalEntryState initial).toSharedState := by
+  simpa [RecursiveBridgeInitialWorldRel] using hInitialWorld
 
 namespace RecursiveBridgeTargetRuntime
 
@@ -91,12 +116,8 @@ def withAcceptedNoCallCreate
     (hSemantics :
       RecursiveBridgeSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -114,7 +135,8 @@ def withAcceptedNoCallCreate
   sourceAccepted := hSourceAccepted
   compileResources := hCompileResources
   semantics := hSemantics
-  initialShared := hInitialSharedRel
+  initialShared := by
+    simpa [RecursiveBridgeInitialWorldRel] using hInitialWorld
   sourceRun := hSourceRun
   compileTarget := hCompileTarget
   targetRuntime :=
@@ -144,12 +166,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hSemantics :
       RecursiveBridgeSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -182,7 +200,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
     (hTop :=
       RecursiveBridgeTopAssumptions.withAcceptedNoCallCreate
-        hSourceAccepted hCompileResources hSemantics hInitialSharedRel
+        hSourceAccepted hCompileResources hSemantics hInitialWorld
         hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
         outOfGasPolicy currentContractProjection hInitialPc hInitialStack)
 
@@ -293,12 +311,8 @@ def withCanonicalObservation
     (hSemantics :
       RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
         program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -319,7 +333,8 @@ def withCanonicalObservation
   sourceAccepted := hSourceAccepted
   sourceCompileAccepted := hSourceCompileAccepted
   semantics := hSemantics.toSemanticContracts
-  initialShared := hInitialSharedRel
+  initialShared := by
+    simpa [RecursiveBridgeInitialWorldRel] using hInitialWorld
   sourceRun := hSourceRun
   compileTarget := hCompileTarget
   decodeWindow := decodeWindow
@@ -919,12 +934,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hSemantics :
       RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
         program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -970,7 +981,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
                                 result :=
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X
     (RecursiveBridgeTopNoCallSourceCompileAssumptions.withCanonicalObservation
-      hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
+      hSourceAccepted hSourceCompileAccepted hSemantics hInitialWorld
       hSourceRun hCompileTarget decodeWindow jumpdestCorrect
       (Assembly.GasOracleAssumption.trivial (program := asm)
         (initial := initial))
@@ -999,12 +1010,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hSemantics :
       RecursiveBridgeSemanticCoreContracts cfg terminalRel revertRel prim
         program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -1039,7 +1046,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       hOutcome, hWholeRel, _hAccepted, _hBytes, _hEncoding, _hGasBoundary,
       _hGasOracle, _hOutOfGas, _hProjection, hTrace, hRuns⟩ :=
     compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
-      hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
+      hSourceAccepted hSourceCompileAccepted hSemantics hInitialWorld
       hSourceRun hCompileTarget decodeWindow jumpdestCorrect
       hInitialPc hInitialStack hX
   exact
@@ -1070,12 +1077,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
     (hExpr : RecursiveBridgeExprResultContracts cfg program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -1123,7 +1126,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     hSourceAccepted hSourceCompileAccepted
     (RecursiveBridgeSemanticCoreContracts.ofBoundaries hPrimitive hTerminal
       hExpr)
-    hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+    hInitialWorld hSourceRun hCompileTarget decodeWindow jumpdestCorrect
     hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
@@ -2063,12 +2066,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
         Locals.Source.PrimitiveSemantics.structured program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -2114,7 +2113,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_XRunner
     (initial := canonicalEntryState initial)
     hFullSourceAccepted hFeatureCoverage hCompileResources hTerminal hExpr
-    (by simpa using hInitialSharedRel) hSourceRun hCompileTarget
+    (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
+    hSourceRun hCompileTarget
     decodeWindow jumpdestCorrect
     (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
     hRunner
@@ -2139,12 +2139,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
         Locals.Source.PrimitiveSemantics.structured program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
-    (hInitialSharedRel :
-      Reference.SharedStateRel cfg
-        { shared with
-          executionEnv :=
-            { shared.executionEnv with code := program.contract } }
-        initial.toSharedState)
+    (hInitialWorld :
+      RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
       RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
     (hCompileTarget :
@@ -2173,7 +2169,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_XRunner
     (initial := canonicalEntryState initial)
     hFullSourceAccepted hFeatureCoverage hCompileResources hTerminal hExpr
-    (by simpa using hInitialSharedRel) hSourceRun hCompileTarget
+    (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
+    hSourceRun hCompileTarget
     decodeWindow jumpdestCorrect
     (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
     hRunner

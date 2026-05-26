@@ -2937,6 +2937,9 @@ abbrev recursiveBridgeTopNoCallSourceCompileFullSourceCoveredStructuredPrimitive
 abbrev recursiveBridgeCanonicalEntryState :=
   @Yul.Program.canonicalEntryState
 
+abbrev recursiveBridgeInitialWorldRel :=
+  @Yul.Program.RecursiveBridgeInitialWorldRel
+
 abbrev recursiveBridgeTopNoCallSourceCompileFullSourceCoveredStructuredPrimitiveCanonicalEntryToEVMXRunner :=
   @Yul.Program.compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_XRunner
 
