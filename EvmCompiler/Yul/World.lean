@@ -811,6 +811,94 @@ theorem sharedStateRel_addAccessedAccount
   · exact chainStateRel_addAccessedAccount hChain addr
   · simpa [EvmYul.State.addAccessedAccount] using hMachine
 
+theorem machineStateRel_finishExternalCall
+    {cfg : Reference.StateRelConfig}
+    {yul evm : EvmYul.MachineState}
+    (hMachine : Reference.MachineStateRel cfg yul evm)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256) :
+    Reference.MachineStateRel cfg
+      (yul.finishExternalCall returnData inOffset inSize outOffset outSize)
+      (evm.finishExternalCall returnData inOffset inSize outOffset outSize) := by
+  rcases hMachine with ⟨hGas, hActive, hMemory, _hReturn, _hHReturn⟩
+  constructor
+  · simpa [EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes] using
+      hGas
+  · simp [EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+      hActive]
+  · simp [EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes,
+      hMemory]
+  · simp [EvmYul.MachineState.finishExternalCall]
+  · simp [EvmYul.MachineState.finishExternalCall]
+
+theorem sharedStateRel_finishExternalCall
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState :=
+          yul.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize }
+      { evm with
+        toMachineState :=
+          evm.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize } := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  exact
+    ⟨hChain,
+      machineStateRel_finishExternalCall hMachine returnData
+        inOffset inSize outOffset outSize⟩
+
+theorem sharedStateRel_finishExternalCallWithWorld
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hCreated : yulCreated = evmCreated)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState :=
+          yul.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        createdAccounts := yulCreated }
+      { evm with
+        toMachineState :=
+          evm.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize
+        accountMap := evmAccountMap
+        substate := evmSubstate
+        createdAccounts := evmCreated } := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  rcases hChain with
+    ⟨_hAccountMap, hSigma, hTotal, hReceipts, _hSubstate, hEnv,
+      hBlocks, hGenesis, _hCreated⟩
+  constructor
+  · constructor
+    · exact hAccountMap
+    · simpa using hSigma
+    · simpa using hTotal
+    · simpa using hReceipts
+    · exact hSubstate
+    · simpa using hEnv
+    · simpa using hBlocks
+    · simpa using hGenesis
+    · exact hCreated
+  · exact
+      machineStateRel_finishExternalCall hMachine returnData
+        inOffset inSize outOffset outSize
+
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     {addr : EvmYul.AccountAddress}
