@@ -326,6 +326,69 @@ def CompilePreserves : Prop :=
     CompilesTo program asm →
       Assembly.Accepted asm ∧ PreservesLowered program asm
 
+namespace Shape
+
+theorem matchesStack_length {shape : Shape} {stack : EvmYul.Stack Word}
+    (hMatches : shape.matchesStack stack = true) :
+    shape.length = stack.length := by
+  induction shape generalizing stack with
+  | nil =>
+      cases stack <;> simp [TypedCfg.Shape.matchesStack] at hMatches ⊢
+  | cons slot rest ih =>
+      cases stack with
+      | nil =>
+          simp [TypedCfg.Shape.matchesStack] at hMatches
+      | cons value values =>
+          have hTail : TypedCfg.Shape.matchesStack rest values = true := by
+            have hSplit :
+                slot.matchesValue value = true ∧
+                  TypedCfg.Shape.matchesStack rest values = true := by
+              simpa [TypedCfg.Shape.matchesStack] using hMatches
+            exact hSplit.2
+          simp [ih hTail]
+
+theorem matchesStack_drop (n : Nat) {shape : Shape}
+    {stack : EvmYul.Stack Word}
+    (hMatches : TypedCfg.Shape.matchesStack shape stack = true) :
+    TypedCfg.Shape.matchesStack (shape.drop n) (stack.drop n) = true := by
+  induction n generalizing shape stack with
+  | zero =>
+      simpa using hMatches
+  | succ n ih =>
+      cases shape with
+      | nil =>
+          cases stack <;> simp [TypedCfg.Shape.matchesStack] at hMatches ⊢
+      | cons slot rest =>
+          cases stack with
+          | nil =>
+              simp [TypedCfg.Shape.matchesStack] at hMatches
+          | cons value values =>
+              have hTail : TypedCfg.Shape.matchesStack rest values = true := by
+                have hSplit :
+                    slot.matchesValue value = true ∧
+                      TypedCfg.Shape.matchesStack rest values = true := by
+                  simpa [TypedCfg.Shape.matchesStack] using hMatches
+                exact hSplit.2
+              simpa using ih hTail
+
+theorem matchesStack_drop_of_unwindTo {target current : Shape}
+    {stack : EvmYul.Stack Word}
+    (hUnwind : Shape.unwindTo target current = some target)
+    (hMatches : TypedCfg.Shape.matchesStack current stack = true) :
+    TypedCfg.Shape.matchesStack target
+      (stack.drop (current.length - target.length)) = true := by
+  unfold Shape.unwindTo at hUnwind
+  by_cases hCond :
+      target.length ≤ current.length ∧
+        current.drop (current.length - target.length) = target
+  · simp [hCond] at hUnwind
+    have hDrop :=
+      matchesStack_drop (current.length - target.length) hMatches
+    simpa [hCond.2] using hDrop
+  · simp [hCond] at hUnwind
+
+end Shape
+
 namespace Terminator
 
 theorem lower?_fallthrough {program : Program} {sites : List CallSite}
@@ -570,6 +633,109 @@ theorem runPopMany_target {program : Program} {sites : List CallSite}
           · simpa [targetPopMany, Assembly.Target.runList, hTargetHeadStep]
               using hTargetTail
           · simpa [RunState.withEVM] using hRelFinal
+
+theorem runPopMany_stack_drop {n : Nat} {state state' : EVMState}
+    (hRun : TypedCfg.Instr.runPopMany n state = .ok state') :
+    state'.stack = state.stack.drop n := by
+  induction n generalizing state state' with
+  | zero =>
+      simp [TypedCfg.Instr.runPopMany] at hRun
+      cases hRun
+      simp
+  | succ n ih =>
+      simp [TypedCfg.Instr.runPopMany] at hRun
+      cases hStep : Assembly.PrimOp.pop.step state with
+      | error err =>
+          simp [hStep] at hRun
+          change (Except.error err : Except EVMException EVMState) =
+            Except.ok state' at hRun
+          cases hRun
+      | ok mid =>
+          simp [hStep] at hRun
+          change TypedCfg.Instr.runPopMany n mid = .ok state' at hRun
+          have hMidStack : mid.stack = state.stack.drop 1 := by
+            cases hStack : state.stack with
+            | nil =>
+                simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+                  Assembly.PrimStep.run, EvmYul.Stack.pop, hStack] at hStep
+            | cons value rest =>
+                simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+                  Assembly.PrimStep.run, EvmYul.Stack.pop, hStack,
+                  EvmYul.EVM.State.replaceStackAndIncrPC,
+                  EvmYul.EVM.State.incrPC] at hStep
+                cases hStep
+                simp [hStack]
+          rw [ih hRun, hMidStack]
+          simp [List.drop_drop, Nat.add_comm, Nat.add_left_comm,
+            Nat.add_assoc]
+
+theorem runPopMany_success_of_le (n : Nat) (state : EVMState)
+    (hLe : n ≤ state.stack.length) :
+    ∃ state', TypedCfg.Instr.runPopMany n state = .ok state' := by
+  induction n generalizing state with
+  | zero =>
+      exact ⟨state, rfl⟩
+  | succ n ih =>
+      cases hStack : state.stack with
+      | nil =>
+          simp [hStack] at hLe
+      | cons value rest =>
+          let mid := state.replaceStackAndIncrPC rest
+          have hStep :
+              Assembly.PrimOp.pop.step state = .ok mid := by
+            simp [Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+              Assembly.PrimStep.run, EvmYul.Stack.pop, hStack, mid,
+              EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC]
+          have hTailLe : n ≤ mid.stack.length := by
+            simp [mid, EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC]
+            have hLeRest : n + 1 ≤ (value :: rest).length := by
+              simpa [hStack] using hLe
+            exact Nat.succ_le_succ_iff.mp hLeRest
+          rcases ih mid hTailLe with ⟨state', hRunTail⟩
+          refine ⟨state', ?_⟩
+          simp [TypedCfg.Instr.runPopMany, hStep]
+          change TypedCfg.Instr.runPopMany n mid = .ok state'
+          exact hRunTail
+
+theorem unwind_runWithShape?_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {shape targetShape : Shape}
+    (hMatches : Shape.matchesStack shape source.evm.stack = true)
+    (hUnwind : Shape.unwindTo targetShape shape = some targetShape)
+    (hRel : PayloadRel program sites source target) :
+    ∃ sourceEVM' target',
+      TypedCfg.Instr.runWithShape? (.unwind targetShape) shape source.evm =
+          .ok (sourceEVM', targetShape) ∧
+        Assembly.Target.runList
+            (targetPopMany (shape.length - targetShape.length)) target =
+          .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  have hLen := Shape.matchesStack_length hMatches
+  have hLe : shape.length - targetShape.length ≤ source.evm.stack.length := by
+    rw [← hLen]
+    exact Nat.sub_le shape.length targetShape.length
+  rcases runPopMany_success_of_le
+      (shape.length - targetShape.length) source.evm hLe with
+    ⟨sourceEVM', hRunPop⟩
+  rcases runPopMany_target hRel hRunPop with
+    ⟨target', hTargetRun, hTargetRel⟩
+  refine ⟨sourceEVM', target', ?_, hTargetRun, hTargetRel⟩
+  have hStackDrop := runPopMany_stack_drop hRunPop
+  have hTargetMatches :=
+    Shape.matchesStack_drop_of_unwindTo hUnwind hMatches
+  simp [TypedCfg.Instr.runWithShape?, TypedCfg.Instr.type?, hUnwind,
+    hRunPop]
+  change
+    (if Shape.matchesStack targetShape sourceEVM'.stack = true then
+        Except.ok (sourceEVM', targetShape)
+      else
+        Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+      Except.ok (sourceEVM', targetShape)
+  rw [hStackDrop]
+  rw [hTargetMatches]
+  simp
 
 end InstrSemantics
 
