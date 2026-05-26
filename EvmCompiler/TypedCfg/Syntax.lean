@@ -77,6 +77,48 @@ inductive Instr where
   | unwind (target : Shape)
   deriving DecidableEq, Repr
 
+namespace Instr
+
+def dupOp? : Nat → Option Assembly.PrimOp
+  | 0 => some .dup1
+  | 1 => some .dup2
+  | 2 => some .dup3
+  | 3 => some .dup4
+  | 4 => some .dup5
+  | 5 => some .dup6
+  | 6 => some .dup7
+  | 7 => some .dup8
+  | 8 => some .dup9
+  | 9 => some .dup10
+  | 10 => some .dup11
+  | 11 => some .dup12
+  | 12 => some .dup13
+  | 13 => some .dup14
+  | 14 => some .dup15
+  | 15 => some .dup16
+  | _ => none
+
+def swapOp? : Nat → Option Assembly.PrimOp
+  | 0 => some .swap1
+  | 1 => some .swap2
+  | 2 => some .swap3
+  | 3 => some .swap4
+  | 4 => some .swap5
+  | 5 => some .swap6
+  | 6 => some .swap7
+  | 7 => some .swap8
+  | 8 => some .swap9
+  | 9 => some .swap10
+  | 10 => some .swap11
+  | 11 => some .swap12
+  | 12 => some .swap13
+  | 13 => some .swap14
+  | 14 => some .swap15
+  | 15 => some .swap16
+  | _ => none
+
+end Instr
+
 inductive Terminator where
   | fallthrough
   | jump (target : Label)

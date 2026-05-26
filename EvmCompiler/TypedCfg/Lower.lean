@@ -108,42 +108,10 @@ def popMany : Nat → Assembly.Program
   | n + 1 => .prim .pop :: popMany n
 
 def dup? : Nat → Option Assembly.Program
-  | 0 => some [.prim .dup1]
-  | 1 => some [.prim .dup2]
-  | 2 => some [.prim .dup3]
-  | 3 => some [.prim .dup4]
-  | 4 => some [.prim .dup5]
-  | 5 => some [.prim .dup6]
-  | 6 => some [.prim .dup7]
-  | 7 => some [.prim .dup8]
-  | 8 => some [.prim .dup9]
-  | 9 => some [.prim .dup10]
-  | 10 => some [.prim .dup11]
-  | 11 => some [.prim .dup12]
-  | 12 => some [.prim .dup13]
-  | 13 => some [.prim .dup14]
-  | 14 => some [.prim .dup15]
-  | 15 => some [.prim .dup16]
-  | _ => none
+  | depth => (dupOp? depth).map (fun op => [.prim op])
 
 def swap? : Nat → Option Assembly.Program
-  | 0 => some [.prim .swap1]
-  | 1 => some [.prim .swap2]
-  | 2 => some [.prim .swap3]
-  | 3 => some [.prim .swap4]
-  | 4 => some [.prim .swap5]
-  | 5 => some [.prim .swap6]
-  | 6 => some [.prim .swap7]
-  | 7 => some [.prim .swap8]
-  | 8 => some [.prim .swap9]
-  | 9 => some [.prim .swap10]
-  | 10 => some [.prim .swap11]
-  | 11 => some [.prim .swap12]
-  | 12 => some [.prim .swap13]
-  | 13 => some [.prim .swap14]
-  | 14 => some [.prim .swap15]
-  | 15 => some [.prim .swap16]
-  | _ => none
+  | depth => (swapOp? depth).map (fun op => [.prim op])
 
 def localDepthFrom? (name : Name) : Shape → Nat → Option Nat
   | [], _depth => none

@@ -747,6 +747,267 @@ theorem prim_runWithShape?_sourceAt_continuing {program : Program}
                   (full := full) (pc := pc) (op := op) (step := step)
                   hRel hCont hStep
 
+theorem dup_runWithShape?_sourceAt {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape output : Shape}
+    {sourceEVM' : EVMState} {full : Assembly.Program} {pc : Nat}
+    {depth : Nat} {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRun :
+      TypedCfg.Instr.runWithShape? (.dup depth) shape source.evm =
+        .ok (sourceEVM', output))
+    (hOp : TypedCfg.Instr.dupOp? depth = some op)
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step) :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim op) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  unfold TypedCfg.Instr.runWithShape? at hRun
+  cases hType : TypedCfg.Instr.type? (.dup depth) shape with
+  | none =>
+      simp [hType] at hRun
+  | some typedOutput =>
+      simp [hType, TypedCfg.Instr.run, TypedCfg.Instr.runDup, hOp] at hRun
+      cases hStep : op.step source.evm with
+      | error err =>
+          rw [hStep] at hRun
+          change
+            (Except.error err :
+              Except EVMException (EVMState × Shape)) =
+                .ok (sourceEVM', output) at hRun
+          cases hRun
+      | ok stepped =>
+          rw [hStep] at hRun
+          change
+            (if typedOutput.matchesStack stepped.stack = true then
+                Except.ok (stepped, typedOutput)
+              else
+                Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+              Except.ok (sourceEVM', output) at hRun
+          cases hOutputMatches : typedOutput.matchesStack stepped.stack with
+          | false =>
+              rw [hOutputMatches] at hRun
+              change
+                (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                  Except EVMException (EVMState × Shape)) =
+                    .ok (sourceEVM', output) at hRun
+              cases hRun
+          | true =>
+              rw [hOutputMatches] at hRun
+              cases hRun
+              exact
+                prim_step_sourceAt_continuing
+                  (program := program) (sites := sites) (source := source)
+                  (target := target)
+                  (full := full) (pc := pc) (op := op) (step := step)
+                  hRel hCont hStep
+
+theorem swap_runWithShape?_sourceAt {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape output : Shape}
+    {sourceEVM' : EVMState} {full : Assembly.Program} {pc : Nat}
+    {depth : Nat} {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRun :
+      TypedCfg.Instr.runWithShape? (.swap depth) shape source.evm =
+        .ok (sourceEVM', output))
+    (hOp : TypedCfg.Instr.swapOp? depth = some op)
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step) :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim op) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  unfold TypedCfg.Instr.runWithShape? at hRun
+  cases hType : TypedCfg.Instr.type? (.swap depth) shape with
+  | none =>
+      simp [hType] at hRun
+  | some typedOutput =>
+      simp [hType, TypedCfg.Instr.run, TypedCfg.Instr.runSwap, hOp] at hRun
+      cases hStep : op.step source.evm with
+      | error err =>
+          rw [hStep] at hRun
+          change
+            (Except.error err :
+              Except EVMException (EVMState × Shape)) =
+                .ok (sourceEVM', output) at hRun
+          cases hRun
+      | ok stepped =>
+          rw [hStep] at hRun
+          change
+            (if typedOutput.matchesStack stepped.stack = true then
+                Except.ok (stepped, typedOutput)
+              else
+                Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+              Except.ok (sourceEVM', output) at hRun
+          cases hOutputMatches : typedOutput.matchesStack stepped.stack with
+          | false =>
+              rw [hOutputMatches] at hRun
+              change
+                (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                  Except EVMException (EVMState × Shape)) =
+                    .ok (sourceEVM', output) at hRun
+              cases hRun
+          | true =>
+              rw [hOutputMatches] at hRun
+              cases hRun
+              exact
+                prim_step_sourceAt_continuing
+                  (program := program) (sites := sites) (source := source)
+                  (target := target)
+                  (full := full) (pc := pc) (op := op) (step := step)
+                  hRel hCont hStep
+
+theorem loadLocal_runWithShape?_sourceAt {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape output : Shape}
+    {sourceEVM' : EVMState} {full : Assembly.Program} {pc : Nat}
+    {name : Name} {depth : Nat} {op : Assembly.PrimOp}
+    {step : Assembly.PrimStep}
+    (hRun :
+      TypedCfg.Instr.runWithShape? (.loadLocal name depth) shape source.evm =
+        .ok (sourceEVM', output))
+    (hOp : TypedCfg.Instr.dupOp? depth = some op)
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step) :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim op) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  unfold TypedCfg.Instr.runWithShape? at hRun
+  cases hType : TypedCfg.Instr.type? (.loadLocal name depth) shape with
+  | none =>
+      simp [hType] at hRun
+  | some typedOutput =>
+      simp [hType, TypedCfg.Instr.run, TypedCfg.Instr.runDup, hOp] at hRun
+      cases hStep : op.step source.evm with
+      | error err =>
+          rw [hStep] at hRun
+          change
+            (Except.error err :
+              Except EVMException (EVMState × Shape)) =
+                .ok (sourceEVM', output) at hRun
+          cases hRun
+      | ok stepped =>
+          rw [hStep] at hRun
+          change
+            (if typedOutput.matchesStack stepped.stack = true then
+                Except.ok (stepped, typedOutput)
+              else
+                Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+              Except.ok (sourceEVM', output) at hRun
+          cases hOutputMatches : typedOutput.matchesStack stepped.stack with
+          | false =>
+              rw [hOutputMatches] at hRun
+              change
+                (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                  Except EVMException (EVMState × Shape)) =
+                    .ok (sourceEVM', output) at hRun
+              cases hRun
+          | true =>
+              rw [hOutputMatches] at hRun
+              cases hRun
+              exact
+                prim_step_sourceAt_continuing
+                  (program := program) (sites := sites) (source := source)
+                  (target := target)
+                  (full := full) (pc := pc) (op := op) (step := step)
+                  hRel hCont hStep
+
+theorem storeLocal_runWithShape?_target {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape output : Shape}
+    {sourceEVM' : EVMState} {name : Name} {depth : Nat}
+    {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRun :
+      TypedCfg.Instr.runWithShape? (.storeLocal name depth) shape source.evm =
+        .ok (sourceEVM', output))
+    (hOp : TypedCfg.Instr.swapOp? depth = some op)
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step) :
+    ∃ target',
+      Assembly.Target.runList [.prim op, .prim .pop] target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  unfold TypedCfg.Instr.runWithShape? at hRun
+  cases hType : TypedCfg.Instr.type? (.storeLocal name depth) shape with
+  | none =>
+      simp [hType] at hRun
+  | some typedOutput =>
+      simp [hType, TypedCfg.Instr.run, TypedCfg.Instr.runSwap, hOp] at hRun
+      cases hSwap : op.step source.evm with
+      | error err =>
+          rw [hSwap] at hRun
+          change
+            (Except.error err :
+              Except EVMException (EVMState × Shape)) =
+                .ok (sourceEVM', output) at hRun
+          cases hRun
+      | ok swapped =>
+          rw [hSwap] at hRun
+          change
+            (((pure swapped : Except EVMException EVMState) >>= fun x =>
+                Assembly.PrimOp.pop.step x >>= fun y =>
+                  if typedOutput.matchesStack y.stack = true then
+                    Except.ok (y, typedOutput)
+                  else
+                    Except.error
+                      EvmYul.EVM.ExecutionException.InvalidInstruction) =
+              Except.ok (sourceEVM', output)) at hRun
+          simp only [pure_bind] at hRun
+          cases hPop : Assembly.PrimOp.pop.step swapped with
+          | error err =>
+              rw [hPop] at hRun
+              change
+                (Except.error err :
+                  Except EVMException (EVMState × Shape)) =
+                    .ok (sourceEVM', output) at hRun
+              cases hRun
+          | ok popped =>
+              rw [hPop] at hRun
+              change
+                (if typedOutput.matchesStack popped.stack = true then
+                    Except.ok (popped, typedOutput)
+                  else
+                    Except.error
+                      EvmYul.EVM.ExecutionException.InvalidInstruction) =
+                  Except.ok (sourceEVM', output) at hRun
+              cases hOutputMatches : typedOutput.matchesStack popped.stack with
+              | false =>
+                  rw [hOutputMatches] at hRun
+                  change
+                    (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                      Except EVMException (EVMState × Shape)) =
+                        .ok (sourceEVM', output) at hRun
+                  cases hRun
+              | true =>
+                  rw [hOutputMatches] at hRun
+                  cases hRun
+                  rcases PayloadRel.prim_step_target_continuing
+                      (program := program) (sites := sites) (source := source)
+                      (target := target) (sourceEVM' := swapped)
+                      (op := op) (step := step) hRel hCont hSwap with
+                    ⟨targetMid, hTargetSwap, hRelMid⟩
+                  rcases PayloadRel.pop_step_target
+                      (program := program) (sites := sites)
+                      (source := source.withEVM swapped)
+                      (target := targetMid) (sourceEVM' := sourceEVM')
+                      hRelMid hPop with
+                    ⟨targetFinal, hTargetPop, hRelFinal⟩
+                  have hTargetSwapStep :
+                      Assembly.Target.stepInstr (.prim op) target =
+                        .ok targetMid := by
+                    cases hTargetStep :
+                        Assembly.Target.stepInstr (.prim op) target with
+                    | error err =>
+                        simp [Assembly.Target.runList, hTargetStep]
+                          at hTargetSwap
+                        exact hTargetSwap
+                    | ok steppedTarget =>
+                        simp [Assembly.Target.runList, hTargetStep]
+                          at hTargetSwap
+                        cases hTargetSwap
+                        rfl
+                  refine ⟨targetFinal, ?_, ?_⟩
+                  · simpa [Assembly.Target.runList, hTargetSwapStep]
+                      using hTargetPop
+                  · simpa [RunState.withEVM] using hRelFinal
+
 theorem push_step_sourceAt {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
     {full : Assembly.Program} {pc : Nat} {value : Word} :
