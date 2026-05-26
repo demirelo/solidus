@@ -40,6 +40,12 @@ this IR as the refactor proceeds.
        local code-image, external account-code inspection, create, and
        external-call coverage remain semantic bridge boundaries until their
        explicit contracts are proved.
+     - [x] Shrink `RecursiveBridgeCompileResources`: lower-object source
+       acceptedness is constructed from `RecursiveBridgeSourceAccepted`, so the
+       resource package now carries only the generated function program's
+       source/direct frame bound. The remaining removal path is a checked
+       frame-bound proof from lowering success, not another acceptedness
+       wrapper.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
@@ -229,10 +235,12 @@ Current assumption-cleanup checkpoint:
     projections and the checked reconstruction of old
     `Reference.Safe.FeatureCoverage.program` from feature coverage plus
     successful checked compilation.
-  - Lower resource validity: `RecursiveBridgeCompileResources` supplies
-    `Objects.Source.Program.CompileAccepted` for the generated lower object;
-    this is the stack/frame/accessibility resource boundary for the lower
-    tower, not a semantic replay certificate.
+  - Lower resource validity: `RecursiveBridgeCompileResources` supplies only
+    the generated lower function program's `SourceDirect.FrameBound.Program`.
+    Lower-object source acceptedness is reconstructed from
+    `RecursiveBridgeSourceAccepted`, and `LayerAudit` exposes the checked
+    reconstruction of the older `Objects.Source.Program.CompileAccepted`
+    package.
   - Shared semantic contracts: `RecursiveBridgeSemanticContracts` names the
     primitive/terminal/revert/outcome agreement between the imported Yul model
     and the compiler source tower.

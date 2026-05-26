@@ -167503,15 +167503,29 @@ end RecursiveBridgeFeatureCoverage
 /--
 Compiler-resource acceptedness for the bridge.
 
-These assumptions are about the generated lower object program and its
-stack/frame/access bounds, not about the imported Yul source semantics itself.
+These assumptions are about stack/frame/access bounds for the generated lower
+function program. Source acceptedness for the lower object is reconstructed
+from `RecursiveBridgeSourceAccepted`; the remaining compiler-side obligation is
+the source/direct frame bound that is not yet proved by checked lowering.
 -/
 structure RecursiveBridgeCompileResources (program : Program) : Prop where
-  objectCompileAccepted :
+  functionFrameBound :
     ∀ lowerObj : Objects.Program, program.toObjects? = some lowerObj →
-      Objects.Source.Program.CompileAccepted lowerObj
+      Functions.SourceDirect.FrameBound.Program lowerObj.toFunctions
 
 namespace RecursiveBridgeSourceAccepted
+
+theorem lowerObjectSourceAccepted {program : Program}
+    (hSource : RecursiveBridgeSourceAccepted program)
+    {lowerObj : Objects.Program}
+    (hLower : program.toObjects? = some lowerObj) :
+    Objects.Program.SourceAccepted lowerObj := by
+  rcases Reference.programAccepted_of_accepted hSource.reference with
+    ⟨_hWF, _hSupported, acceptedObj, hAcceptedLower,
+      hAcceptedObj⟩
+  rw [hLower] at hAcceptedLower
+  cases hAcceptedLower
+  exact Objects.Program.sourceAccepted_of_accepted hAcceptedObj
 
 theorem toFullAndCoverage {program : Program}
     (hSource : RecursiveBridgeSourceAccepted program) :
@@ -167555,7 +167569,17 @@ theorem of_source_resources {program : Program}
     sourceScoped := hSource.sourceScoped
     controlScoped := hSource.controlScoped
     userCalls := hSource.userCalls
-    objectCompileAccepted := hResources.objectCompileAccepted }
+    objectCompileAccepted := by
+      intro lowerObj hLower
+      let hObjSource := hSource.lowerObjectSourceAccepted hLower
+      exact
+        { source := hObjSource
+          functions :=
+            { source := by
+                simpa [Objects.Program.SourceAccepted,
+                  Functions.Inline.Program.SourceAccepted] using hObjSource.2
+              frameBound :=
+                hResources.functionFrameBound lowerObj hLower } } }
 
 theorem source {program : Program}
     (hAccepted : RecursiveBridgeAccepted program) :
@@ -167568,7 +167592,10 @@ theorem source {program : Program}
 theorem resources {program : Program}
     (hAccepted : RecursiveBridgeAccepted program) :
     RecursiveBridgeCompileResources program :=
-  { objectCompileAccepted := hAccepted.objectCompileAccepted }
+  { functionFrameBound := by
+      intro lowerObj hLower
+      exact
+        (hAccepted.objectCompileAccepted lowerObj hLower).functions.frameBound }
 
 end RecursiveBridgeAccepted
 
@@ -167577,7 +167604,24 @@ namespace RecursiveBridgeCompileResources
 theorem of_sourceCompileAccepted {program : Program}
     (hAccepted : SourceCompileAccepted program) :
     RecursiveBridgeCompileResources program where
-  objectCompileAccepted := hAccepted.objects
+  functionFrameBound := by
+    intro lowerObj hLower
+    exact (hAccepted.objects lowerObj hLower).functions.frameBound
+
+theorem lowerObjectCompileAccepted {program : Program}
+    (hSource : RecursiveBridgeSourceAccepted program)
+    (hResources : RecursiveBridgeCompileResources program)
+    {lowerObj : Objects.Program}
+    (hLower : program.toObjects? = some lowerObj) :
+    Objects.Source.Program.CompileAccepted lowerObj := by
+  let hObjSource := hSource.lowerObjectSourceAccepted hLower
+  exact
+    { source := hObjSource
+      functions :=
+        { source := by
+            simpa [Objects.Program.SourceAccepted,
+              Functions.Inline.Program.SourceAccepted] using hObjSource.2
+          frameBound := hResources.functionFrameBound lowerObj hLower } }
 
 theorem to_sourceCompileAccepted {program : Program}
     (hSource : RecursiveBridgeSourceAccepted program)
@@ -167586,7 +167630,9 @@ theorem to_sourceCompileAccepted {program : Program}
   source :=
     sourceAccepted_of_accepted
       (Reference.programAccepted_of_accepted hSource.reference)
-  objects := hResources.objectCompileAccepted
+  objects := by
+    intro lowerObj hLower
+    exact lowerObjectCompileAccepted hSource hResources hLower
 
 end RecursiveBridgeCompileResources
 

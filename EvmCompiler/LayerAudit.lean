@@ -2763,8 +2763,23 @@ abbrev recursiveBridgeSourceAcceptedToFullAndCoverage :=
 abbrev recursiveBridgeSourceAcceptedOfFullCoverageAndCompileChecked :=
   @Yul.Program.RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
 
+abbrev recursiveBridgeSourceAcceptedLowerObjectSourceAccepted :=
+  @Yul.Program.RecursiveBridgeSourceAccepted.lowerObjectSourceAccepted
+
 abbrev recursiveBridgeCompileResources :=
   @Yul.Program.RecursiveBridgeCompileResources
+
+abbrev recursiveBridgeCompileResourcesFunctionFrameBound :=
+  @Yul.Program.RecursiveBridgeCompileResources.functionFrameBound
+
+abbrev recursiveBridgeCompileResourcesOfSourceCompileAccepted :=
+  @Yul.Program.RecursiveBridgeCompileResources.of_sourceCompileAccepted
+
+abbrev recursiveBridgeCompileResourcesLowerObjectCompileAccepted :=
+  @Yul.Program.RecursiveBridgeCompileResources.lowerObjectCompileAccepted
+
+abbrev recursiveBridgeCompileResourcesToSourceCompileAccepted :=
+  @Yul.Program.RecursiveBridgeCompileResources.to_sourceCompileAccepted
 
 abbrev recursiveBridgeSemanticContracts :=
   @Yul.Program.RecursiveBridgeSemanticContracts

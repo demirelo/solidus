@@ -513,7 +513,8 @@ theorem lowerObjectCompileAccepted
     {lowerObj : Objects.Program}
     (hLower : program.toObjects? = some lowerObj) :
     Objects.Source.Program.CompileAccepted lowerObj :=
-  hTop.compileResources.objectCompileAccepted lowerObj hLower
+  RecursiveBridgeCompileResources.lowerObjectCompileAccepted
+    hTop.sourceAccepted hTop.compileResources hLower
 
 theorem sourceReferenceAccepted
     {cfg : Reference.StateRelConfig}
@@ -558,7 +559,11 @@ theorem sourceCompileAccepted
   source :=
     sourceAccepted_of_accepted
       (Reference.programAccepted_of_accepted hTop.sourceAccepted.reference)
-  objects := hTop.compileResources.objectCompileAccepted
+  objects := by
+    intro lowerObj hLower
+    exact
+      RecursiveBridgeCompileResources.lowerObjectCompileAccepted
+        hTop.sourceAccepted hTop.compileResources hLower
 
 theorem emittedNoCallCreate
     {cfg : Reference.StateRelConfig}
