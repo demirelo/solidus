@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 06:17 PDT.
+Last updated: 2026-05-26 06:26 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -78,12 +78,13 @@ this IR as the refactor proceeds.
       asking users for compiler-generated acceptedness evidence.
     - [x] Split `Yul.Program.SourceAccepted` at the preferred gas-aware top
       surface. The caller now supplies `Yul.Program.SourceAcceptedCore`
-      (source wellformedness plus lowered source acceptedness), while
+      (a successful lowering to an `Objects.Program.SourceAccepted`), while
       successful checked compilation constructs `Yul.Program.Supported` via
-      `Yul.Program.supported?` as part of the source-static check.
-   - [x] Add preferred gas-aware top wrappers that take full source
-     acceptedness plus explicit feature coverage instead of the old bundled
-     source-fragment acceptedness predicate.
+      `Yul.Program.supported?` as part of the source-static check. Yul `WF`
+      is reconstructed from the lowered object's source acceptedness.
+    - [x] Add preferred gas-aware top wrappers that take full source
+      acceptedness plus explicit feature coverage instead of the old bundled
+      source-fragment acceptedness predicate.
    - [x] Export checked full-source-surface facts showing code-image and
      external call/create primitives are accepted by `Reference.Safe.Full`,
      while keeping the old rejection facts named as bridge-coverage facts.
@@ -3101,7 +3102,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 - [x] Lower-layer capabilities pass through unless intentionally abstracted or explicitly rejected by the accepted subset.
 - [x] Public theorem is same-observation for the accepted source run boundary, not a replay certificate boundary.
 - [x] Preferred gas-aware top theorem assumption audit:
-  - [x] `Yul.Program.Accepted` and then `Yul.Program.SourceAccepted` are split at the public surface: callers provide only `Yul.Program.SourceAcceptedCore`, and successful checked compilation constructs both supported-syntax evidence and lower structured acceptedness internally.
+  - [x] `Yul.Program.Accepted` and then `Yul.Program.SourceAccepted` are split at the public surface: callers provide only `Yul.Program.SourceAcceptedCore`, and successful checked compilation constructs supported-syntax evidence while lower source acceptedness reconstructs Yul `WF` and lower structured acceptedness internally.
   - [x] `RecursiveBridgeSourceRun` remains a fundamental input-execution and source-fuel boundary: the compiler cannot prove that an arbitrary imported run with a caller-chosen fuel and result occurred, nor that it avoided the imported successful `.OutOfFuel` marker.
   - [x] `RecursiveBridgeInitialWorldRel` remains a fundamental initial-state boundary: for an arbitrary `StateRelConfig`, source shared state, and EVM state, only the caller can supply the account/code/storage/machine-state relation.
   - [x] `RecursiveBridgeTerminalObservationContracts` remains a semantic observation boundary: it relates imported `YulHalt`/`Revert` results to source-tower halt states under caller-chosen terminal/revert relations, so it is not compiler-generated evidence.

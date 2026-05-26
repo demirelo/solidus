@@ -2287,9 +2287,8 @@ def SourceAccepted (program : Program) : Prop :=
       toObjects? program = some lower ∧ lower.SourceAccepted
 
 def SourceAcceptedCore (program : Program) : Prop :=
-  WF program ∧
-    ∃ lower : Objects.Program,
-      toObjects? program = some lower ∧ lower.SourceAccepted
+  ∃ lower : Objects.Program,
+    toObjects? program = some lower ∧ lower.SourceAccepted
 
 theorem sourceAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
@@ -2302,15 +2301,20 @@ theorem sourceAccepted_of_accepted {program : Program}
 theorem sourceAcceptedCore_of_sourceAccepted {program : Program}
     (hSourceAccepted : SourceAccepted program) :
     SourceAcceptedCore program := by
-  rcases hSourceAccepted with ⟨hWF, _hSupported, lower, hLower,
+  rcases hSourceAccepted with ⟨_hWF, _hSupported, lower, hLower,
     hLowerSourceAccepted⟩
-  exact ⟨hWF, lower, hLower, hLowerSourceAccepted⟩
+  exact ⟨lower, hLower, hLowerSourceAccepted⟩
 
 theorem sourceAccepted_of_sourceAcceptedCore_supported {program : Program}
     (hCore : SourceAcceptedCore program)
     (hSupported : Supported program) :
     SourceAccepted program := by
-  rcases hCore with ⟨hWF, lower, hLower, hLowerSourceAccepted⟩
+  rcases hCore with ⟨lower, hLower, hLowerSourceAccepted⟩
+  have hWF : WF program := by
+    intro lower' hLower'
+    rw [hLower] at hLower'
+    cases hLower'
+    exact hLowerSourceAccepted.1
   exact ⟨hWF, hSupported, lower, hLower, hLowerSourceAccepted⟩
 
 theorem toObjects_wf {program : Program} {lower : Objects.Program}
