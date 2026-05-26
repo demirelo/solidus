@@ -240,8 +240,7 @@ mutual
               let (pre, lowerArgs, state') ← lowerExprArgs? env state args
               let (tmp, state'') ← Fresh.fresh? state'
               some
-                (pre ++ [.decl [tmp] none,
-                  .call [tmp] functionName lowerArgs],
+                (pre ++ [.callDecl [tmp] functionName lowerArgs],
                   .var tmp, state'')
             else
               none
@@ -279,10 +278,7 @@ mutual
             let targets := identNames vars
             let (pre, lowerArgs, state') ←
               lowerCallArgs? env state targets functionName args
-            some
-              (pre ++ [.decl targets none,
-                .call targets functionName lowerArgs],
-                state')
+            some (pre ++ [.callDecl targets functionName lowerArgs], state')
     | .Let vars (some expr) => do
         let (pre, lowerExpr, state') ← lowerExpr? env state expr
         some (pre ++ [.decl (identNames vars) (some lowerExpr)], state')

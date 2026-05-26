@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 19:02 PDT.
+Last updated: 2026-05-25 19:12 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -72,8 +72,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Blocks = statement sequences.
   - Statements include value-level primitives, declarations, assignments,
     `if`, `switch`, `for`, `break`, `continue`, `leave`, procedure calls,
-    terminal EVM halts, exceptional `invalid`, and explicit bracketed scopes if
-    needed.
+    declaration-by-procedure-call, terminal EVM halts, exceptional `invalid`,
+    and explicit bracketed scopes if needed.
   - No `pop`, `dup`, `swap`, stack shapes, return tokens, concrete stack tails,
     byte offsets, or raw jumps in source syntax.
 - [x] Create `EvmCompiler.StackFreeCfg.Semantics`.
@@ -88,6 +88,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`
     as procedure exit, and keep EVM `RETURN` as terminal halt.
+  - Declaration targets are not in scope while their initializer/call
+    arguments are evaluated; assignment targets are checked before evaluating
+    the right-hand side, matching the Yul evaluation boundary.
 - [x] Create `EvmCompiler.StackFreeCfg.Accepted`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage

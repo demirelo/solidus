@@ -19,6 +19,12 @@ def insert (store : T) (name : Name) (value : Word) : T :=
 def contains (store : T) (name : Name) : Bool :=
   (store name).isSome
 
+def containsAll? (store : T) (names : List Name) : Bool :=
+  names.all (fun name => contains store name)
+
+def containsNone? (store : T) (names : List Name) : Bool :=
+  names.all (fun name => !(contains store name))
+
 def restrictTo (scope : List Name) (store : T) : T :=
   fun key => if key ∈ scope then store key else none
 
@@ -70,6 +76,12 @@ def assignMany? (state : State) (names : List Name) (values : List Word) :
     Option State := do
   let vars ← Store.assignMany names values state.vars
   some (state.withVars vars)
+
+def canDeclare? (state : State) (names : List Name) : Bool :=
+  decide names.Nodup && Store.containsNone? state.vars names
+
+def canAssign? (state : State) (names : List Name) : Bool :=
+  decide names.Nodup && Store.containsAll? state.vars names
 
 end State
 
@@ -319,6 +331,9 @@ mutual
             let state' ← Expr.evalZero prim expr state
             .ok (Outcome.regular state' ctx.scope)
         | .decl names value? => do
+            if !(state.canDeclare? names) then
+              invalid
+            else
             let (stateAfterValue, values) ←
               match value? with
               | none => .ok (state, zeros names.length)
@@ -334,6 +349,9 @@ mutual
               | none => invalid
             .ok (Outcome.regular state' (names ++ ctx.scope))
         | .assign names value => do
+            if !(state.canAssign? names) then
+              invalid
+            else
             let (stateAfterValue, out) ← Expr.eval prim value state
             if out.length = names.length then
               let state' ←
@@ -383,6 +401,9 @@ mutual
             else
               invalid
         | .call targets functionName args => do
+            if !(state.canAssign? targets) then
+              invalid
+            else
             let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
             match program.findProc? functionName with
             | none => invalid
@@ -419,6 +440,61 @@ mutual
                           | none => invalid
                           | some assigned =>
                               .ok (Outcome.regular assigned ctx.scope)
+                  | .halt kind =>
+                      .ok (Outcome.halt kind
+                        { stateAfterArgs with shared := outcome.state.shared }
+                        ctx.scope)
+                  | .outOfFuel =>
+                      .ok (Outcome.outOfFuel
+                        { stateAfterArgs with shared := outcome.state.shared }
+                        ctx.scope)
+                  | .invalid =>
+                      .ok (Outcome.invalid
+                        { stateAfterArgs with shared := outcome.state.shared }
+                        ctx.scope)
+                  | .brk | .cont => invalid
+                else
+                  invalid
+        | .callDecl names functionName args => do
+            if !(state.canDeclare? names) then
+              invalid
+            else
+            let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
+            match program.findProc? functionName with
+            | none => invalid
+            | some proc =>
+                if argValues.length = proc.params.length ∧
+                    names.length = proc.returns.length then
+                  let returnVars ←
+                    match
+                        Store.insertMany proc.returns
+                          (zeros proc.returns.length) Store.empty with
+                    | some vars => .ok vars
+                    | none => invalid
+                  let calleeVars ←
+                    match Store.insertMany proc.params argValues returnVars with
+                    | some vars => .ok vars
+                    | none => invalid
+                  let calleeState : State :=
+                    { shared := stateAfterArgs.shared, vars := calleeVars }
+                  let calleeCtx : Ctx :=
+                    { scope := proc.returns ++ proc.params
+                      canBreak := false
+                      canContinue := false
+                      canLeave := true }
+                  let outcome ←
+                    Block.run fuel' prim program calleeCtx proc.body calleeState
+                  match outcome.mode with
+                  | .regular | .leave =>
+                      match Store.lookupMany proc.returns outcome.state.vars with
+                      | none => invalid
+                      | some retValues =>
+                          let callerState :=
+                            { stateAfterArgs with shared := outcome.state.shared }
+                          match callerState.insertMany? names retValues with
+                          | none => invalid
+                          | some declared =>
+                              .ok (Outcome.regular declared (names ++ ctx.scope))
                   | .halt kind =>
                       .ok (Outcome.halt kind
                         { stateAfterArgs with shared := outcome.state.shared }

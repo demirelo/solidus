@@ -265,6 +265,16 @@ mutual
           some shape
         else
           none
+    | .callDecl names functionName args => do
+        let (argCode, argShape) ← Expr.compileArgs? args shape
+        let _ := argCode
+        let _ := functionName
+        if argShape.length = shape.length + args.length ∧
+            argShape.drop args.length = shape then
+          (TypedCfg.Instr.declareLocals names).type?
+            (TypedCfg.Shape.pushWords names.length shape)
+        else
+          none
     | .brk | .cont | .leave | .terminal _ _ | .invalid => none
 
   def SwitchCases.regularShape? (cases : List (Word × Block))
@@ -299,6 +309,15 @@ def callRegularShape? (program : Program) (targets : List Name)
   else
     none
 
+def callDeclRegularShape? (program : Program) (names : List Name)
+    (functionName : Name) (args : List Expr) (shape : Shape) : Option Shape := do
+  let proc ← program.findProc? functionName
+  if args.length = proc.params.length ∧ names.length = proc.returns.length then
+    (TypedCfg.Instr.declareLocals names).type?
+      (TypedCfg.Shape.pushWords proc.returns.length shape)
+  else
+    none
+
 mutual
   def Block.toCfgFrom
       (program : Program) (block : Block) (ctx : Context)
@@ -313,6 +332,8 @@ mutual
           match stmt with
           | .call targets functionName args =>
               callRegularShape? program targets functionName args shape
+          | .callDecl names functionName args =>
+              callDeclRegularShape? program names functionName args shape
           | _ => Stmt.regularShape? stmt shape
         match regularShape? with
         | none =>
@@ -454,6 +475,27 @@ mutual
           let returnLabel := LabelSupply.label supply 0
           let returnShape := TypedCfg.Shape.pushWords proc.returns.length shape
           let returnBody := [TypedCfg.Instr.assignLocals targets]
+          some
+            { blocks :=
+                [ { label := label
+                    input := shape
+                    body := argCode
+                    term := .call functionName returnLabel }
+                , { label := returnLabel
+                    input := returnShape
+                    body := returnBody ++ [.unwind ctx.regular.shape]
+                    term := .jump ctx.regular.label } ]
+              next := LabelSupply.next supply }
+        else
+          none
+    | .callDecl names functionName args => do
+        let proc ← program.findProc? functionName
+        if names.length = proc.returns.length ∧
+            args.length = proc.params.length then
+          let (argCode, _argShape) ← Expr.compileArgs? args shape
+          let returnLabel := LabelSupply.label supply 0
+          let returnShape := TypedCfg.Shape.pushWords proc.returns.length shape
+          let returnBody := [TypedCfg.Instr.declareLocals names]
           some
             { blocks :=
                 [ { label := label

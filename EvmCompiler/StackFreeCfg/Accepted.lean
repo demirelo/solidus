@@ -150,6 +150,11 @@ mutual
           some (extend env names)
         else
           none
+    | .callDecl names _functionName _args =>
+        if decide names.Nodup && disjoint? names env then
+          some (extend env names)
+        else
+          none
     | _ => some env
 
   def StmtList.OutEnv (env : List Name) : List Stmt → Option (List Name)
@@ -218,6 +223,13 @@ mutual
         | some sig =>
             targets.Nodup ∧ containsAll env targets ∧
               targets.length = sig.returns ∧ args.length = sig.params ∧
+              ExprList.AllOne profile env args
+    | .callDecl names functionName args =>
+        match Signature.find? sigs functionName with
+        | none => False
+        | some sig =>
+            names.Nodup ∧ disjoint names env ∧
+              names.length = sig.returns ∧ args.length = sig.params ∧
               ExprList.AllOne profile env args
     | .terminal kind args =>
         args.length = profile.terminalArity kind ∧
@@ -299,6 +311,14 @@ mutual
         | some sig =>
             decide targets.Nodup && containsAll? env targets &&
               decide (targets.length = sig.returns) &&
+              decide (args.length = sig.params) &&
+              ExprList.allOne? profile env args
+    | .callDecl names functionName args =>
+        match Signature.find? sigs functionName with
+        | none => false
+        | some sig =>
+            decide names.Nodup && disjoint? names env &&
+              decide (names.length = sig.returns) &&
               decide (args.length = sig.params) &&
               ExprList.allOne? profile env args
     | .terminal kind args =>
