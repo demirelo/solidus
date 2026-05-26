@@ -315,6 +315,12 @@ end Block
 
 namespace Program
 
+def suspendedAt? (program : Program) (label : Label) (state : RunState) :
+    Bool :=
+  match program.findBlock? label with
+  | none => false
+  | some block => block.input.matchesStack state.evm.stack
+
 def step (program : Program) (label : Label) (state : RunState) :
     Except EVMException Outcome :=
   match program.findBlock? label with
@@ -322,7 +328,11 @@ def step (program : Program) (label : Label) (state : RunState) :
   | some block => block.run program state
 
 def runFrom : Nat → Program → Label → RunState → Except EVMException Outcome
-  | 0, _program, label, state => .ok (.outOfFuel label state)
+  | 0, program, label, state =>
+      if program.suspendedAt? label state then
+        .ok (.outOfFuel label state)
+      else
+        .ok (.invalid state)
   | fuel + 1, program, label, state => do
       let outcome ← step program label state
       match outcome with

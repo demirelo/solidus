@@ -61,6 +61,9 @@ Proof rule:
     `invalid` outcomes even for unchecked raw programs.
   - Fuel exhaustion is represented as a distinct `outOfFuel` outcome carrying
     the current label and run state, not as invalid execution.
+  - Zero-fuel `outOfFuel` is only produced at a valid block boundary whose
+    runtime stack conforms to that block's declared input shape; missing labels
+    or shape violations still produce semantic `invalid`.
   - Raw `PC` is rejected at this layer because typed CFG has symbolic labels,
     not concrete byte offsets; concrete PC behavior belongs below this
     boundary.
