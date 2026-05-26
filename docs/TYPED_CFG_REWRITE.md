@@ -181,6 +181,48 @@ symbolic stack contract that implements it. Concrete `DUP`/`SWAP`/`POP`
 sequences are not a higher-layer concern; they belong to the typed CFG backend
 that realizes symbolic local-slot operations and unwinds as labeled assembly.
 
+The symbolic local/cleanup effects at the typed CFG boundary are:
+
+- `declareLocal x`: reclassify the current top word as local slot `x`; this is
+  a shape-only effect and emits no runtime instruction;
+- `loadLocal x depth`: duplicate the checked local slot at `depth`; the backend
+  realizes this as the corresponding `DUPn`;
+- `storeLocal x depth`: consume the top word and update the checked local slot
+  at `depth`; the backend realizes this as `SWAPn; POP`;
+- `unwind targetShape`: pop the dead lexical region until the current shape is
+  exactly `targetShape`.
+
+The typed CFG semantics now has both a block stepper and a fuelled whole-CFG
+runner. Instruction execution is shape-aware: the interpreter checks each
+symbolic instruction against the current shape, executes the corresponding EVM
+state transition, and threads the output shape forward. In particular,
+`unwind` is not a ghost annotation in the semantics; it executes the same
+sequence of conceptual pops that the backend lowers to assembly `POP`s.
+
+Procedure/function control is also part of typed CFG, not an assembly-only
+convention. A typed CFG program carries procedure metadata:
+
+```text
+name, entry label, argument count, return count
+```
+
+The checker enforces that the procedure entry label expects exactly its
+argument words, that a `call f k` starts with enough argument words and that
+return label `k` expects the callee's return words plus the preserved caller
+shape, and that `ret f` exits with exactly the declared return words.
+
+The typed CFG interpreter represents calls with a semantic return frame:
+
+```text
+call f k : split args from caller tail, run f on args only, remember k + tail
+ret f    : attach return values to the remembered caller tail, jump to k
+```
+
+This is intentionally cleaner than the concrete EVM implementation. The
+typed-CFG-to-assembly lowering realizes the same effect with hidden return
+tokens and generated dispatch blocks, so return-token plumbing is quarantined
+below typed CFG.
+
 ## Yul Surface Audit
 
 The typed CFG should be broad enough that Yul does not force a redesign later:
@@ -199,11 +241,9 @@ The typed CFG should be broad enough that Yul does not force a redesign later:
   be resolved in the object/frontend layer before typed CFG, so they do not add
   new CFG control semantics.
 
-The remaining intentional hole in this rewrite checkpoint is internal
-procedure call/return lowering in the new structured-to-CFG compiler. The old
-direct assembly compiler has this convention; the CFG path should reintroduce
-it through typed continuations and a checked return-dispatch boundary rather
-than by recreating untyped assembly jumps.
+Internal procedure call/return is now in the typed CFG path. The old direct
+assembly convention is no longer the public procedure semantics; it survives
+only as the lower backend implementation strategy for typed `call`/`ret`.
 
 Delay clever stack-slot reuse. Use lexical stack regions first; liveness-based
 slot reuse can be a later optimization pass with its own proof.

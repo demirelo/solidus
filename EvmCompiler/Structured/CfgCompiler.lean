@@ -89,33 +89,35 @@ def valueShape? (code : Code) (shape : Shape) : Option Shape := do
 end Code
 
 mutual
-  def Block.regularShape? (block : Block) (shape : Shape) : Option Shape :=
+  def Block.regularShape? (procs : List Proc) (block : Block)
+      (shape : Shape) : Option Shape :=
     match block with
     | ⟨[]⟩ => some shape
     | ⟨stmt :: rest⟩ =>
-        match Stmt.regularShape? stmt shape with
+        match Stmt.regularShape? procs stmt shape with
         | none => none
-        | some shape' => Block.regularShape? { stmts := rest } shape'
+        | some shape' => Block.regularShape? procs { stmts := rest } shape'
 
-  def Stmt.regularShape? (stmt : Stmt) (shape : Shape) : Option Shape :=
+  def Stmt.regularShape? (procs : List Proc) (stmt : Stmt)
+      (shape : Shape) : Option Shape :=
     match stmt with
     | .code code =>
         Code.type? code shape
     | .if_ cond body => do
         let _ ← Code.conditionShape? cond shape
-        match Block.regularShape? body shape with
+        match Block.regularShape? procs body shape with
         | none => some shape
         | some bodyShape => if bodyShape = shape then some shape else none
     | .switch scrutinee cases defaultBody => do
         let _ ← Code.valueShape? scrutinee shape
-        let casesOk ← SwitchCases.regularShape? cases shape
-        let defaultOk ← SwitchDefault.regularShape? defaultBody shape
+        let casesOk ← SwitchCases.regularShape? procs cases shape
+        let defaultOk ← SwitchDefault.regularShape? procs defaultBody shape
         if casesOk && defaultOk then some shape else none
     | .for_ init cond post body => do
-        let initShape ← Block.regularShape? init shape
+        let initShape ← Block.regularShape? procs init shape
         let _ ← Code.conditionShape? cond initShape
-        let postShape? := Block.regularShape? post initShape
-        let bodyShape? := Block.regularShape? body initShape
+        let postShape? := Block.regularShape? procs post initShape
+        let bodyShape? := Block.regularShape? procs body initShape
         match postShape?, bodyShape? with
         | some postShape, some bodyShape =>
             if postShape = initShape ∧ bodyShape = initShape then
@@ -123,27 +125,36 @@ mutual
             else
               none
         | _, _ => none
-    | .brk | .cont | .leave | .terminal _ | .call _ =>
+    | .call name => do
+        let proc ← ProcList.lookup? name procs
+        if proc.argc ≤ shape.length then
+          some (TypedCfg.Shape.pushWords proc.retc
+            (TypedCfg.Shape.pop proc.argc shape))
+        else
+          none
+    | .brk | .cont | .leave | .terminal _ =>
         none
 
-  def SwitchCases.regularShape? (cases : List (Word × Block))
+  def SwitchCases.regularShape? (procs : List Proc)
+      (cases : List (Word × Block))
       (shape : Shape) : Option Bool :=
     match cases with
     | [] => some true
     | (_value, body) :: rest => do
         let bodyOk :=
-          match Block.regularShape? body shape with
+          match Block.regularShape? procs body shape with
           | none => true
           | some bodyShape => bodyShape = shape
-        let restOk ← SwitchCases.regularShape? rest shape
+        let restOk ← SwitchCases.regularShape? procs rest shape
         some (bodyOk && restOk)
 
-  def SwitchDefault.regularShape? (defaultBody : Option Block)
+  def SwitchDefault.regularShape? (procs : List Proc)
+      (defaultBody : Option Block)
       (shape : Shape) : Option Bool :=
     match defaultBody with
     | none => some true
     | some body =>
-        match Block.regularShape? body shape with
+        match Block.regularShape? procs body shape with
         | none => some true
         | some bodyShape => some (bodyShape = shape)
 end
@@ -157,7 +168,7 @@ mutual
         some { blocks := [exitBlock label shape (some ctx.regular)]
                next := supply }
     | ⟨stmt :: rest⟩ =>
-        match Stmt.regularShape? stmt shape with
+        match Stmt.regularShape? ctx.procs stmt shape with
         | none =>
             Stmt.toCfgFrom stmt ctx label shape supply
         | some nextShape => do
@@ -228,7 +239,7 @@ mutual
               [exitBlock endLabel shape (some ctx.regular)]
             next := defaultResult.next }
     | .for_ init cond post body => do
-        let initShape ← Block.regularShape? init shape
+        let initShape ← Block.regularShape? ctx.procs init shape
         let _ ← Code.conditionShape? cond initShape
         let loopLabel := LabelSupply.label supply 0
         let bodyLabel := LabelSupply.label supply 1
@@ -275,8 +286,14 @@ mutual
                   body := []
                   term := .halt kind } ]
             next := supply }
-    | .call _name =>
-        some { blocks := [invalidBlock label shape], next := supply }
+    | .call name =>
+        some
+          { blocks :=
+              [ { label := label
+                  input := shape
+                  body := []
+                  term := .call name ctx.regular.label } ]
+            next := supply }
 
   def SwitchCases.toCfgTests
       (cases : List (Word × Block)) (label defaultLabel : Label)
@@ -354,6 +371,50 @@ mutual
             next := bodyResult.next }
 end
 
+namespace Proc
+
+def toTypedCfg (proc : Proc) : TypedCfg.Procedure where
+  name := proc.name
+  entry := ProcLabel.entry proc.name
+  argc := proc.argc
+  retc := proc.retc
+
+def toCfgFrom (allProcs : List Proc) (proc : Proc)
+    (supply : LabelSupply) : Option Result := do
+  let returnShape := TypedCfg.Shape.pushWords proc.retc []
+  let exitKont : Kont := { label := ProcLabel.exit proc.name, shape := returnShape }
+  let result ←
+    Block.toCfgFrom proc.body
+      { procs := allProcs
+        regular := exitKont
+        leave? := some exitKont }
+      (ProcLabel.entry proc.name) (TypedCfg.Shape.pushWords proc.argc []) supply
+  some
+    { blocks :=
+        result.blocks ++
+          [ { label := ProcLabel.exit proc.name
+              input := returnShape
+              body := []
+              term := .ret proc.name } ]
+      next := result.next }
+
+end Proc
+
+namespace ProcList
+
+def toTypedCfg : List Proc → List TypedCfg.Procedure
+  | [] => []
+  | proc :: rest => Proc.toTypedCfg proc :: toTypedCfg rest
+
+def toCfgFrom : List Proc → List Proc → LabelSupply → Option Result
+  | _allProcs, [], supply => some { blocks := [], next := supply }
+  | allProcs, proc :: rest, supply => do
+      let head ← Proc.toCfgFrom allProcs proc supply
+      let tail ← toCfgFrom allProcs rest head.next
+      some (head.append tail)
+
+end ProcList
+
 namespace Program
 
 def entryLabel : Label :=
@@ -367,9 +428,11 @@ def toCfg? (program : Program) : Option TypedCfg.Program := do
   let result ←
     Block.toCfgFrom program.body
       { procs := program.procs, regular := endKont } entryLabel [] 0
+  let procs ← ProcList.toCfgFrom program.procs program.procs result.next
   some
     { entry := entryLabel
-      blocks := result.blocks ++ [finalBlock endLabel []] }
+      procedures := ProcList.toTypedCfg program.procs
+      blocks := result.blocks ++ procs.blocks ++ [finalBlock endLabel []] }
 
 def toCheckedCfg? (program : Program) : Option TypedCfg.CheckedProgram := do
   let cfg ← toCfg? program

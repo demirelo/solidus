@@ -420,6 +420,7 @@ def toCfg? (program : Program) : Option TypedCfg.Program := do
       Block.toCfgFrom program.body { regular := endKont } entryLabel [] 0
     some
       { entry := entryLabel
+        procedures := []
         blocks := result.blocks ++ [finalBlock endLabel []] }
 
 def toCheckedCfg? (program : Program) : Option TypedCfg.CheckedProgram := do

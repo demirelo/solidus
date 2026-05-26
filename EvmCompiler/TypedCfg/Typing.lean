@@ -49,6 +49,29 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
         | [] => none
       else
         none
+  | .declareLocal name =>
+      match shape with
+      | _value :: rest => some (.local name :: rest)
+      | [] => none
+  | .loadLocal name depth =>
+      if depth < 16 then
+        if shape[depth]? = some (.local name) then
+          some (.word :: shape)
+        else
+          none
+      else
+        none
+  | .storeLocal name depth =>
+      if depth < 16 then
+        match shape with
+        | _value :: rest =>
+            if rest[depth]? = some (.local name) then
+              some rest
+            else
+              none
+        | [] => none
+      else
+        none
   | .unwind target =>
       Shape.unwindTo target shape
 
@@ -70,7 +93,8 @@ def targets : Terminator → List Label
   | .fallthrough => []
   | .jump target => [target]
   | .jumpi target next => [target, next]
-  | .returnDispatch _ => []
+  | .call _name returnLabel => [returnLabel]
+  | .ret _name => []
   | .halt _ => []
   | .invalid => []
 
@@ -86,8 +110,19 @@ def type? (program : Program) (shape : Shape) : Terminator → Option Unit
       | _cond :: rest =>
           if rest = targetShape ∧ rest = fallthroughShape then some () else none
       | _ => none
-  | .returnDispatch siteShape =>
-      if shape = siteShape then some () else none
+  | .call name returnLabel => do
+      let proc ← program.findProc? name
+      let entryShape ← program.labelShape? proc.entry
+      let returnShape ← program.labelShape? returnLabel
+      if proc.argc ≤ shape.length ∧
+          entryShape = proc.entryShape ∧
+          returnShape = Shape.pushWords proc.retc (Shape.pop proc.argc shape) then
+        some ()
+      else
+        none
+  | .ret name => do
+      let proc ← program.findProc? name
+      if shape = proc.returnShape then some () else none
   | .halt kind =>
       if kind.argCount ≤ shape.length then some () else none
   | .invalid => some ()
@@ -111,11 +146,20 @@ namespace Program
 def LabelsUnique (program : Program) : Prop :=
   program.blocks.Pairwise (fun left right => left.label ≠ right.label)
 
+def ProcNamesUnique (program : Program) : Prop :=
+  program.procedures.Pairwise (fun left right => left.name ≠ right.name)
+
 def AllBlocksTyped (program : Program) : Prop :=
   ∀ block, block ∈ program.blocks → block.WellTyped program
 
+def AllProceduresTyped (program : Program) : Prop :=
+  ∀ proc, proc ∈ program.procedures →
+    proc.argc ≤ 16 ∧ proc.retc < 16 ∧
+      program.labelShape? proc.entry = some proc.entryShape
+
 def WellTyped (program : Program) : Prop :=
-  program.LabelsUnique ∧ program.AllBlocksTyped ∧ program.findBlock? program.entry ≠ none
+  program.LabelsUnique ∧ program.ProcNamesUnique ∧ program.AllProceduresTyped ∧
+    program.AllBlocksTyped ∧ program.findBlock? program.entry ≠ none
 
 def labelsUnique? : List Block → Bool
   | [] => true
@@ -123,11 +167,26 @@ def labelsUnique? : List Block → Bool
       rest.all (fun other => decide (block.label ≠ other.label)) &&
         labelsUnique? rest
 
+def procNamesUnique? : List Procedure → Bool
+  | [] => true
+  | proc :: rest =>
+      rest.all (fun other => decide (proc.name ≠ other.name)) &&
+        procNamesUnique? rest
+
+def allProceduresTyped? (program : Program) : Bool :=
+  program.procedures.all
+    (fun proc =>
+      decide (proc.argc ≤ 16) &&
+        decide (proc.retc < 16) &&
+          decide (program.labelShape? proc.entry = some proc.entryShape))
+
 def allBlocksTyped? (program : Program) : Bool :=
   program.blocks.all (fun block => (block.type? program).isSome)
 
 def typeCheck? (program : Program) : Option Unit :=
   if labelsUnique? program.blocks &&
+      procNamesUnique? program.procedures &&
+      allProceduresTyped? program &&
       allBlocksTyped? program &&
       (program.findBlock? program.entry).isSome then
     some ()
@@ -152,7 +211,7 @@ def check? (program : Program) : Option CheckedProgram :=
 theorem wellTyped_allBlocksTyped {program : Program}
     (h : program.WellTyped) :
     program.AllBlocksTyped :=
-  h.2.1
+  h.2.2.2.1
 
 end Program
 

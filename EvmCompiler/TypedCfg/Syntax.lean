@@ -7,6 +7,7 @@ abbrev Word := Assembly.Word
 abbrev EVMState := Assembly.EVMState
 abbrev EVMException := Assembly.EVMException
 abbrev Label := Assembly.Label
+abbrev Name := String
 
 /--
 Symbolic stack slots used by the typed CFG.
@@ -65,6 +66,9 @@ inductive Instr where
   | pop
   | dup (depth : Nat)
   | swap (depth : Nat)
+  | declareLocal (name : String)
+  | loadLocal (name : String) (depth : Nat)
+  | storeLocal (name : String) (depth : Nat)
   | unwind (target : Shape)
   deriving DecidableEq, Repr
 
@@ -72,7 +76,8 @@ inductive Terminator where
   | fallthrough
   | jump (target : Label)
   | jumpi (target : Label) (fallthrough : Label)
-  | returnDispatch (siteShape : Shape)
+  | call (name : Name) (returnLabel : Label)
+  | ret (name : Name)
   | halt (kind : Assembly.HaltKind)
   | invalid
   deriving DecidableEq, Repr
@@ -84,12 +89,33 @@ structure Block where
   term : Terminator
   deriving Repr
 
+structure Procedure where
+  name : Name
+  entry : Label
+  argc : Nat
+  retc : Nat
+  deriving DecidableEq, Repr
+
+namespace Procedure
+
+def entryShape (proc : Procedure) : Shape :=
+  Shape.pushWords proc.argc []
+
+def returnShape (proc : Procedure) : Shape :=
+  Shape.pushWords proc.retc []
+
+end Procedure
+
 structure Program where
   entry : Label
+  procedures : List Procedure := []
   blocks : List Block
   deriving Repr
 
 namespace Program
+
+def findProc? (program : Program) (name : Name) : Option Procedure :=
+  program.procedures.find? (fun proc => proc.name == name)
 
 def findBlock? (program : Program) (label : Label) : Option Block :=
   program.blocks.find? (fun block => block.label == label)

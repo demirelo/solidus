@@ -3,14 +3,108 @@ import EvmCompiler.TypedCfg.Typing
 namespace EvmCompiler
 namespace TypedCfg
 
+structure ReturnFrame where
+  returnLabel : Label
+  callerStack : EvmYul.Stack Word
+  retc : Nat
+
+structure RunState where
+  evm : EVMState
+  returns : List ReturnFrame := []
+
+namespace RunState
+
+def initial (state : EVMState) : RunState where
+  evm := state
+  returns := []
+
+def withEVM (state : RunState) (evm : EVMState) : RunState :=
+  { state with evm := evm }
+
+def pushReturn (state : RunState) (returnLabel : Label)
+    (callerStack : EvmYul.Stack Word) (retc : Nat) : RunState :=
+  { state with
+    returns := { returnLabel, callerStack, retc } :: state.returns }
+
+def popReturn? (state : RunState) : Option (ReturnFrame × RunState) :=
+  match state.returns with
+  | [] => none
+  | frame :: rest => some (frame, { state with returns := rest })
+
+end RunState
+
+namespace StackFrame
+
+def splitArgs? (argc : Nat) (stack : EvmYul.Stack Word) :
+    Option (EvmYul.Stack Word × EvmYul.Stack Word) :=
+  if argc ≤ stack.length then
+    some (stack.take argc, stack.drop argc)
+  else
+    none
+
+def attachReturns? (frame : ReturnFrame) (stack : EvmYul.Stack Word) :
+    Option (EvmYul.Stack Word) :=
+  if stack.length = frame.retc then
+    some (stack ++ frame.callerStack)
+  else
+    none
+
+end StackFrame
+
 inductive Outcome where
-  | fallthrough (state : EVMState)
-  | jump (target : Label) (state : EVMState)
-  | returnDispatch (state : EVMState)
-  | halt (kind : Assembly.HaltKind) (state : EVMState)
-  | invalid (state : EVMState)
+  | fallthrough (state : RunState)
+  | jump (target : Label) (state : RunState)
+  | halt (kind : Assembly.HaltKind) (state : RunState)
+  | invalid (state : RunState)
 
 namespace Instr
+
+def runPopMany : Nat → EVMState → Except EVMException EVMState
+  | 0, state => .ok state
+  | n + 1, state => do
+      let state' ← Assembly.PrimOp.pop.step state
+      runPopMany n state'
+
+def runDup (depth : Nat) (state : EVMState) : Except EVMException EVMState :=
+  match depth with
+  | 0 => Assembly.PrimOp.dup1.step state
+  | 1 => Assembly.PrimOp.dup2.step state
+  | 2 => Assembly.PrimOp.dup3.step state
+  | 3 => Assembly.PrimOp.dup4.step state
+  | 4 => Assembly.PrimOp.dup5.step state
+  | 5 => Assembly.PrimOp.dup6.step state
+  | 6 => Assembly.PrimOp.dup7.step state
+  | 7 => Assembly.PrimOp.dup8.step state
+  | 8 => Assembly.PrimOp.dup9.step state
+  | 9 => Assembly.PrimOp.dup10.step state
+  | 10 => Assembly.PrimOp.dup11.step state
+  | 11 => Assembly.PrimOp.dup12.step state
+  | 12 => Assembly.PrimOp.dup13.step state
+  | 13 => Assembly.PrimOp.dup14.step state
+  | 14 => Assembly.PrimOp.dup15.step state
+  | 15 => Assembly.PrimOp.dup16.step state
+  | _ => .error .InvalidInstruction
+
+def runSwap (depth : Nat) (state : EVMState) :
+    Except EVMException EVMState :=
+  match depth with
+  | 0 => Assembly.PrimOp.swap1.step state
+  | 1 => Assembly.PrimOp.swap2.step state
+  | 2 => Assembly.PrimOp.swap3.step state
+  | 3 => Assembly.PrimOp.swap4.step state
+  | 4 => Assembly.PrimOp.swap5.step state
+  | 5 => Assembly.PrimOp.swap6.step state
+  | 6 => Assembly.PrimOp.swap7.step state
+  | 7 => Assembly.PrimOp.swap8.step state
+  | 8 => Assembly.PrimOp.swap9.step state
+  | 9 => Assembly.PrimOp.swap10.step state
+  | 10 => Assembly.PrimOp.swap11.step state
+  | 11 => Assembly.PrimOp.swap12.step state
+  | 12 => Assembly.PrimOp.swap13.step state
+  | 13 => Assembly.PrimOp.swap14.step state
+  | 14 => Assembly.PrimOp.swap15.step state
+  | 15 => Assembly.PrimOp.swap16.step state
+  | _ => .error .InvalidInstruction
 
 def run (instr : Instr) (state : EVMState) : Except EVMException EVMState :=
   match instr with
@@ -21,88 +115,118 @@ def run (instr : Instr) (state : EVMState) : Except EVMException EVMState :=
   | .pop =>
       Assembly.PrimOp.pop.step state
   | .dup depth =>
-      match depth with
-      | 0 => Assembly.PrimOp.dup1.step state
-      | 1 => Assembly.PrimOp.dup2.step state
-      | 2 => Assembly.PrimOp.dup3.step state
-      | 3 => Assembly.PrimOp.dup4.step state
-      | 4 => Assembly.PrimOp.dup5.step state
-      | 5 => Assembly.PrimOp.dup6.step state
-      | 6 => Assembly.PrimOp.dup7.step state
-      | 7 => Assembly.PrimOp.dup8.step state
-      | 8 => Assembly.PrimOp.dup9.step state
-      | 9 => Assembly.PrimOp.dup10.step state
-      | 10 => Assembly.PrimOp.dup11.step state
-      | 11 => Assembly.PrimOp.dup12.step state
-      | 12 => Assembly.PrimOp.dup13.step state
-      | 13 => Assembly.PrimOp.dup14.step state
-      | 14 => Assembly.PrimOp.dup15.step state
-      | _ => Assembly.PrimOp.dup16.step state
+      runDup depth state
   | .swap depth =>
-      match depth with
-      | 0 => Assembly.PrimOp.swap1.step state
-      | 1 => Assembly.PrimOp.swap2.step state
-      | 2 => Assembly.PrimOp.swap3.step state
-      | 3 => Assembly.PrimOp.swap4.step state
-      | 4 => Assembly.PrimOp.swap5.step state
-      | 5 => Assembly.PrimOp.swap6.step state
-      | 6 => Assembly.PrimOp.swap7.step state
-      | 7 => Assembly.PrimOp.swap8.step state
-      | 8 => Assembly.PrimOp.swap9.step state
-      | 9 => Assembly.PrimOp.swap10.step state
-      | 10 => Assembly.PrimOp.swap11.step state
-      | 11 => Assembly.PrimOp.swap12.step state
-      | 12 => Assembly.PrimOp.swap13.step state
-      | 13 => Assembly.PrimOp.swap14.step state
-      | 14 => Assembly.PrimOp.swap15.step state
-      | _ => Assembly.PrimOp.swap16.step state
+      runSwap depth state
+  | .declareLocal _name =>
+      .ok state
+  | .loadLocal _name depth =>
+      runDup depth state
+  | .storeLocal _name depth => do
+      let state' ← runSwap depth state
+      Assembly.PrimOp.pop.step state'
   | .unwind _target =>
       .ok state
+
+def runWithShape? (instr : Instr) (shape : Shape) (state : EVMState) :
+    Except EVMException (EVMState × Shape) :=
+  match instr.type? shape with
+  | none => .error .InvalidInstruction
+  | some output => do
+      let state' ←
+        match instr with
+        | .unwind target =>
+            runPopMany (shape.length - target.length) state
+        | _ =>
+            instr.run state
+      .ok (state', output)
 
 end Instr
 
 namespace Block
 
-def runBody : List Instr → EVMState → Except EVMException EVMState
-  | [], state => .ok state
-  | instr :: rest, state => do
-      let state' ← instr.run state
-      runBody rest state'
+def runBodyWithShape? :
+    List Instr → Shape → EVMState → Except EVMException (EVMState × Shape)
+  | [], shape, state => .ok (state, shape)
+  | instr :: rest, shape, state => do
+      let (state', shape') ← instr.runWithShape? shape state
+      runBodyWithShape? rest shape' state'
 
-def runTerm (term : Terminator) (state : EVMState) :
+def runBody (body : List Instr) (state : EVMState) :
+    Except EVMException EVMState := do
+  let (state', _shape) ← runBodyWithShape? body [] state
+  .ok state'
+
+def runTerm (program : Program) (term : Terminator) (state : RunState) :
     Except EVMException Outcome :=
   match term with
   | .fallthrough => .ok (.fallthrough state)
   | .jump target => .ok (.jump target state)
   | .jumpi target fallthrough =>
-      match state.stack.pop with
+      match state.evm.stack.pop with
       | none => .ok (.invalid state)
       | some (stack, cond) =>
-          let state' := { state with stack := stack }
+          let state' := state.withEVM { state.evm with stack := stack }
           if cond = EvmYul.UInt256.ofNat 0 then
             .ok (.jump fallthrough state')
           else
             .ok (.jump target state')
-  | .returnDispatch _ => .ok (.returnDispatch state)
+  | .call name returnLabel =>
+      match program.findProc? name with
+      | none => .ok (.invalid state)
+      | some proc =>
+          match StackFrame.splitArgs? proc.argc state.evm.stack with
+          | none => .error .StackUnderflow
+          | some (args, callerStack) =>
+              let evm := { state.evm with stack := args }
+              let state' :=
+                (state.withEVM evm).pushReturn returnLabel callerStack proc.retc
+              .ok (.jump proc.entry state')
+  | .ret name =>
+      match program.findProc? name, state.popReturn? with
+      | some proc, some (frame, returned) =>
+          if frame.retc = proc.retc then
+            match StackFrame.attachReturns? frame state.evm.stack with
+            | none => .ok (.invalid state)
+            | some stack =>
+                let evm := { state.evm with stack := stack }
+                .ok (.jump frame.returnLabel (returned.withEVM evm))
+          else
+            .ok (.invalid state)
+      | _, _ => .ok (.invalid state)
   | .halt kind => do
-      let state' ← kind.toPrimOp.step state
+      let evm ← kind.toPrimOp.step state.evm
+      let state' := state.withEVM evm
       .ok (.halt kind state')
   | .invalid => .ok (.invalid state)
 
-def run (block : Block) (state : EVMState) :
+def run (program : Program) (block : Block) (state : RunState) :
     Except EVMException Outcome := do
-  let state' ← runBody block.body state
-  runTerm block.term state'
+  let (evm, _shape) ← runBodyWithShape? block.body block.input state.evm
+  runTerm program block.term (state.withEVM evm)
 
 end Block
 
 namespace Program
 
-def step (program : Program) (label : Label) (state : EVMState) :
+def step (program : Program) (label : Label) (state : RunState) :
     Except EVMException Outcome :=
   match program.findBlock? label with
   | none => .ok (.invalid state)
-  | some block => block.run state
+  | some block => block.run program state
+
+def runFrom : Nat → Program → Label → RunState → Except EVMException Outcome
+  | 0, _program, _label, state => .ok (.invalid state)
+  | fuel + 1, program, label, state => do
+      let outcome ← step program label state
+      match outcome with
+      | .jump target state' => runFrom fuel program target state'
+      | .fallthrough _ | .halt _ _ | .invalid _ =>
+          .ok outcome
+
+def run (fuel : Nat) (program : Program) (state : EVMState) :
+    Except EVMException Outcome :=
+  runFrom fuel program program.entry (RunState.initial state)
 
 end Program
 
