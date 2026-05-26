@@ -154,8 +154,7 @@ def AllBlocksTyped (program : Program) : Prop :=
 
 def AllProceduresTyped (program : Program) : Prop :=
   ∀ proc, proc ∈ program.procedures →
-    proc.argc ≤ 16 ∧ proc.retc < 16 ∧
-      program.labelShape? proc.entry = some proc.entryShape
+    program.labelShape? proc.entry = some proc.entryShape
 
 def WellTyped (program : Program) : Prop :=
   program.LabelsUnique ∧ program.ProcNamesUnique ∧ program.AllProceduresTyped ∧
@@ -176,9 +175,7 @@ def procNamesUnique? : List Procedure → Bool
 def allProceduresTyped? (program : Program) : Bool :=
   program.procedures.all
     (fun proc =>
-      decide (proc.argc ≤ 16) &&
-        decide (proc.retc < 16) &&
-          decide (program.labelShape? proc.entry = some proc.entryShape))
+      decide (program.labelShape? proc.entry = some proc.entryShape))
 
 def allBlocksTyped? (program : Program) : Bool :=
   program.blocks.all (fun block => (block.type? program).isSome)

@@ -226,7 +226,9 @@ below typed CFG.
 There are two backend entry points:
 
 - `CheckedProgram.lower?` produces labeled assembly, preserving symbolic labels
-  for the existing assembly layer.
+  for the existing assembly layer. This backend is partial for procedure
+  arities that cannot be realized with the current `DUP`/`SWAP` token-dispatch
+  convention.
 - `CheckedProgram.assemble?` additionally runs the labeled-assembly acceptedness
   and assembler gate, so generated dispatch-label collisions or unresolved
   jumps fail at the typed-CFG backend boundary.
