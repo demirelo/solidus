@@ -508,6 +508,21 @@ theorem sourceStepAt_pop_eq_targetRunList
   | ok state' =>
       rfl
 
+theorem sourceStepAt_push_eq_targetRunList
+    (full : Assembly.Program) (pc : Nat) (state : Assembly.EVMState)
+    (value : Word) :
+    Assembly.Source.stepAt full pc (.push value) state =
+      Assembly.Target.runList [.push32 value] state := by
+  change Assembly.Target.stepInstr (Assembly.TargetInstr.push32 value) state =
+    Assembly.Target.runList [.push32 value] state
+  unfold Assembly.Target.runList
+  cases hStep :
+      Assembly.Target.stepInstr (Assembly.TargetInstr.push32 value) state with
+  | error err =>
+      rfl
+  | ok state' =>
+      rfl
+
 theorem pop_step_sourceAt {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState} {sourceEVM' : EVMState}
     {full : Assembly.Program} {pc : Nat}
@@ -521,6 +536,24 @@ theorem pop_step_sourceAt {program : Program} {sites : List CallSite}
   refine ⟨target', ?_, hRel'⟩
   rw [sourceStepAt_pop_eq_targetRunList]
   exact hRun
+
+theorem push_step_sourceAt {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {full : Assembly.Program} {pc : Nat} {value : Word} :
+    let sourceEVM' :=
+      source.evm.replaceStackAndIncrPC
+        (source.evm.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    let target' :=
+      target.replaceStackAndIncrPC
+        (target.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    PayloadRel program sites source target →
+      Assembly.Source.stepAt full pc (.push value) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  intro sourceEVM' target' hRel
+  constructor
+  · rw [sourceStepAt_push_eq_targetRunList]
+    rfl
+  · exact PayloadRel.push hRel
 
 theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
@@ -560,6 +593,30 @@ theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
   · constructor
     · rfl
     · exact PayloadRel.push hRel
+
+theorem push_runWithShape?_sourceAt {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape : Shape} {value : Word}
+    {full : Assembly.Program} {pc : Nat}
+    (hMatches : shape.matchesStack source.evm.stack = true)
+    (hRel : PayloadRel program sites source target) :
+    let sourceEVM' :=
+      source.evm.replaceStackAndIncrPC
+        (source.evm.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    let target' :=
+      target.replaceStackAndIncrPC
+        (target.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    TypedCfg.Instr.runWithShape? (.push value) shape source.evm =
+        .ok (sourceEVM', .word :: shape) ∧
+      Assembly.Source.stepAt full pc (.push value) target = .ok target' ∧
+      PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases push_runWithShape?_target
+      (program := program) (sites := sites) (source := source)
+      (target := target) (shape := shape) (value := value)
+      hMatches hRel with ⟨hSourceRun, hTargetRun, hRel'⟩
+  refine ⟨hSourceRun, ?_, hRel'⟩
+  rw [sourceStepAt_push_eq_targetRunList]
+  exact hTargetRun
 
 theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
@@ -611,6 +668,26 @@ theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
                   stack := rest }, shape)
         rw [hRestMatches]
         simp
+
+theorem pop_runWithShape?_sourceAt {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape : Shape} {slot : Slot}
+    {full : Assembly.Program} {pc : Nat}
+    (hMatches : Shape.matchesStack (slot :: shape) source.evm.stack = true)
+    (hRel : PayloadRel program sites source target) :
+    ∃ sourceEVM' target',
+      TypedCfg.Instr.runWithShape? .pop (slot :: shape) source.evm =
+          .ok (sourceEVM', shape) ∧
+        Assembly.Source.stepAt full pc (.prim .pop) target = .ok target' ∧
+          PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases pop_runWithShape?_target
+      (program := program) (sites := sites) (source := source)
+      (target := target) (shape := shape) (slot := slot)
+      hMatches hRel with
+    ⟨sourceEVM', target', hSourceRun, hTargetRun, hRel'⟩
+  refine ⟨sourceEVM', target', hSourceRun, ?_, hRel'⟩
+  rw [sourceStepAt_pop_eq_targetRunList]
+  exact hTargetRun
 
 theorem runPopMany_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
