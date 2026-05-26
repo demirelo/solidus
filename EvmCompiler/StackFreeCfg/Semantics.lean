@@ -91,8 +91,13 @@ def zero : Word :=
 def zeros (n : Nat) : List Word :=
   List.replicate n zero
 
-abbrev invalid {α : Type} : Except EVMException α :=
-  .error .InvalidInstruction
+abbrev invalid {α : Type} : Except Exception α :=
+  .error .invalid
+
+def liftPrimitive {α : Type} :
+    Except Assembly.EVMException α → Except Exception α
+  | .ok value => .ok value
+  | .error error => .error (.primitive error)
 
 /--
 Shared value-level primitive semantics for StackFreeCfg.
@@ -105,10 +110,10 @@ values back to the source interpreter.
 structure PrimitiveSemantics where
   eval :
     Assembly.PrimOp → SharedState → List Word →
-      Except EVMException (SharedState × List Word)
+      Except Exception (SharedState × List Word)
   terminal :
     Assembly.HaltKind → SharedState → List Word →
-      Except EVMException SharedState
+      Except Exception SharedState
 
 namespace PrimitiveSemantics
 
@@ -139,19 +144,20 @@ def canonical : PrimitiveSemantics where
       | none => invalid
       | some (inputArity, outputArity) =>
           if args.length = inputArity then
-            let state' ← op.step (isolatedState shared args)
+            let state' ← liftPrimitive (op.step (isolatedState shared args))
             if state'.stack.length = outputArity then
               .ok (state'.toSharedState, state'.stack)
             else
               invalid
           else
-            .error .StackUnderflow
+            invalid
   terminal kind shared args := do
     if args.length = kind.argCount then
-      let state' ← kind.toPrimOp.step (isolatedState shared args)
+      let state' ←
+        liftPrimitive (kind.toPrimOp.step (isolatedState shared args))
       .ok state'.toSharedState
     else
-      .error .StackUnderflow
+      invalid
 
 end PrimitiveSemantics
 
@@ -229,7 +235,7 @@ namespace Expr
 
 mutual
   def eval (prim : PrimitiveSemantics) (expr : Expr) (state : State) :
-      Except EVMException (State × List Word) :=
+      Except Exception (State × List Word) :=
     match expr with
     | .literal value =>
         .ok (state, [value])
@@ -248,7 +254,7 @@ mutual
   free of any stack discipline.
   -/
   def evalArgs (prim : PrimitiveSemantics) : List Expr → State →
-      Except EVMException (State × List Word)
+      Except Exception (State × List Word)
     | [], state => .ok (state, [])
     | arg :: rest, state => do
         let (stateAfterRest, restValues) ← evalArgs prim rest state
@@ -259,21 +265,21 @@ mutual
 end
 
 def evalOne (prim : PrimitiveSemantics) (expr : Expr) (state : State) :
-    Except EVMException (State × Word) := do
+    Except Exception (State × Word) := do
   let (state', values) ← eval prim expr state
   match values with
   | [value] => .ok (state', value)
   | _ => invalid
 
 def evalZero (prim : PrimitiveSemantics) (expr : Expr) (state : State) :
-    Except EVMException State := do
+    Except Exception State := do
   let (state', values) ← eval prim expr state
   match values with
   | [] => .ok state'
   | _ => invalid
 
 def evalCondition (prim : PrimitiveSemantics) (expr : Expr) (state : State) :
-    Except EVMException (State × Bool) := do
+    Except Exception (State × Bool) := do
   let (state', value) ← evalOne prim expr state
   .ok (state', value != zero)
 
@@ -295,7 +301,7 @@ end Switch
 mutual
   def Block.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (ctx : Ctx) (block : Block) (state : State) :
-      Except EVMException Outcome :=
+      Except Exception Outcome :=
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 => do
@@ -305,7 +311,7 @@ mutual
 
   def StmtList.run (fuel : Nat) (prim : PrimitiveSemantics)
       (program : Program) (ctx : Ctx) (stmts : List Stmt) (state : State) :
-      Except EVMException Outcome :=
+      Except Exception Outcome :=
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 =>
@@ -322,7 +328,7 @@ mutual
 
   def Stmt.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (ctx : Ctx) (stmt : Stmt) (state : State) :
-      Except EVMException Outcome :=
+      Except Exception Outcome :=
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 =>
@@ -520,7 +526,7 @@ mutual
   def For.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (outerScope : List Name) (cond : Expr) (post body : Block)
       (loopCtx : Ctx) (state : State) :
-      Except EVMException Outcome :=
+      Except Exception Outcome :=
     match fuel with
     | 0 => .ok ((Outcome.outOfFuel state loopCtx.scope).restrictTo outerScope)
     | fuel' + 1 => do
@@ -554,15 +560,15 @@ end
 namespace Program
 
 def runState (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
-    (state : State) : Except EVMException Outcome :=
+    (state : State) : Except Exception Outcome :=
   Block.run fuel prim program Ctx.initial program.body state
 
 def run (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
-    (shared : SharedState) : Except EVMException Outcome :=
+    (shared : SharedState) : Except Exception Outcome :=
   runState prim fuel program { shared := shared }
 
 def runCanonical (fuel : Nat) (program : Program) (shared : SharedState) :
-    Except EVMException Outcome :=
+    Except Exception Outcome :=
   runState PrimitiveSemantics.canonical fuel program { shared := shared }
 
 end Program

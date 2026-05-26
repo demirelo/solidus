@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 19:12 PDT.
+Last updated: 2026-05-25 19:24 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -84,6 +84,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Outcomes are `regular`, `break`, `continue`, `leave`, procedure return,
     terminal halt, exceptional `invalid`, error, and out-of-fuel/resource
     result.
+  - Source errors use `StackFreeCfg.Exception`; lower EVM execution exceptions
+    are wrapped only by the explicit primitive-semantics adapter.
   - Blocks own lexical scope cleanup.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`

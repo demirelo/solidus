@@ -4,8 +4,12 @@ namespace EvmCompiler
 namespace StackFreeCfg
 
 abbrev Word := Assembly.Word
-abbrev EVMException := Assembly.EVMException
 abbrev Name := String
+
+inductive Exception where
+  | invalid
+  | primitive (error : Assembly.EVMException)
+  deriving Repr
 
 /--
 Stack-free expressions.
