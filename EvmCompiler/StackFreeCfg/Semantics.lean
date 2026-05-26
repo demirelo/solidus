@@ -295,9 +295,9 @@ end Program
 mutual
   def Block.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (ctx : Ctx) (block : Block) (state : State) :
-      Except Exception Outcome :=
+    Except Exception Outcome :=
     match fuel with
-    | 0 => .ok (Outcome.outOfFuel state ctx.scope)
+    | 0 => .ok (Outcome.outOfFuel (state.restrictTo ctx.scope) ctx.scope)
     | fuel' + 1 => do
         let state := state.restrictTo ctx.scope
         let outcome ←
@@ -306,9 +306,9 @@ mutual
 
   def StmtList.run (fuel : Nat) (prim : PrimitiveSemantics)
       (program : Program) (ctx : Ctx) (stmts : List Stmt) (state : State) :
-      Except Exception Outcome :=
+    Except Exception Outcome :=
     match fuel with
-    | 0 => .ok (Outcome.outOfFuel state ctx.scope)
+    | 0 => .ok (Outcome.outOfFuel (state.restrictTo ctx.scope) ctx.scope)
     | fuel' + 1 =>
         let state := state.restrictTo ctx.scope
         match stmts with
@@ -324,9 +324,9 @@ mutual
 
   def Stmt.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (ctx : Ctx) (stmt : Stmt) (state : State) :
-      Except Exception Outcome :=
+    Except Exception Outcome :=
     match fuel with
-    | 0 => .ok (Outcome.outOfFuel state ctx.scope)
+    | 0 => .ok (Outcome.outOfFuel (state.restrictTo ctx.scope) ctx.scope)
     | fuel' + 1 =>
         let state := state.restrictTo ctx.scope
         match stmt with
@@ -525,7 +525,9 @@ mutual
       (loopCtx : Ctx) (state : State) :
       Except Exception Outcome :=
     match fuel with
-    | 0 => .ok ((Outcome.outOfFuel state loopCtx.scope).restrictTo outerScope)
+    | 0 =>
+        .ok ((Outcome.outOfFuel (state.restrictTo loopCtx.scope) loopCtx.scope)
+          |>.restrictTo outerScope)
     | fuel' + 1 => do
         let state := state.restrictTo loopCtx.scope
         let (stateAfterCond, condValue) ← Expr.evalCondition prim cond state

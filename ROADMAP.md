@@ -104,6 +104,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Blocks own lexical scope cleanup.
   - Block, statement, statement-sequence, and loop execution restrict incoming
     varstores to the current lexical scope before evaluating user syntax.
+  - Resource exhaustion / zero-fuel outcomes also restrict the returned
+    varstore to the active source scope, so out-of-fuel does not leak hidden
+    caller or lower-layer locals through the source interpreter boundary.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`
     as procedure exit, and keep EVM `RETURN` as terminal halt.
