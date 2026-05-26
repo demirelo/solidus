@@ -54,6 +54,67 @@ def stack? (program : Program) (sites : List CallSite) :
     (current : EvmYul.Stack Word) :
     stack? program sites [] current = some current := rfl
 
+theorem stack?_push_current {program : Program} {sites : List CallSite}
+    {returns : List ReturnFrame} {current target : EvmYul.Stack Word}
+    {value : Word}
+    (hStack : stack? program sites returns current = some target) :
+    stack? program sites returns (value :: current) =
+      some (value :: target) := by
+  induction returns generalizing current target with
+  | nil =>
+      simp at hStack ⊢
+      exact hStack
+  | cons frame rest ih =>
+      simp [stack?] at hStack ⊢
+      cases hToken : frameToken? program sites frame with
+      | none =>
+          simp [hToken] at hStack
+      | some token =>
+          simp [hToken] at hStack
+          cases hCaller :
+              stack? program sites rest frame.callerStack with
+          | none =>
+              simp [hCaller] at hStack
+          | some caller =>
+              simp [hCaller] at hStack
+              cases hStack
+              simp
+
+theorem stack?_suffix {program : Program} {sites : List CallSite}
+    {returns : List ReturnFrame} {current target : EvmYul.Stack Word}
+    (hStack : stack? program sites returns current = some target) :
+    ∃ suffix,
+      target = current ++ suffix ∧
+        ∀ newCurrent : EvmYul.Stack Word,
+          stack? program sites returns newCurrent =
+            some (newCurrent ++ suffix) := by
+  cases returns with
+  | nil =>
+      simp at hStack
+      cases hStack
+      refine ⟨[], ?_, ?_⟩
+      · simp
+      · intro newCurrent
+        simp [stack?]
+  | cons frame rest =>
+      simp [stack?] at hStack
+      cases hToken : frameToken? program sites frame with
+      | none =>
+          simp [hToken] at hStack
+      | some token =>
+          simp [hToken] at hStack
+          cases hCaller :
+              stack? program sites rest frame.callerStack with
+          | none =>
+              simp [hCaller] at hStack
+          | some caller =>
+              simp [hCaller] at hStack
+              cases hStack
+              refine ⟨token :: caller, ?_, ?_⟩
+              · simp
+              · intro newCurrent
+                simp [stack?, hToken, hCaller]
+
 end ReturnEncoding
 
 def withPcAndStack (state : EVMState) (pc : Nat)
@@ -66,6 +127,51 @@ structure PayloadRel (program : Program) (sites : List CallSite)
   stack_eq :
     ReturnEncoding.stack? program sites source.returns source.evm.stack =
       some target.stack
+
+namespace PayloadRel
+
+theorem hidden_suffix {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    (h : PayloadRel program sites source target) :
+    ∃ suffix,
+      target.stack = source.evm.stack ++ suffix ∧
+        ∀ newVisible : EvmYul.Stack Word,
+          ReturnEncoding.stack? program sites source.returns newVisible =
+            some (newVisible ++ suffix) := by
+  exact ReturnEncoding.stack?_suffix h.stack_eq
+
+theorem replace_visible_stack {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    (h : PayloadRel program sites source target)
+    (newVisible : EvmYul.Stack Word) :
+    ∃ suffix,
+      target.stack = source.evm.stack ++ suffix ∧
+        PayloadRel program sites
+          (source.withEVM { source.evm with stack := newVisible })
+          { target with stack := newVisible ++ suffix } := by
+  rcases h.hidden_suffix with ⟨suffix, hTargetStack, hMaterialize⟩
+  refine ⟨suffix, hTargetStack, ?_⟩
+  constructor
+  · simp [RunState.withEVM, h.shared_eq]
+  · simpa [RunState.withEVM] using hMaterialize newVisible
+
+theorem push {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState} {value : Word}
+    (h : PayloadRel program sites source target) :
+    PayloadRel program sites
+      (source.withEVM
+        (source.evm.replaceStackAndIncrPC
+          (source.evm.stack.push value) (pcΔ := Assembly.Instr.push32Size)))
+      (target.replaceStackAndIncrPC
+        (target.stack.push value) (pcΔ := Assembly.Instr.push32Size)) := by
+  constructor
+  · simp [RunState.withEVM, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, h.shared_eq]
+  · simp [RunState.withEVM, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+    exact ReturnEncoding.stack?_push_current h.stack_eq
+
+end PayloadRel
 
 /--
 Relation between a typed CFG suspension point and a labeled-assembly machine
@@ -259,6 +365,49 @@ theorem lowerWithShape?_type? {instr : TypedCfg.Instr} {shape : Shape}
         rw [hOutput]
 
 end Instr
+
+namespace InstrSemantics
+
+theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {shape : Shape} {value : Word}
+    (hMatches : shape.matchesStack source.evm.stack = true)
+    (hRel : PayloadRel program sites source target) :
+    let sourceEVM' :=
+      source.evm.replaceStackAndIncrPC
+        (source.evm.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    let target' :=
+      target.replaceStackAndIncrPC
+        (target.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+    TypedCfg.Instr.runWithShape? (.push value) shape source.evm =
+        .ok (sourceEVM', .word :: shape) ∧
+      Assembly.Target.runList [.push32 value] target = .ok target' ∧
+      PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  let sourceEVM' :=
+      source.evm.replaceStackAndIncrPC
+        (source.evm.stack.push value) (pcΔ := Assembly.Instr.push32Size)
+  have hOutputMatches :
+      Shape.matchesStack (Slot.word :: shape) (value :: source.evm.stack) =
+        true := by
+    simp [Shape.matchesStack, Slot.matchesValue, hMatches]
+  constructor
+  · change
+      (if Shape.matchesStack (Slot.word :: shape) sourceEVM'.stack = true then
+          Except.ok (sourceEVM', Slot.word :: shape)
+        else
+          Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+        Except.ok (sourceEVM', Slot.word :: shape)
+    have hSourceStack : sourceEVM'.stack = value :: source.evm.stack := by
+      simp [sourceEVM', EvmYul.Stack.push,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, Assembly.Instr.push32Size]
+    rw [hSourceStack, hOutputMatches]
+    simp
+  · constructor
+    · rfl
+    · exact PayloadRel.push hRel
+
+end InstrSemantics
 
 namespace Block
 
