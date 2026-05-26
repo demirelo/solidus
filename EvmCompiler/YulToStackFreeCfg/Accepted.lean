@@ -13,14 +13,18 @@ theorem relates imported Yul execution to `StackFreeCfg` execution.
 
 namespace Coverage
 
-def primExpr? (prim : EvmYul.Operation .Yul) (argc : Nat) : Bool :=
+def primArity? (prim : EvmYul.Operation .Yul) (argc : Nat) :
+    Option Nat :=
   match Prim.toAssembly? prim with
-  | none => false
+  | none => none
   | some op =>
       match StackFreeCfg.Prim.sourceArity? op with
       | some (inputArity, outputArity) =>
-          inputArity = argc && outputArity = 1
-      | none => false
+          if inputArity = argc then some outputArity else none
+      | none => none
+
+def primExpr? (prim : EvmYul.Operation .Yul) (argc : Nat) : Bool :=
+  primArity? prim argc |>.isSome
 
 def primStmt? (prim : EvmYul.Operation .Yul) (argc : Nat) : Bool :=
   match Prim.terminal? prim with
@@ -47,24 +51,35 @@ def datacopyStmt? (layout : ObjectLayout) (args : List AstExpr) : Bool :=
   | _ => false
 
 mutual
-  def expr? (env : Env) : AstExpr → Bool
-    | .Lit _value => true
-    | .Var _name => true
+  def exprArity? (env : Env) : AstExpr → Option Nat
+    | .Lit _value => some 1
+    | .Var _name => some 1
     | .Call (.inl prim) args =>
-        exprList? env args && primExpr? prim args.length
+        if exprList? env args then
+          primArity? prim args.length
+        else
+          none
     | .Call (.inr functionName) args =>
         if objectExpr? env.objectLayout functionName args then
-          true
+          some 1
         else
           match env.findSignature? functionName with
           | some sig =>
-              sig.params = args.length && sig.returns = 1 &&
-                exprList? env args
-          | none => false
+              if sig.params = args.length && exprList? env args then
+                some sig.returns
+              else
+                none
+          | none => none
+
+  def expr? (env : Env) (expr : AstExpr) : Bool :=
+    (exprArity? env expr).isSome
+
+  def exprArityIs? (env : Env) (expr : AstExpr) (arity : Nat) : Bool :=
+    decide (exprArity? env expr = some arity)
 
   def exprList? (env : Env) : List AstExpr → Bool
     | [] => true
-    | expr :: rest => expr? env expr && exprList? env rest
+    | expr :: rest => exprArityIs? env expr 1 && exprList? env rest
 
   def callStmt? (env : Env) (targets : List Name) (functionName : Name)
       (args : List AstExpr) : Bool :=
@@ -79,16 +94,16 @@ mutual
     | .Let _vars none => true
     | .Let vars (some (.Call (.inr functionName) args)) =>
         if objectExpr? env.objectLayout functionName args then
-          true
+          vars.length = 1
         else
           callStmt? env (identNames vars) functionName args
-    | .Let _vars (some expr) => expr? env expr
+    | .Let vars (some expr) => exprArityIs? env expr vars.length
     | .Assign vars (.Call (.inr functionName) args) =>
         if objectExpr? env.objectLayout functionName args then
-          true
+          vars.length = 1
         else
           callStmt? env (identNames vars) functionName args
-    | .Assign _vars expr => expr? env expr
+    | .Assign vars expr => exprArityIs? env expr vars.length
     | .ExprStmtCall (.Call (.inl prim) args) =>
         exprList? env args && primStmt? prim args.length
     | .ExprStmtCall (.Call (.inr functionName) args) =>
@@ -101,11 +116,12 @@ mutual
           callStmt? env [] functionName args
     | .ExprStmtCall _ => false
     | .Switch scrutinee cases defaultBody =>
-        expr? env scrutinee && cases? env cases && stmtList? env defaultBody
+        exprArityIs? env scrutinee 1 && cases? env cases &&
+          stmtList? env defaultBody
     | .For cond post body =>
-        expr? env cond && stmtList? env post && stmtList? env body
+        exprArityIs? env cond 1 && stmtList? env post && stmtList? env body
     | .If cond body =>
-        expr? env cond && stmtList? env body
+        exprArityIs? env cond 1 && stmtList? env body
     | .Continue | .Break | .Leave => true
 
   def stmtList? (env : Env) : List AstStmt → Bool
