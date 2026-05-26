@@ -168259,20 +168259,22 @@ structure RecursiveBridgeFullSourceAccepted (program : Program) : Prop where
     Reference.SourceBridgeFacts.UserCallArity.ProgramOk program
 
 /--
-Source-static bridge facts that can be checked directly from the imported Yul
-program syntax.
+Source/static bridge facts plus lowered source acceptedness that can be checked
+directly from the imported Yul program and its deterministic lowering.
 
-These facts are separated from source acceptedness: lexical scoping,
-control-flow scoping, user-call arity, supported-syntax coverage, and the
-current no-shadowing predicate are finite source checks, while
-`Program.SourceAcceptedCore` remains the semantic/wellformedness and lowered
-source-acceptedness boundary.  The no-shadowing predicate currently also checks
-`Safe.expr` at expression-bearing statements; that is constructed here
-explicitly rather than hidden inside `Reference.FullAccepted`.
+Lexical scoping, control-flow scoping, user-call arity, supported-syntax
+coverage, and the current no-shadowing predicate are finite source checks.
+`Program.SourceAcceptedCore` is checked by lowering to `Objects.Program` and
+checking the lower function program's source WF/scoping predicates.  The
+no-shadowing predicate currently also checks `Safe.expr` at expression-bearing
+statements; that is constructed here explicitly rather than hidden inside
+`Reference.FullAccepted`.
 -/
 structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
   supported :
     Program.Supported program
+  sourceAcceptedCore :
+    Program.SourceAcceptedCore program
   noShadowing :
     Reference.Safe.NoShadowing.program program
   sourceScoped :
@@ -168286,29 +168288,39 @@ namespace RecursiveBridgeSourceStaticFacts
 
 noncomputable def checked? (program : Program) : Bool :=
   Program.supported? program &&
-    (Reference.Safe.NoShadowing.program? program &&
-      (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
-        (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
-          Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)))
+    (Program.sourceAcceptedCore? program &&
+      (Reference.Safe.NoShadowing.program? program &&
+        (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+          (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+            Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program))))
 
 theorem of_checked? {program : Program}
     (hCheck : checked? program = true) :
     RecursiveBridgeSourceStaticFacts program := by
   have hAnd :
       Program.supported? program = true ∧
+        (Program.sourceAcceptedCore? program &&
+          (Reference.Safe.NoShadowing.program? program &&
+            (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+              (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+                Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)))) =
+          true :=
+    by simpa [checked?] using hCheck
+  have hCore :
+      Program.sourceAcceptedCore? program = true ∧
         (Reference.Safe.NoShadowing.program? program &&
           (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
             (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
               Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program))) =
           true :=
-    by simpa [checked?] using hCheck
+    by simpa using hAnd.2
   have hStatic :
       Reference.Safe.NoShadowing.program? program = true ∧
         (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
           (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
             Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)) =
           true :=
-    by simpa using hAnd.2
+    by simpa using hCore.2
   have hMid :
       Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program =
           true ∧
@@ -168324,6 +168336,8 @@ theorem of_checked? {program : Program}
     by simpa using hMid.2
   exact
     { supported := Program.supported_of_check hAnd.1
+      sourceAcceptedCore :=
+        Program.sourceAcceptedCore_of_check hCore.1
       noShadowing :=
         Reference.Safe.NoShadowing.program_of_check hStatic.1
       sourceScoped :=
@@ -170071,9 +170085,9 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
 
 /--
 Checked compiler/source boundary that also validates the source-static bridge
-facts.  Source acceptedness itself is still an explicit semantic boundary,
-but supported syntax, lexical scoping, no-shadowing, control-flow scoping, and
-user-call arity are constructed from this check.
+facts and lowered source acceptedness core.  Supported syntax, lower-source
+WF/scoping, lexical scoping, no-shadowing, control-flow scoping, and user-call
+arity are constructed from this check.
 -/
 noncomputable def compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
     (program : Program) :

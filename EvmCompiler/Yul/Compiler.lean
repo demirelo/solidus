@@ -2290,6 +2290,27 @@ def SourceAcceptedCore (program : Program) : Prop :=
   ∃ lower : Objects.Program,
     toObjects? program = some lower ∧ lower.SourceAccepted
 
+noncomputable def sourceAcceptedCore? (program : Program) : Bool :=
+  match toObjects? program with
+  | none => false
+  | some lower => Objects.SourceAcceptedCheck.Program.sourceAccepted? lower
+
+theorem sourceAcceptedCore_of_check {program : Program}
+    (hCheck : sourceAcceptedCore? program = true) :
+    SourceAcceptedCore program := by
+  unfold sourceAcceptedCore? at hCheck
+  cases hLower : toObjects? program with
+  | none =>
+      simp [hLower] at hCheck
+  | some lower =>
+      have hLowerCheck :
+          Objects.SourceAcceptedCheck.Program.sourceAccepted? lower = true :=
+        by simpa [hLower] using hCheck
+      exact
+        ⟨lower, hLower,
+          Objects.SourceAcceptedCheck.Program.sourceAccepted_of_check
+            hLowerCheck⟩
+
 theorem sourceAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     SourceAccepted program := by
