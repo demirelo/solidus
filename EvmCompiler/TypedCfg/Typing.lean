@@ -1,4 +1,5 @@
 import EvmCompiler.TypedCfg.Syntax
+import EvmCompiler.Assembly.PrimSemantics
 
 namespace EvmCompiler
 namespace TypedCfg

@@ -233,7 +233,7 @@ namespace Terminator
 
 def lower? (program : Program) (sites : List CallSite) (blockLabel : Label) :
     Terminator → Option Assembly.Program
-  | .fallthrough => some []
+  | .fallthrough => some [.prim .stop]
   | .jump target => some [.jump target]
   | .jumpi target next => some [.jumpi target, .jump next]
   | .call name returnLabel => do

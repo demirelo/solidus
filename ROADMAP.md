@@ -106,8 +106,15 @@ Current status:
 - [x] Independent semantics exists.
 - [x] Contract surface exists.
 - [x] Lowering to labeled assembly exists.
+- [x] Adjacent preservation boundary exists in
+  `EvmCompiler.TypedCfg.Preservation`.
 - [x] Ordinary `push` now produces generic `.word` shape slots, while exact
   literal slots remain available for explicit contracts.
+- [x] Typed syntax no longer imports the assembly umbrella/proof modules; it
+  imports only assembly syntax and shared EVM state types. Typed semantics
+  imports primitive semantics directly and does not run by lowering.
+- [x] Typed `.fallthrough` lowers to assembly `STOP`, so semantic completion
+  cannot physically fall into later emitted blocks.
 - [ ] Complete adjacent proof: `TypedCfg -> labeled assembly`.
 - [ ] Audit generated labels/tokens/dispatch uniqueness at this boundary.
 

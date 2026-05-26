@@ -53,6 +53,13 @@ inductive PrimOp where
   | revert | invalid | selfdestruct
   deriving DecidableEq, Repr
 
+inductive HaltKind where
+  | stop
+  | return
+  | revert
+  | selfdestruct
+  deriving DecidableEq, Repr
+
 namespace PrimOp
 
 def toEVM : PrimOp → EVMOp
@@ -170,7 +177,30 @@ def toEVM : PrimOp → EVMOp
   | .invalid => EvmYul.Operation.INVALID
   | .selfdestruct => EvmYul.Operation.SELFDESTRUCT
 
+def haltKind? : PrimOp → Option HaltKind
+  | .stop => some .stop
+  | .return => some .return
+  | .revert => some .revert
+  | .selfdestruct => some .selfdestruct
+  | _ => none
+
 end PrimOp
+
+namespace HaltKind
+
+def argCount : HaltKind → Nat
+  | .stop => 0
+  | .return => 2
+  | .revert => 2
+  | .selfdestruct => 1
+
+def toPrimOp : HaltKind → PrimOp
+  | .stop => .stop
+  | .return => .return
+  | .revert => .revert
+  | .selfdestruct => .selfdestruct
+
+end HaltKind
 
 inductive Instr where
   | label (name : Label)

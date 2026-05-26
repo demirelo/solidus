@@ -1,11 +1,12 @@
-import EvmCompiler.Assembly
+import EvmCompiler.Assembly.Syntax
+import EvmYul.EVM.State
 
 namespace EvmCompiler
 namespace TypedCfg
 
 abbrev Word := Assembly.Word
-abbrev EVMState := Assembly.EVMState
-abbrev EVMException := Assembly.EVMException
+abbrev EVMState := EvmYul.EVM.State
+abbrev EVMException := EvmYul.EVM.ExecutionException
 abbrev Label := Assembly.Label
 abbrev Name := String
 
