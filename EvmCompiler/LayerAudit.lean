@@ -2847,6 +2847,9 @@ abbrev recursiveBridgeSemanticCoreArityOfContracts :=
 abbrev recursiveBridgeSourceRun :=
   @Yul.Program.RecursiveBridgeSourceRun
 
+abbrev recursiveBridgeSourceRunToDispatcherBodyNoOutOfFuel :=
+  @Yul.Program.RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel
+
 abbrev recursiveBridgeTargetRuntime :=
   @Yul.Program.RecursiveBridgeTargetRuntime
 

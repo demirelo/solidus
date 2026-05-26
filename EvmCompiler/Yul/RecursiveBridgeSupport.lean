@@ -169138,6 +169138,22 @@ structure RecursiveBridgeSourceRun
       .ok referenceResult
   noOutOfFuel : referenceResult ≠ .regular .OutOfFuel
 
+namespace RecursiveBridgeSourceRun
+
+theorem toDispatcherBodyNoOutOfFuel
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {referenceResult : Reference.Result}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel
+        referenceResult) :
+    DispatcherBodyNoOutOfFuel program shared store sourceFuel :=
+  DispatcherBodyNoOutOfFuel.of_runResult_not_outOfFuel hSourceRun.run
+    hSourceRun.noOutOfFuel
+
+end RecursiveBridgeSourceRun
+
 /--
 Public theorem with the imported source run and sufficient-fuel condition
 bundled.

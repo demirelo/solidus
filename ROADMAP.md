@@ -169,6 +169,13 @@ this IR as the refactor proceeds.
        consume `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts`, making the
        expression boundary the smaller resource premise rather than arbitrary
        `ExprEvalResultOkAt` evidence.
+     - [x] Audit the premise against the imported evaluator. It is not
+       constructible from source acceptedness alone: safe user-function
+       expression calls can still expose the imported interpreter's
+       success-valued `.OutOfFuel` marker at insufficient source fuel. The
+       honest removal path is a sufficient-source-fuel theorem, or a smaller
+       actual-run-scoped premise threaded through the recursive expression
+       dispatcher.
    - [ ] Route the preferred top theorem through the canonical semantic
      constructors so users do not pass arbitrary semantic-contract packages.
      - [x] Add preferred gas-aware top wrappers specialized to the canonical
@@ -222,6 +229,9 @@ Current assumption-cleanup checkpoint:
   - Source run: `RecursiveBridgeSourceRun` is the concrete imported Nethermind
     Yul run plus the explicit exclusion of the historical successful
     `.regular .OutOfFuel` marker.
+    `RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel` constructs the
+    internal dispatcher-body fuel fact used by the old bridge from that public
+    source-run boundary.
   - Target entry/runtime: checked compiler success, initial shared-state
     relation, canonical entry PC/empty stack, code-size decode-window bound,
     jumpdest-scanner correctness, and gas-aware runner completeness. The
