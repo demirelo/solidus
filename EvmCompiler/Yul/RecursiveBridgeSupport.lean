@@ -167174,29 +167174,36 @@ structure RecursiveBridgeFullSourceAccepted (program : Program) : Prop where
 Current semantic-feature coverage needed to reuse the existing recursive bridge.
 
 This is deliberately separate from full source acceptedness. Today it is
-equivalent to the old `Reference.Safe.program` fragment predicate, but the
-families are explicit: imported-incomplete/code-image/create operations,
-external-call-boundary operations, and object-builtin user calls can now be
-removed or replaced one at a time as the corresponding semantic contracts are
-proved.
+not the whole old `Reference.Safe.program` fragment predicate: it carries only
+the semantic families that are still bridge boundaries. Object-builtin user-call
+coverage is constructed from successful compiler lowering.
 -/
 structure RecursiveBridgeFeatureCoverage (program : Program) : Prop where
   importedIncomplete :
     Reference.Safe.FeatureCoverage.importedIncompleteProgram program
   externalBoundary :
     Reference.Safe.FeatureCoverage.externalBoundaryProgram program
-  objectBuiltinUserCalls :
-    Reference.Safe.FeatureCoverage.objectBuiltinProgram program
 
 namespace RecursiveBridgeFeatureCoverage
 
-theorem to_program {program : Program}
-    (hCoverage : RecursiveBridgeFeatureCoverage program) :
+theorem to_program_of_objectBuiltin {program : Program}
+    (hCoverage : RecursiveBridgeFeatureCoverage program)
+    (hObjectBuiltin :
+      Reference.Safe.FeatureCoverage.objectBuiltinProgram program) :
     Reference.Safe.FeatureCoverage.program program := by
   exact
     (Reference.Safe.FeatureCoverage.program_iff_split program).mpr
       ⟨hCoverage.importedIncomplete, hCoverage.externalBoundary,
-        hCoverage.objectBuiltinUserCalls⟩
+        hObjectBuiltin⟩
+
+theorem to_program_of_compileChecked? {program : Program}
+    {asm : Assembly.Program}
+    (hCoverage : RecursiveBridgeFeatureCoverage program)
+    (hCompile : compileChecked? program = some asm) :
+    Reference.Safe.FeatureCoverage.program program :=
+  hCoverage.to_program_of_objectBuiltin
+    (Reference.Safe.FeatureCoverage.objectBuiltinProgram_of_compileChecked?_some
+      hCompile)
 
 theorem of_program {program : Program}
     (hCoverage : Reference.Safe.FeatureCoverage.program program) :
@@ -167204,11 +167211,10 @@ theorem of_program {program : Program}
   rcases
       (Reference.Safe.FeatureCoverage.program_iff_split program).mp
         hCoverage with
-    ⟨hImportedIncomplete, hExternalBoundary, hObjectBuiltin⟩
+    ⟨hImportedIncomplete, hExternalBoundary, _hObjectBuiltin⟩
   exact
     { importedIncomplete := hImportedIncomplete
-      externalBoundary := hExternalBoundary
-      objectBuiltinUserCalls := hObjectBuiltin }
+      externalBoundary := hExternalBoundary }
 
 end RecursiveBridgeFeatureCoverage
 
@@ -167240,14 +167246,17 @@ theorem toFullAndCoverage {program : Program}
         ((Reference.Safe.FeatureCoverage.program_iff_safe program).mpr
           hSource.reference.2.1)⟩
 
-theorem ofFullAndCoverage {program : Program}
+theorem ofFullCoverageAndCompileChecked {program : Program}
+    {asm : Assembly.Program}
     (hFull : RecursiveBridgeFullSourceAccepted program)
-    (hCoverage : RecursiveBridgeFeatureCoverage program) :
+    (hCoverage : RecursiveBridgeFeatureCoverage program)
+    (hCompile : compileChecked? program = some asm) :
     RecursiveBridgeSourceAccepted program := by
   exact
     { reference :=
         (Reference.bridgeCoveredAccepted_iff_accepted).mp
-          ⟨hFull.reference, hCoverage.to_program⟩
+          ⟨hFull.reference,
+            hCoverage.to_program_of_compileChecked? hCompile⟩
       sourceScoped := hFull.sourceScoped
       controlScoped := hFull.controlScoped
       userCalls := hFull.userCalls }

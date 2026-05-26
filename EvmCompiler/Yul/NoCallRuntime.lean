@@ -1560,9 +1560,10 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
                               .ok result ∧
                               Assembly.GasAware.XResultAgrees targetOutcome
                                 result :=
+  let hCompile := (compileCheckedAssemblyTarget?_eq_some hCompileTarget).1
   let hSourceAccepted :=
-    RecursiveBridgeSourceAccepted.ofFullAndCoverage hFullSourceAccepted
-      hFeatureCoverage
+    RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+      hFullSourceAccepted hFeatureCoverage hCompile
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     hSourceAccepted
     (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
@@ -1632,9 +1633,10 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
             EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
                 (Assembly.GasAware.installCodeAndGas target gas initial) ≠
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  let hCompile := (compileCheckedAssemblyTarget?_eq_some hCompileTarget).1
   let hSourceAccepted :=
-    RecursiveBridgeSourceAccepted.ofFullAndCoverage hFullSourceAccepted
-      hFeatureCoverage
+    RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+      hFullSourceAccepted hFeatureCoverage hCompile
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     hSourceAccepted
     (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
