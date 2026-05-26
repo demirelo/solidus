@@ -1,4 +1,5 @@
 import EvmCompiler.StackFreeCfg.Syntax
 import EvmCompiler.StackFreeCfg.Semantics
+import EvmCompiler.StackFreeCfg.PrimitiveAdapter
 import EvmCompiler.StackFreeCfg.Accepted
 import EvmCompiler.StackFreeCfg.Compiler

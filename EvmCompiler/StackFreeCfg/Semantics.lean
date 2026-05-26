@@ -4,7 +4,6 @@ namespace EvmCompiler
 namespace StackFreeCfg
 
 abbrev SharedState := EvmYul.SharedState .EVM
-abbrev EVMState := Assembly.EVMState
 
 namespace Store
 
@@ -94,18 +93,13 @@ def zeros (n : Nat) : List Word :=
 abbrev invalid {α : Type} : Except Exception α :=
   .error .invalid
 
-def liftPrimitive {α : Type} :
-    Except Assembly.EVMException α → Except Exception α
-  | .ok value => .ok value
-  | .error error => .error (.primitive error)
-
 /--
 Shared value-level primitive semantics for StackFreeCfg.
 
-The source language is stack-free; this adapter is the explicit boundary where
-already-shared EVM/Yul primitive meaning is reused. It evaluates a primitive on
-an isolated argument vector and projects only the shared EVM state plus result
-values back to the source interpreter.
+The source language is stack-free. This interface is value-level: it receives
+source argument values and returns source result values plus shared EVM/Yul
+state. Concrete reuse of EVM/Yul primitive semantics lives in
+`StackFreeCfg.PrimitiveAdapter`, not in this source interpreter.
 -/
 structure PrimitiveSemantics where
   eval :
@@ -116,48 +110,6 @@ structure PrimitiveSemantics where
       Except Exception SharedState
 
 namespace PrimitiveSemantics
-
-def rejectedSourceOp : Assembly.PrimOp → Bool
-  | .pc
-  | .dup1 | .dup2 | .dup3 | .dup4
-  | .dup5 | .dup6 | .dup7 | .dup8
-  | .dup9 | .dup10 | .dup11 | .dup12
-  | .dup13 | .dup14 | .dup15 | .dup16
-  | .swap1 | .swap2 | .swap3 | .swap4
-  | .swap5 | .swap6 | .swap7 | .swap8
-  | .swap9 | .swap10 | .swap11 | .swap12
-  | .swap13 | .swap14 | .swap15 | .swap16 => true
-  | _ => false
-
-def isolatedState (shared : SharedState) (args : List Word) : EVMState :=
-  { toSharedState := shared
-    pc := EvmYul.UInt256.ofNat 0
-    stack := args
-    execLength := 0 }
-
-def canonical : PrimitiveSemantics where
-  eval op shared args := do
-    if rejectedSourceOp op || op.haltKind?.isSome then
-      invalid
-    else
-      match op.stackEffect? with
-      | none => invalid
-      | some (inputArity, outputArity) =>
-          if args.length = inputArity then
-            let state' ← liftPrimitive (op.step (isolatedState shared args))
-            if state'.stack.length = outputArity then
-              .ok (state'.toSharedState, state'.stack)
-            else
-              invalid
-          else
-            invalid
-  terminal kind shared args := do
-    if args.length = kind.argCount then
-      let state' ←
-        liftPrimitive (kind.toPrimOp.step (isolatedState shared args))
-      .ok state'.toSharedState
-    else
-      invalid
 
 end PrimitiveSemantics
 
@@ -566,10 +518,6 @@ def runState (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
 def run (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
     (shared : SharedState) : Except Exception Outcome :=
   runState prim fuel program { shared := shared }
-
-def runCanonical (fuel : Nat) (program : Program) (shared : SharedState) :
-    Except Exception Outcome :=
-  runState PrimitiveSemantics.canonical fuel program { shared := shared }
 
 end Program
 
