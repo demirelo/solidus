@@ -2701,20 +2701,22 @@ Current checked imported-Yul-to-gas-aware-EVM public theorem boundary.
 Unlike the legacy `sourceBridge` compatibility record above, this theorem uses
 the internally constructed recursive source bridge and exposes named semantic
 contracts, initial-state relation, source-run/resource, compiler-success,
-code-size bytecode bridge check, and gas/current-contract assumptions. Lower
+code-size bytecode bridge check, and exact gas-precondition callback. Lower
 source/direct frame resources are now constructed by a checked compile-resource
 boundary. The
 preferred `recursiveBridgeTopToGasAwareEVM` alias now points at the result-level
 `EVM.X` theorem through the no-CALL/CREATE source-compile package: absence of
 external calls is derived from accepted checked compilation, decode-window and
 jumpdest-scanner facts are constructed by an explicit bytecode check, generated
-source/direct frame resources are checked over the lowered object, and the
-remaining gas behavior is the named gas-aware runner-completeness premise for
-replaying checked block traces above a finite bound. Source-static lexical,
-control-flow, user-call arity, and existing no-shadowing/source-expression facts
-are now constructed by the same checked boundary, which also constructs the
-full `Yul.Program.SourceAccepted` boundary. The remaining expression premise is
-the source-facing `RecursiveBridgeExprResultContracts`, not the historical
+source/direct frame resources are checked over the lowered object, and the same
+checked boundary constructs source-static lexical, control-flow, user-call
+arity, existing no-shadowing/source-expression facts, and the full
+`Yul.Program.SourceAccepted` boundary. The preferred gas-aware route exposes the
+exact trace-to-`X` gas precondition callback needed to replay the compiler's
+checked block trace above a finite gas bound; the stronger
+`XResultRunnerCompleteness` package remains a compatibility adapter. The
+remaining expression premise is the source-facing
+`RecursiveBridgeExprResultContracts`, not the historical
 no-successful-`.OutOfFuel` compatibility package.
 -/
 abbrev recursiveBridgeTopAssumptions :=
@@ -3104,6 +3106,12 @@ abbrev recursiveBridgeTopNoCallSourceCompileProgramSourceAcceptedStructuredPrimi
 abbrev recursiveBridgeTopNoCallSourceCompileProgramSourceAcceptedStructuredPrimitiveCanonicalEntryToEVMXRunnerNoOutOfGas :=
   @Yul.Program.compile_whole_program_result_no_out_of_gas_of_programSourceAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
+abbrev recursiveBridgeTopNoCallSourceCompileCheckedStructuredPrimitiveCanonicalEntryToEVMX :=
+  @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
+
+abbrev recursiveBridgeTopNoCallSourceCompileCheckedStructuredPrimitiveCanonicalEntryToEVMXNoOutOfGas :=
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
+
 abbrev recursiveBridgeTopNoCallSourceCompileCheckedStructuredPrimitiveCanonicalEntryToEVMXRunner :=
   @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
@@ -3111,16 +3119,16 @@ abbrev recursiveBridgeTopNoCallSourceCompileCheckedStructuredPrimitiveCanonicalE
   @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
 
 abbrev recursiveBridgeTopNoCallToGasAwareEVM :=
-  @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
 
 abbrev recursiveBridgeTopNoCallToGasAwareEVMNoOutOfGas :=
-  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
 
 abbrev recursiveBridgeTopToGasAwareEVM :=
-  @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
 
 abbrev recursiveBridgeTopToGasAwareEVMNoOutOfGas :=
-  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_XRunner
+  @Yul.Program.compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_X
 
 abbrev functionEntryListFind :=
   @Yul.Reference.SourceBridgeFacts.FunctionEntryList.find?

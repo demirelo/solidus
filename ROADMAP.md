@@ -241,10 +241,12 @@ this IR as the refactor proceeds.
 3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
    - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
      fundamental gas/oracle assumptions from compiler-derived execution
-     evidence. The preferred public wrapper now takes
-     `Assembly.GasAware.XResultRunnerCompleteness asm target initial`, while
-     the compiler theorem still derives the concrete `BlockTraceResult`
-     internally.
+     evidence. The compiler theorem still derives the concrete
+     `BlockTraceResult` internally. The preferred public wrapper now takes the
+     exact trace-to-`X` gas-precondition callback consumed by the lower
+     gas-aware bridge, while
+     `Assembly.GasAware.XResultRunnerCompleteness` remains a stronger
+     compatibility package that supplies that callback.
    - [ ] Prove the needed `XResultPreconditionAssumptions` from the checked
      bytecode trace, target encoding/jumpdest correctness, gas oracle,
      out-of-gas policy, and explicit sufficient-gas bound.
@@ -260,7 +262,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 03:36 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 06:55 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -269,17 +271,13 @@ nonrelatable non-call cases into that accepted successor theorem.
 Current assumption-cleanup checkpoint:
 
 - [x] Record the current preferred top-boundary assumptions explicitly:
-  - Source validity: `RecursiveBridgeSourceAccepted` bundles imported Yul
-    acceptedness, lexical scoping, control-flow scoping, and user-call arity.
-  - Full source/feature split: the preferred surface takes
-    `RecursiveBridgeFullSourceAccepted` plus the checked compiler/source
-    boundary `compileCheckedAssemblyTargetBytecodeResourcesFeatures?`. Full
-    acceptedness is source validity; the checker rejects the four
-    currently-unproved bridge families until their semantics are proved.
-    `LayerAudit` exports the source checker, its soundness theorem, the four
-    field projections, and the checked reconstruction of old
-    `Reference.Safe.FeatureCoverage.program` from feature coverage plus
-    successful checked compilation.
+  - Source validity and source-static checks: the preferred surface uses the
+    checked compiler/source boundary
+    `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?` to
+    construct `Yul.Program.SourceAccepted`, feature coverage, lexical scoping,
+    control-flow scoping, user-call arity, no-shadowing, and source-expression
+    facts. The checker still rejects the four currently-unproved bridge
+    families until their semantics are proved.
   - Lower resource validity: the generated lower function program's
     `SourceDirect.FrameBound.Program` is no longer a preferred public premise.
     `Functions.SourceDirect.FrameBound.program?` checks it over the lowered
@@ -301,22 +299,23 @@ Current assumption-cleanup checkpoint:
   - Target entry/runtime: checked compiler success, checked source
     feature-family exclusions, checked lower frame resources, checked bytecode
     bridge facts, initial shared-state relation, canonical entry PC/empty
-    stack, and gas-aware runner completeness. The marker-only gas oracle,
-    out-of-gas policy, and current-contract projection packages are constructed
-    internally by trivial checked constructors.
+    stack, and the exact trace-to-`X` gas precondition callback. The marker-only
+    gas oracle, out-of-gas policy, and current-contract projection packages are
+    constructed internally by trivial checked constructors, and
+    `XResultRunnerCompleteness` remains only a stronger compatibility route.
   - Discharged/generated facts at the top boundary: emitted no-call/create is
     proved from accepted source plus checked compilation; `DecodeSafety` is
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
     `RecursiveBridgeTargetRuntime` is no longer the preferred public input.
-  - Remaining preferred inputs after the feature checker checkpoint:
-    `RecursiveBridgeFullSourceAccepted` is the source-validity boundary;
+  - Remaining preferred inputs after the checked source/static, canonical-entry,
+    expression-result, and gas-boundary checkpoints:
     `RecursiveBridgeSourceRun` is the concrete imported source execution;
     `RecursiveBridgeInitialWorldRel` is the source/target environment
     relation; `RecursiveBridgeTerminalObservationContracts` is the terminal
-    and revert observation relation; `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts`
-    is the remaining expression-fuel resource boundary; and
-    `Assembly.GasAware.XResultRunnerCompleteness` is the target runtime/gas
-    bridge theorem still to be proved below the compiler.
+    and revert observation relation; `RecursiveBridgeExprResultContracts` is
+    the source-facing expression result/resource boundary; and the exact
+    trace-to-`X` gas-precondition callback is the target runtime/gas bridge
+    theorem still to be proved below the compiler.
 - [x] Classify the remaining `Reference.Safe.primitive` exclusions exactly.
   The public feature package now distinguishes local code-image operations
   (`CODESIZE`/`CODECOPY`), external account-code inspection (`EXTCODESIZE` /
@@ -335,14 +334,13 @@ Current assumption-cleanup checkpoint:
   gas-aware top wrappers. `GasOracleAssumption.trivial`,
   `OutOfGasPolicyAssumption.trivial`, and
   `CurrentContractProjectionAssumption.trivial` now populate the old runtime
-  package internally; the remaining target-side runtime premise is the
-  substantive `XResultRunnerCompleteness`.
-- [x] Re-express the preferred expression result-shape premise as the narrower
-  resource boundary. The default gas-aware audit alias now routes through
-  wrappers that take `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` and
-  internally construct `RecursiveBridgeExprResultContracts` with the checked
-  safe-expression checkpoint theorem; this keeps the all-expression fuel
-  condition explicit instead of hiding it in an arbitrary result-shape package.
+  package internally; the remaining target-side runtime premise is now the
+  exact trace-to-`X` gas precondition callback.
+- [x] Re-express the preferred expression result-shape premise as the
+  source-facing resource boundary. The default gas-aware audit alias now takes
+  `RecursiveBridgeExprResultContracts` directly; the older
+  no-successful-`.OutOfFuel` package remains a compatibility route through the
+  checked safe-expression checkpoint theorem.
 - [x] Construct canonical target entry state in the preferred gas-aware wrapper.
   The default audit alias now takes an initial shared-state relation against an
   arbitrary EVM state and runs the target from `canonicalEntryState initial`,
@@ -3123,7 +3121,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
     This is still a semantic/resource boundary for successful imported
     expression evaluation returning an ordinary `Ok` state, pending a
     sufficient-source-fuel or actual-run-scoped theorem.
-  - [x] `Assembly.GasAware.XResultRunnerCompleteness` remains the target-runtime completeness theorem: checked compilation produces a gasless block trace, while this package says EVMYulLean's gas-aware `X` runner replays that trace above a finite gas bound.
+  - [x] The preferred public route no longer exposes
+    `Assembly.GasAware.XResultRunnerCompleteness`; it exposes the exact
+    trace-to-`X` gas-precondition callback for the compiler-derived block trace.
+    `XResultRunnerCompleteness` remains a stronger target-runtime completeness
+    package and compatibility adapter, pending the real sufficient-gas proof
+    below the compiler.
 - [x] Layer audit gate: build, proof-hole scan, theorem names, remaining assumptions, and progress-log entry.
 - [x] Root imports `EvmCompiler.LayerAudit`, a checked theorem-spine tripwire naming each adjacent preservation theorem and keeping the imported-Yul `SourceBridge` boundary visually separate from completed adjacent proofs.
   - [x] `EvmCompiler.LayerAudit` names every current interpreter boundary and adjacent connection proof, including the explicit transparent Objects adapter, the quarantined compiler-facing `Yul.Lowered.run`, and the final bundled imported-Yul recursive bridge theorem to the gas-aware EVM route.
