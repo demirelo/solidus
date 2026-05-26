@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:21 PDT.
+Last updated: 2026-05-25 20:27 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -186,6 +186,15 @@ StackFreeCfg, not directly into TypedCfg or assembly.
 
 - [ ] Define the exact imported Yul source surface.
   - Name the Nethermind Yul semantics version/patch being targeted.
+  - [x] Add `EvmCompiler.YulToStackFreeCfg.Contract`, which records the
+    current target semantics source as
+    `danrobinson/EVMYulLean@5d7511d768bd35622a9f151324650f57707684f2`
+    on branch `codex/solidity-loop-post-success-defeq`.
+  - [x] Add executable `lowerGate` with inspectable rejection reasons:
+    `coverage`, `sourceWF`, `lowering`, and `stackFreeAccepted`.
+  - [x] Expose `Program.lowerObserved?`, which lowers accepted imported Yul
+    programs to `StackFreeCfg.Program.runObserved` without mentioning
+    `TypedCfg`, stack shapes, assembly labels, return tokens, or bytecode PCs.
   - Inventory every statement, expression, function, object/data, primitive,
     terminal, and error/resource outcome.
   - Reject or separately contract `verbatim`; do not silently include it.
