@@ -1,14 +1,12 @@
-import EvmCompiler.Assembly.Syntax
-import EvmYul.EVM.State
+import EvmCompiler.Assembly
 
 namespace EvmCompiler
 namespace TypedCfg
 
 abbrev Word := Assembly.Word
-abbrev EVMState := EvmYul.EVM.State
-abbrev EVMException := EvmYul.EVM.ExecutionException
+abbrev EVMState := Assembly.EVMState
+abbrev EVMException := Assembly.EVMException
 abbrev Label := Assembly.Label
-abbrev Name := String
 
 /--
 Symbolic stack slots used by the typed CFG.
@@ -67,64 +65,14 @@ inductive Instr where
   | pop
   | dup (depth : Nat)
   | swap (depth : Nat)
-  | declareLocal (name : String)
-  | declareLocals (names : List String)
-  | initLocals (names : List String)
-  | loadLocal (name : String) (depth : Nat)
-  | storeLocal (name : String) (depth : Nat)
-  | assignLocals (names : List String)
-  | returnLocals (names : List String)
   | unwind (target : Shape)
   deriving DecidableEq, Repr
-
-namespace Instr
-
-def dupOp? : Nat → Option Assembly.PrimOp
-  | 0 => some .dup1
-  | 1 => some .dup2
-  | 2 => some .dup3
-  | 3 => some .dup4
-  | 4 => some .dup5
-  | 5 => some .dup6
-  | 6 => some .dup7
-  | 7 => some .dup8
-  | 8 => some .dup9
-  | 9 => some .dup10
-  | 10 => some .dup11
-  | 11 => some .dup12
-  | 12 => some .dup13
-  | 13 => some .dup14
-  | 14 => some .dup15
-  | 15 => some .dup16
-  | _ => none
-
-def swapOp? : Nat → Option Assembly.PrimOp
-  | 0 => some .swap1
-  | 1 => some .swap2
-  | 2 => some .swap3
-  | 3 => some .swap4
-  | 4 => some .swap5
-  | 5 => some .swap6
-  | 6 => some .swap7
-  | 7 => some .swap8
-  | 8 => some .swap9
-  | 9 => some .swap10
-  | 10 => some .swap11
-  | 11 => some .swap12
-  | 12 => some .swap13
-  | 13 => some .swap14
-  | 14 => some .swap15
-  | 15 => some .swap16
-  | _ => none
-
-end Instr
 
 inductive Terminator where
   | fallthrough
   | jump (target : Label)
   | jumpi (target : Label) (fallthrough : Label)
-  | call (name : Name) (returnLabel : Label)
-  | ret (name : Name)
+  | returnDispatch (siteShape : Shape)
   | halt (kind : Assembly.HaltKind)
   | invalid
   deriving DecidableEq, Repr
@@ -136,33 +84,12 @@ structure Block where
   term : Terminator
   deriving Repr
 
-structure Procedure where
-  name : Name
-  entry : Label
-  argc : Nat
-  retc : Nat
-  deriving DecidableEq, Repr
-
-namespace Procedure
-
-def entryShape (proc : Procedure) : Shape :=
-  Shape.pushWords proc.argc []
-
-def returnShape (proc : Procedure) : Shape :=
-  Shape.pushWords proc.retc []
-
-end Procedure
-
 structure Program where
   entry : Label
-  procedures : List Procedure := []
   blocks : List Block
   deriving Repr
 
 namespace Program
-
-def findProc? (program : Program) (name : Name) : Option Procedure :=
-  program.procedures.find? (fun proc => proc.name == name)
 
 def findBlock? (program : Program) (label : Label) : Option Block :=
   program.blocks.find? (fun block => block.label == label)

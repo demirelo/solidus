@@ -1,4 +1,4 @@
-import EvmCompiler.Functions.Syntax
+import EvmCompiler.Functions.Semantics
 
 namespace EvmCompiler
 namespace Objects
@@ -7,6 +7,7 @@ abbrev Word := Functions.Word
 abbrev EVMState := Functions.EVMState
 abbrev EVMException := Functions.EVMException
 abbrev Name := Functions.Name
+abbrev Outcome := EvmCompiler.Functions.Outcome
 
 structure DataSection where
   name? : Option Name

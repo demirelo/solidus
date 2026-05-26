@@ -239,16 +239,18 @@ theorem compile_whole_program_X_bridge {program : Program}
     (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
     XBridgeCertificate program target fuel initial sourceFinal := by
   obtain
-    ⟨hAccepted, hBytes, hEncoding, targetFinal, hTrace, hErase⟩ :=
-    compile_whole_program_sound hCompile hRuntime.bytecode hRun
+    ⟨hAccepted, hBytes, hEncoding, hGasOpcode,
+      hGasOracle, hOutOfGas, hProjection,
+      targetFinal, hTrace, hErase⟩ :=
+    compile_whole_program_sound hCompile hRuntime hRun
   exact
     { accepted := hAccepted
       compileBytes_eq := hBytes
       encodingCorrect := hEncoding
-      gasOpcodeBoundary := TargetProgram.gas_opcode_boundary target
-      gasOracle := hRuntime.gasOracle
-      outOfGasPolicy := hRuntime.outOfGasPolicy
-      currentContractProjection := hRuntime.currentContractProjection
+      gasOpcodeBoundary := hGasOpcode
+      gasOracle := hGasOracle
+      outOfGasPolicy := hOutOfGas
+      currentContractProjection := hProjection
       externalInteraction := hRuntime.externalInteraction
       blockTrace := ⟨targetFinal, hTrace, hErase⟩
       sufficientGas :=

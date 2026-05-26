@@ -1,43 +1,16 @@
 import EvmCompiler.TypedCfg.Syntax
-import EvmCompiler.Assembly.PrimSemantics
 
 namespace EvmCompiler
 namespace TypedCfg
 
 namespace Instr
 
-namespace ShapeOps
-
-def locals (names : List Name) : Shape :=
-  names.map Slot.local
-
-def allLocalsPresent (names : List Name) (shape : Shape) : Bool :=
-  names.all (fun name => decide ((.local name : Slot) ∈ shape))
-
-def allLocalsAbsent (names : List Name) (shape : Shape) : Bool :=
-  names.all (fun name => decide ((.local name : Slot) ∉ shape))
-
-end ShapeOps
-
 def type? (instr : Instr) (shape : Shape) : Option Shape :=
   match instr with
-  | .push _value => some (.word :: shape)
-  | .prim .pc => none
+  | .push value => some (.literal value :: shape)
   | .prim op =>
       match op.continuingStep? with
-      | none =>
-          if op.haltKind?.isSome then
-            none
-          else
-            match op.stackEffect? with
-            | some (inputArity, outputArity) =>
-                if inputArity ≤ shape.length then
-                  some
-                    (Shape.pushWords outputArity
-                      (Shape.pop inputArity shape))
-                else
-                  none
-            | none => none
+      | none => none
       | some step =>
           if step.inputArity ≤ shape.length then
             some (Shape.pushWords step.outputArity (Shape.pop step.inputArity shape))
@@ -56,67 +29,11 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
         none
   | .swap depth =>
       if depth < 16 then
-        match shape with
-        | top :: rest =>
-            match rest[depth]? with
-            | some slot => some (slot :: rest.set depth top)
-            | none => none
-        | [] => none
-      else
-        none
-  | .declareLocal name =>
-      match shape with
-      | _value :: rest =>
-          if ShapeOps.allLocalsAbsent [name] rest then
-            some (.local name :: rest)
-          else
-            none
-      | [] => none
-  | .declareLocals names =>
-      if names.length ≤ shape.length then
-        let rest := Shape.pop names.length shape
-        if decide names.Nodup && ShapeOps.allLocalsAbsent names rest then
-          some (ShapeOps.locals names ++ rest)
-        else
-          none
-      else
-        none
-  | .initLocals names =>
-      if decide names.Nodup && ShapeOps.allLocalsAbsent names shape then
-        some (ShapeOps.locals names ++ shape)
-      else
-        none
-  | .loadLocal name depth =>
-      if depth < 16 then
-        if shape[depth]? = some (.local name) then
-          some (.word :: shape)
-        else
-          none
-      else
-        none
-  | .storeLocal name depth =>
-      if depth < 16 then
-        match shape with
-        | _value :: rest =>
-            if rest[depth]? = some (.local name) then
-              some rest
-            else
-              none
-        | [] => none
-      else
-        none
-  | .assignLocals names =>
-      if names.length ≤ shape.length then
-        let rest := Shape.pop names.length shape
-        if decide names.Nodup && ShapeOps.allLocalsPresent names rest then
-          some rest
-        else
-          none
-      else
-        none
-  | .returnLocals names =>
-      if decide names.Nodup && ShapeOps.allLocalsPresent names shape then
-        some (Shape.pushWords names.length [])
+        match shape, shape[depth]? with
+        | top :: rest, some slot =>
+            some (slot :: (rest.set (depth - 1) top))
+        | _, none => none
+        | [], _ => none
       else
         none
   | .unwind target =>
@@ -140,8 +57,7 @@ def targets : Terminator → List Label
   | .fallthrough => []
   | .jump target => [target]
   | .jumpi target next => [target, next]
-  | .call _name returnLabel => [returnLabel]
-  | .ret _name => []
+  | .returnDispatch _ => []
   | .halt _ => []
   | .invalid => []
 
@@ -154,33 +70,17 @@ def type? (program : Program) (shape : Shape) : Terminator → Option Unit
       let targetShape ← program.labelShape? target
       let fallthroughShape ← program.labelShape? next
       match shape with
-      | _cond :: rest =>
+      | .word :: rest =>
           if rest = targetShape ∧ rest = fallthroughShape then some () else none
       | _ => none
-  | .call name returnLabel => do
-      let proc ← program.findProc? name
-      let entryShape ← program.labelShape? proc.entry
-      let returnShape ← program.labelShape? returnLabel
-      if proc.argc ≤ shape.length ∧
-          entryShape = proc.entryShape ∧
-          returnShape = Shape.pushWords proc.retc (Shape.pop proc.argc shape) then
-        some ()
-      else
-        none
-  | .ret name => do
-      let proc ← program.findProc? name
-      if shape = proc.returnShape then some () else none
-  | .halt kind =>
-      if kind.argCount ≤ shape.length then some () else none
+  | .returnDispatch siteShape =>
+      if shape = siteShape then some () else none
+  | .halt _ => some ()
   | .invalid => some ()
 
 end Terminator
 
 namespace Block
-
-def type? (program : Program) (block : Block) : Option Unit := do
-  let output ← bodyType? block.body block.input
-  block.term.type? program output
 
 def WellTyped (program : Program) (block : Block) : Prop :=
   ∃ output, bodyType? block.body block.input = some output ∧
@@ -193,69 +93,16 @@ namespace Program
 def LabelsUnique (program : Program) : Prop :=
   program.blocks.Pairwise (fun left right => left.label ≠ right.label)
 
-def ProcNamesUnique (program : Program) : Prop :=
-  program.procedures.Pairwise (fun left right => left.name ≠ right.name)
-
 def AllBlocksTyped (program : Program) : Prop :=
   ∀ block, block ∈ program.blocks → block.WellTyped program
 
-def AllProceduresTyped (program : Program) : Prop :=
-  ∀ proc, proc ∈ program.procedures →
-    program.labelShape? proc.entry = some proc.entryShape
-
 def WellTyped (program : Program) : Prop :=
-  program.LabelsUnique ∧ program.ProcNamesUnique ∧ program.AllProceduresTyped ∧
-    program.AllBlocksTyped ∧ program.findBlock? program.entry ≠ none
-
-def labelsUnique? : List Block → Bool
-  | [] => true
-  | block :: rest =>
-      rest.all (fun other => decide (block.label ≠ other.label)) &&
-        labelsUnique? rest
-
-def procNamesUnique? : List Procedure → Bool
-  | [] => true
-  | proc :: rest =>
-      rest.all (fun other => decide (proc.name ≠ other.name)) &&
-        procNamesUnique? rest
-
-def allProceduresTyped? (program : Program) : Bool :=
-  program.procedures.all
-    (fun proc =>
-      decide (program.labelShape? proc.entry = some proc.entryShape))
-
-def allBlocksTyped? (program : Program) : Bool :=
-  program.blocks.all (fun block => (block.type? program).isSome)
-
-def typeCheck? (program : Program) : Option Unit :=
-  if labelsUnique? program.blocks &&
-      procNamesUnique? program.procedures &&
-      allProceduresTyped? program &&
-      allBlocksTyped? program &&
-      (program.findBlock? program.entry).isSome then
-    some ()
-  else
-    none
-
-end Program
-
-structure CheckedProgram where
-  program : Program
-  checked : program.typeCheck? = some ()
-  deriving Repr
-
-namespace Program
-
-def check? (program : Program) : Option CheckedProgram :=
-  if h : program.typeCheck? = some () then
-    some { program := program, checked := h }
-  else
-    none
+  program.LabelsUnique ∧ program.AllBlocksTyped ∧ program.findBlock? program.entry ≠ none
 
 theorem wellTyped_allBlocksTyped {program : Program}
     (h : program.WellTyped) :
     program.AllBlocksTyped :=
-  h.2.2.2.1
+  h.2.1
 
 end Program
 

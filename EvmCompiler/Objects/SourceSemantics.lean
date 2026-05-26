@@ -9,8 +9,8 @@ Source-facing object semantics.
 
 At this layer objects are still a transparent root-code wrapper: data and
 nested object layout are checked structurally but do not yet affect execution.
-The wrapper points at the stack-free `Functions.Source` interpreter, so object
-execution does not expose function-frame or stack-layout details.
+The important boundary repair is that this transparent adapter points at the
+stack-free `Functions.Source` interpreter, not at the direct function backend.
 -/
 namespace Source
 

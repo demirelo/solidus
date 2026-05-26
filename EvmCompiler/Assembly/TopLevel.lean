@@ -22,26 +22,16 @@ theorem TargetProgram.gas_opcode_boundary_expanded (target : TargetProgram) :
   exact TargetProgram.gas_opcode_boundary target
 
 /--
-Bytecode assumptions needed to connect the verified AST-level compiler theorem
-to EVMYulLean's byte decoder/fetch surface.
+Runtime assumptions added when the verified AST-level compiler theorem is used
+as a claim about deployed EVM bytecode.
 
 `decodeWindow` is a resource/code-size bound; the actual `DecodeSafety` facts
 are derived from the checked assembler layout. `jumpdestCorrect` remains a
 bytecode/EVMYulLean scanner boundary because the imported jumpdest scanner is
-opaque.
--/
-structure BytecodeAssumptions (target : TargetProgram) : Prop where
-  decodeWindow : Bytecode.TargetFitsDecodeWindow target
-  jumpdestCorrect : Bytecode.JumpdestCorrect target
-
-/--
-Runtime assumptions added only when the bytecode theorem is used as a claim
-about deployed gas-aware EVM execution.
-
-Gas accounting, possible out-of-gas interruption, the gas-erased state
-projection, and the call/create bridge are not needed by the gasless assembly
-compiler theorem. They live here so higher layers can see exactly where the
-runtime boundary begins.
+opaque. The remaining fields name the semantic choices intentionally not
+modeled by the gasless source language or not yet derived from the source step
+relation: gas accounting, possible out-of-gas interruption, the gas-erased state
+projection, and the call/create bridge to the gas-aware EVM runner.
 -/
 structure RuntimeAssumptions
     (program : Program) (target : TargetProgram) (initial : EVMState) :
@@ -54,12 +44,6 @@ structure RuntimeAssumptions
   externalInteraction : ExternalInteractionAssumption program target initial
 
 namespace RuntimeAssumptions
-
-def bytecode {program : Program} {target : TargetProgram} {initial : EVMState}
-    (hRuntime : RuntimeAssumptions program target initial) :
-    BytecodeAssumptions target where
-  decodeWindow := hRuntime.decodeWindow
-  jumpdestCorrect := hRuntime.jumpdestCorrect
 
 def withExplicitBoundaries {program : Program} {target : TargetProgram}
     {initial : EVMState}
@@ -107,36 +91,50 @@ semantic claim is the gas-erased whole-run block trace.
 theorem compile_whole_program_sound {program : Program}
     {target : TargetProgram} {fuel : Nat} {initial sourceFinal : EVMState}
     (hCompile : compile? program = some target)
-    (hBytecode : BytecodeAssumptions target)
+    (hRuntime : RuntimeAssumptions program target initial)
     (hRun : Source.runN program fuel initial = .ok sourceFinal) :
     Accepted program ∧
       Bytecode.compileBytes? program = some (Bytecode.encodeTarget target) ∧
         Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) ∧
-          ∃ targetFinal,
-            Preservation.BlockTrace program target fuel initial targetFinal ∧
-              eraseGas targetFinal = eraseGas sourceFinal := by
+          target.GasOpcodeBoundary ∧
+            GasOracleAssumption program initial ∧
+              OutOfGasPolicyAssumption program initial ∧
+                CurrentContractProjectionAssumption program initial ∧
+                  ∃ targetFinal,
+                    Preservation.BlockTrace program target fuel initial targetFinal ∧
+                      eraseGas targetFinal = eraseGas sourceFinal := by
   obtain ⟨hAccepted, targetFinal, hEncoding, hTrace, hErase⟩ :=
     Bytecode.compile_runN_bytecode_bridge_checked hCompile
-      (Bytecode.compile_decodeSafety hCompile hBytecode.decodeWindow)
-      hBytecode.jumpdestCorrect hRun
-  refine ⟨hAccepted, ?_, hEncoding, targetFinal, hTrace, hErase⟩
+      (Bytecode.compile_decodeSafety hCompile hRuntime.decodeWindow)
+      hRuntime.jumpdestCorrect hRun
+  refine
+    ⟨hAccepted, ?_, hEncoding, TargetProgram.gas_opcode_boundary target,
+      hRuntime.gasOracle, hRuntime.outOfGasPolicy,
+      hRuntime.currentContractProjection, targetFinal, hTrace, hErase⟩
   simp [Bytecode.compileBytes?, hCompile]
 
 theorem compile_whole_program_result_sound {program : Program}
     {target : TargetProgram} {fuel : Nat} {initial : EVMState}
     {result : StepResult}
     (hCompile : compile? program = some target)
-    (hBytecode : BytecodeAssumptions target)
+    (hRuntime : RuntimeAssumptions program target initial)
     (hRun : Source.runNResult program fuel initial = .ok result) :
     Accepted program ∧
       Bytecode.compileBytes? program = some (Bytecode.encodeTarget target) ∧
         Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) ∧
-          Preservation.BlockTraceResult program target fuel initial result := by
+          target.GasOpcodeBoundary ∧
+            GasOracleAssumption program initial ∧
+              OutOfGasPolicyAssumption program initial ∧
+                CurrentContractProjectionAssumption program initial ∧
+                  Preservation.BlockTraceResult program target fuel initial result := by
   obtain ⟨hAccepted, hEncoding, hTrace⟩ :=
     Bytecode.compile_runN_result_bytecode_bridge_checked hCompile
-      (Bytecode.compile_decodeSafety hCompile hBytecode.decodeWindow)
-      hBytecode.jumpdestCorrect hRun
-  refine ⟨hAccepted, ?_, hEncoding, hTrace⟩
+      (Bytecode.compile_decodeSafety hCompile hRuntime.decodeWindow)
+      hRuntime.jumpdestCorrect hRun
+  refine
+    ⟨hAccepted, ?_, hEncoding, TargetProgram.gas_opcode_boundary target,
+      hRuntime.gasOracle, hRuntime.outOfGasPolicy,
+      hRuntime.currentContractProjection, hTrace⟩
   simp [Bytecode.compileBytes?, hCompile]
 
 end Assembly

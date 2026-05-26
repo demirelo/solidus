@@ -7,10 +7,12 @@ namespace Locals
 /-
 Stack-free source semantics for the locals abstraction.
 
-This namespace is the source-side contract the layers above locals should
-target. Stack slots, layout depths, and return-frame encodings belong in
-compiler relations below this semantics, not in the meaning of the source
-language.
+The existing `Locals.Direct` interpreter is the checked stack-lowering backend:
+it interprets locals by looking up stack depths, emitting DUP/SWAP/POP behavior,
+and threading concrete EVM stacks.  This namespace is the source-side contract
+the layers above locals should target instead.  Stack slots, layout depths, and
+return-frame encodings belong in the compiler relation from this semantics to
+the stack-shaped backend.
 -/
 namespace Source
 
@@ -261,6 +263,109 @@ def evalCondition (prim : PrimitiveSemantics) (expr : Expr 1)
   let (state', value) ← evalOne prim expr state
   .ok (state', value != EvmYul.UInt256.ofNat 0)
 
+mutual
+  theorem eval_vars_eq {results : Nat} {prim : PrimitiveSemantics}
+      {expr : Expr results} {state state' : State} {values : List Word}
+      (hEval : eval prim expr state = .ok (state', values)) :
+      state'.vars = state.vars := by
+    cases expr with
+    | lit value =>
+        simp [eval] at hEval
+        rcases hEval with ⟨hState, _hValues⟩
+        cases hState
+        rfl
+    | var name =>
+        cases hLookup : state.vars name with
+        | none =>
+            simp [eval, hLookup, invalid, Structured.invalid] at hEval
+        | some value =>
+            simp [eval, hLookup] at hEval
+            rcases hEval with ⟨hState, _hValues⟩
+            cases hState
+            rfl
+    | code code =>
+        simp [eval, invalid, Structured.invalid] at hEval
+    | prim op args =>
+        cases hArgs : ExprSeq.eval prim args state with
+        | error err =>
+            simp [eval, hArgs] at hEval
+        | ok argsResult =>
+            rcases argsResult with ⟨stateAfterArgs, values⟩
+            cases hPrim :
+                prim.eval op stateAfterArgs.shared values with
+            | error err =>
+                simp [eval, hArgs, hPrim] at hEval
+            | ok primResult =>
+                rcases primResult with ⟨sharedAfter, values'⟩
+                simp [eval, hArgs, hPrim] at hEval
+                rcases hEval with ⟨hState, _hValues⟩
+                cases hState
+                simpa [State.withShared] using
+                  (evalSeq_vars_eq (prim := prim) (exprs := args)
+                    (state := state) (state' := stateAfterArgs)
+                    (values := values) hArgs)
+
+  theorem evalSeq_vars_eq {results : Nat} {prim : PrimitiveSemantics}
+      {exprs : ExprSeq results} {state state' : State} {values : List Word}
+      (hEval : ExprSeq.eval prim exprs state = .ok (state', values)) :
+      state'.vars = state.vars := by
+    cases exprs with
+    | nil =>
+        simp [ExprSeq.eval] at hEval
+        rcases hEval with ⟨hState, _hValues⟩
+        cases hState
+        rfl
+    | cons head tail =>
+        cases hHead : eval prim head state with
+        | error err =>
+            simp [ExprSeq.eval, hHead] at hEval
+        | ok headResult =>
+            rcases headResult with ⟨stateAfterHead, headValues⟩
+            cases hTail :
+                ExprSeq.eval prim tail stateAfterHead with
+            | error err =>
+                simp [ExprSeq.eval, hHead, hTail] at hEval
+            | ok tailResult =>
+                rcases tailResult with ⟨stateAfterTail, tailValues⟩
+                simp [ExprSeq.eval, hHead, hTail] at hEval
+                rcases hEval with ⟨hState, _hValues⟩
+                have hHeadVars :
+                    stateAfterHead.vars = state.vars :=
+                  eval_vars_eq (prim := prim) (expr := head)
+                    (state := state) (state' := stateAfterHead)
+                    (values := headValues) hHead
+                have hTailVars :
+                    stateAfterTail.vars = stateAfterHead.vars :=
+                  evalSeq_vars_eq (prim := prim) (exprs := tail)
+                    (state := stateAfterHead) (state' := stateAfterTail)
+                    (values := tailValues) hTail
+                cases hState
+                exact hTailVars.trans hHeadVars
+end
+
+theorem evalOne_vars_eq {results : Nat} {prim : PrimitiveSemantics}
+    {expr : Expr results} {state state' : State} {value : Word}
+    (hEval : evalOne prim expr state = .ok (state', value)) :
+    state'.vars = state.vars := by
+  unfold evalOne at hEval
+  cases hExpr : eval prim expr state with
+  | error err =>
+      simp [hExpr] at hEval
+  | ok result =>
+      rcases result with ⟨stateAfter, values⟩
+      cases values with
+      | nil =>
+          simp [hExpr, invalid, Structured.invalid] at hEval
+      | cons head tail =>
+          cases tail with
+          | nil =>
+              simp [hExpr] at hEval
+              rcases hEval with ⟨hState, _hValue⟩
+              cases hState
+              exact eval_vars_eq hExpr
+          | cons second rest =>
+              simp [hExpr, invalid, Structured.invalid] at hEval
+
 end Expr
 
 namespace Switch
@@ -461,6 +566,342 @@ mutual
       | exact Prod.Lex.right _
           (Prod.Lex.left _ _ (by omega))
 end
+
+namespace Stmt
+
+theorem run_regular_scope {prim : PrimitiveSemantics} {program : Program}
+    {ctx ctx' : Ctx} {fuel : Nat} {stmt : Stmt} {state out : State}
+    (hRun :
+      Source.Stmt.run prim program ctx fuel stmt state =
+        .ok (Outcome.regular out, ctx')) :
+    ctx'.scope = Scope.Stmt.outEnv ctx.scope stmt := by
+  cases stmt with
+  | expr expr =>
+      cases hEval : Expr.eval prim expr state with
+      | error err =>
+          simp [Source.Stmt.run, hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfterExpr, values⟩
+          simp [Source.Stmt.run, hEval, Scope.Stmt.outEnv] at hRun
+          rcases hRun with ⟨_hOutcome, hCtxEq⟩
+          cases hCtxEq
+          rfl
+  | exprs exprs =>
+      cases hEval : Expr.ExprSeq.eval prim exprs state with
+      | error err =>
+          simp [Source.Stmt.run, hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfterExprs, values⟩
+          simp [Source.Stmt.run, hEval, Scope.Stmt.outEnv] at hRun
+          rcases hRun with ⟨_hOutcome, hCtxEq⟩
+          cases hCtxEq
+          rfl
+  | let_ name value =>
+      cases hEval : Expr.evalOne prim value state with
+      | error err =>
+          simp [Source.Stmt.run, hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfterValue, value'⟩
+          simp [Source.Stmt.run, hEval, Scope.Stmt.outEnv] at hRun
+          rcases hRun with ⟨_hOutcome, hCtxEq⟩
+          cases hCtxEq
+          rfl
+  | assign name value =>
+      cases hContains : state.vars.contains name with
+      | false =>
+          simp [Source.Stmt.run, hContains, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | true =>
+          cases hEval : Expr.evalOne prim value state with
+          | error err =>
+              simp [Source.Stmt.run, hContains, hEval] at hRun
+          | ok result =>
+              rcases result with ⟨stateAfterValue, value'⟩
+              simp [Source.Stmt.run, hContains, hEval, Scope.Stmt.outEnv]
+                at hRun
+              rcases hRun with ⟨_hOutcome, hCtxEq⟩
+              cases hCtxEq
+              rfl
+  | assignTop name =>
+      simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+  | assignTopWithOffset offset name =>
+      simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+  | block body =>
+      cases hBlock : Block.runScoped prim program ctx body fuel state with
+      | error err =>
+          simp [Source.Stmt.run, hBlock] at hRun
+      | ok outcome =>
+          cases outcome with
+          | mk blockState mode =>
+              cases mode <;> simp [Source.Stmt.run, hBlock,
+                Scope.Stmt.outEnv, Outcome.regular, Outcome.brk,
+                Outcome.cont, Outcome.leave, Outcome.halt] at hRun
+              case regular =>
+                rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                cases hCtxEq
+                rfl
+  | if_ cond body =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | succ fuel =>
+          cases hCond : Expr.evalCondition prim cond state with
+          | error err =>
+              simp [Source.Stmt.run, hCond] at hRun
+          | ok condResult =>
+              rcases condResult with ⟨stateAfterCond, condTrue⟩
+              cases condTrue <;>
+                simp [Source.Stmt.run, hCond, Scope.Stmt.outEnv] at hRun
+              · rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                cases hCtxEq
+                rfl
+              · cases hBlock :
+                    Block.runScoped prim program ctx body fuel
+                      stateAfterCond with
+                | error err =>
+                    simp [hBlock] at hRun
+                | ok outcome =>
+                    cases outcome with
+                    | mk blockState mode =>
+                        cases mode <;> simp [hBlock, Outcome.regular,
+                          Outcome.brk, Outcome.cont, Outcome.leave,
+                          Outcome.halt] at hRun
+                        case regular =>
+                          rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                          cases hCtxEq
+                          rfl
+  | switch scrutinee cases defaultBody =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | succ fuel =>
+          cases hScrutinee : Expr.evalOne prim scrutinee state with
+          | error err =>
+              simp [Source.Stmt.run, hScrutinee] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨stateAfterScrutinee, value⟩
+              cases hSelect : Switch.select value cases defaultBody with
+              | none =>
+                  simp [Source.Stmt.run, hScrutinee, hSelect,
+                    Scope.Stmt.outEnv] at hRun
+                  rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                  cases hCtxEq
+                  rfl
+              | some body =>
+                  cases hBlock :
+                      Block.runScoped prim program ctx body fuel
+                        stateAfterScrutinee with
+                  | error err =>
+                      simp [Source.Stmt.run, hScrutinee, hSelect, hBlock]
+                        at hRun
+                  | ok outcome =>
+                      cases outcome with
+                      | mk blockState mode =>
+                          cases mode <;> simp [Source.Stmt.run, hScrutinee,
+                            hSelect, hBlock, Scope.Stmt.outEnv,
+                            Outcome.regular, Outcome.brk, Outcome.cont,
+                            Outcome.leave, Outcome.halt] at hRun
+                          case regular =>
+                            rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                            cases hCtxEq
+                            rfl
+  | for_ init cond post body =>
+      cases fuel with
+      | zero =>
+          simp [Source.Stmt.run, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | succ fuel =>
+          cases hInit :
+              Block.runOpen prim program ctx.withoutLoopControl fuel init
+                state with
+          | error err =>
+              simp [Source.Stmt.run, hInit] at hRun
+          | ok initResult =>
+              rcases initResult with ⟨initOutcome, initCtx⟩
+              cases initOutcome with
+              | mk initState initMode =>
+                  cases initMode <;> simp [Source.Stmt.run, hInit,
+                    Scope.Stmt.outEnv, Outcome.regular, Outcome.brk,
+                    Outcome.cont, Outcome.leave, Outcome.halt,
+                Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+                  case regular =>
+                    cases hLoop :
+                        Stmt.runForLoop prim program initCtx cond
+                          initCtx.withoutLoopControl post
+                          (initCtx.withLoopControl initCtx.scope initCtx.scope)
+                          body fuel initState with
+                    | error err =>
+                        simp [hLoop] at hRun
+                    | ok loopOutcome =>
+                        cases loopOutcome with
+                        | mk loopState loopMode =>
+                            cases loopMode <;> simp [hLoop, Outcome.regular,
+                              Outcome.brk, Outcome.cont, Outcome.leave,
+                              Outcome.halt, Source.invalid, invalid,
+                              EvmCompiler.Structured.invalid] at hRun
+                            case regular =>
+                              rcases hRun with ⟨_hOutcome, hCtxEq⟩
+                              cases hCtxEq
+                              rfl
+  | brk =>
+      cases hBreak : ctx.breakScope? with
+      | none =>
+          simp [Source.Stmt.run, hBreak, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | some scope =>
+          simp [Source.Stmt.run, hBreak, Outcome.brk] at hRun
+          exact False.elim (by
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            cases hOutcome)
+  | cont =>
+      cases hContinue : ctx.continueScope? with
+      | none =>
+          simp [Source.Stmt.run, hContinue, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | some scope =>
+          simp [Source.Stmt.run, hContinue, Outcome.cont] at hRun
+          exact False.elim (by
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            cases hOutcome)
+  | leave =>
+      cases hLeave : ctx.leaveScope? with
+      | none =>
+          simp [Source.Stmt.run, hLeave, Source.invalid, invalid,
+            EvmCompiler.Structured.invalid] at hRun
+      | some scope =>
+          simp [Source.Stmt.run, hLeave, Outcome.leave] at hRun
+          exact False.elim (by
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            cases hOutcome)
+  | call name =>
+      simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+  | terminal kind =>
+      cases hTerminal : prim.terminal kind state.shared [] with
+      | error err =>
+          simp [Source.Stmt.run, hTerminal] at hRun
+      | ok shared =>
+          simp [Source.Stmt.run, hTerminal, Outcome.halt] at hRun
+          exact False.elim (by
+            rcases hRun with ⟨hOutcome, _hCtx⟩
+            cases hOutcome)
+  | terminalArgs kind args =>
+      cases hArgs : Expr.ExprSeq.eval prim args state with
+      | error err =>
+          simp [Source.Stmt.run, hArgs] at hRun
+      | ok argResult =>
+          rcases argResult with ⟨stateAfterArgs, values⟩
+          cases hTerminal : prim.terminal kind stateAfterArgs.shared values with
+          | error err =>
+              simp [Source.Stmt.run, hArgs, hTerminal] at hRun
+          | ok shared =>
+              simp [Source.Stmt.run, hArgs, hTerminal, Outcome.halt] at hRun
+              exact False.elim (by
+                rcases hRun with ⟨hOutcome, _hCtx⟩
+                cases hOutcome)
+
+end Stmt
+
+namespace Block
+
+theorem runOpen_regular_scope {prim : PrimitiveSemantics}
+    {program : Program} {ctx ctx' : Ctx} {fuel : Nat} {block : Block}
+    {state out : State}
+    (hRun :
+      Source.Block.runOpen prim program ctx fuel block state =
+        .ok (Outcome.regular out, ctx')) :
+    ctx'.scope = Scope.Block.outEnv ctx.scope block := by
+  cases block with
+  | mk stmts =>
+      induction stmts generalizing ctx ctx' fuel state out with
+      | nil =>
+          cases fuel with
+          | zero =>
+              simp [Source.Block.runOpen, Source.invalid, invalid,
+                EvmCompiler.Structured.invalid] at hRun
+          | succ fuel =>
+              simp [Source.Block.runOpen, Scope.Block.outEnv,
+                Scope.StmtList.outEnv] at hRun
+              rcases hRun with ⟨_hOutcome, hCtxEq⟩
+              cases hCtxEq
+              rfl
+      | cons stmt rest ih =>
+          cases fuel with
+          | zero =>
+              simp [Source.Block.runOpen, Source.invalid, invalid,
+                EvmCompiler.Structured.invalid] at hRun
+          | succ fuel =>
+              cases hStmt :
+                  Source.Stmt.run prim program ctx fuel stmt state with
+              | error err =>
+                  simp [Source.Block.runOpen, hStmt] at hRun
+              | ok stmtResult =>
+                  rcases stmtResult with ⟨stmtOutcome, headCtx⟩
+                  cases stmtOutcome with
+                  | mk stmtState mode =>
+                      cases mode <;> simp [Source.Block.runOpen, hStmt,
+                        Outcome.regular, Outcome.brk, Outcome.cont,
+                        Outcome.leave, Outcome.halt] at hRun
+                      case regular =>
+                        have hHeadScope :
+                            headCtx.scope =
+                              Scope.Stmt.outEnv ctx.scope stmt :=
+                          Stmt.run_regular_scope hStmt
+                        have hTailScope :
+                            ctx'.scope =
+                              Scope.Block.outEnv headCtx.scope
+                                { stmts := rest } :=
+                          ih hRun
+                        simpa [Scope.Block.outEnv, Scope.StmtList.outEnv,
+                          hHeadScope] using hTailScope
+                      all_goals
+                        exact False.elim (by
+                          rcases hRun with ⟨hOutcome, _hCtx⟩
+                          cases hOutcome)
+
+theorem runScoped_regular_eq_restrict {prim : PrimitiveSemantics}
+    {program : Program} {ctx : Ctx} {block : Block} {fuel : Nat}
+    {state out : State}
+    (hRun :
+      Block.runScoped prim program ctx block fuel state =
+        .ok (Outcome.regular out)) :
+    ∃ inner finalCtx,
+      Block.runOpen prim program ctx fuel block state =
+        .ok (Outcome.regular inner, finalCtx) ∧
+        out = inner.restrictTo ctx.scope := by
+  unfold Block.runScoped at hRun
+  cases hOpen : Block.runOpen prim program ctx fuel block state with
+  | error err =>
+      simp [hOpen] at hRun
+  | ok result =>
+      rcases result with ⟨outcome, finalCtx⟩
+      cases outcome with
+      | mk outcomeState mode =>
+          cases mode
+          · simp [hOpen, Outcome.regular] at hRun
+            cases hRun
+            refine ⟨outcomeState, finalCtx, ?_, rfl⟩
+            simpa [Outcome.regular] using hOpen
+          · simp [hOpen, Outcome.regular, Outcome.brk] at hRun
+          · simp [hOpen, Outcome.regular, Outcome.cont] at hRun
+          · simp [hOpen, Outcome.regular, Outcome.leave] at hRun
+          · simp [hOpen, Outcome.regular, Outcome.halt] at hRun
+
+theorem runScoped_regular_drops_not_mem {prim : PrimitiveSemantics}
+    {program : Program} {ctx : Ctx} {block : Block} {fuel : Nat}
+    {state out : State} {name : Name}
+    (hRun :
+      Block.runScoped prim program ctx block fuel state =
+        .ok (Outcome.regular out))
+    (hNotMem : name ∉ ctx.scope) :
+    out.vars name = none := by
+  rcases runScoped_regular_eq_restrict hRun with
+    ⟨inner, _finalCtx, _hOpen, hOut⟩
+  rw [hOut]
+  exact Store.restrictTo_not_mem hNotMem
+
+end Block
 
 namespace Program
 

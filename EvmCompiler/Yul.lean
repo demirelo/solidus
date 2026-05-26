@@ -1,3 +1,9 @@
 import EvmCompiler.Yul.Syntax
 import EvmCompiler.Yul.Compiler
+import EvmCompiler.Yul.ArgSlots
 import EvmCompiler.Yul.PrimSemantics
+import EvmCompiler.Yul.Semantics
+import EvmCompiler.Yul.Preservation
+import EvmCompiler.Yul.RecursiveBridgeSupport
+import EvmCompiler.Yul.NoCallCreate
+import EvmCompiler.Yul.NoCallRuntime

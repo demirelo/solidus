@@ -9,6 +9,13 @@ namespace Assembly
 abbrev EVMState := EvmYul.EVM.State
 abbrev EVMException := EvmYul.EVM.ExecutionException
 
+inductive HaltKind where
+  | stop
+  | return
+  | revert
+  | selfdestruct
+  deriving DecidableEq, Repr
+
 structure Halt where
   kind : HaltKind
   state : EVMState
@@ -20,12 +27,35 @@ inductive StepResult where
 
 namespace HaltKind
 
+def argCount : HaltKind → Nat
+  | .stop => 0
+  | .return => 2
+  | .revert => 2
+  | .selfdestruct => 1
+
+def toPrimOp : HaltKind → PrimOp
+  | .stop => .stop
+  | .return => .return
+  | .revert => .revert
+  | .selfdestruct => .selfdestruct
+
 def output (kind : HaltKind) (state : EVMState) : ByteArray :=
   match kind with
   | .stop | .selfdestruct => .empty
   | .return | .revert => state.toMachineState.H_return
 
 end HaltKind
+
+namespace PrimOp
+
+def haltKind? : PrimOp → Option HaltKind
+  | .stop => some .stop
+  | .return => some .return
+  | .revert => some .revert
+  | .selfdestruct => some .selfdestruct
+  | _ => none
+
+end PrimOp
 
 namespace TargetInstr
 

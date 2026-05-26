@@ -1,4 +1,6 @@
-import EvmCompiler.Yul.Syntax
+import EvmCompiler.Yul.Compiler
+import EvmCompiler.Objects.Semantics
+import EvmCompiler.Objects.SourceSemantics
 import EvmYul.Yul.Interpreter
 
 namespace EvmCompiler
@@ -34,6 +36,10 @@ def runRegular (fuel : Nat) (program : Program) (state : ReferenceState) :
 
 /--
 Independent Yul source interpreter for the imported Nethermind AST.
+
+This is the public source run boundary for the Yul layer.  The old
+compiler-facing execution through object lowering is intentionally quarantined
+below as `Lowered.run`.
 -/
 def run (fuel : Nat) (program : Program) (state : ReferenceState) :
     Except ReferenceException ReferenceResult :=
@@ -46,6 +52,68 @@ def run (fuel : Nat) (program : Program) (state : ReferenceState) :
   | .error exception => .error exception
 
 end Program
+
+namespace Lowered
+
+noncomputable def run (fuel : Nat) (program : Program) (state : EVMState) :
+    Except EVMException Outcome :=
+  match program.toObjects? with
+  | none => .error .InvalidInstruction
+  | some lower => lower.run fuel state
+
+inductive Eval :
+    Nat → Program → EVMState → Outcome → Prop where
+  | ofObjects {fuel : Nat} {program : Program}
+      {initial : EVMState} {outcome : Outcome} {lower : Objects.Program}
+      (hToObjects : program.toObjects? = some lower)
+      (hRun : lower.run fuel initial = .ok outcome) :
+      Eval fuel program initial outcome
+
+end Lowered
+
+namespace SourceLowered
+
+noncomputable def runState (prim : Objects.Source.PrimitiveSemantics) (fuel : Nat)
+    (program : Program) (state : Objects.Source.State) :
+    Except EVMException Objects.Source.Outcome :=
+  match program.toObjects? with
+  | none => .error .InvalidInstruction
+  | some lower => Objects.Source.Program.runState prim fuel lower state
+
+noncomputable def run (prim : Objects.Source.PrimitiveSemantics) (fuel : Nat)
+    (program : Program) (state : EVMState) :
+    Except EVMException Objects.Source.Outcome :=
+  match program.toObjects? with
+  | none => .error .InvalidInstruction
+  | some lower => Objects.Source.Program.run prim fuel lower state
+
+theorem runState_of_toObjects? {prim : Objects.Source.PrimitiveSemantics}
+    {fuel : Nat} {program : Program} {state : Objects.Source.State}
+    {lower : Objects.Program}
+    (hLower : program.toObjects? = some lower) :
+    runState prim fuel program state =
+      Objects.Source.Program.runState prim fuel lower state := by
+  simp [runState, hLower]
+
+theorem run_of_toObjects? {prim : Objects.Source.PrimitiveSemantics}
+    {fuel : Nat} {program : Program} {state : EVMState}
+    {lower : Objects.Program}
+    (hLower : program.toObjects? = some lower) :
+    run prim fuel program state =
+      Objects.Source.Program.run prim fuel lower state := by
+  simp [run, hLower]
+
+inductive Eval (prim : Objects.Source.PrimitiveSemantics) :
+    Nat → Program → Objects.Source.State → Objects.Source.Outcome → Prop where
+  | ofObjects {fuel : Nat} {program : Program}
+      {initial : Objects.Source.State} {outcome : Objects.Source.Outcome}
+      {lower : Objects.Program}
+      (hToObjects : program.toObjects? = some lower)
+      (hRun :
+        Objects.Source.Program.runState prim fuel lower initial = .ok outcome) :
+      Eval prim fuel program initial outcome
+
+end SourceLowered
 
 end Yul
 end EvmCompiler
