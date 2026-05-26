@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 20:43 PDT.
+Last updated: 2026-05-25 21:12 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -178,6 +178,12 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - [x] Prove compiler-gate lemmas:
     `accepted?_of_compilesTo`, `checked_of_compilesTo`, and
     `toCfg?_of_compilesTo`.
+  - [x] Add internal adjacent-proof vocabulary:
+    source store scoping, typed-shape/store matching, source/target state
+    relation, mode-to-continuation mapping, fragment result relation, and
+    statement/sequence/block soundness predicates.
+  - [x] Prove `initial_stateRel`, the bridge from the public initial-state
+    relation into the internal state relation used by the induction.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.
@@ -305,12 +311,17 @@ StackFreeCfg, not directly into TypedCfg or assembly.
 
 ### Stage 4: Labeled Assembly To EVM Proof
 
-- [ ] Reuse/restore the archived labeled-assembly proof shape where it still
+- [x] Reuse/restore the archived labeled-assembly proof shape where it still
   applies.
-- [ ] Prove label resolution maps every symbolic target to a `JUMPDEST`.
-- [ ] Prove byte encoding and concrete PC preservation.
-- [ ] Prove gasless source assembly run agrees with EVM execution after erasing
-  gas-only behavior.
+- [x] Prove accepted labeled assembly source runs compile to target block
+  traces with matching result/halt behavior.
+- [x] Prove byte encoding and concrete PC/decode preservation, conditional on
+  a finite decoder-window bound and the imported jumpdest scanner boundary.
+- [ ] Prove or eliminate `Bytecode.JumpdestCorrect`; currently this is the
+  remaining bytecode scanner assumption because EVMYulLean's `D_J_aux` is
+  opaque.
+- [x] Keep gasless source assembly run agreement free of gas/oracle/external
+  runtime assumptions; those now live only at the gas-aware `X` boundary.
 - [ ] Keep gas/resource assumptions explicit at the final gas-aware boundary.
 
 ### Stage 5: End-To-End Composition

@@ -67,6 +67,128 @@ inductive ResultRel : SourceResult → TargetResult → Prop where
   | primitiveError {error : TypedCfg.EVMException} :
       ResultRel (.error (.primitive error)) (.error error)
 
+namespace Internal
+
+/-!
+Internal proof vocabulary for the adjacent StackFreeCfg -> TypedCfg proof.
+
+These definitions may mention `TypedCfg.Shape`, labels, and runtime stacks
+because they live exactly at the compiler boundary that hides those details.
+They should not be used by higher layers, which should target `Observation` and
+`Program.CompilePreserves` above.
+-/
+
+abbrev Shape :=
+  TypedCfg.Shape
+
+abbrev Label :=
+  TypedCfg.Label
+
+def StoreScoped (scope : List Name) (vars : Store.T) : Prop :=
+  ∀ name, name ∉ scope → vars name = none
+
+def SlotMatchesStore (vars : Store.T) :
+    TypedCfg.Slot → Word → Prop
+  | .literal expected, value => value = expected
+  | .local name, value => vars name = some value
+  | .word, _value => True
+  | .temp _scope _index, _value => True
+  | .returnPC _site, _value => True
+  | .returnValue name _index, value => vars name = some value
+
+def ShapeMatchesStore (vars : Store.T) :
+    Shape → EvmYul.Stack Word → Prop
+  | [], [] => True
+  | slot :: shapeRest, value :: stackRest =>
+      SlotMatchesStore vars slot value ∧
+        ShapeMatchesStore vars shapeRest stackRest
+  | _, _ => False
+
+structure StateRel (scope : List Name) (shape : Shape)
+    (source : State) (target : TypedCfg.RunState) : Prop where
+  store_scoped : StoreScoped scope source.vars
+  shared_eq : target.evm.toSharedState = source.shared
+  stack : ShapeMatchesStore source.vars shape target.evm.stack
+
+namespace StateRel
+
+theorem shared_eq_of {scope : List Name} {shape : Shape}
+    {source : State} {target : TypedCfg.RunState}
+    (h : StateRel scope shape source target) :
+    target.evm.toSharedState = source.shared :=
+  h.shared_eq
+
+end StateRel
+
+namespace Mode
+
+def kont? (ctx : Compiler.Context) : Mode → Option Compiler.Kont
+  | .regular => some ctx.regular
+  | .brk => ctx.break?
+  | .cont => ctx.continue?
+  | .leave => ctx.leave?
+  | .halt _ | .invalid | .outOfFuel => none
+
+end Mode
+
+inductive FragmentResultRel (ctx : Compiler.Context) :
+    Except Exception Outcome → Except TypedCfg.EVMException TypedCfg.Outcome →
+      Prop where
+  | jump {source : Outcome} {target : TypedCfg.RunState}
+      {kont : Compiler.Kont}
+      (hKont : Mode.kont? ctx source.mode = some kont)
+      (hState : StateRel source.scope kont.shape source.state target) :
+      FragmentResultRel ctx (.ok source) (.ok (.jump kont.label target))
+  | halt {source : Outcome} {target : TypedCfg.RunState}
+      {kind : Assembly.HaltKind}
+      (hMode : source.mode = .halt kind)
+      (hShared : target.evm.toSharedState = source.state.shared) :
+      FragmentResultRel ctx (.ok source) (.ok (.halt kind target))
+  | invalidMode {source : Outcome} {target : TypedCfg.RunState}
+      (hMode : source.mode = .invalid) :
+      FragmentResultRel ctx (.ok source) (.ok (.invalid target))
+  | invalidError {target : TypedCfg.RunState} :
+      FragmentResultRel ctx (.error .invalid) (.ok (.invalid target))
+  | outOfFuel {source : Outcome} {label : Label}
+      {target : TypedCfg.RunState}
+      (hMode : source.mode = .outOfFuel)
+      (hShared : target.evm.toSharedState = source.state.shared) :
+      FragmentResultRel ctx (.ok source) (.ok (.outOfFuel label target))
+  | primitiveError {error : TypedCfg.EVMException} :
+      FragmentResultRel ctx (.error (.primitive error)) (.error error)
+
+def StmtSound (cfg : TypedCfg.Program) (program : Program)
+    (sourceCtx : Ctx) (targetCtx : Compiler.Context)
+    (stmt : Stmt) (label : Label) (shape : Shape) : Prop :=
+  ∀ fuel source target,
+    StateRel sourceCtx.scope shape source target →
+      FragmentResultRel targetCtx
+        (Stmt.run fuel PrimitiveSemantics.canonical program sourceCtx stmt
+          source)
+        (TypedCfg.Program.runFrom fuel cfg label target)
+
+def SeqSound (cfg : TypedCfg.Program) (program : Program)
+    (sourceCtx : Ctx) (targetCtx : Compiler.Context)
+    (stmts : List Stmt) (label : Label) (shape : Shape) : Prop :=
+  ∀ fuel source target,
+    StateRel sourceCtx.scope shape source target →
+      FragmentResultRel targetCtx
+        (StmtList.run fuel PrimitiveSemantics.canonical program sourceCtx stmts
+          source)
+        (TypedCfg.Program.runFrom fuel cfg label target)
+
+def BlockSound (cfg : TypedCfg.Program) (program : Program)
+    (sourceCtx : Ctx) (targetCtx : Compiler.Context)
+    (block : Block) (label : Label) (shape : Shape) : Prop :=
+  ∀ fuel source target,
+    StateRel sourceCtx.scope shape source target →
+      FragmentResultRel targetCtx
+        (Block.run fuel PrimitiveSemantics.canonical program sourceCtx block
+          source)
+        (TypedCfg.Program.runFrom fuel cfg label target)
+
+end Internal
+
 namespace Program
 
 def CompilesTo (program : Program) (target : TypedCfg.CheckedProgram) : Prop :=
@@ -134,6 +256,17 @@ def CompilePreserves : Prop :=
       PreservesCompiled program target
 
 end Program
+
+theorem initial_stateRel {shared : SharedState} {target : TypedCfg.EVMState}
+    (h : InitialRel shared target) :
+    Internal.StateRel [] [] ({ shared := shared } : State)
+      (TypedCfg.RunState.initial target) := by
+  constructor
+  · intro name hMem
+    rfl
+  · simp [TypedCfg.RunState.initial, h.shared_eq]
+  · simp [Internal.ShapeMatchesStore, TypedCfg.RunState.initial,
+      h.stack_empty]
 
 end Preservation
 end StackFreeCfg
