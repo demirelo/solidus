@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 15:33 PDT.
+Last updated: 2026-05-26 15:38 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3013,6 +3013,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
            - [x] Package `toExecute` dispatch into child-frame construction, covering both precompile/default-code frames and ordinary selected account code frames from a single `CompiledToExecuteRel`.
            - [x] Package the `CALL` value-transfer branch hinge: the compiled account-map relation now turns EVM's `value <= balance` check into Yul `callTransferAccountMap? = some ...`, and turns EVM insufficient funds into the Yul `none` branch.
            - [x] Specialize call-gas agreement for the missing-recipient/no-contract branch by deriving matching `dead` facts from the compiled account-map relation.
+           - [x] Package imported-Yul empty-return helper branches after caller warming, covering both `none` account-map early failures and `some` transferred-account-map empty successes under the explicit returned target-gas relation.
          - [ ] Prove the result/world merge after the child call returns or reverts, including account-map, substate, created-account, return-data, and success-bit agreement.
            - [x] Add target-gas-aware external-call finish/merge lemmas, so EVM's returned-child-gas update is explicit in the proof obligation instead of hidden inside the generic finish-call relation.
            - [x] Package the successful nonempty-child-account-map branch of EVM `Θ` result merge: when the returned EVM child account map is not `∅`, the restored Yul caller state relates to the EVM caller state using the child account map/substate/created-account set.
