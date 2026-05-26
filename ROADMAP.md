@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-25 06:52 PDT.
+Last updated: 2026-05-26 05:07 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -47,6 +47,13 @@ this IR as the refactor proceeds.
        that bound with `RecursiveBridgeCompileResources.checked?` through
        `compileCheckedAssemblyTargetBytecodeResources?` instead of taking it as
        a separate premise.
+     - [x] Add `Reference.Safe.FeatureCoverage.checked?` and the combined
+       `compileCheckedAssemblyTargetBytecodeResourcesFeatures?` boundary, so
+       the preferred public theorem checks the four remaining source
+       feature-family exclusions structurally instead of asking callers to
+       prove `RecursiveBridgeFeatureCoverage`. These exclusions remain honest
+       unsupported-feature semantic boundaries until their source/target
+       contracts are proved.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
@@ -230,10 +237,12 @@ Current assumption-cleanup checkpoint:
   - Source validity: `RecursiveBridgeSourceAccepted` bundles imported Yul
     acceptedness, lexical scoping, control-flow scoping, and user-call arity.
   - Full source/feature split: the preferred surface takes
-    `RecursiveBridgeFullSourceAccepted` plus `RecursiveBridgeFeatureCoverage`.
-    Full acceptedness is source validity; feature coverage carries the four
-    currently-unproved bridge families. `LayerAudit` exports the four field
-    projections and the checked reconstruction of old
+    `RecursiveBridgeFullSourceAccepted` plus the checked compiler/source
+    boundary `compileCheckedAssemblyTargetBytecodeResourcesFeatures?`. Full
+    acceptedness is source validity; the checker rejects the four
+    currently-unproved bridge families until their semantics are proved.
+    `LayerAudit` exports the source checker, its soundness theorem, the four
+    field projections, and the checked reconstruction of old
     `Reference.Safe.FeatureCoverage.program` from feature coverage plus
     successful checked compilation.
   - Lower resource validity: the generated lower function program's
@@ -254,11 +263,12 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel` constructs the
     internal dispatcher-body fuel fact used by the old bridge from that public
     source-run boundary.
-  - Target entry/runtime: checked compiler success, checked lower frame
-    resources, checked bytecode bridge facts, initial shared-state relation,
-    canonical entry PC/empty stack, and gas-aware runner completeness. The
-    marker-only gas oracle, out-of-gas policy, and current-contract projection
-    packages are constructed internally by trivial checked constructors.
+  - Target entry/runtime: checked compiler success, checked source
+    feature-family exclusions, checked lower frame resources, checked bytecode
+    bridge facts, initial shared-state relation, canonical entry PC/empty
+    stack, and gas-aware runner completeness. The marker-only gas oracle,
+    out-of-gas policy, and current-contract projection packages are constructed
+    internally by trivial checked constructors.
   - Discharged/generated facts at the top boundary: emitted no-call/create is
     proved from accepted source plus checked compilation; `DecodeSafety` is
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
@@ -270,6 +280,13 @@ Current assumption-cleanup checkpoint:
   calls (`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`) as separate semantic
   boundaries. Object-builtin user-call coverage is no longer public evidence:
   it is constructed from successful checked compilation.
+- [x] Check the remaining source feature-family exclusions at the preferred
+  top boundary. `Reference.Safe.FeatureCoverage.checked?` structurally rejects
+  the four unsupported families in the source program, and
+  `compileCheckedAssemblyTargetBytecodeResourcesFeatures?` bundles that source
+  check with checked compilation, lower frame resources, and bytecode bridge
+  checks. This removes caller-supplied `RecursiveBridgeFeatureCoverage` from
+  the preferred theorem without pretending the unsupported families are proved.
 - [x] Remove the marker-only gas bookkeeping premises from the preferred
   gas-aware top wrappers. `GasOracleAssumption.trivial`,
   `OutOfGasPolicyAssumption.trivial`, and
@@ -403,6 +420,12 @@ Current assumption-cleanup checkpoint:
     preferred gas-aware top theorem constructs the generated source/direct frame
     bound from the lowered object and a concrete checker rather than exposing
     `RecursiveBridgeCompileResources` as a caller premise.
+  - [x] Add `Reference.Safe.FeatureCoverage.checked?`,
+    `RecursiveBridgeFeatureCoverage.checked?`, and
+    `Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesFeatures?`, so
+    the preferred gas-aware top theorem constructs the feature-coverage package
+    from a concrete source checker rather than exposing
+    `RecursiveBridgeFeatureCoverage` as a caller premise.
 - [x] Add the actual result-level gas-aware `EVM.X` top wrapper for the
   preferred no-call/create route.
   - [x] Add `Assembly.GasAware.XResultAgrees` and

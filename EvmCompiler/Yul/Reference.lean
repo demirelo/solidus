@@ -997,6 +997,506 @@ noncomputable def objectBuiltinProgram :
     Program → Prop :=
   Family.program Family.anyPrimitive objectBuiltinUserCall
 
+def localCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
+  | .Env .CODESIZE => false
+  | .Env .CODECOPY => false
+  | _ => true
+
+def externalCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
+  | .Env .EXTCODESIZE => false
+  | .Env .EXTCODECOPY => false
+  | .Env .EXTCODEHASH => false
+  | _ => true
+
+def createBoundaryPrimitive? : EvmYul.Operation .Yul → Bool
+  | .System .CREATE => false
+  | .System .CREATE2 => false
+  | _ => true
+
+def externalBoundaryPrimitive? : EvmYul.Operation .Yul → Bool
+  | .System .CALL => false
+  | .System .CALLCODE => false
+  | .System .DELEGATECALL => false
+  | .System .STATICCALL => false
+  | _ => true
+
+theorem localCodeImagePrimitive_of_check {op : EvmYul.Operation .Yul}
+    (hCheck : localCodeImagePrimitive? op = true) :
+    localCodeImagePrimitive op := by
+  cases op <;> simp [localCodeImagePrimitive?,
+    localCodeImagePrimitive, Safe.localCodeImagePrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [localCodeImagePrimitive?, localCodeImagePrimitive,
+      Safe.localCodeImagePrimitive] at hCheck ⊢
+
+theorem externalCodeImagePrimitive_of_check {op : EvmYul.Operation .Yul}
+    (hCheck : externalCodeImagePrimitive? op = true) :
+    externalCodeImagePrimitive op := by
+  cases op <;> simp [externalCodeImagePrimitive?,
+    externalCodeImagePrimitive, Safe.externalCodeImagePrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [externalCodeImagePrimitive?, externalCodeImagePrimitive,
+      Safe.externalCodeImagePrimitive] at hCheck ⊢
+
+theorem createBoundaryPrimitive_of_check {op : EvmYul.Operation .Yul}
+    (hCheck : createBoundaryPrimitive? op = true) :
+    createBoundaryPrimitive op := by
+  cases op <;> simp [createBoundaryPrimitive?,
+    createBoundaryPrimitive, Safe.createBoundaryPrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [createBoundaryPrimitive?, createBoundaryPrimitive,
+      Safe.createBoundaryPrimitive] at hCheck ⊢
+
+theorem externalBoundaryPrimitive_of_check {op : EvmYul.Operation .Yul}
+    (hCheck : externalBoundaryPrimitive? op = true) :
+    externalBoundaryPrimitive op := by
+  cases op <;> simp [externalBoundaryPrimitive?,
+    externalBoundaryPrimitive, Safe.externalCallBoundaryPrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [externalBoundaryPrimitive?, externalBoundaryPrimitive,
+      Safe.externalCallBoundaryPrimitive] at hCheck ⊢
+
+namespace Family
+
+def anyUserCall? (_functionName : Name) : Bool :=
+  true
+
+theorem anyUserCall_of_check {functionName : Name}
+    (_hCheck : anyUserCall? functionName = true) :
+    anyUserCall functionName := by
+  trivial
+
+mutual
+  def expr?
+      (primitive? : EvmYul.Operation .Yul → Bool)
+      (userCall? : Name → Bool) :
+      AstExpr → Bool
+    | .Lit _value => true
+    | .Var _name => true
+    | .Call (.inl prim) args => primitive? prim && exprs? primitive? userCall? args
+    | .Call (.inr functionName) args =>
+        userCall? functionName && exprs? primitive? userCall? args
+
+  def exprs?
+      (primitive? : EvmYul.Operation .Yul → Bool)
+      (userCall? : Name → Bool) :
+      List AstExpr → Bool
+    | [] => true
+    | head :: rest =>
+        expr? primitive? userCall? head && exprs? primitive? userCall? rest
+
+  def stmt?
+      (primitive? : EvmYul.Operation .Yul → Bool)
+      (userCall? : Name → Bool) :
+      AstStmt → Bool
+    | .Block body => stmts? primitive? userCall? body
+    | .Let _names none => true
+    | .Let _names (some value) => expr? primitive? userCall? value
+    | .Assign _names value => expr? primitive? userCall? value
+    | .ExprStmtCall value => expr? primitive? userCall? value
+    | .Switch scrutinee cases defaultBody =>
+        expr? primitive? userCall? scrutinee &&
+          (casesSafe? primitive? userCall? cases &&
+            stmts? primitive? userCall? defaultBody)
+    | .For cond post body =>
+        expr? primitive? userCall? cond &&
+          (stmts? primitive? userCall? post &&
+            stmts? primitive? userCall? body)
+    | .If cond body =>
+        expr? primitive? userCall? cond &&
+          stmts? primitive? userCall? body
+    | .Continue | .Break | .Leave => true
+
+  def stmts?
+      (primitive? : EvmYul.Operation .Yul → Bool)
+      (userCall? : Name → Bool) :
+      List AstStmt → Bool
+    | [] => true
+    | head :: rest =>
+        stmt? primitive? userCall? head && stmts? primitive? userCall? rest
+
+  def casesSafe?
+      (primitive? : EvmYul.Operation .Yul → Bool)
+      (userCall? : Name → Bool) :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        stmts? primitive? userCall? body &&
+          casesSafe? primitive? userCall? rest
+end
+
+def functionDefinition?
+    (primitive? : EvmYul.Operation .Yul → Bool)
+    (userCall? : Name → Bool) :
+    AstFunctionDefinition → Bool
+  | .Def _params _returns body => stmts? primitive? userCall? body
+
+def functionEntries?
+    (primitive? : EvmYul.Operation .Yul → Bool)
+    (userCall? : Name → Bool) :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      functionDefinition? primitive? userCall? fn &&
+        functionEntries? primitive? userCall? rest
+
+noncomputable def contract?
+    (primitive? : EvmYul.Operation .Yul → Bool)
+    (userCall? : Name → Bool) (contract : AstContract) :
+    Bool :=
+  stmt? primitive? userCall? contract.dispatcher &&
+    functionEntries? primitive? userCall?
+      (Contract.functionEntries contract)
+
+noncomputable def program?
+    (primitive? : EvmYul.Operation .Yul → Bool)
+    (userCall? : Name → Bool) (program : Program) :
+    Bool :=
+  contract? primitive? userCall? program.contract
+
+mutual
+  theorem expr_of_check
+      {primitive : EvmYul.Operation .Yul → Prop}
+      {userCall : Name → Prop}
+      {primitive? : EvmYul.Operation .Yul → Bool}
+      {userCall? : Name → Bool}
+      (hPrimitive :
+        ∀ op, primitive? op = true → primitive op)
+      (hUserCall :
+        ∀ functionName, userCall? functionName = true →
+          userCall functionName) :
+      ∀ {expr' : AstExpr},
+        expr? primitive? userCall? expr' = true →
+          expr primitive userCall expr' := by
+    intro expr' hCheck
+    cases expr' with
+    | Lit value =>
+        trivial
+    | Var name =>
+        trivial
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            have hAnd :
+                primitive? prim = true ∧
+                  exprs? primitive? userCall? args = true :=
+              by simpa [expr?] using hCheck
+            exact
+              ⟨hPrimitive prim hAnd.1,
+                exprs_of_check hPrimitive hUserCall hAnd.2⟩
+        | inr functionName =>
+            have hAnd :
+                userCall? functionName = true ∧
+                  exprs? primitive? userCall? args = true :=
+              by simpa [expr?] using hCheck
+            exact
+              ⟨hUserCall functionName hAnd.1,
+                exprs_of_check hPrimitive hUserCall hAnd.2⟩
+
+  theorem exprs_of_check
+      {primitive : EvmYul.Operation .Yul → Prop}
+      {userCall : Name → Prop}
+      {primitive? : EvmYul.Operation .Yul → Bool}
+      {userCall? : Name → Bool}
+      (hPrimitive :
+        ∀ op, primitive? op = true → primitive op)
+      (hUserCall :
+        ∀ functionName, userCall? functionName = true →
+          userCall functionName) :
+      ∀ {exprs' : List AstExpr},
+        exprs? primitive? userCall? exprs' = true →
+          exprs primitive userCall exprs' := by
+    intro exprs' hCheck
+    cases exprs' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            expr? primitive? userCall? head = true ∧
+              exprs? primitive? userCall? rest = true :=
+          by simpa [exprs?] using hCheck
+        exact
+          ⟨expr_of_check hPrimitive hUserCall hAnd.1,
+            exprs_of_check hPrimitive hUserCall hAnd.2⟩
+
+  theorem stmt_of_check
+      {primitive : EvmYul.Operation .Yul → Prop}
+      {userCall : Name → Prop}
+      {primitive? : EvmYul.Operation .Yul → Bool}
+      {userCall? : Name → Bool}
+      (hPrimitive :
+        ∀ op, primitive? op = true → primitive op)
+      (hUserCall :
+        ∀ functionName, userCall? functionName = true →
+          userCall functionName) :
+      ∀ {stmt' : AstStmt},
+        stmt? primitive? userCall? stmt' = true →
+          stmt primitive userCall stmt' := by
+    intro stmt' hCheck
+    cases stmt' with
+    | Block body =>
+        exact stmts_of_check hPrimitive hUserCall hCheck
+    | Let names value =>
+        cases value with
+        | none =>
+            trivial
+        | some value =>
+            exact expr_of_check hPrimitive hUserCall hCheck
+    | Assign names value =>
+        exact expr_of_check hPrimitive hUserCall hCheck
+    | ExprStmtCall value =>
+        exact expr_of_check hPrimitive hUserCall hCheck
+    | Switch scrutinee cases defaultBody =>
+        have hAnd :
+            expr? primitive? userCall? scrutinee = true ∧
+              (casesSafe? primitive? userCall? cases &&
+                stmts? primitive? userCall? defaultBody) = true :=
+          by simpa [stmt?] using hCheck
+        have hTail :
+            casesSafe? primitive? userCall? cases = true ∧
+              stmts? primitive? userCall? defaultBody = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨expr_of_check hPrimitive hUserCall hAnd.1,
+            casesSafe_of_check hPrimitive hUserCall hTail.1,
+            stmts_of_check hPrimitive hUserCall hTail.2⟩
+    | For cond post body =>
+        have hAnd :
+            expr? primitive? userCall? cond = true ∧
+              (stmts? primitive? userCall? post &&
+                stmts? primitive? userCall? body) = true :=
+          by simpa [stmt?] using hCheck
+        have hTail :
+            stmts? primitive? userCall? post = true ∧
+              stmts? primitive? userCall? body = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨expr_of_check hPrimitive hUserCall hAnd.1,
+            stmts_of_check hPrimitive hUserCall hTail.1,
+            stmts_of_check hPrimitive hUserCall hTail.2⟩
+    | If cond body =>
+        have hAnd :
+            expr? primitive? userCall? cond = true ∧
+              stmts? primitive? userCall? body = true :=
+          by simpa [stmt?] using hCheck
+        exact
+          ⟨expr_of_check hPrimitive hUserCall hAnd.1,
+            stmts_of_check hPrimitive hUserCall hAnd.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem stmts_of_check
+      {primitive : EvmYul.Operation .Yul → Prop}
+      {userCall : Name → Prop}
+      {primitive? : EvmYul.Operation .Yul → Bool}
+      {userCall? : Name → Bool}
+      (hPrimitive :
+        ∀ op, primitive? op = true → primitive op)
+      (hUserCall :
+        ∀ functionName, userCall? functionName = true →
+          userCall functionName) :
+      ∀ {stmts' : List AstStmt},
+        stmts? primitive? userCall? stmts' = true →
+          stmts primitive userCall stmts' := by
+    intro stmts' hCheck
+    cases stmts' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            stmt? primitive? userCall? head = true ∧
+              stmts? primitive? userCall? rest = true :=
+          by simpa [stmts?] using hCheck
+        exact
+          ⟨stmt_of_check hPrimitive hUserCall hAnd.1,
+            stmts_of_check hPrimitive hUserCall hAnd.2⟩
+
+  theorem casesSafe_of_check
+      {primitive : EvmYul.Operation .Yul → Prop}
+      {userCall : Name → Prop}
+      {primitive? : EvmYul.Operation .Yul → Bool}
+      {userCall? : Name → Bool}
+      (hPrimitive :
+        ∀ op, primitive? op = true → primitive op)
+      (hUserCall :
+        ∀ functionName, userCall? functionName = true →
+          userCall functionName) :
+      ∀ {cases' : List (Word × List AstStmt)},
+        casesSafe? primitive? userCall? cases' = true →
+          casesSafe primitive userCall cases' := by
+    intro cases' hCheck
+    cases cases' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            stmts? primitive? userCall? body = true ∧
+              casesSafe? primitive? userCall? rest = true :=
+          by simpa [casesSafe?] using hCheck
+        exact
+          ⟨stmts_of_check hPrimitive hUserCall hAnd.1,
+            casesSafe_of_check hPrimitive hUserCall hAnd.2⟩
+end
+
+theorem functionDefinition_of_check
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {primitive? : EvmYul.Operation .Yul → Bool}
+    {userCall? : Name → Bool}
+    (hPrimitive :
+      ∀ op, primitive? op = true → primitive op)
+    (hUserCall :
+      ∀ functionName, userCall? functionName = true →
+        userCall functionName) :
+    ∀ {fn : AstFunctionDefinition},
+      functionDefinition? primitive? userCall? fn = true →
+        functionDefinition primitive userCall fn
+  | .Def _params _returns _body, hCheck =>
+      stmts_of_check hPrimitive hUserCall hCheck
+
+theorem functionEntries_of_check
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {primitive? : EvmYul.Operation .Yul → Bool}
+    {userCall? : Name → Bool}
+    (hPrimitive :
+      ∀ op, primitive? op = true → primitive op)
+    (hUserCall :
+      ∀ functionName, userCall? functionName = true →
+        userCall functionName) :
+    ∀ {entries : List (Name × AstFunctionDefinition)},
+      functionEntries? primitive? userCall? entries = true →
+        functionEntries primitive userCall entries
+  | [], _hCheck => by
+      trivial
+  | (_name, fn) :: rest, hCheck => by
+      have hAnd :
+          functionDefinition? primitive? userCall? fn = true ∧
+            functionEntries? primitive? userCall? rest = true :=
+        by simpa [functionEntries?] using hCheck
+      exact
+        ⟨functionDefinition_of_check hPrimitive hUserCall hAnd.1,
+          functionEntries_of_check hPrimitive hUserCall hAnd.2⟩
+
+theorem contract_of_check
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {primitive? : EvmYul.Operation .Yul → Bool}
+    {userCall? : Name → Bool}
+    (hPrimitive :
+      ∀ op, primitive? op = true → primitive op)
+    (hUserCall :
+      ∀ functionName, userCall? functionName = true →
+        userCall functionName)
+    {contract' : AstContract}
+    (hCheck :
+      contract? primitive? userCall? contract' = true) :
+    contract primitive userCall contract' := by
+  have hAnd :
+      stmt? primitive? userCall? contract'.dispatcher = true ∧
+        functionEntries? primitive? userCall?
+          (Contract.functionEntries contract') = true :=
+    by simpa [contract?] using hCheck
+  exact
+    ⟨stmt_of_check hPrimitive hUserCall hAnd.1,
+      functionEntries_of_check hPrimitive hUserCall hAnd.2⟩
+
+theorem program_of_check
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {primitive? : EvmYul.Operation .Yul → Bool}
+    {userCall? : Name → Bool}
+    (hPrimitive :
+      ∀ op, primitive? op = true → primitive op)
+    (hUserCall :
+      ∀ functionName, userCall? functionName = true →
+        userCall functionName)
+    {program' : Program}
+    (hCheck :
+      program? primitive? userCall? program' = true) :
+    program primitive userCall program' :=
+  contract_of_check hPrimitive hUserCall hCheck
+
+end Family
+
+noncomputable def localCodeImageProgram? (program : Program) : Bool :=
+  Family.program? localCodeImagePrimitive? Family.anyUserCall? program
+
+noncomputable def externalCodeImageProgram? (program : Program) : Bool :=
+  Family.program? externalCodeImagePrimitive? Family.anyUserCall? program
+
+noncomputable def createBoundaryProgram? (program : Program) : Bool :=
+  Family.program? createBoundaryPrimitive? Family.anyUserCall? program
+
+noncomputable def externalBoundaryProgram? (program : Program) : Bool :=
+  Family.program? externalBoundaryPrimitive? Family.anyUserCall? program
+
+noncomputable def checked? (program : Program) : Bool :=
+  localCodeImageProgram? program &&
+    (externalCodeImageProgram? program &&
+      (createBoundaryProgram? program &&
+        externalBoundaryProgram? program))
+
+theorem localCodeImageProgram_of_check {program : Program}
+    (hCheck : localCodeImageProgram? program = true) :
+    localCodeImageProgram program :=
+  Family.program_of_check
+    (fun _op hOp => localCodeImagePrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
+theorem externalCodeImageProgram_of_check {program : Program}
+    (hCheck : externalCodeImageProgram? program = true) :
+    externalCodeImageProgram program :=
+  Family.program_of_check
+    (fun _op hOp => externalCodeImagePrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
+theorem createBoundaryProgram_of_check {program : Program}
+    (hCheck : createBoundaryProgram? program = true) :
+    createBoundaryProgram program :=
+  Family.program_of_check
+    (fun _op hOp => createBoundaryPrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
+theorem externalBoundaryProgram_of_check {program : Program}
+    (hCheck : externalBoundaryProgram? program = true) :
+    externalBoundaryProgram program :=
+  Family.program_of_check
+    (fun _op hOp => externalBoundaryPrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
+theorem checked?_sound {program : Program}
+    (hCheck : checked? program = true) :
+    localCodeImageProgram program ∧
+      externalCodeImageProgram program ∧
+        createBoundaryProgram program ∧
+          externalBoundaryProgram program := by
+  have hAnd :
+      localCodeImageProgram? program = true ∧
+        (externalCodeImageProgram? program &&
+          (createBoundaryProgram? program &&
+            externalBoundaryProgram? program)) = true :=
+    by simpa [checked?] using hCheck
+  have hTail :
+      externalCodeImageProgram? program = true ∧
+        (createBoundaryProgram? program &&
+          externalBoundaryProgram? program) = true :=
+    by simpa using hAnd.2
+  have hLast :
+      createBoundaryProgram? program = true ∧
+        externalBoundaryProgram? program = true :=
+    by simpa using hTail.2
+  exact
+    ⟨localCodeImageProgram_of_check hAnd.1,
+      externalCodeImageProgram_of_check hTail.1,
+      createBoundaryProgram_of_check hLast.1,
+      externalBoundaryProgram_of_check hLast.2⟩
+
 theorem importedIncompletePrimitive_iff_precise
     (op : EvmYul.Operation .Yul) :
     importedIncompletePrimitive op ↔

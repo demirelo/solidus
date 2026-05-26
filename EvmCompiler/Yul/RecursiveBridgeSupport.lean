@@ -167498,6 +167498,20 @@ theorem of_program {program : Program}
       createBoundary := hCreateBoundary
       externalBoundary := hExternalBoundary }
 
+noncomputable def checked? (program : Program) : Bool :=
+  Reference.Safe.FeatureCoverage.checked? program
+
+theorem of_checked? {program : Program}
+    (hCheck : checked? program = true) :
+    RecursiveBridgeFeatureCoverage program := by
+  rcases Reference.Safe.FeatureCoverage.checked?_sound hCheck with
+    ⟨hLocal, hExternalCode, hCreate, hExternal⟩
+  exact
+    { localCodeImage := hLocal
+      externalCodeImage := hExternalCode
+      createBoundary := hCreate
+      externalBoundary := hExternal }
+
 end RecursiveBridgeFeatureCoverage
 
 /--
@@ -169100,6 +169114,46 @@ theorem compileCheckedAssemblyTargetBytecodeResources?_eq_some
         ⟨by simpa using hBase,
           RecursiveBridgeCompileResources.of_checked?
             (by simpa using hResources)⟩
+
+/--
+Checked compiler/source boundary that validates lower stack/frame resources,
+bytecode facts, and the source feature-family exclusions still consumed by the
+current recursive bridge.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResourcesFeatures?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTargetBytecodeResources? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeFeatureCoverage.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeatures? program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResources? program = some (asm, target) ∧
+      RecursiveBridgeFeatureCoverage program := by
+  unfold compileCheckedAssemblyTargetBytecodeResourcesFeatures? at hCompileTarget
+  cases hBase : compileCheckedAssemblyTargetBytecodeResources? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hCoverage :
+          RecursiveBridgeFeatureCoverage.checked? program <;>
+        simp [hCoverage] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeFeatureCoverage.of_checked?
+            (by simpa using hCoverage)⟩
 
 /--
 Public theorem using one checked compile-and-assemble success premise.
