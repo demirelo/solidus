@@ -248,7 +248,7 @@ this IR as the refactor proceeds.
      out-of-gas policy, and explicit sufficient-gas bound.
    - [ ] Strengthen the preferred gas-aware top theorem so it existentially
      derives the gas bound and `EVM.X` agreement without taking an external
-     `hX` certificate.
+     `hTargetGasForX` certificate.
 
 ## Final Nethermind Yul Bridge Completion Steps
 
