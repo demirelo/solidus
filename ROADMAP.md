@@ -156,9 +156,15 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - `break`/`continue`/`leave`/halt/error/out-of-fuel short-circuit the tail.
 - [ ] Prove adjacent preservation:
   `StackFreeCfg.compile_preserves : StackFreeCfg.run -> TypedCfg.run`.
-- [ ] Audit no stack leakage above StackFreeCfg:
-  public semantics/proofs mention no `TypedCfg.Shape`, local depth, EVM stack
-  suffix, `DUP`/`SWAP`/`POP`, return token, or dispatch label.
+- [x] Audit no stack leakage in StackFreeCfg source semantics:
+  `Syntax`, core `Semantics`, and `Accepted` expose variables, scopes,
+  procedures, value-level primitives, source outcomes, and shared state only.
+  Stack terms appear only in source comments, rejected-op names, primitive
+  arity profiling, and the explicit `PrimitiveAdapter` boundary.
+- [ ] Audit no stack leakage in the future StackFreeCfg preservation theorem:
+  public proofs should mention no `TypedCfg.Shape`, local depth, EVM stack
+  suffix, `DUP`/`SWAP`/`POP`, return token, or dispatch label above the
+  adjacent compiler proof boundary.
 
 ### Stage 2: Yul To StackFreeCfg Compiler Design
 
