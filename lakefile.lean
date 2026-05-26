@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 require evmyul from git
-  "https://github.com/danrobinson/EVMYulLean.git" @ "codex/solidity-loop-post-success-defeq"
+  "https://github.com/danrobinson/EVMYulLean.git" @ "codex/chain-call-semantics"
 
 package «evm-compiler» {
   moreLeanArgs := #["-DautoImplicit=false"]
