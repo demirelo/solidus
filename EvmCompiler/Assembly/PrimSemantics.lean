@@ -1059,6 +1059,477 @@ theorem run_suffix_sound_safe
         cases hRun
         simp
 
+theorem run_suffix_sound_safe_from_run
+    {step : Assembly.PrimStep}
+    {base : EvmYul.Stack Word}
+    {source target source' target' : EvmYul.EVM.State}
+    (hSafe : SuffixSafe step)
+    (hShared : target.toSharedState = source.toSharedState)
+    (hStack : target.stack = source.stack ++ base)
+    (hSource : step.run source = .ok source')
+    (hTarget : step.run target = .ok target') :
+    target'.toSharedState = source'.toSharedState ∧
+      target'.stack = source'.stack ++ base := by
+  cases step
+  case bin f =>
+    simp [PrimStep.run, EvmYul.EVM.execBinOp] at hSource hTarget
+    cases hPop : source.stack.pop2 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hSource hTarget ⊢
+        cases hSource
+        cases hTarget
+        simp [EvmYul.Stack.push]
+  case un f =>
+    simp [PrimStep.run, EvmYul.EVM.execUnOp] at hSource hTarget
+    cases hPop : source.stack.pop with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hSource hTarget ⊢
+        cases hSource
+        cases hTarget
+        simp [EvmYul.Stack.push]
+  case tri f =>
+    simp [PrimStep.run, EvmYul.EVM.execTriOp] at hSource hTarget
+    cases hPop : source.stack.pop3 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hSource hTarget ⊢
+        cases hSource
+        cases hTarget
+        simp [EvmYul.Stack.push]
+  case dup n => contradiction
+  case swap n => contradiction
+  case invalid => simp [PrimStep.run] at hSource
+  case executionEnv f =>
+    simp [PrimStep.run, EvmYul.EVM.executionEnvOp, hShared, hStack,
+      EvmYul.Stack.push] at hSource hTarget ⊢
+    cases hSource
+    cases hTarget
+    simp [EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, hShared]
+  case machineState f =>
+    simp [PrimStep.run, EvmYul.EVM.machineStateOp, hShared, hStack,
+      EvmYul.Stack.push] at hSource hTarget ⊢
+    cases hSource
+    cases hTarget
+    simp [EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, hShared]
+  case state f =>
+    simp [PrimStep.run, EvmYul.EVM.stateOp, hShared, hStack,
+      EvmYul.Stack.push] at hSource hTarget ⊢
+    cases hSource
+    cases hTarget
+    simp [EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, hShared]
+  all_goals
+    simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.ternaryCopyOp,
+      EvmYul.EVM.quaternaryCopyOp,
+      EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC] at hSource hTarget ⊢
+  case unaryExecutionEnv f =>
+    cases hPop : source.stack.pop with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case unaryState f =>
+    cases hPop : source.stack.pop with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case pop =>
+    cases hPop : source.stack.pop with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case mload =>
+    cases hPop : source.stack.pop with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a⟩
+        have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case binaryMachineState =>
+    cases hPop : source.stack.pop2 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case binaryMachineStateWithResult =>
+    cases hPop : source.stack.pop2 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case binaryState =>
+    cases hPop : source.stack.pop2 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case log0 =>
+    cases hPop : source.stack.pop2 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b⟩
+        have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case ternaryMachineState =>
+    cases hPop : source.stack.pop3 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case ternaryCopy =>
+    cases hPop : source.stack.pop3 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case returndatacopy =>
+    cases hPop : source.stack.pop3 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case log1 =>
+    cases hPop : source.stack.pop3 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c⟩
+        have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case quaternaryCopy =>
+    cases hPop : source.stack.pop4 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d⟩
+        have hPopTarget := Stack.pop4_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case log2 =>
+    cases hPop : source.stack.pop4 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d⟩
+        have hPopTarget := Stack.pop4_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case log3 =>
+    cases hPop : source.stack.pop5 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d, e⟩
+        have hPopTarget := Stack.pop5_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+  case log4 =>
+    cases hPop : source.stack.pop6 with
+    | none => simp [hPop] at hSource
+    | some tup =>
+        rcases tup with ⟨rest, a, b, c, d, e, f⟩
+        have hPopTarget := Stack.pop6_append_of_some (tail := base) hPop
+        rw [hStack, hPopTarget] at hTarget
+        simp [hPop, hShared] at hSource hTarget
+        cases hSource
+        cases hTarget
+        simp
+
+theorem run_suffix_exists_safe_from_run
+    {step : Assembly.PrimStep}
+    {base : EvmYul.Stack Word}
+    {source target source' : EvmYul.EVM.State}
+    (hSafe : SuffixSafe step)
+    (hShared : target.toSharedState = source.toSharedState)
+    (hStack : target.stack = source.stack ++ base)
+    (hSource : step.run source = .ok source') :
+    ∃ target',
+      step.run target = .ok target' ∧
+        target'.toSharedState = source'.toSharedState ∧
+          target'.stack = source'.stack ++ base := by
+  cases hTarget : step.run target with
+  | ok target' =>
+      exact ⟨target', rfl,
+        run_suffix_sound_safe_from_run hSafe hShared hStack hSource hTarget⟩
+  | error err =>
+      exfalso
+      cases step
+      case dup n => contradiction
+      case swap n => contradiction
+      case invalid => simp [PrimStep.run] at hSource
+      case bin f =>
+        simp [PrimStep.run, EvmYul.EVM.execBinOp] at hSource hTarget
+        cases hPop : source.stack.pop2 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b⟩
+            have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case un f =>
+        simp [PrimStep.run, EvmYul.EVM.execUnOp] at hSource hTarget
+        cases hPop : source.stack.pop with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a⟩
+            have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case tri f =>
+        simp [PrimStep.run, EvmYul.EVM.execTriOp] at hSource hTarget
+        cases hPop : source.stack.pop3 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c⟩
+            have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case executionEnv f =>
+        simp [PrimStep.run, EvmYul.EVM.executionEnvOp, hShared, hStack,
+          EvmYul.Stack.push] at hSource hTarget
+        cases hTarget
+      case machineState f =>
+        simp [PrimStep.run, EvmYul.EVM.machineStateOp, hShared, hStack,
+          EvmYul.Stack.push] at hSource hTarget
+        cases hTarget
+      case state f =>
+        simp [PrimStep.run, EvmYul.EVM.stateOp, hShared, hStack,
+          EvmYul.Stack.push] at hSource hTarget
+        cases hTarget
+      all_goals
+        simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp,
+          EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+          EvmYul.EVM.binaryMachineStateOp,
+          EvmYul.EVM.binaryMachineStateOp',
+          EvmYul.EVM.ternaryMachineStateOp, EvmYul.EVM.ternaryCopyOp,
+          EvmYul.EVM.quaternaryCopyOp,
+          EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] at hSource hTarget
+      case unaryExecutionEnv f =>
+        cases hPop : source.stack.pop with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a⟩
+            have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case unaryState f =>
+        cases hPop : source.stack.pop with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a⟩
+            have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case pop =>
+        cases hPop : source.stack.pop with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a⟩
+            have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case mload =>
+        cases hPop : source.stack.pop with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a⟩
+            have hPopTarget := Stack.pop_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case binaryMachineState =>
+        cases hPop : source.stack.pop2 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b⟩
+            have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case binaryMachineStateWithResult =>
+        cases hPop : source.stack.pop2 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b⟩
+            have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case binaryState =>
+        cases hPop : source.stack.pop2 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b⟩
+            have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case log0 =>
+        cases hPop : source.stack.pop2 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b⟩
+            have hPopTarget := Stack.pop2_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case ternaryMachineState =>
+        cases hPop : source.stack.pop3 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c⟩
+            have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case ternaryCopy =>
+        cases hPop : source.stack.pop3 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c⟩
+            have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case returndatacopy =>
+        cases hPop : source.stack.pop3 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c⟩
+            have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case log1 =>
+        cases hPop : source.stack.pop3 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c⟩
+            have hPopTarget := Stack.pop3_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case quaternaryCopy =>
+        cases hPop : source.stack.pop4 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c, d⟩
+            have hPopTarget := Stack.pop4_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+            cases hTarget
+      case log2 =>
+        cases hPop : source.stack.pop4 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c, d⟩
+            have hPopTarget := Stack.pop4_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case log3 =>
+        cases hPop : source.stack.pop5 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c, d, e⟩
+            have hPopTarget := Stack.pop5_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+      case log4 =>
+        cases hPop : source.stack.pop6 with
+        | none => simp [hPop] at hSource
+        | some tup =>
+            rcases tup with ⟨rest, a, b, c, d, e, f⟩
+            have hPopTarget := Stack.pop6_append_of_some (tail := base) hPop
+            rw [hStack, hPopTarget] at hTarget
+            simp [hPop, hShared] at hSource hTarget
+
 theorem run_suffix_exists_safe
     {step : Assembly.PrimStep}
     {shared : EvmYul.SharedState .EVM}

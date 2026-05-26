@@ -230,6 +230,38 @@ theorem pop_step_target {program : Program} {sites : List CallSite}
                 EvmYul.EVM.State.replaceStackAndIncrPC,
                 EvmYul.EVM.State.incrPC])
 
+theorem prim_step_target_safe {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState} {sourceEVM' : EVMState}
+    {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step)
+    (hSafe : Assembly.PrimStep.SuffixSafe step)
+    (hStep : op.step source.evm = .ok sourceEVM') :
+    ∃ target',
+      Assembly.Target.runList [.prim op] target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases hRel.hidden_suffix with ⟨suffix, hTargetStack, hSuffix⟩
+  have hSourceRun : step.run source.evm = .ok sourceEVM' := by
+    rw [← Assembly.PrimOp.step_eq_continuingStep_run hCont source.evm]
+    exact hStep
+  rcases Assembly.PrimStep.run_suffix_exists_safe_from_run
+      (step := step) (base := suffix) (source := source.evm)
+      (target := target) (source' := sourceEVM') hSafe hRel.shared_eq
+      hTargetStack hSourceRun with
+    ⟨target', hTargetRun, hShared, hStack⟩
+  have hTargetStep :
+      op.step target = .ok target' := by
+    rw [Assembly.PrimOp.step_eq_continuingStep_run hCont target]
+    exact hTargetRun
+  refine ⟨target', ?_, ?_⟩
+  · simp [Assembly.Target.runList, Assembly.Target.stepInstr, hTargetStep]
+    rfl
+  · exact
+      PayloadRel.with_visible_evm_from_suffix
+        (program := program) (sites := sites) (source := source)
+        (sourceEVM' := sourceEVM') (target' := target') (suffix := suffix)
+        hSuffix hShared hStack
+
 end PayloadRel
 
 /--
@@ -543,6 +575,77 @@ theorem pop_step_sourceAt {program : Program} {sites : List CallSite}
   refine ⟨target', ?_, hRel'⟩
   rw [sourceStepAt_pop_eq_targetRunList]
   exact hRun
+
+theorem prim_step_sourceAt_safe {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState} {sourceEVM' : EVMState}
+    {full : Assembly.Program} {pc : Nat}
+    {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step)
+    (hSafe : Assembly.PrimStep.SuffixSafe step)
+    (hStep : op.step source.evm = .ok sourceEVM') :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim op) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases PayloadRel.prim_step_target_safe hRel hCont hSafe hStep with
+    ⟨target', hRun, hRel'⟩
+  refine ⟨target', ?_, hRel'⟩
+  rw [sourceStepAt_prim_eq_targetRunList]
+  exact hRun
+
+theorem prim_runWithShape?_sourceAt_safe {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {target : Assembly.EVMState} {shape output : Shape}
+    {sourceEVM' : EVMState} {full : Assembly.Program} {pc : Nat}
+    {op : Assembly.PrimOp} {step : Assembly.PrimStep}
+    (hRun :
+      TypedCfg.Instr.runWithShape? (.prim op) shape source.evm =
+        .ok (sourceEVM', output))
+    (hRel : PayloadRel program sites source target)
+    (hCont : op.continuingStep? = some step)
+    (hSafe : Assembly.PrimStep.SuffixSafe step) :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim op) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  unfold TypedCfg.Instr.runWithShape? at hRun
+  cases hType : TypedCfg.Instr.type? (.prim op) shape with
+  | none =>
+      simp [hType] at hRun
+  | some typedOutput =>
+      simp [hType, TypedCfg.Instr.run] at hRun
+      cases hStep : op.step source.evm with
+      | error err =>
+          rw [hStep] at hRun
+          change
+            (Except.error err :
+              Except EVMException (EVMState × Shape)) =
+                .ok (sourceEVM', output) at hRun
+          cases hRun
+      | ok stepped =>
+          rw [hStep] at hRun
+          change
+            (if typedOutput.matchesStack stepped.stack = true then
+                Except.ok (stepped, typedOutput)
+              else
+                Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+              Except.ok (sourceEVM', output) at hRun
+          cases hMatches : typedOutput.matchesStack stepped.stack with
+          | false =>
+              rw [hMatches] at hRun
+              change
+                (Except.error EvmYul.EVM.ExecutionException.InvalidInstruction :
+                  Except EVMException (EVMState × Shape)) =
+                    .ok (sourceEVM', output) at hRun
+              cases hRun
+          | true =>
+              rw [hMatches] at hRun
+              cases hRun
+              exact
+                prim_step_sourceAt_safe
+                  (program := program) (sites := sites) (source := source)
+                  (target := target)
+                  (full := full) (pc := pc) (op := op) (step := step)
+                  hRel hCont hSafe hStep
 
 theorem push_step_sourceAt {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
