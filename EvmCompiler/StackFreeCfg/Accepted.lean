@@ -5,7 +5,8 @@ namespace StackFreeCfg
 
 namespace Prim
 
-def isRawStackOp : Assembly.PrimOp → Bool
+def isUnsupportedSourceOp : Assembly.PrimOp → Bool
+  | .pc
   | .dup1 | .dup2 | .dup3 | .dup4
   | .dup5 | .dup6 | .dup7 | .dup8
   | .dup9 | .dup10 | .dup11 | .dup12
@@ -21,10 +22,12 @@ Source-level primitive arity.
 
 `pop(x)` is allowed as a value-level zero-result primitive. Raw `dup`/`swap`
 are rejected because they expose stack positions and are not Yul source
-constructs. Terminal opcodes are represented by `Stmt.terminal`.
+constructs. `pc` is rejected because this source layer has no program-counter
+semantics; Yul does not expose it, and any future PC-like feature should be an
+explicit oracle. Terminal opcodes are represented by `Stmt.terminal`.
 -/
 def sourceArity? (op : Assembly.PrimOp) : Option (Nat × Nat) :=
-  if isRawStackOp op || op.haltKind?.isSome then
+  if isUnsupportedSourceOp op || op.haltKind?.isSome then
     none
   else
     op.stackEffect?

@@ -90,6 +90,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage
     obligations rather than hidden proof conveniences.
+  - Reject raw `DUP`/`SWAP` and `PC` at this source layer: Yul does not expose
+    them, and any future PC-like feature should be an explicit oracle rather
+    than the isolated primitive adapter's synthetic program counter.
 - [x] Create `EvmCompiler.StackFreeCfg.Compiler`.
   - Compile StackFreeCfg to `TypedCfg`.
   - The compiler owns all stack facts: source-variable layout, typed-CFG

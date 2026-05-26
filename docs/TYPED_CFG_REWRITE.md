@@ -507,7 +507,11 @@ The typed CFG should be broad enough that Yul does not force a redesign later:
   continuation, distinct from EVM `RETURN`;
 - object/data builtins such as `datasize`, `dataoffset`, and `datacopy` should
   be resolved in the object/frontend layer before typed CFG, so they do not add
-  new CFG control semantics.
+  new CFG control semantics;
+- raw `PC` should not be exposed above typed CFG. Yul has no `pc` builtin, and
+  any future source-level PC-like operation should be modeled as an explicit
+  oracle rather than by reusing the isolated primitive adapter's synthetic
+  program counter.
 
 Internal procedure call/return is now in the typed CFG path. The old direct
 assembly convention is no longer the public procedure semantics; it survives
