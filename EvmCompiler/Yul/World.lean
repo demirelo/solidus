@@ -775,6 +775,53 @@ noncomputable def stateRelConfig
   gasValueRel := gasValueRel
   totalGasRel := totalGasRel
 
+theorem executionEnvRel_callFrame
+    {cfg : Reference.StateRelConfig}
+    {yulCode : AstContract} {evmCode : ByteArray}
+    (hCode : cfg.codeRel yulCode evmCode)
+    (codeOwner sender source : EvmYul.AccountAddress)
+    (weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (gasPrice depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool)
+    (blobVersionedHashes : List ByteArray) :
+    Reference.ExecutionEnvRel cfg
+      { codeOwner := codeOwner
+        sender := sender
+        source := source
+        weiValue := weiValue
+        calldata := calldata
+        code := yulCode
+        gasPrice := gasPrice
+        header := header
+        depth := depth
+        perm := perm
+        blobVersionedHashes := blobVersionedHashes }
+      { codeOwner := codeOwner
+        sender := sender
+        source := source
+        weiValue := weiValue
+        calldata := calldata
+        code := evmCode
+        gasPrice := gasPrice
+        header := header
+        depth := depth
+        perm := perm
+        blobVersionedHashes := blobVersionedHashes } := by
+  exact
+    { codeOwner := rfl
+      sender := rfl
+      source := rfl
+      weiValue := rfl
+      calldata := rfl
+      code := hCode
+      gasPrice := rfl
+      header := rfl
+      depth := rfl
+      perm := rfl
+      blobVersionedHashes := rfl }
+
 theorem chainStateRel_addAccessedAccount
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
@@ -1032,6 +1079,76 @@ theorem sharedStateRel_freshExternalCallWithWorldFromFreshEvmFrame
     · simpa using hGenesis
     · exact hCreated
   · exact machineStateRel_freshExternalCall hGas
+
+theorem sharedStateRel_callFrameFromFreshEvmFrame
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {yulGas evmGas : EvmYul.UInt256}
+    {yulCode : AstContract} {evmCode : ByteArray}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hCode : cfg.codeRel yulCode evmCode)
+    (hCreated : yulCreated = evmCreated)
+    (hGas : cfg.gasAvailableRel yulGas evmGas)
+    (codeOwner sender source : EvmYul.AccountAddress)
+    (weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (gasPrice depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool)
+    (blobVersionedHashes : List ByteArray) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        executionEnv :=
+          { codeOwner := codeOwner
+            sender := sender
+            source := source
+            weiValue := weiValue
+            calldata := calldata
+            code := yulCode
+            gasPrice := gasPrice
+            header := header
+            depth := depth
+            perm := perm
+            blobVersionedHashes := blobVersionedHashes }
+        createdAccounts := yulCreated }
+      ({ (default : EvmYul.EVM.State) with
+        accountMap := evmAccountMap
+        σ₀ := evm.σ₀
+        totalGasUsedInBlock := evm.totalGasUsedInBlock
+        transactionReceipts := evm.transactionReceipts
+        substate := evmSubstate
+        executionEnv :=
+          { codeOwner := codeOwner
+            sender := sender
+            source := source
+            weiValue := weiValue
+            calldata := calldata
+            code := evmCode
+            gasPrice := gasPrice
+            header := header
+            depth := depth
+            perm := perm
+            blobVersionedHashes := blobVersionedHashes }
+        blocks := evm.blocks
+        genesisBlockHeader := evm.genesisBlockHeader
+        createdAccounts := evmCreated
+        toMachineState := EvmYul.MachineState.freshExternalCall evmGas }
+        : EvmYul.EVM.State).toSharedState := by
+  exact
+    sharedStateRel_freshExternalCallWithWorldFromFreshEvmFrame hShared
+      hAccountMap hSubstate
+      (executionEnvRel_callFrame hCode codeOwner sender source weiValue
+        calldata gasPrice depth header perm blobVersionedHashes)
+      hCreated hGas
 
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}

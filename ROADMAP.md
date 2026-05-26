@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 12:42 PDT.
+Last updated: 2026-05-26 15:11 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3009,6 +3009,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
        - [x] Correct imported-Yul CALL-family account warming so `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL` all add the target to `accessedAccounts` before dispatch/failure handling, matching EVM's substate update shape.
        - [x] Align imported-Yul static-call behavior with EVM: `STATICCALL` is allowed from an already-static context, and `CALLCODE` follows the current EVM model's writable/static check instead of adding a stricter Yul-only rejection.
        - [ ] Prove callee entry-state construction and result/world merge for the ordinary compiled-account `CALL` path.
+         - [x] Package callee entry-frame construction: related selected Yul/EVM code images now construct related child `ExecutionEnv`s, and the fresh-child-frame/world relation consumes that frame proof directly.
+         - [ ] Prove the result/world merge after the child call returns or reverts, including account-map, substate, created-account, return-data, and success-bit agreement.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
    - [x] Add checked lowering decomposition for bound binary primitive arguments and a compiler-output-aware `add(left, right)` bridge theorem that composes the generated hidden-argument prelude with generic `toStackSeq?` target replay and the target `ADD` proof.
