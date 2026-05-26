@@ -822,6 +822,65 @@ theorem executionEnvRel_callFrame
       perm := rfl
       blobVersionedHashes := rfl }
 
+theorem CompiledToExecuteRel.executionEnvRel_callFrame
+    {cfg : Reference.StateRelConfig}
+    {yulExec : EvmYul.ToExecute .Yul}
+    {evmExec : EvmYul.ToExecute .EVM}
+    (hExec : CompiledToExecuteRel yulExec evmExec)
+    (hCodeRel :
+      ∀ {yulCode : AstContract} {evmCode : ByteArray},
+        CompiledCodeRel yulCode evmCode →
+          cfg.codeRel yulCode evmCode)
+    (codeOwner sender source : EvmYul.AccountAddress)
+    (weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (gasPrice depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool)
+    (blobVersionedHashes : List ByteArray) :
+    Reference.ExecutionEnvRel cfg
+      { codeOwner := codeOwner
+        sender := sender
+        source := source
+        weiValue := weiValue
+        calldata := calldata
+        code :=
+          match yulExec with
+          | EvmYul.ToExecute.Precompiled _ => default
+          | EvmYul.ToExecute.Code yulCode => yulCode
+        gasPrice := gasPrice
+        header := header
+        depth := depth
+        perm := perm
+        blobVersionedHashes := blobVersionedHashes }
+      { codeOwner := codeOwner
+        sender := sender
+        source := source
+        weiValue := weiValue
+        calldata := calldata
+        code :=
+          match evmExec with
+          | EvmYul.ToExecute.Precompiled _ => default
+          | EvmYul.ToExecute.Code evmCode => evmCode
+        gasPrice := gasPrice
+        header := header
+        depth := depth
+        perm := perm
+        blobVersionedHashes := blobVersionedHashes } := by
+  cases hExec with
+  | precompiled precompiled =>
+      simpa using
+        World.executionEnvRel_callFrame
+          (hCodeRel CompiledCodeRel.empty)
+          codeOwner sender source weiValue calldata gasPrice depth
+          header perm blobVersionedHashes
+  | code hCode =>
+      simpa using
+        World.executionEnvRel_callFrame
+          (hCodeRel hCode)
+          codeOwner sender source weiValue calldata gasPrice depth
+          header perm blobVersionedHashes
+
 theorem chainStateRel_addAccessedAccount
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
