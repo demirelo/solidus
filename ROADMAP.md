@@ -71,6 +71,10 @@ Proof rule:
     not concrete byte offsets; concrete PC behavior belongs below this
     boundary.
 - [x] Keep EVM terminal halts distinct from structured `leave`.
+- [x] Add `EvmCompiler.TypedCfg.Contract` as the typed stack CFG contract
+  surface: it records valid suspension points and outcome classification for
+  adjacent proof statements while explicitly documenting that labels, stacks,
+  return frames, and shapes belong only at this layer and below.
 - [x] Implement typed-CFG-to-labeled-assembly lowering as a separate backend
   boundary.
 - [x] Add checked assembly backend entry point
@@ -130,6 +134,12 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     procedure-call target lists remain valid only for zero-return calls.
   - Raw execution rejects duplicate procedure names and malformed procedure
     frames whose params/returns collide.
+- [x] Add `EvmCompiler.StackFreeCfg.Contract`.
+  - `Observation` is the preferred source-facing result boundary for higher
+    layers: shared state, scoped varstore, active scope, and source mode.
+  - `Program.runObserved` / `runStateObserved` project raw runs to that
+    stack-free observation, so higher proof statements do not need to mention
+    lower-layer layouts, labels, return tokens, or stack machinery.
 - [x] Create `EvmCompiler.StackFreeCfg.Accepted`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage
