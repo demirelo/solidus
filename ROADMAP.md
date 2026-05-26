@@ -107,6 +107,10 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - The core source interpreter is parametric in value-level primitive
     semantics; concrete reuse of isolated EVM primitive stepping lives in
     `EvmCompiler.StackFreeCfg.PrimitiveAdapter`.
+  - Statement and loop semantics use source-scoped expression-evaluation
+    wrappers, so every expression site first restricts the varstore to the
+    active lexical scope. The raw expression evaluator remains only a local
+    helper over an already chosen store.
   - Blocks own lexical scope cleanup.
   - Block, statement, statement-sequence, and loop execution restrict incoming
     varstores to the current lexical scope before evaluating user syntax.

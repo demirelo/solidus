@@ -244,6 +244,38 @@ def evalCondition (prim : PrimitiveSemantics) (expr : Expr) (state : State) :
   let (state', value) ← evalOne prim expr state
   .ok (state', value != zero)
 
+def evalScoped (prim : PrimitiveSemantics) (scope : List Name)
+    (expr : Expr) (state : State) :
+    Except Exception (State × List Word) :=
+  eval prim expr (state.restrictTo scope)
+
+def evalArgsScoped (prim : PrimitiveSemantics) (scope : List Name)
+    (args : List Expr) (state : State) :
+    Except Exception (State × List Word) :=
+  evalArgs prim args (state.restrictTo scope)
+
+def evalOneScoped (prim : PrimitiveSemantics) (scope : List Name)
+    (expr : Expr) (state : State) :
+    Except Exception (State × Word) := do
+  let (state', values) ← evalScoped prim scope expr state
+  match values with
+  | [value] => .ok (state', value)
+  | _ => invalid
+
+def evalZeroScoped (prim : PrimitiveSemantics) (scope : List Name)
+    (expr : Expr) (state : State) :
+    Except Exception State := do
+  let (state', values) ← evalScoped prim scope expr state
+  match values with
+  | [] => .ok state'
+  | _ => invalid
+
+def evalConditionScoped (prim : PrimitiveSemantics) (scope : List Name)
+    (expr : Expr) (state : State) :
+    Except Exception (State × Bool) := do
+  let (state', value) ← evalOneScoped prim scope expr state
+  .ok (state', value != zero)
+
 end Expr
 
 namespace Switch
@@ -331,7 +363,7 @@ mutual
         let state := state.restrictTo ctx.scope
         match stmt with
         | .expr expr => do
-            let state' ← Expr.evalZero prim expr state
+            let state' ← Expr.evalZeroScoped prim ctx.scope expr state
             .ok (Outcome.regular state' ctx.scope)
         | .decl names value? => do
             if !(state.canDeclareNonempty? names) then
@@ -341,7 +373,8 @@ mutual
               match value? with
               | none => .ok (state, zeros names.length)
               | some value => do
-                  let (stateAfterValue, out) ← Expr.eval prim value state
+                  let (stateAfterValue, out) ←
+                    Expr.evalScoped prim ctx.scope value state
                   if out.length = names.length then
                     .ok (stateAfterValue, out)
                   else
@@ -355,7 +388,8 @@ mutual
             if !(state.canAssignNonempty? names) then
               invalid
             else
-            let (stateAfterValue, out) ← Expr.eval prim value state
+            let (stateAfterValue, out) ←
+              Expr.evalScoped prim ctx.scope value state
             if out.length = names.length then
               let state' ←
                 match stateAfterValue.assignMany? names out with
@@ -367,13 +401,15 @@ mutual
         | .block body =>
             Block.run fuel' prim program ctx body state
         | .if_ cond body => do
-            let (stateAfterCond, condValue) ← Expr.evalCondition prim cond state
+            let (stateAfterCond, condValue) ←
+              Expr.evalConditionScoped prim ctx.scope cond state
             if condValue then
               Block.run fuel' prim program ctx body stateAfterCond
             else
               .ok (Outcome.regular stateAfterCond ctx.scope)
         | .switch scrutinee cases defaultBody => do
-            let (stateAfterScrutinee, value) ← Expr.evalOne prim scrutinee state
+            let (stateAfterScrutinee, value) ←
+              Expr.evalOneScoped prim ctx.scope scrutinee state
             match Switch.select value cases defaultBody with
             | none => .ok (Outcome.regular stateAfterScrutinee ctx.scope)
             | some body => Block.run fuel' prim program ctx body stateAfterScrutinee
@@ -407,7 +443,8 @@ mutual
             if !(state.canAssign? targets) then
               invalid
             else
-            let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
+            let (stateAfterArgs, argValues) ←
+              Expr.evalArgsScoped prim ctx.scope args state
             match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
@@ -462,7 +499,8 @@ mutual
             if !(state.canDeclareNonempty? names) then
               invalid
             else
-            let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
+            let (stateAfterArgs, argValues) ←
+              Expr.evalArgsScoped prim ctx.scope args state
             match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
@@ -514,7 +552,8 @@ mutual
                 else
                   invalid
         | .terminal kind args => do
-            let (stateAfterArgs, values) ← Expr.evalArgs prim args state
+            let (stateAfterArgs, values) ←
+              Expr.evalArgsScoped prim ctx.scope args state
             let shared ← prim.terminal kind stateAfterArgs.shared values
             .ok (Outcome.halt kind (stateAfterArgs.withShared shared) ctx.scope)
         | .invalid =>
@@ -530,7 +569,8 @@ mutual
           |>.restrictTo outerScope)
     | fuel' + 1 => do
         let state := state.restrictTo loopCtx.scope
-        let (stateAfterCond, condValue) ← Expr.evalCondition prim cond state
+        let (stateAfterCond, condValue) ←
+          Expr.evalConditionScoped prim loopCtx.scope cond state
         if condValue then
           let bodyOutcome ←
             Block.run fuel' prim program loopCtx.withLoopControl body
