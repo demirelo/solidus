@@ -76,6 +76,7 @@ inductive Outcome where
   | jump (target : Label) (state : RunState)
   | halt (kind : Assembly.HaltKind) (state : RunState)
   | invalid (state : RunState)
+  | outOfFuel (label : Label) (state : RunState)
 
 namespace Instr
 
@@ -234,7 +235,10 @@ def runWithShape? (instr : Instr) (shape : Shape) (state : EVMState) :
             | none => .error .InvalidInstruction
         | _ =>
             instr.run state
-      .ok (state', output)
+      if output.matchesStack state'.stack then
+        .ok (state', output)
+      else
+        .error .InvalidInstruction
 
 end Instr
 
@@ -315,12 +319,12 @@ def step (program : Program) (label : Label) (state : RunState) :
   | some block => block.run program state
 
 def runFrom : Nat → Program → Label → RunState → Except EVMException Outcome
-  | 0, _program, _label, state => .ok (.invalid state)
+  | 0, _program, label, state => .ok (.outOfFuel label state)
   | fuel + 1, program, label, state => do
       let outcome ← step program label state
       match outcome with
       | .jump target state' => runFrom fuel program target state'
-      | .fallthrough _ | .halt _ _ | .invalid _ =>
+      | .fallthrough _ | .halt _ _ | .invalid _ | .outOfFuel _ _ =>
           .ok outcome
 
 def run (fuel : Nat) (program : Program) (state : EVMState) :
