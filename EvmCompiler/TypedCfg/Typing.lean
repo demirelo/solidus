@@ -5,6 +5,19 @@ namespace TypedCfg
 
 namespace Instr
 
+namespace ShapeOps
+
+def locals (names : List Name) : Shape :=
+  names.map Slot.local
+
+def allLocalsPresent (names : List Name) (shape : Shape) : Bool :=
+  names.all (fun name => decide ((.local name : Slot) ∈ shape))
+
+def allLocalsAbsent (names : List Name) (shape : Shape) : Bool :=
+  names.all (fun name => decide ((.local name : Slot) ∉ shape))
+
+end ShapeOps
+
 def type? (instr : Instr) (shape : Shape) : Option Shape :=
   match instr with
   | .push value => some (.literal value :: shape)
@@ -51,8 +64,26 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
         none
   | .declareLocal name =>
       match shape with
-      | _value :: rest => some (.local name :: rest)
+      | _value :: rest =>
+          if ShapeOps.allLocalsAbsent [name] rest then
+            some (.local name :: rest)
+          else
+            none
       | [] => none
+  | .declareLocals names =>
+      if names.length ≤ shape.length then
+        let rest := Shape.pop names.length shape
+        if decide names.Nodup && ShapeOps.allLocalsAbsent names rest then
+          some (ShapeOps.locals names.reverse ++ rest)
+        else
+          none
+      else
+        none
+  | .initLocals names =>
+      if decide names.Nodup && ShapeOps.allLocalsAbsent names shape then
+        some (ShapeOps.locals names.reverse ++ shape)
+      else
+        none
   | .loadLocal name depth =>
       if depth < 16 then
         if shape[depth]? = some (.local name) then
@@ -70,6 +101,20 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
             else
               none
         | [] => none
+      else
+        none
+  | .assignLocals names =>
+      if names.length ≤ shape.length then
+        let rest := Shape.pop names.length shape
+        if decide names.Nodup && ShapeOps.allLocalsPresent names rest then
+          some rest
+        else
+          none
+      else
+        none
+  | .returnLocals names =>
+      if decide names.Nodup && ShapeOps.allLocalsPresent names shape then
+        some (Shape.pushWords names.length [])
       else
         none
   | .unwind target =>

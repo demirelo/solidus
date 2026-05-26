@@ -60,6 +60,63 @@ inductive Outcome where
 
 namespace Instr
 
+namespace StackOps
+
+def reverseTop (n : Nat) (stack : EvmYul.Stack Word) :
+    Option (EvmYul.Stack Word) :=
+  if n ≤ stack.length then
+    some ((stack.take n).reverse ++ stack.drop n)
+  else
+    none
+
+def pushZeros : Nat → EvmYul.Stack Word → EvmYul.Stack Word
+  | 0, stack => stack
+  | n + 1, stack => pushZeros n (EvmYul.UInt256.ofNat 0 :: stack)
+
+def replaceFirst? (name : Name) (value : Word) :
+    Shape → EvmYul.Stack Word → Option (EvmYul.Stack Word)
+  | [], [] => none
+  | .local slotName :: shapeRest, old :: stackRest =>
+      if slotName = name then
+        some (value :: stackRest)
+      else do
+        let updated ← replaceFirst? name value shapeRest stackRest
+        some (old :: updated)
+  | _slot :: shapeRest, old :: stackRest => do
+      let updated ← replaceFirst? name value shapeRest stackRest
+      some (old :: updated)
+  | _, _ => none
+
+def assignValues? : List Name → List Word → Shape → EvmYul.Stack Word →
+    Option (EvmYul.Stack Word)
+  | [], [], _shape, stack => some stack
+  | name :: names, value :: values, shape, stack => do
+      let stack' ← replaceFirst? name value shape stack
+      assignValues? names values shape stack'
+  | _, _, _, _ => none
+
+def readLocal? (name : Name) : Shape → EvmYul.Stack Word → Option Word
+  | [], [] => none
+  | .local slotName :: shapeRest, value :: stackRest =>
+      if slotName = name then
+        some value
+      else
+        readLocal? name shapeRest stackRest
+  | _slot :: shapeRest, _value :: stackRest =>
+      readLocal? name shapeRest stackRest
+  | _, _ => none
+
+def readLocals? (names : List Name) (shape : Shape)
+    (stack : EvmYul.Stack Word) : Option (EvmYul.Stack Word) :=
+  match names with
+  | [] => some []
+  | name :: rest => do
+      let value ← readLocal? name shape stack
+      let values ← readLocals? rest shape stack
+      some (value :: values)
+
+end StackOps
+
 def runPopMany : Nat → EVMState → Except EVMException EVMState
   | 0, state => .ok state
   | n + 1, state => do
@@ -121,11 +178,21 @@ def run (instr : Instr) (state : EVMState) : Except EVMException EVMState :=
       runSwap depth state
   | .declareLocal _name =>
       .ok state
+  | .declareLocals names =>
+      match StackOps.reverseTop names.length state.stack with
+      | some stack => .ok { state with stack := stack }
+      | none => .error .StackUnderflow
+  | .initLocals names =>
+      .ok { state with stack := StackOps.pushZeros names.length state.stack }
   | .loadLocal _name depth =>
       runDup depth state
   | .storeLocal _name depth => do
       let state' ← runSwap depth state
       Assembly.PrimOp.pop.step state'
+  | .assignLocals _names =>
+      .error .InvalidInstruction
+  | .returnLocals _names =>
+      .error .InvalidInstruction
   | .unwind _target =>
       .error .InvalidInstruction
 
@@ -138,6 +205,20 @@ def runWithShape? (instr : Instr) (shape : Shape) (state : EVMState) :
         match instr with
         | .unwind target =>
             runPopMany (shape.length - target.length) state
+        | .assignLocals names =>
+            if names.length ≤ state.stack.length then
+              let values := state.stack.take names.length
+              let rest := state.stack.drop names.length
+              let shapeRest := Shape.pop names.length shape
+              match StackOps.assignValues? names values shapeRest rest with
+              | some stack => .ok { state with stack := stack }
+              | none => .error .InvalidInstruction
+            else
+              .error .StackUnderflow
+        | .returnLocals names =>
+            match StackOps.readLocals? names shape state.stack with
+            | some stack => .ok { state with stack := stack }
+            | none => .error .InvalidInstruction
         | _ =>
             instr.run state
       .ok (state', output)

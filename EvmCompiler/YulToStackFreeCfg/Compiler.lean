@@ -1,4 +1,4 @@
-import EvmCompiler.StackFreeCfg
+import EvmCompiler.StackFreeCfg.Accepted
 import EvmCompiler.Yul.Syntax
 
 namespace EvmCompiler
@@ -175,6 +175,48 @@ def lowerExpr? (layout : ObjectLayout) (name : Name) (args : List AstExpr) :
   | _, _ => none
 
 end ObjectBuiltin
+
+namespace Names
+
+mutual
+  def expr : AstExpr → List Name
+    | .Lit _value => []
+    | .Var name => [identName name]
+    | .Call (.inl _prim) args => exprList args
+    | .Call (.inr functionName) args => functionName :: exprList args
+
+  def exprList : List AstExpr → List Name
+    | [] => []
+    | head :: rest => expr head ++ exprList rest
+
+  def stmt : AstStmt → List Name
+    | .Block stmts => stmtList stmts
+    | .Let vars none => identNames vars
+    | .Let vars (some value) => identNames vars ++ expr value
+    | .Assign vars value => identNames vars ++ expr value
+    | .ExprStmtCall value => expr value
+    | .Switch scrutinee cases defaultBody =>
+        expr scrutinee ++ casesList cases ++ stmtList defaultBody
+    | .For cond post body =>
+        expr cond ++ stmtList post ++ stmtList body
+    | .If cond body =>
+        expr cond ++ stmtList body
+    | .Continue | .Break | .Leave => []
+
+  def stmtList : List AstStmt → List Name
+    | [] => []
+    | head :: rest => stmt head ++ stmtList rest
+
+  def casesList : List (Word × List AstStmt) → List Name
+    | [] => []
+    | (_value, body) :: rest => stmtList body ++ casesList rest
+end
+
+def functionDefinition : AstFunctionDefinition → List Name
+  | .Def params returns body =>
+      identNames params ++ identNames returns ++ stmtList body
+
+end Names
 
 mutual
   def lowerExpr? (env : Env) (state : Fresh.State) :
@@ -371,11 +413,12 @@ def signatures (entries : List (Name × AstFunctionDefinition)) :
       returns := fn.rets.length }
 
 def namesInFunction : AstFunctionDefinition → List Name
-  | .Def params returns _body => identNames params ++ identNames returns
+  | fn => Names.functionDefinition fn
 
-def usedNames (_dispatcher : AstStmt)
+def usedNames (dispatcher : AstStmt)
     (entries : List (Name × AstFunctionDefinition)) : List Name :=
-  entries.flatMap fun (name, fn) => name :: namesInFunction fn
+  Names.stmt dispatcher ++
+    entries.flatMap fun (name, fn) => name :: namesInFunction fn
 
 def lowerFunctions? (env : Env) :
     Fresh.State → List (Name × AstFunctionDefinition) →

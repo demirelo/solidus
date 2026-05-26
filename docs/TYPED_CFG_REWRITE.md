@@ -418,24 +418,35 @@ Those facts should appear in the compiler's layout relation and preservation
 proof, not in the stack-free source interpreter and not in any higher layer's
 theorem statement.
 
-Variables and scopes intentionally arrive in the next layer up. They will
-change the compiled stack shape, but that change belongs to the locals
-compiler, not to the locals source semantics: a declaration extends the typed
-CFG shape with symbolic local slots, assignments update those slots, and every
-normal or abrupt block exit unwinds to the enclosing continuation shape. Higher
-layers should see only a varstore/scope semantics, while typed CFG sees the
-symbolic stack contract that implements it. Concrete `DUP`/`SWAP`/`POP`
-sequences are not a higher-layer concern; they belong to the typed CFG backend
-that realizes symbolic local-slot operations and unwinds as labeled assembly.
+Variables and scopes are now part of `StackFreeCfg`, the first stack-free
+source layer above typed CFG. Its source semantics is a varstore/scope
+interpreter: declarations extend the visible source environment, assignments
+update named variables, and block/loop/procedure exits restrict the varstore
+back to the source-visible scope. The compiler from `StackFreeCfg` to
+`TypedCfg` is the only layer that maps those source variables to symbolic stack
+slots. Higher layers should see only the varstore/scope semantics, while typed
+CFG sees the symbolic stack contract that implements it. Concrete
+`DUP`/`SWAP`/`POP` sequences are not a higher-layer concern; they belong to the
+typed CFG backend that realizes symbolic local-slot operations and unwinds as
+labeled assembly.
 
 The symbolic local/cleanup effects at the typed CFG boundary are:
 
 - `declareLocal x`: reclassify the current top word as local slot `x`; this is
   a shape-only effect and emits no runtime instruction;
+- `declareLocals xs`: reclassify the top `xs.length` words as a lexical group
+  of source locals in source order, reversing the top segment so local lookup
+  by name agrees with multi-value declarations;
+- `initLocals xs`: push zero-initialized local slots for procedure return
+  variables;
 - `loadLocal x depth`: duplicate the checked local slot at `depth`; the backend
   realizes this as the corresponding `DUPn`;
 - `storeLocal x depth`: consume the top word and update the checked local slot
   at `depth`; the backend realizes this as `SWAPn; POP`;
+- `assignLocals xs`: consume `xs.length` result values and update the existing
+  checked local slots by name;
+- `returnLocals xs`: gather the named return locals in source order and discard
+  the callee frame, producing exactly the procedure return values;
 - `unwind targetShape`: pop the dead lexical region until the current shape is
   exactly `targetShape`.
 

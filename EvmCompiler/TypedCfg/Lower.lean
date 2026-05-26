@@ -140,10 +140,14 @@ def lower? : Instr → Option Assembly.Program
   | .dup depth => dup? depth
   | .swap depth => swap? depth
   | .declareLocal _name => some []
+  | .declareLocals _names => none
+  | .initLocals _names => none
   | .loadLocal _name depth => dup? depth
   | .storeLocal _name depth => do
       let swap ← swap? depth
       some (swap ++ [.prim .pop])
+  | .assignLocals _names => none
+  | .returnLocals _names => none
   | .unwind _target => none
 
 def lowerWithShape? (instr : Instr) (shape : Shape) :

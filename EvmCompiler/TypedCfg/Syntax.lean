@@ -67,8 +67,12 @@ inductive Instr where
   | dup (depth : Nat)
   | swap (depth : Nat)
   | declareLocal (name : String)
+  | declareLocals (names : List String)
+  | initLocals (names : List String)
   | loadLocal (name : String) (depth : Nat)
   | storeLocal (name : String) (depth : Nat)
+  | assignLocals (names : List String)
+  | returnLocals (names : List String)
   | unwind (target : Shape)
   deriving DecidableEq, Repr
 
