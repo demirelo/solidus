@@ -203,6 +203,199 @@ inductive ResultRel (sharedRel : SharedRel) (exceptionRel : ExceptionRel) :
       ResultRel sharedRel exceptionRel (.error sourceError)
         (.error targetError)
 
+namespace InitialRel
+
+theorem sharedStateRel {sharedRel : SharedRel}
+    {source : Reference.State} {targetShared : StackFreeCfg.SharedState}
+    (h : InitialRel sharedRel source targetShared) :
+    ReferenceState.SharedStateRel sharedRel source targetShared := by
+  rcases h.ok_state with ⟨sourceShared, sourceStore, hSource, hShared⟩
+  subst source
+  exact hShared
+
+theorem source_not_outOfFuel {sharedRel : SharedRel}
+    {source : Reference.State} {targetShared : StackFreeCfg.SharedState}
+    (h : InitialRel sharedRel source targetShared) :
+    source ≠ .OutOfFuel := by
+  intro hOut
+  rcases h.ok_state with ⟨sourceShared, sourceStore, hSource, _hShared⟩
+  rw [hOut] at hSource
+  cases hSource
+
+end InitialRel
+
+namespace ResultRel
+
+theorem of_run_regular {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      Reference.run fuel program sourceInitial =
+        .ok (.regular sourceState))
+    (hMode : targetObs.mode = .regular)
+    (hScope : targetObs.scope = [])
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) := by
+  rw [hRun]
+  exact ResultRel.regular hMode hScope hShared
+
+theorem of_callDispatcher_ok {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {rets : List Word} {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (Reference.installContract program sourceInitial) =
+          .ok (sourceState, rets))
+    (hMode : targetObs.mode = .regular)
+    (hScope : targetObs.scope = [])
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) :=
+  of_run_regular (Reference.run_of_callDispatcher_ok hRun) hMode hScope
+    hShared
+
+theorem of_run_yulHalt {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {value : Word} {targetObs : StackFreeCfg.Observation}
+    {kind : Assembly.HaltKind}
+    (hRun :
+      Reference.run fuel program sourceInitial =
+        .ok (.yulHalt sourceState value))
+    (hMode : targetObs.mode = .halt kind)
+    (hKind : NonRevertingHalt kind)
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) := by
+  rw [hRun]
+  exact ResultRel.yulHalt hMode hKind hShared
+
+theorem of_callDispatcher_yulHalt {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {value : Word} {targetObs : StackFreeCfg.Observation}
+    {kind : Assembly.HaltKind}
+    (hRun :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (Reference.installContract program sourceInitial) =
+          .error (.YulHalt sourceState value))
+    (hMode : targetObs.mode = .halt kind)
+    (hKind : NonRevertingHalt kind)
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) :=
+  of_run_yulHalt (Reference.run_of_callDispatcher_yulHalt hRun) hMode hKind
+    hShared
+
+theorem of_run_revert {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      Reference.run fuel program sourceInitial =
+        .ok (.revert sourceState))
+    (hMode : targetObs.mode = .halt .revert)
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) := by
+  rw [hRun]
+  exact ResultRel.revert hMode hShared
+
+theorem of_callDispatcher_revert {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial sourceState : Reference.State}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (Reference.installContract program sourceInitial) =
+          .error (.Revert sourceState))
+    (hMode : targetObs.mode = .halt .revert)
+    (hShared :
+      ReferenceState.SharedStateRel sharedRel sourceState
+        targetObs.shared) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) :=
+  of_run_revert (Reference.run_of_callDispatcher_revert hRun) hMode hShared
+
+theorem of_run_outOfFuel {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial : Reference.State}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      Reference.run fuel program sourceInitial = .error .OutOfFuel)
+    (hMode : targetObs.mode = .outOfFuel) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) := by
+  rw [hRun]
+  exact ResultRel.outOfFuel hMode
+
+theorem of_callDispatcher_outOfFuel {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial : Reference.State}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (Reference.installContract program sourceInitial) =
+          .error .OutOfFuel)
+    (hMode : targetObs.mode = .outOfFuel) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) :=
+  of_run_outOfFuel (Reference.run_of_callDispatcher_outOfFuel hRun) hMode
+
+theorem of_run_invalid {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial : Reference.State}
+    {sourceError : Reference.Exception}
+    {targetObs : StackFreeCfg.Observation}
+    (hRun :
+      Reference.run fuel program sourceInitial = .error sourceError)
+    (hNotFuel : sourceError ≠ .OutOfFuel)
+    (hMode : targetObs.mode = .invalid) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.ok targetObs) := by
+  rw [hRun]
+  exact ResultRel.invalid hNotFuel hMode
+
+theorem of_run_targetInvalidError {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial : Reference.State}
+    {sourceError : Reference.Exception}
+    (hRun :
+      Reference.run fuel program sourceInitial = .error sourceError)
+    (hNotFuel : sourceError ≠ .OutOfFuel) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.error .invalid) := by
+  rw [hRun]
+  exact ResultRel.targetInvalidError hNotFuel
+
+theorem of_run_exception {sharedRel : SharedRel}
+    {exceptionRel : ExceptionRel} {fuel : Nat}
+    {program : Yul.Program} {sourceInitial : Reference.State}
+    {sourceError : Reference.Exception}
+    {targetError : StackFreeCfg.Exception}
+    (hRun :
+      Reference.run fuel program sourceInitial = .error sourceError)
+    (hRel : exceptionRel sourceError targetError) :
+    ResultRel sharedRel exceptionRel
+      (Reference.run fuel program sourceInitial) (.error targetError) := by
+  rw [hRun]
+  exact ResultRel.exception hRel
+
+end ResultRel
+
 /--
 Source-to-target fuel budget for this pass.
 
