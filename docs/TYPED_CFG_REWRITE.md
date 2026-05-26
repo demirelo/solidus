@@ -435,8 +435,8 @@ The symbolic local/cleanup effects at the typed CFG boundary are:
 - `declareLocal x`: reclassify the current top word as local slot `x`; this is
   a shape-only effect and emits no runtime instruction;
 - `declareLocals xs`: reclassify the top `xs.length` words as a lexical group
-  of source locals in source order, reversing the top segment so local lookup
-  by name agrees with multi-value declarations;
+  of source locals in source order; this is a shape-only effect and emits no
+  runtime instruction;
 - `initLocals xs`: push zero-initialized local slots for procedure return
   variables;
 - `loadLocal x depth`: duplicate the checked local slot at `depth`; the backend

@@ -77,7 +77,7 @@ def disjoint? (left right : List Name) : Bool :=
   left.all (fun name => decide (name ∉ right))
 
 def extend (env names : List Name) : List Name :=
-  names.reverse ++ env
+  names ++ env
 
 mutual
   def Expr.Arity (profile : PrimitiveProfile) (env : List Name) :

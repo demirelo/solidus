@@ -328,7 +328,7 @@ mutual
               match stateAfterValue.insertMany? names values with
               | some state' => .ok state'
               | none => invalid
-            .ok (Outcome.regular state' (names.reverse ++ ctx.scope))
+            .ok (Outcome.regular state' (names ++ ctx.scope))
         | .assign names value => do
             let (stateAfterValue, out) ← Expr.eval prim value state
             if out.length = names.length then

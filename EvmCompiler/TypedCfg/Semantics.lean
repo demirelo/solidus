@@ -62,13 +62,6 @@ namespace Instr
 
 namespace StackOps
 
-def reverseTop (n : Nat) (stack : EvmYul.Stack Word) :
-    Option (EvmYul.Stack Word) :=
-  if n ≤ stack.length then
-    some ((stack.take n).reverse ++ stack.drop n)
-  else
-    none
-
 def pushZeros : Nat → EvmYul.Stack Word → EvmYul.Stack Word
   | 0, stack => stack
   | n + 1, stack => pushZeros n (EvmYul.UInt256.ofNat 0 :: stack)
@@ -179,9 +172,10 @@ def run (instr : Instr) (state : EVMState) : Except EVMException EVMState :=
   | .declareLocal _name =>
       .ok state
   | .declareLocals names =>
-      match StackOps.reverseTop names.length state.stack with
-      | some stack => .ok { state with stack := stack }
-      | none => .error .StackUnderflow
+      if names.length ≤ state.stack.length then
+        .ok state
+      else
+        .error .StackUnderflow
   | .initLocals names =>
       .ok { state with stack := StackOps.pushZeros names.length state.stack }
   | .loadLocal _name depth =>

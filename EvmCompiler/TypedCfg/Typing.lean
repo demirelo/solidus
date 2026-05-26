@@ -74,14 +74,14 @@ def type? (instr : Instr) (shape : Shape) : Option Shape :=
       if names.length ≤ shape.length then
         let rest := Shape.pop names.length shape
         if decide names.Nodup && ShapeOps.allLocalsAbsent names rest then
-          some (ShapeOps.locals names.reverse ++ rest)
+          some (ShapeOps.locals names ++ rest)
         else
           none
       else
         none
   | .initLocals names =>
       if decide names.Nodup && ShapeOps.allLocalsAbsent names shape then
-        some (ShapeOps.locals names.reverse ++ shape)
+        some (ShapeOps.locals names ++ shape)
       else
         none
   | .loadLocal name depth =>

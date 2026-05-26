@@ -103,7 +103,7 @@ def locals (names : List Name) : Shape :=
   names.map TypedCfg.Slot.local
 
 def pushedLocals (names : List Name) (shape : Shape) : Shape :=
-  locals names.reverse ++ shape
+  locals names ++ shape
 
 def lookupDepth? (name : Name) : Shape → Nat → Option Nat
   | [], _depth => none
