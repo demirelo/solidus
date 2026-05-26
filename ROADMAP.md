@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 15:38 PDT.
+Last updated: 2026-05-26 15:43 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3019,6 +3019,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
            - [x] Package the successful nonempty-child-account-map branch of EVM `Θ` result merge: when the returned EVM child account map is not `∅`, the restored Yul caller state relates to the EVM caller state using the child account map/substate/created-account set.
            - [x] Add the exact conditional `Θ` result-merge shape: the proof can now consume a relation to `if childMap == ∅ then parentMap else childMap`, rather than forcing the nonempty branch as the only possible success shape.
            - [x] Package the warmed-caller finish relation used by revert and early-failure branches after account access.
+           - [x] Package imported-Yul successful and reverted restore helpers against the EVM `Θ` conditional result merge and warmed-parent revert shape, leaving only the child-result/gas-return proof obligations explicit.
            - [ ] Prove the ordinary compiled-account child result relation against the conditional merge shape, then discharge the remaining success/revert/failure branches and gas-return relation.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.

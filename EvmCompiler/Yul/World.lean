@@ -1511,6 +1511,125 @@ theorem sharedStateRel_callSuccessMergeWithTargetGasOfEvmNonempty
       hCreated returnData inOffset inSize
       outOffset outSize hGas
 
+theorem restoreSuccessfulContractCallState_ok_rel
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {evmChildAccountMap : EvmYul.AccountMap .EVM}
+    {evmChildSubstate : EvmYul.Substate}
+    {evmChildCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {targetGas : EvmYul.UInt256}
+    (hAccountMap :
+      cfg.accountMapRel yulChild.accountMap
+        (if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          evmParent.accountMap
+        else
+          evmChildAccountMap))
+    (hSubstate :
+      yulChild.substate =
+        if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          evmParent.substate
+        else
+          evmChildSubstate)
+    (hCreated : yulChild.createdAccounts = evmChildCreated)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (.Ok yulParent parentStore)
+          (.Ok yulChild childStore)
+          restoreStore returnData inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall returnData
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+              evmParent.accountMap
+            else
+              evmChildAccountMap
+          substate :=
+            if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+              evmParent.substate
+            else
+              evmChildSubstate
+          createdAccounts := evmChildCreated } := by
+  refine
+    ⟨{ yulParent with
+        toMachineState :=
+          yulParent.toMachineState.finishExternalCall returnData
+            inOffset inSize outOffset outSize
+        accountMap := yulChild.accountMap
+        substate := yulChild.substate
+        createdAccounts := yulChild.createdAccounts },
+      ?_, ?_⟩
+  · simp [EvmYul.Yul.restoreSuccessfulContractCallState,
+      EvmYul.Yul.State.toMachineState]
+  · exact
+      sharedStateRel_callResultMergeWithTargetGas hParent
+        hAccountMap hSubstate hCreated returnData
+        inOffset inSize outOffset outSize hGas
+
+theorem restoreRevertedContractCallState_afterAccess_ok_rel
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {targetGas : EvmYul.UInt256}
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall
+          yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreRevertedContractCallState
+          (EvmYul.Yul.addAccessedAccount (.Ok yulParent parentStore) addr)
+          (.Ok yulChild childStore)
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall
+                yulChild.toMachineState.H_return
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          substate :=
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate } := by
+  refine
+    ⟨{ yulParent with
+        toMachineState :=
+          yulParent.toMachineState.finishExternalCall
+            yulChild.toMachineState.H_return
+            inOffset inSize outOffset outSize
+        substate :=
+          (EvmYul.State.addAccessedAccount yulParent.toState addr).substate },
+      ?_, ?_⟩
+  · simp [EvmYul.Yul.restoreRevertedContractCallState,
+      EvmYul.Yul.addAccessedAccount, EvmYul.Yul.State.setState,
+      EvmYul.Yul.State.toMachineState, EvmYul.Yul.State.toState,
+      EvmYul.State.addAccessedAccount]
+  · simpa [EvmYul.State.addAccessedAccount] using
+      sharedStateRel_finishExternalCallAfterAccessWithTargetGas
+        hParent addr yulChild.toMachineState.H_return
+        inOffset inSize outOffset outSize hGas
+
 theorem sharedStateRel_freshExternalCallWithWorld
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
