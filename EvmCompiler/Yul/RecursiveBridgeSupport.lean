@@ -168262,11 +168262,16 @@ structure RecursiveBridgeFullSourceAccepted (program : Program) : Prop where
 Source-static bridge facts that can be checked directly from the imported Yul
 program syntax.
 
-These facts are separated from `Reference.FullAccepted`: lexical scoping,
-control-flow scoping, and user-call arity are finite syntactic checks, while
-source acceptedness remains the semantic/wellformedness boundary.
+These facts are separated from source acceptedness: lexical scoping,
+control-flow scoping, user-call arity, and the current no-shadowing predicate
+are finite source checks, while `Program.Accepted` remains the
+semantic/wellformedness boundary.  The no-shadowing predicate currently also
+checks `Safe.expr` at expression-bearing statements; that is constructed here
+explicitly rather than hidden inside `Reference.FullAccepted`.
 -/
 structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
+  noShadowing :
+    Reference.Safe.NoShadowing.program program
   sourceScoped :
     Reference.SourceBridgeFacts.SourceLexical.ProgramScoped program
   controlScoped :
@@ -168277,30 +168282,40 @@ structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
 namespace RecursiveBridgeSourceStaticFacts
 
 noncomputable def checked? (program : Program) : Bool :=
-  Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
-    (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
-      Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)
+  Reference.Safe.NoShadowing.program? program &&
+    (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+      (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+        Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program))
 
 theorem of_checked? {program : Program}
     (hCheck : checked? program = true) :
     RecursiveBridgeSourceStaticFacts program := by
   have hAnd :
+      Reference.Safe.NoShadowing.program? program = true ∧
+        (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+          (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+            Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)) =
+          true :=
+    by simpa [checked?] using hCheck
+  have hMid :
       Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program =
           true ∧
         (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
           Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program) =
             true :=
-    by simpa [checked?] using hCheck
+    by simpa using hAnd.2
   have hTail :
       Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program =
           true ∧
         Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program =
           true :=
-    by simpa using hAnd.2
+    by simpa using hMid.2
   exact
-    { sourceScoped :=
+    { noShadowing :=
+        Reference.Safe.NoShadowing.program_of_check hAnd.1
+      sourceScoped :=
         Reference.SourceBridgeFacts.SourceLexical.ProgramScoped.of_check
-          hAnd.1
+          hMid.1
       controlScoped :=
         Reference.SourceBridgeFacts.ControlFlow.ProgramScoped.of_check
           hTail.1
@@ -168310,9 +168325,11 @@ theorem of_checked? {program : Program}
 
 theorem toFullSourceAccepted {program : Program}
     (hFacts : RecursiveBridgeSourceStaticFacts program)
-    (hReference : Reference.FullAccepted program) :
+    (hProgramAccepted : Program.Accepted program) :
     RecursiveBridgeFullSourceAccepted program :=
-  { reference := hReference
+  { reference :=
+      ⟨hProgramAccepted, Reference.Safe.Full.program_all program,
+        hFacts.noShadowing⟩
     sourceScoped := hFacts.sourceScoped
     controlScoped := hFacts.controlScoped
     userCalls := hFacts.userCalls }

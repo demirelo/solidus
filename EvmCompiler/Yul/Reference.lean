@@ -3113,6 +3113,136 @@ def freshIn (env : List Name) (names : List Name) : Prop :=
 def extend (env names : List Name) : List Name :=
   names ++ env
 
+def namesNodup? (names : List Name) : Bool :=
+  decide names.Nodup
+
+def namesFresh? (env names : List Name) : Bool :=
+  names.all fun name => decide (name ∉ env)
+
+def freshIn? (env names : List Name) : Bool :=
+  namesNodup? names && namesFresh? env names
+
+def primitive? (op : EvmYul.Operation .Yul) : Bool :=
+  FeatureCoverage.localCodeImagePrimitive? op &&
+    (FeatureCoverage.externalCodeImagePrimitive? op &&
+      (FeatureCoverage.createBoundaryPrimitive? op &&
+        FeatureCoverage.externalBoundaryPrimitive? op))
+
+def userCall? (functionName : Name) : Bool :=
+  !ObjectBuiltin.unsupported? functionName
+
+mutual
+  def expr? : AstExpr → Bool
+    | .Lit _value => true
+    | .Var _name => true
+    | .Call (.inl prim) args => primitive? prim && exprs? args
+    | .Call (.inr functionName) args => userCall? functionName && exprs? args
+
+  def exprs? : List AstExpr → Bool
+    | [] => true
+    | head :: rest => expr? head && exprs? rest
+end
+
+theorem namesNodup_of_check {names : List Name}
+    (hCheck : namesNodup? names = true) :
+    names.Nodup :=
+  of_decide_eq_true hCheck
+
+theorem namesFresh_of_check {env names : List Name}
+    (hCheck : namesFresh? env names = true) :
+    ∀ name, name ∈ names → name ∉ env := by
+  intro name hName
+  exact
+    of_decide_eq_true
+      ((List.all_eq_true.mp hCheck) name hName)
+
+theorem freshIn_of_check {env names : List Name}
+    (hCheck : freshIn? env names = true) :
+    freshIn env names := by
+  have hAnd :
+      namesNodup? names = true ∧ namesFresh? env names = true :=
+    by simpa [freshIn?] using hCheck
+  exact
+    ⟨namesNodup_of_check hAnd.1, namesFresh_of_check hAnd.2⟩
+
+theorem primitive_of_check {op : EvmYul.Operation .Yul}
+    (hCheck : primitive? op = true) :
+    primitive op := by
+  have hAnd :
+      FeatureCoverage.localCodeImagePrimitive? op = true ∧
+        (FeatureCoverage.externalCodeImagePrimitive? op &&
+          (FeatureCoverage.createBoundaryPrimitive? op &&
+            FeatureCoverage.externalBoundaryPrimitive? op)) = true :=
+    by simpa [primitive?] using hCheck
+  have hTail :
+      FeatureCoverage.externalCodeImagePrimitive? op = true ∧
+        (FeatureCoverage.createBoundaryPrimitive? op &&
+          FeatureCoverage.externalBoundaryPrimitive? op) = true :=
+    by simpa using hAnd.2
+  have hLast :
+      FeatureCoverage.createBoundaryPrimitive? op = true ∧
+        FeatureCoverage.externalBoundaryPrimitive? op = true :=
+    by simpa using hTail.2
+  have hImported :
+      yulImportedSemanticsIncompletePrimitive op = False :=
+    (importedIncompletePrimitive_iff_local_external_create op).mpr
+      ⟨FeatureCoverage.localCodeImagePrimitive_of_check hAnd.1,
+        FeatureCoverage.externalCodeImagePrimitive_of_check hTail.1,
+        FeatureCoverage.createBoundaryPrimitive_of_check hLast.1⟩
+  have hExternal :
+      externalCallBoundaryPrimitive op = False :=
+    FeatureCoverage.externalBoundaryPrimitive_of_check hLast.2
+  exact
+    (primitive_iff_not_importedIncomplete_not_externalBoundary op).mpr
+      ⟨hImported, hExternal⟩
+
+theorem userCall_of_check {functionName : Name}
+    (hCheck : userCall? functionName = true) :
+    FeatureCoverage.objectBuiltinUserCall functionName := by
+  unfold userCall? at hCheck
+  unfold FeatureCoverage.objectBuiltinUserCall
+  cases hUnsupported : ObjectBuiltin.unsupported? functionName <;>
+    simp [hUnsupported] at hCheck ⊢
+
+mutual
+  theorem expr_of_check {expr' : AstExpr}
+      (hCheck : expr? expr' = true) :
+      expr expr' := by
+    cases expr' with
+    | Lit value =>
+        trivial
+    | Var name =>
+        trivial
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            have hAnd :
+                primitive? prim = true ∧ exprs? args = true :=
+              by simpa [expr?] using hCheck
+            exact ⟨primitive_of_check hAnd.1, exprs_of_check hAnd.2⟩
+        | inr functionName =>
+            have hAnd :
+                userCall? functionName = true ∧ exprs? args = true :=
+              by simpa [expr?] using hCheck
+            exact
+              ⟨by
+                  simpa [FeatureCoverage.objectBuiltinUserCall] using
+                    userCall_of_check hAnd.1,
+                exprs_of_check hAnd.2⟩
+
+  theorem exprs_of_check {exprs' : List AstExpr}
+      (hCheck : exprs? exprs' = true) :
+      exprs exprs' := by
+    cases exprs' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            expr? head = true ∧ exprs? rest = true :=
+          by simpa [exprs?] using hCheck
+        exact ⟨expr_of_check hAnd.1, exprs_of_check hAnd.2⟩
+end
+
 mutual
   def stmt : List Name → AstStmt → Prop
     | env, .Block body => stmts env body
@@ -3144,6 +3274,120 @@ mutual
     | env, _ => env
 end
 
+mutual
+  def stmt? (env : List Name) : AstStmt → Bool
+    | .Block body => stmts? env body
+    | .Let names none => freshIn? env (identNames names)
+    | .Let names (some value) =>
+        freshIn? env (identNames names) && expr? value
+    | .Assign _names value => expr? value
+    | .ExprStmtCall value => expr? value
+    | .Switch scrutinee cases defaultBody =>
+        expr? scrutinee && (casesSafe? env cases && stmts? env defaultBody)
+    | .For cond post body =>
+        expr? cond && (stmts? env post && stmts? env body)
+    | .If cond body =>
+        expr? cond && stmts? env body
+    | .Continue | .Break | .Leave => true
+
+  def stmts? (env : List Name) : List AstStmt → Bool
+    | [] => true
+    | head :: rest =>
+        stmt? env head && stmts? (stmtOutEnv env head) rest
+
+  def casesSafe? (env : List Name) :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        stmts? env body && casesSafe? env rest
+end
+
+mutual
+  theorem stmt_of_check {env : List Name} {stmt' : AstStmt}
+      (hCheck : stmt? env stmt' = true) :
+      stmt env stmt' := by
+    cases stmt' with
+    | Block body =>
+        exact stmts_of_check hCheck
+    | Let names value =>
+        cases value with
+        | none =>
+            exact freshIn_of_check hCheck
+        | some value =>
+            have hAnd :
+                freshIn? env (identNames names) = true ∧
+                  expr? value = true :=
+              by simpa [stmt?] using hCheck
+            exact ⟨freshIn_of_check hAnd.1, expr_of_check hAnd.2⟩
+    | Assign names value =>
+        exact expr_of_check hCheck
+    | ExprStmtCall value =>
+        exact expr_of_check hCheck
+    | Switch scrutinee cases defaultBody =>
+        have hAnd :
+            expr? scrutinee = true ∧
+              (casesSafe? env cases && stmts? env defaultBody) = true :=
+          by simpa [stmt?] using hCheck
+        have hTail :
+            casesSafe? env cases = true ∧
+              stmts? env defaultBody = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨expr_of_check hAnd.1, casesSafe_of_check hTail.1,
+            stmts_of_check hTail.2⟩
+    | For cond post body =>
+        have hAnd :
+            expr? cond = true ∧
+              (stmts? env post && stmts? env body) = true :=
+          by simpa [stmt?] using hCheck
+        have hTail :
+            stmts? env post = true ∧ stmts? env body = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨expr_of_check hAnd.1, stmts_of_check hTail.1,
+            stmts_of_check hTail.2⟩
+    | If cond body =>
+        have hAnd :
+            expr? cond = true ∧ stmts? env body = true :=
+          by simpa [stmt?] using hCheck
+        exact ⟨expr_of_check hAnd.1, stmts_of_check hAnd.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem stmts_of_check {env : List Name} {stmts' : List AstStmt}
+      (hCheck : stmts? env stmts' = true) :
+      stmts env stmts' := by
+    cases stmts' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        have hAnd :
+            stmt? env head = true ∧
+              stmts? (stmtOutEnv env head) rest = true :=
+          by simpa [stmts?] using hCheck
+        exact
+          ⟨stmt_of_check hAnd.1, stmts_of_check hAnd.2⟩
+
+  theorem casesSafe_of_check {env : List Name}
+      {cases' : List (Word × List AstStmt)}
+      (hCheck : casesSafe? env cases' = true) :
+      casesSafe env cases' := by
+    cases cases' with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            stmts? env body = true ∧ casesSafe? env rest = true :=
+          by simpa [casesSafe?] using hCheck
+        exact
+          ⟨stmts_of_check hAnd.1, casesSafe_of_check hAnd.2⟩
+end
+
 def functionDefinition (functionEnv : List Name) :
     AstFunctionDefinition → Prop
   | .Def params returns body =>
@@ -3165,6 +3409,86 @@ noncomputable def contract (contract : AstContract) : Prop :=
 
 noncomputable def program (program : Program) : Prop :=
   contract program.contract
+
+def functionDefinition? (functionEnv : List Name) :
+    AstFunctionDefinition → Bool
+  | .Def params returns body =>
+      let locals := identNames params ++ identNames returns
+      freshIn? functionEnv locals &&
+        stmts? (extend functionEnv locals) body
+
+def functionEntries? (functionEnv : List Name) :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      functionDefinition? functionEnv fn &&
+        functionEntries? functionEnv rest
+
+noncomputable def contract? (contract : AstContract) : Bool :=
+  let entries := Contract.functionEntries contract
+  let functionEnv := entries.map Prod.fst
+  namesNodup? functionEnv &&
+    (stmt? functionEnv contract.dispatcher &&
+      functionEntries? functionEnv entries)
+
+noncomputable def program? (program : Program) : Bool :=
+  contract? program.contract
+
+theorem functionDefinition_of_check {functionEnv : List Name}
+    {fn : AstFunctionDefinition}
+    (hCheck : functionDefinition? functionEnv fn = true) :
+    functionDefinition functionEnv fn := by
+  cases fn with
+  | Def params returns body =>
+      have hAnd :
+          freshIn? functionEnv (identNames params ++ identNames returns) =
+              true ∧
+            stmts?
+                (extend functionEnv
+                  (identNames params ++ identNames returns)) body =
+              true :=
+        by simpa [functionDefinition?] using hCheck
+      exact
+        ⟨freshIn_of_check hAnd.1, stmts_of_check hAnd.2⟩
+
+theorem functionEntries_of_check {functionEnv : List Name}
+    {entries : List (Name × AstFunctionDefinition)}
+    (hCheck : functionEntries? functionEnv entries = true) :
+    functionEntries functionEnv entries := by
+  induction entries with
+  | nil =>
+      trivial
+  | cons entry rest ih =>
+      rcases entry with ⟨_name, fn⟩
+      have hAnd :
+          functionDefinition? functionEnv fn = true ∧
+            functionEntries? functionEnv rest = true :=
+        by simpa [functionEntries?] using hCheck
+      exact
+        ⟨functionDefinition_of_check hAnd.1, ih hAnd.2⟩
+
+theorem contract_of_check {contract' : AstContract}
+    (hCheck : contract? contract' = true) :
+    contract contract' := by
+  let entries := Contract.functionEntries contract'
+  let functionEnv := entries.map Prod.fst
+  have hAnd :
+      namesNodup? functionEnv = true ∧
+        (stmt? functionEnv contract'.dispatcher &&
+          functionEntries? functionEnv entries) = true :=
+    by simpa [contract?, entries, functionEnv] using hCheck
+  have hTail :
+      stmt? functionEnv contract'.dispatcher = true ∧
+        functionEntries? functionEnv entries = true :=
+    by simpa using hAnd.2
+  exact
+    ⟨namesNodup_of_check hAnd.1, stmt_of_check hTail.1,
+      functionEntries_of_check hTail.2⟩
+
+theorem program_of_check {program' : Program}
+    (hCheck : program? program' = true) :
+    program program' :=
+  contract_of_check hCheck
 
 theorem let_names_fresh_of_stmt {env : List Name}
     {names : List EvmYul.Identifier} {value : Option AstExpr}

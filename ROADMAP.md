@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 05:34 PDT.
+Last updated: 2026-05-26 05:48 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -60,9 +60,16 @@ this IR as the refactor proceeds.
       `RecursiveBridgeSourceStaticFacts`, and route the preferred public
       theorem through
       `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?`.
-      The preferred theorem now takes only `Reference.FullAccepted` for source
-      acceptedness, rather than a caller-provided
+      This intermediate checkpoint reduced source acceptedness to
+      `Reference.FullAccepted`, rather than a caller-provided
       `RecursiveBridgeFullSourceAccepted` package.
+    - [x] Extend `RecursiveBridgeSourceStaticFacts` with checked
+      `Reference.Safe.NoShadowing.program` construction. This removes the
+      caller-supplied `Reference.FullAccepted` premise from the preferred
+      gas-aware top theorem: the public alias now takes `Yul.Program.Accepted`
+      as the fundamental source-validity boundary, constructs trivial
+      `Reference.Safe.Full.program`, and obtains no-shadowing/source-expression
+      safety from the checked source-static boundary.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
