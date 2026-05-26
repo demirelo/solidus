@@ -45663,7 +45663,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_expr_prim_of_lower_prelude
         hLower with
     ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
   rcases
-      lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+      lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
         (cfg := cfg) (layout := layout) (prim := prim) (program := program)
         (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
         (op := op) (args := args) (codeOverride := codeOverride)
@@ -45760,7 +45760,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_pr
           some seq →
         SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
           args codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -45963,7 +45963,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_pr
           some seq →
         SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
           args codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -64366,7 +64366,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_of_preludeR
           some seq →
         SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel
           args codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -64457,7 +64457,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_expr_prim_of_preludeR
                   rcases hEval (SourceStateRel.ok hShared hVars) with
                     ⟨sharedAfter, storeAfter, values, hEvalOk⟩
                   have hBridge :=
-                    sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general
+                    sourceRegularSeqRunBridgeHidden_single_expr_prim_of_lower_preludeRegular_general_arity
                       (cfg := cfg) (layout := layout) (prim := prim)
                       (program := program) (ctx := ctx) (shared := shared)
                       (sharedAfter := sharedAfter) (store := store)
@@ -73823,7 +73823,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_mstore_of_preludeRegu
     (op := .mstore) (args := args) (codeOverride := codeOverride)
     (allowed := allowed) hScope hCompat
     (by simp [Prim.terminal?]) (by simp [Prim.toBasicOp?])
-    (by rfl) hArgs (primitiveStackSoundAt_mstore hYul hSource)
+    (by rfl) hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt
+      (primitiveStackSoundAt_mstore hYul hSource))
     hImportedEval
 
 /-- Names-aware checked wrapper for successful `mstore8(...)` statements. -/
@@ -73890,7 +73892,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_mstore8_of_preludeReg
     (op := .mstore8) (args := args) (codeOverride := codeOverride)
     (allowed := allowed) hScope hCompat
     (by simp [Prim.terminal?]) (by simp [Prim.toBasicOp?])
-    (by rfl) hArgs (primitiveStackSoundAt_mstore8 hYul hSource)
+    (by rfl) hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt
+      (primitiveStackSoundAt_mstore8 hYul hSource))
     hImportedEval
 
 /-- Names-aware checked wrapper for successful `mcopy(...)` statements. -/
@@ -73957,7 +73961,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_mcopy_of_preludeRegul
     (op := .mcopy) (args := args) (codeOverride := codeOverride)
     (allowed := allowed) hScope hCompat
     (by simp [Prim.terminal?]) (by simp [Prim.toBasicOp?])
-    (by rfl) hArgs (primitiveStackSoundAt_mcopy hYul hSource)
+    (by rfl) hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt
+      (primitiveStackSoundAt_mcopy hYul hSource))
     hImportedEval
 
 /-- Names-aware checked wrapper for successful `calldatacopy(...)` statements. -/
@@ -74018,7 +74024,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_calldatacopy_of_prelu
     (op := .calldatacopy) (args := args) (codeOverride := codeOverride)
     (allowed := allowed) hScope hCompat
     (by simp [Prim.terminal?]) (by simp [Prim.toBasicOp?])
-    (by rfl) hArgs (primitiveStackSoundAt_calldatacopy hYul hSource)
+    (by rfl) hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt
+      (primitiveStackSoundAt_calldatacopy hYul hSource))
     hImportedEval
 
 /-- Names-aware checked wrapper for successful `returndatacopy(...)` statements. -/
@@ -74085,7 +74093,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_returndatacopy_of_pre
     (op := .returndatacopy) (args := args) (codeOverride := codeOverride)
     (allowed := allowed) hScope hCompat
     (by simp [Prim.terminal?]) (by simp [Prim.toBasicOp?])
-    (by rfl) hArgs (primitiveStackSoundAt_returndatacopy hYul hSource)
+    (by rfl) hArgs
+    (primitiveStackSoundAtArity_of_stackSoundAt
+      (primitiveStackSoundAt_returndatacopy hYul hSource))
     hImportedEval
 
 /--
@@ -129948,7 +129958,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_pr
     (hSafeArgs : Safe.exprs args)
     (hScopedArgs : SourceExprsScoped layout args)
     (hArgsOk : UserCallArity.ExprsOk contract args)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -130031,7 +130041,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_pr
     (hSafeArgs : Safe.exprs args)
     (hScopedArgs : SourceExprsScoped layout args)
     (hArgsOk : UserCallArity.ExprsOk contract args)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -165990,8 +166000,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166050,9 +166060,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       (by
         intro layout fuel yulPrim op hSafe hBasic
         exact
-          Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
-            (hPrimSound (layout := layout) (fuel := fuel)
-              (yulPrim := yulPrim) (op := op) hSafe hBasic))
+          hPrimSound (layout := layout) (fuel := fuel)
+            (yulPrim := yulPrim) (op := op) hSafe hBasic)
       hResultOk sourceFuel)
     hScope hNoOutOfFuel hObservation hCompile hAssemble hRuntime
     hCompileAccepted hInitialPc hInitialStack hSourceInitial
@@ -166145,8 +166154,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166298,8 +166307,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166435,8 +166444,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166584,8 +166593,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166753,8 +166762,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -166885,8 +166894,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -167015,8 +167024,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -167287,8 +167296,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -167405,8 +167414,8 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -167508,8 +167517,8 @@ structure RecursiveBridgeSemanticContracts
       {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
       Reference.Safe.primitive yulPrim →
       Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-        yulPrim op
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
   exprResultOk :
     ∀ {layout : List Name} {fuel : Nat}
       {expr : AstExpr},
@@ -167566,8 +167575,8 @@ structure RecursiveBridgeSemanticCoreContracts
       {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
       Reference.Safe.primitive yulPrim →
       Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-        yulPrim op
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
   exprResultOk :
     ∀ {layout : List Name} {fuel : Nat}
       {expr : AstExpr},
@@ -167710,8 +167719,8 @@ structure RecursiveBridgePrimitiveContracts
       {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
       Reference.Safe.primitive yulPrim →
       Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-        yulPrim op
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
 
 /--
 Imported-Yul primitive calls that lower to source-tower stack primitive
@@ -167730,8 +167739,8 @@ structure RecursiveBridgePrimitiveStackContracts
       {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
       Reference.Safe.primitive yulPrim →
       Prim.toBasicOp? yulPrim = some op →
-      Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-        yulPrim op
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
 
 /--
 Arity-aware imported-Yul primitive stack contract.
@@ -167771,11 +167780,7 @@ theorem of_strict
     {prim : Objects.Source.PrimitiveSemantics}
     (hStack : RecursiveBridgePrimitiveStackContracts cfg prim) :
     RecursiveBridgePrimitiveStackArityContracts cfg prim where
-  primitiveStack := by
-    intro layout fuel yulPrim op hSafe hBasic
-    exact
-      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
-        (hStack.primitiveStack hSafe hBasic)
+  primitiveStack := hStack.primitiveStack
 
 theorem structured
     {cfg : Reference.StateRelConfig} :
@@ -167789,6 +167794,23 @@ theorem structured
 
 end RecursiveBridgePrimitiveStackArityContracts
 
+namespace RecursiveBridgePrimitiveStackContracts
+
+/-- After the in-place flip of the `primitiveStack` field to the arity-aware
+predicate, the canonical structured primitive semantics inhabits the
+`RecursiveBridgePrimitiveStackContracts` package directly. -/
+theorem structured
+    {cfg : Reference.StateRelConfig} :
+    RecursiveBridgePrimitiveStackContracts cfg
+      Locals.Source.PrimitiveSemantics.structured where
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_safe_toBasicOp
+        hSafe hBasic
+
+end RecursiveBridgePrimitiveStackContracts
+
 namespace RecursiveBridgePrimitiveArityContracts
 
 theorem of_strict
@@ -167797,11 +167819,7 @@ theorem of_strict
     (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim) :
     RecursiveBridgePrimitiveArityContracts cfg prim where
   primitiveSound := hPrimitive.primitiveSound
-  primitiveStack := by
-    intro layout fuel yulPrim op hSafe hBasic
-    exact
-      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
-        (hPrimitive.primitiveStack hSafe hBasic)
+  primitiveStack := hPrimitive.primitiveStack
 
 theorem of_stack
     {cfg : Reference.StateRelConfig}
@@ -168033,8 +168051,8 @@ theorem of_canonical_observation
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Reference.Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        Reference.SourceBridgeFacts.PrimitiveStackSoundAt cfg layout prim fuel
-          yulPrim op)
+        Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+          fuel yulPrim op)
     (hExprResultOk :
       ∀ {layout : List Name} {fuel : Nat}
         {expr : AstExpr},
@@ -168175,11 +168193,7 @@ theorem of_strict
       outcomeRel program shared store where
   primitiveSound := hContracts.primitiveSound
   terminal := hContracts.terminal
-  primitiveStack := by
-    intro layout fuel yulPrim op hSafe hBasic
-    exact
-      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
-        (hContracts.primitiveStack hSafe hBasic)
+  primitiveStack := hContracts.primitiveStack
   exprResultOk := hContracts.exprResultOk
   observation := hContracts.observation
 
@@ -168310,11 +168324,7 @@ theorem of_strict
       program where
   primitiveSound := hCore.primitiveSound
   terminal := hCore.terminal
-  primitiveStack := by
-    intro layout fuel yulPrim op hSafe hBasic
-    exact
-      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
-        (hCore.primitiveStack hSafe hBasic)
+  primitiveStack := hCore.primitiveStack
   exprResultOk := hCore.exprResultOk
 
 theorem ofSemanticContracts

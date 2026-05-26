@@ -1815,9 +1815,6 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitiveStack :
-      RecursiveBridgePrimitiveStackContracts cfg
-        Locals.Source.PrimitiveSemantics.structured)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel
         Locals.Source.PrimitiveSemantics.structured program)
@@ -1875,7 +1872,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
     hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
-    hPrimitiveStack hTerminal hExpr hInitialSharedRel hSourceRun
+    RecursiveBridgePrimitiveStackContracts.structured
+    hTerminal hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
     currentContractProjection hInitialPc hInitialStack hRunner
 
@@ -1894,9 +1892,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program)
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitiveStack :
-      RecursiveBridgePrimitiveStackContracts cfg
-        Locals.Source.PrimitiveSemantics.structured)
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel
         Locals.Source.PrimitiveSemantics.structured program)
@@ -1940,7 +1935,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
     hFullSourceAccepted hFeatureCoverage hSourceCompileAccepted
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
-    hPrimitiveStack hTerminal hExpr hInitialSharedRel hSourceRun
+    RecursiveBridgePrimitiveStackContracts.structured
+    hTerminal hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
     currentContractProjection hInitialPc hInitialStack hRunner
 
