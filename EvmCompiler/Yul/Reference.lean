@@ -341,6 +341,205 @@ def primitive : EvmYul.Operation .Yul → Prop :=
 def userCall (functionName : Name) : Prop :=
   ObjectBuiltin.unsupported? functionName = false
 
+namespace Family
+
+def anyPrimitive (_op : EvmYul.Operation .Yul) : Prop :=
+  True
+
+def anyUserCall (_functionName : Name) : Prop :=
+  True
+
+mutual
+  def expr
+      (primitive : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop) :
+      AstExpr → Prop
+    | .Lit _value => True
+    | .Var _name => True
+    | .Call (.inl prim) args => primitive prim ∧ exprs primitive userCall args
+    | .Call (.inr functionName) args =>
+        userCall functionName ∧ exprs primitive userCall args
+
+  def exprs
+      (primitive : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop) :
+      List AstExpr → Prop
+    | [] => True
+    | head :: rest =>
+        expr primitive userCall head ∧ exprs primitive userCall rest
+
+  def stmt
+      (primitive : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop) :
+      AstStmt → Prop
+    | .Block body => stmts primitive userCall body
+    | .Let _names none => True
+    | .Let _names (some value) => expr primitive userCall value
+    | .Assign _names value => expr primitive userCall value
+    | .ExprStmtCall value => expr primitive userCall value
+    | .Switch scrutinee cases defaultBody =>
+        expr primitive userCall scrutinee ∧
+          casesSafe primitive userCall cases ∧
+            stmts primitive userCall defaultBody
+    | .For cond post body =>
+        expr primitive userCall cond ∧
+          stmts primitive userCall post ∧
+            stmts primitive userCall body
+    | .If cond body =>
+        expr primitive userCall cond ∧ stmts primitive userCall body
+    | .Continue | .Break | .Leave => True
+
+  def stmts
+      (primitive : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop) :
+      List AstStmt → Prop
+    | [] => True
+    | head :: rest =>
+        stmt primitive userCall head ∧ stmts primitive userCall rest
+
+  def casesSafe
+      (primitive : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop) :
+      List (Word × List AstStmt) → Prop
+    | [] => True
+    | (_value, body) :: rest =>
+        stmts primitive userCall body ∧
+          casesSafe primitive userCall rest
+end
+
+def functionDefinition
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) :
+    AstFunctionDefinition → Prop
+  | .Def _params _returns body => stmts primitive userCall body
+
+def functionEntries
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) :
+    List (Name × AstFunctionDefinition) → Prop
+  | [] => True
+  | (_name, fn) :: rest =>
+      functionDefinition primitive userCall fn ∧
+        functionEntries primitive userCall rest
+
+noncomputable def contract
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) (contract : AstContract) :
+    Prop :=
+  stmt primitive userCall contract.dispatcher ∧
+    functionEntries primitive userCall
+      (Contract.functionEntries contract)
+
+noncomputable def program
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) (program : Program) :
+    Prop :=
+  contract primitive userCall program.contract
+
+end Family
+
+def importedIncompletePrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  Safe.yulImportedSemanticsIncompletePrimitive op = False
+
+def externalBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  Safe.externalCallBoundaryPrimitive op = False
+
+def objectBuiltinUserCall (functionName : Name) : Prop :=
+  ObjectBuiltin.unsupported? functionName = false
+
+def importedIncompleteExpr : AstExpr → Prop :=
+  Family.expr importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryExpr : AstExpr → Prop :=
+  Family.expr externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinExpr : AstExpr → Prop :=
+  Family.expr Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteExprs : List AstExpr → Prop :=
+  Family.exprs importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryExprs : List AstExpr → Prop :=
+  Family.exprs externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinExprs : List AstExpr → Prop :=
+  Family.exprs Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteStmt : AstStmt → Prop :=
+  Family.stmt importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryStmt : AstStmt → Prop :=
+  Family.stmt externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinStmt : AstStmt → Prop :=
+  Family.stmt Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteStmts : List AstStmt → Prop :=
+  Family.stmts importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryStmts : List AstStmt → Prop :=
+  Family.stmts externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinStmts : List AstStmt → Prop :=
+  Family.stmts Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition Family.anyPrimitive objectBuiltinUserCall
+
+def importedIncompleteFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries importedIncompletePrimitive Family.anyUserCall
+
+def externalBoundaryFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries externalBoundaryPrimitive Family.anyUserCall
+
+def objectBuiltinFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries Family.anyPrimitive objectBuiltinUserCall
+
+noncomputable def importedIncompleteContract :
+    AstContract → Prop :=
+  Family.contract importedIncompletePrimitive Family.anyUserCall
+
+noncomputable def externalBoundaryContract :
+    AstContract → Prop :=
+  Family.contract externalBoundaryPrimitive Family.anyUserCall
+
+noncomputable def objectBuiltinContract :
+    AstContract → Prop :=
+  Family.contract Family.anyPrimitive objectBuiltinUserCall
+
+noncomputable def importedIncompleteProgram :
+    Program → Prop :=
+  Family.program importedIncompletePrimitive Family.anyUserCall
+
+noncomputable def externalBoundaryProgram :
+    Program → Prop :=
+  Family.program externalBoundaryPrimitive Family.anyUserCall
+
+noncomputable def objectBuiltinProgram :
+    Program → Prop :=
+  Family.program Family.anyPrimitive objectBuiltinUserCall
+
 mutual
   def expr : AstExpr → Prop
     | .Lit _value => True
@@ -464,6 +663,558 @@ theorem contract_iff_safe (contract : AstContract) :
 theorem program_iff_safe (program : Program) :
     FeatureCoverage.program program ↔ Safe.program program := by
   exact contract_iff_safe program.contract
+
+mutual
+  theorem expr_iff_split : (expr' : AstExpr) →
+      expr expr' ↔
+        importedIncompleteExpr expr' ∧
+          externalBoundaryExpr expr' ∧
+            objectBuiltinExpr expr'
+    | .Lit _value => by
+        simp [expr, importedIncompleteExpr, externalBoundaryExpr,
+          objectBuiltinExpr, Family.expr, Family.anyPrimitive,
+          Family.anyUserCall]
+    | .Var _name => by
+        simp [expr, importedIncompleteExpr, externalBoundaryExpr,
+          objectBuiltinExpr, Family.expr, Family.anyPrimitive,
+          Family.anyUserCall]
+    | .Call (.inl prim) args => by
+        constructor
+        · intro h
+          rcases h with ⟨hPrim, hArgs⟩
+          rcases
+              (Safe.primitive_iff_not_importedIncomplete_not_externalBoundary
+                prim).mp hPrim with
+            ⟨hImportedPrim, hExternalPrim⟩
+          have hImportedPrimNot :
+              ¬ Safe.yulImportedSemanticsIncompletePrimitive prim := by
+            simpa using hImportedPrim
+          have hExternalPrimNot :
+              ¬ Safe.externalCallBoundaryPrimitive prim := by
+            simpa using hExternalPrim
+          rcases (exprs_iff_split args).mp hArgs with
+            ⟨hImportedArgs, hExternalArgs, hObjectArgs⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteExpr, importedIncompleteExprs,
+                  importedIncompletePrimitive, Family.expr,
+                  Family.anyUserCall] using
+                  ⟨hImportedPrimNot, hImportedArgs⟩,
+              by
+                simpa [externalBoundaryExpr, externalBoundaryExprs,
+                  externalBoundaryPrimitive, Family.expr,
+                  Family.anyUserCall] using
+                  ⟨hExternalPrimNot, hExternalArgs⟩,
+              by
+                simpa [objectBuiltinExpr, objectBuiltinExprs,
+                  Family.expr, Family.anyPrimitive, objectBuiltinUserCall]
+                  using hObjectArgs⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompletePrimitive prim ∧
+                importedIncompleteExprs args := by
+            simpa [importedIncompleteExpr, importedIncompleteExprs,
+              importedIncompletePrimitive, Family.expr,
+              Family.anyUserCall] using hImported
+          have hExternal' :
+              externalBoundaryPrimitive prim ∧ externalBoundaryExprs args := by
+            simpa [externalBoundaryExpr, externalBoundaryExprs,
+              externalBoundaryPrimitive, Family.expr, Family.anyUserCall]
+              using hExternal
+          have hObject' :
+              objectBuiltinExprs args := by
+            simpa [objectBuiltinExpr, objectBuiltinExprs, Family.expr,
+              Family.anyPrimitive, objectBuiltinUserCall] using hObject
+          exact
+            ⟨(Safe.primitive_iff_not_importedIncomplete_not_externalBoundary
+                prim).mpr ⟨hImported'.1, hExternal'.1⟩,
+              (exprs_iff_split args).mpr
+                ⟨hImported'.2, hExternal'.2, hObject'⟩⟩
+    | .Call (.inr functionName) args => by
+        constructor
+        · intro h
+          rcases h with ⟨hName, hArgs⟩
+          rcases (exprs_iff_split args).mp hArgs with
+            ⟨hImportedArgs, hExternalArgs, hObjectArgs⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteExpr, importedIncompleteExprs,
+                  Family.expr, importedIncompletePrimitive,
+                  Family.anyUserCall] using
+                  hImportedArgs,
+              by
+                simpa [externalBoundaryExpr, externalBoundaryExprs,
+                  Family.expr, externalBoundaryPrimitive,
+                  Family.anyUserCall] using
+                  hExternalArgs,
+              by
+                simpa [objectBuiltinExpr, objectBuiltinExprs, Family.expr,
+                  objectBuiltinUserCall, userCall] using
+                  ⟨hName, hObjectArgs⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteExprs args := by
+            simpa [importedIncompleteExpr, importedIncompleteExprs,
+              Family.expr, importedIncompletePrimitive,
+              Family.anyUserCall] using hImported
+          have hExternal' :
+              externalBoundaryExprs args := by
+            simpa [externalBoundaryExpr, externalBoundaryExprs, Family.expr,
+              externalBoundaryPrimitive, Family.anyUserCall] using hExternal
+          have hObject' :
+              objectBuiltinUserCall functionName ∧ objectBuiltinExprs args := by
+            simpa [objectBuiltinExpr, objectBuiltinExprs, Family.expr,
+              objectBuiltinUserCall] using hObject
+          exact
+            ⟨by simpa [userCall, objectBuiltinUserCall] using hObject'.1,
+              (exprs_iff_split args).mpr
+                ⟨hImported', hExternal', hObject'.2⟩⟩
+
+  theorem exprs_iff_split : (exprs' : List AstExpr) →
+      exprs exprs' ↔
+        importedIncompleteExprs exprs' ∧
+          externalBoundaryExprs exprs' ∧
+            objectBuiltinExprs exprs'
+    | [] => by
+        simp [exprs, importedIncompleteExprs, externalBoundaryExprs,
+          objectBuiltinExprs, Family.exprs]
+    | head :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hHead, hRest⟩
+          rcases (expr_iff_split head).mp hHead with
+            ⟨hHeadImported, hHeadExternal, hHeadObject⟩
+          rcases (exprs_iff_split rest).mp hRest with
+            ⟨hRestImported, hRestExternal, hRestObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteExprs, importedIncompleteExpr,
+                  Family.exprs] using
+                  ⟨hHeadImported, hRestImported⟩,
+              by
+                simpa [externalBoundaryExprs, externalBoundaryExpr,
+                  Family.exprs] using
+                  ⟨hHeadExternal, hRestExternal⟩,
+              by
+                simpa [objectBuiltinExprs, objectBuiltinExpr,
+                  Family.exprs] using
+                  ⟨hHeadObject, hRestObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteExpr head ∧ importedIncompleteExprs rest := by
+            simpa [importedIncompleteExprs, importedIncompleteExpr,
+              Family.exprs] using hImported
+          have hExternal' :
+              externalBoundaryExpr head ∧ externalBoundaryExprs rest := by
+            simpa [externalBoundaryExprs, externalBoundaryExpr,
+              Family.exprs] using hExternal
+          have hObject' :
+              objectBuiltinExpr head ∧ objectBuiltinExprs rest := by
+            simpa [objectBuiltinExprs, objectBuiltinExpr,
+              Family.exprs] using hObject
+          exact
+            ⟨(expr_iff_split head).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (exprs_iff_split rest).mpr
+                ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+
+  theorem stmt_iff_split : (stmt' : AstStmt) →
+      stmt stmt' ↔
+        importedIncompleteStmt stmt' ∧
+          externalBoundaryStmt stmt' ∧
+            objectBuiltinStmt stmt'
+    | .Block body => by
+        simpa [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt] using stmts_iff_split body
+    | .Let _names none => by
+        simp [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt]
+    | .Let _names (some value) => by
+        simpa [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt] using expr_iff_split value
+    | .Assign _names value => by
+        simpa [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt] using expr_iff_split value
+    | .ExprStmtCall value => by
+        simpa [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt] using expr_iff_split value
+    | .Switch scrutinee cases defaultBody => by
+        constructor
+        · intro h
+          rcases h with ⟨hScrutinee, hCases, hDefault⟩
+          rcases (expr_iff_split scrutinee).mp hScrutinee with
+            ⟨hScrutineeImported, hScrutineeExternal, hScrutineeObject⟩
+          rcases (cases_iff_split cases).mp hCases with
+            ⟨hCasesImported, hCasesExternal, hCasesObject⟩
+          rcases (stmts_iff_split defaultBody).mp hDefault with
+            ⟨hDefaultImported, hDefaultExternal, hDefaultObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteStmt, importedIncompleteExpr,
+                  importedIncompleteCases, importedIncompleteStmts,
+                  Family.stmt] using
+                  ⟨hScrutineeImported, hCasesImported, hDefaultImported⟩,
+              by
+                simpa [externalBoundaryStmt, externalBoundaryExpr,
+                  externalBoundaryCases, externalBoundaryStmts,
+                  Family.stmt] using
+                  ⟨hScrutineeExternal, hCasesExternal, hDefaultExternal⟩,
+              by
+                simpa [objectBuiltinStmt, objectBuiltinExpr,
+                  objectBuiltinCases, objectBuiltinStmts, Family.stmt] using
+                  ⟨hScrutineeObject, hCasesObject, hDefaultObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteExpr scrutinee ∧
+                importedIncompleteCases cases ∧
+                  importedIncompleteStmts defaultBody := by
+            simpa [importedIncompleteStmt, importedIncompleteExpr,
+              importedIncompleteCases, importedIncompleteStmts, Family.stmt]
+              using hImported
+          have hExternal' :
+              externalBoundaryExpr scrutinee ∧ externalBoundaryCases cases ∧
+                externalBoundaryStmts defaultBody := by
+            simpa [externalBoundaryStmt, externalBoundaryExpr,
+              externalBoundaryCases, externalBoundaryStmts, Family.stmt]
+              using hExternal
+          have hObject' :
+              objectBuiltinExpr scrutinee ∧ objectBuiltinCases cases ∧
+                objectBuiltinStmts defaultBody := by
+            simpa [objectBuiltinStmt, objectBuiltinExpr, objectBuiltinCases,
+              objectBuiltinStmts, Family.stmt] using hObject
+          exact
+            ⟨(expr_iff_split scrutinee).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (cases_iff_split cases).mpr
+                ⟨hImported'.2.1, hExternal'.2.1, hObject'.2.1⟩,
+              (stmts_iff_split defaultBody).mpr
+                ⟨hImported'.2.2, hExternal'.2.2, hObject'.2.2⟩⟩
+    | .For cond post body => by
+        constructor
+        · intro h
+          rcases h with ⟨hCond, hPost, hBody⟩
+          rcases (expr_iff_split cond).mp hCond with
+            ⟨hCondImported, hCondExternal, hCondObject⟩
+          rcases (stmts_iff_split post).mp hPost with
+            ⟨hPostImported, hPostExternal, hPostObject⟩
+          rcases (stmts_iff_split body).mp hBody with
+            ⟨hBodyImported, hBodyExternal, hBodyObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteStmt, importedIncompleteExpr,
+                  importedIncompleteStmts, Family.stmt] using
+                  ⟨hCondImported, hPostImported, hBodyImported⟩,
+              by
+                simpa [externalBoundaryStmt, externalBoundaryExpr,
+                  externalBoundaryStmts, Family.stmt] using
+                  ⟨hCondExternal, hPostExternal, hBodyExternal⟩,
+              by
+                simpa [objectBuiltinStmt, objectBuiltinExpr,
+                  objectBuiltinStmts, Family.stmt] using
+                  ⟨hCondObject, hPostObject, hBodyObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteExpr cond ∧ importedIncompleteStmts post ∧
+                importedIncompleteStmts body := by
+            simpa [importedIncompleteStmt, importedIncompleteExpr,
+              importedIncompleteStmts, Family.stmt] using hImported
+          have hExternal' :
+              externalBoundaryExpr cond ∧ externalBoundaryStmts post ∧
+                externalBoundaryStmts body := by
+            simpa [externalBoundaryStmt, externalBoundaryExpr,
+              externalBoundaryStmts, Family.stmt] using hExternal
+          have hObject' :
+              objectBuiltinExpr cond ∧ objectBuiltinStmts post ∧
+                objectBuiltinStmts body := by
+            simpa [objectBuiltinStmt, objectBuiltinExpr,
+              objectBuiltinStmts, Family.stmt] using hObject
+          exact
+            ⟨(expr_iff_split cond).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (stmts_iff_split post).mpr
+                ⟨hImported'.2.1, hExternal'.2.1, hObject'.2.1⟩,
+              (stmts_iff_split body).mpr
+                ⟨hImported'.2.2, hExternal'.2.2, hObject'.2.2⟩⟩
+    | .If cond body => by
+        constructor
+        · intro h
+          rcases h with ⟨hCond, hBody⟩
+          rcases (expr_iff_split cond).mp hCond with
+            ⟨hCondImported, hCondExternal, hCondObject⟩
+          rcases (stmts_iff_split body).mp hBody with
+            ⟨hBodyImported, hBodyExternal, hBodyObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteStmt, importedIncompleteExpr,
+                  importedIncompleteStmts, Family.stmt] using
+                  ⟨hCondImported, hBodyImported⟩,
+              by
+                simpa [externalBoundaryStmt, externalBoundaryExpr,
+                  externalBoundaryStmts, Family.stmt] using
+                  ⟨hCondExternal, hBodyExternal⟩,
+              by
+                simpa [objectBuiltinStmt, objectBuiltinExpr,
+                  objectBuiltinStmts, Family.stmt] using
+                  ⟨hCondObject, hBodyObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteExpr cond ∧ importedIncompleteStmts body := by
+            simpa [importedIncompleteStmt, importedIncompleteExpr,
+              importedIncompleteStmts, Family.stmt] using hImported
+          have hExternal' :
+              externalBoundaryExpr cond ∧ externalBoundaryStmts body := by
+            simpa [externalBoundaryStmt, externalBoundaryExpr,
+              externalBoundaryStmts, Family.stmt] using hExternal
+          have hObject' :
+              objectBuiltinExpr cond ∧ objectBuiltinStmts body := by
+            simpa [objectBuiltinStmt, objectBuiltinExpr, objectBuiltinStmts,
+              Family.stmt] using hObject
+          exact
+            ⟨(expr_iff_split cond).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (stmts_iff_split body).mpr
+                ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+    | .Continue => by
+        simp [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt]
+    | .Break => by
+        simp [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt]
+    | .Leave => by
+        simp [stmt, importedIncompleteStmt, externalBoundaryStmt,
+          objectBuiltinStmt, Family.stmt]
+
+  theorem stmts_iff_split : (stmts' : List AstStmt) →
+      stmts stmts' ↔
+        importedIncompleteStmts stmts' ∧
+          externalBoundaryStmts stmts' ∧
+            objectBuiltinStmts stmts'
+    | [] => by
+        simp [stmts, importedIncompleteStmts, externalBoundaryStmts,
+          objectBuiltinStmts, Family.stmts]
+    | head :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hHead, hRest⟩
+          rcases (stmt_iff_split head).mp hHead with
+            ⟨hHeadImported, hHeadExternal, hHeadObject⟩
+          rcases (stmts_iff_split rest).mp hRest with
+            ⟨hRestImported, hRestExternal, hRestObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteStmts, importedIncompleteStmt,
+                  Family.stmts] using
+                  ⟨hHeadImported, hRestImported⟩,
+              by
+                simpa [externalBoundaryStmts, externalBoundaryStmt,
+                  Family.stmts] using
+                  ⟨hHeadExternal, hRestExternal⟩,
+              by
+                simpa [objectBuiltinStmts, objectBuiltinStmt, Family.stmts]
+                  using ⟨hHeadObject, hRestObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteStmt head ∧ importedIncompleteStmts rest := by
+            simpa [importedIncompleteStmts, importedIncompleteStmt,
+              Family.stmts] using hImported
+          have hExternal' :
+              externalBoundaryStmt head ∧ externalBoundaryStmts rest := by
+            simpa [externalBoundaryStmts, externalBoundaryStmt,
+              Family.stmts] using hExternal
+          have hObject' :
+              objectBuiltinStmt head ∧ objectBuiltinStmts rest := by
+            simpa [objectBuiltinStmts, objectBuiltinStmt, Family.stmts]
+              using hObject
+          exact
+            ⟨(stmt_iff_split head).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (stmts_iff_split rest).mpr
+                ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+
+  theorem cases_iff_split :
+      (cases' : List (Word × List AstStmt)) →
+      casesSafe cases' ↔
+        importedIncompleteCases cases' ∧
+          externalBoundaryCases cases' ∧
+            objectBuiltinCases cases'
+    | [] => by
+        simp [casesSafe, importedIncompleteCases, externalBoundaryCases,
+          objectBuiltinCases, Family.casesSafe]
+    | (_value, body) :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hBody, hRest⟩
+          rcases (stmts_iff_split body).mp hBody with
+            ⟨hBodyImported, hBodyExternal, hBodyObject⟩
+          rcases (cases_iff_split rest).mp hRest with
+            ⟨hRestImported, hRestExternal, hRestObject⟩
+          exact
+            ⟨by
+                simpa [importedIncompleteCases, importedIncompleteStmts,
+                  Family.casesSafe] using
+                  ⟨hBodyImported, hRestImported⟩,
+              by
+                simpa [externalBoundaryCases, externalBoundaryStmts,
+                  Family.casesSafe] using
+                  ⟨hBodyExternal, hRestExternal⟩,
+              by
+                simpa [objectBuiltinCases, objectBuiltinStmts,
+                  Family.casesSafe] using
+                  ⟨hBodyObject, hRestObject⟩⟩
+        · intro h
+          rcases h with ⟨hImported, hExternal, hObject⟩
+          have hImported' :
+              importedIncompleteStmts body ∧
+                importedIncompleteCases rest := by
+            simpa [importedIncompleteCases, importedIncompleteStmts,
+              Family.casesSafe] using hImported
+          have hExternal' :
+              externalBoundaryStmts body ∧ externalBoundaryCases rest := by
+            simpa [externalBoundaryCases, externalBoundaryStmts,
+              Family.casesSafe] using hExternal
+          have hObject' :
+              objectBuiltinStmts body ∧ objectBuiltinCases rest := by
+            simpa [objectBuiltinCases, objectBuiltinStmts,
+              Family.casesSafe] using hObject
+          exact
+            ⟨(stmts_iff_split body).mpr
+                ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+              (cases_iff_split rest).mpr
+                ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+end
+
+theorem functionDefinition_iff_split :
+    (fn : AstFunctionDefinition) →
+      functionDefinition fn ↔
+        importedIncompleteFunctionDefinition fn ∧
+          externalBoundaryFunctionDefinition fn ∧
+            objectBuiltinFunctionDefinition fn
+  | .Def _params _returns body => by
+      simpa [functionDefinition, importedIncompleteFunctionDefinition,
+        externalBoundaryFunctionDefinition, objectBuiltinFunctionDefinition,
+        Family.functionDefinition] using stmts_iff_split body
+
+theorem functionEntries_iff_split :
+    (entries : List (Name × AstFunctionDefinition)) →
+      functionEntries entries ↔
+        importedIncompleteFunctionEntries entries ∧
+          externalBoundaryFunctionEntries entries ∧
+            objectBuiltinFunctionEntries entries
+  | [] => by
+      simp [functionEntries, importedIncompleteFunctionEntries,
+        externalBoundaryFunctionEntries, objectBuiltinFunctionEntries,
+        Family.functionEntries]
+  | (_name, fn) :: rest => by
+      constructor
+      · intro h
+        rcases h with ⟨hFn, hRest⟩
+        rcases (functionDefinition_iff_split fn).mp hFn with
+          ⟨hFnImported, hFnExternal, hFnObject⟩
+        rcases (functionEntries_iff_split rest).mp hRest with
+          ⟨hRestImported, hRestExternal, hRestObject⟩
+        exact
+          ⟨by
+              simpa [importedIncompleteFunctionEntries,
+                importedIncompleteFunctionDefinition, Family.functionEntries]
+                using ⟨hFnImported, hRestImported⟩,
+            by
+              simpa [externalBoundaryFunctionEntries,
+                externalBoundaryFunctionDefinition, Family.functionEntries]
+                using ⟨hFnExternal, hRestExternal⟩,
+            by
+              simpa [objectBuiltinFunctionEntries,
+                objectBuiltinFunctionDefinition, Family.functionEntries]
+                using ⟨hFnObject, hRestObject⟩⟩
+      · intro h
+        rcases h with ⟨hImported, hExternal, hObject⟩
+        have hImported' :
+            importedIncompleteFunctionDefinition fn ∧
+              importedIncompleteFunctionEntries rest := by
+          simpa [importedIncompleteFunctionEntries,
+            importedIncompleteFunctionDefinition, Family.functionEntries]
+            using hImported
+        have hExternal' :
+            externalBoundaryFunctionDefinition fn ∧
+              externalBoundaryFunctionEntries rest := by
+          simpa [externalBoundaryFunctionEntries,
+            externalBoundaryFunctionDefinition, Family.functionEntries]
+            using hExternal
+        have hObject' :
+            objectBuiltinFunctionDefinition fn ∧
+              objectBuiltinFunctionEntries rest := by
+          simpa [objectBuiltinFunctionEntries,
+            objectBuiltinFunctionDefinition, Family.functionEntries]
+            using hObject
+        exact
+          ⟨(functionDefinition_iff_split fn).mpr
+              ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+            (functionEntries_iff_split rest).mpr
+              ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+
+theorem contract_iff_split (contract : AstContract) :
+    FeatureCoverage.contract contract ↔
+      importedIncompleteContract contract ∧
+        externalBoundaryContract contract ∧ objectBuiltinContract contract := by
+  constructor
+  · intro h
+    rcases h with ⟨hDispatcher, hFunctions⟩
+    rcases (stmt_iff_split contract.dispatcher).mp hDispatcher with
+      ⟨hDispatcherImported, hDispatcherExternal, hDispatcherObject⟩
+    rcases
+        (functionEntries_iff_split
+          (Contract.functionEntries contract)).mp hFunctions with
+      ⟨hFunctionsImported, hFunctionsExternal, hFunctionsObject⟩
+    exact
+      ⟨by
+          simpa [FeatureCoverage.contract, importedIncompleteContract,
+            Family.contract] using
+            ⟨hDispatcherImported, hFunctionsImported⟩,
+        by
+          simpa [FeatureCoverage.contract, externalBoundaryContract,
+            Family.contract] using
+            ⟨hDispatcherExternal, hFunctionsExternal⟩,
+        by
+          simpa [FeatureCoverage.contract, objectBuiltinContract,
+            Family.contract] using
+            ⟨hDispatcherObject, hFunctionsObject⟩⟩
+  · intro h
+    rcases h with ⟨hImported, hExternal, hObject⟩
+    have hImported' :
+        importedIncompleteStmt contract.dispatcher ∧
+          importedIncompleteFunctionEntries
+            (Contract.functionEntries contract) := by
+      simpa [importedIncompleteContract, Family.contract] using hImported
+    have hExternal' :
+        externalBoundaryStmt contract.dispatcher ∧
+          externalBoundaryFunctionEntries
+            (Contract.functionEntries contract) := by
+      simpa [externalBoundaryContract, Family.contract] using hExternal
+    have hObject' :
+        objectBuiltinStmt contract.dispatcher ∧
+          objectBuiltinFunctionEntries
+            (Contract.functionEntries contract) := by
+      simpa [objectBuiltinContract, Family.contract] using hObject
+    exact
+      ⟨(stmt_iff_split contract.dispatcher).mpr
+          ⟨hImported'.1, hExternal'.1, hObject'.1⟩,
+        (functionEntries_iff_split
+          (Contract.functionEntries contract)).mpr
+          ⟨hImported'.2, hExternal'.2, hObject'.2⟩⟩
+
+theorem program_iff_split (program : Program) :
+    FeatureCoverage.program program ↔
+      importedIncompleteProgram program ∧
+        externalBoundaryProgram program ∧ objectBuiltinProgram program := by
+  simpa [FeatureCoverage.program, importedIncompleteProgram,
+    externalBoundaryProgram, objectBuiltinProgram, Family.program] using
+    contract_iff_split program.contract
 
 end FeatureCoverage
 
