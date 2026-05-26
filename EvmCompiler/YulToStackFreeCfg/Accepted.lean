@@ -140,5 +140,28 @@ noncomputable def program? (layout : ObjectLayout)
 
 end Coverage
 
+namespace Contract
+
+noncomputable def lowerAccepted? (layout : ObjectLayout)
+    (contract : AstContract) : Option StackFreeCfg.Program := do
+  if Coverage.contract? layout contract then
+    let program ← lower? layout contract
+    if StackFreeCfg.Program.accepted? program then
+      some program
+    else
+      none
+  else
+    none
+
+end Contract
+
+namespace Program
+
+noncomputable def lowerAccepted? (layout : ObjectLayout)
+    (program : EvmCompiler.Yul.Program) : Option StackFreeCfg.Program :=
+  Contract.lowerAccepted? layout program.contract
+
+end Program
+
 end YulToStackFreeCfg
 end EvmCompiler

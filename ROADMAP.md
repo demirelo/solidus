@@ -151,6 +151,8 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Feature coverage obligations must be named separately.
   - [x] Add executable `YulToStackFreeCfg.Coverage` checker that names the
     currently lowerable source-surface shapes before proof work.
+  - [x] Add `YulToStackFreeCfg.Program.lowerAccepted?`, which gates lowering
+    by coverage and the generated StackFreeCfg program's acceptedness.
   - [ ] Connect coverage/acceptedness to imported Yul validity and to
     successful lowering with checked theorems.
 - [ ] Prove adjacent preservation:
