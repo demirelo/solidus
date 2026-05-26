@@ -8096,6 +8096,1082 @@ theorem primitiveStackSoundAtArity_structured_selfbalance
         cfg.selfbalanceRel hShared.chain.accountMap
           hShared.chain.executionEnv.codeOwner)
 
+theorem primitiveStackSoundAtArity_structured_pop
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .POP : EvmYul.Operation .Yul)) .pop := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | ok hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  simp [EvmYul.Yul.primCall] at hCall
+                  cases hCall
+                  refine ⟨compilerAfterArgs.shared, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.Stack.pop,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC]
+                  · exact SourceStateRel.ok hShared hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_balance
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .BALANCE : EvmYul.Operation .Yul)) .balance := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_balance_ok fuel sourceShared
+                    store value] at hCall
+                  cases hCall
+                  let sharedAfter : EvmYul.SharedState .EVM :=
+                    { compilerAfterArgs.shared with
+                      toState :=
+                        (EvmYul.State.balance
+                          compilerAfterArgs.shared.toState value).1 }
+                  have hResultEq :
+                      (EvmYul.State.balance sourceShared.toState value).2 =
+                        (EvmYul.State.balance
+                          compilerAfterArgs.shared.toState value).2 := by
+                    exact cfg.balanceRel hShared.chain.accountMap
+                  refine ⟨sharedAfter, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                      Id.run]
+                  · let targetState : EVMState :=
+                      { toSharedState := compilerAfterArgs.shared,
+                        pc := EvmYul.UInt256.ofNat 0,
+                        stack := [value],
+                        execLength := 0 }
+                    have hSharedAfter :
+                        SharedStateRel cfg
+                          { sourceShared with
+                            toState :=
+                              (EvmYul.State.balance sourceShared.toState
+                                value).1 }
+                          sharedAfter := by
+                      simpa [targetState, sharedAfter] using
+                        (SharedStateRel.balance
+                          (cfg := cfg) (sourceShared := sourceShared)
+                          (target := targetState) (address := value)
+                          hShared)
+                    exact SourceStateRel.ok hSharedAfter hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_calldataload
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CALLDATALOAD : EvmYul.Operation .Yul)) .calldataload := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_calldataload_ok fuel
+                    sourceShared store value] at hCall
+                  cases hCall
+                  have hResultEq :
+                      EvmYul.State.calldataload sourceShared.toState value =
+                        EvmYul.State.calldataload
+                          compilerAfterArgs.shared.toState value := by
+                    simp [EvmYul.State.calldataload,
+                      hShared.chain.executionEnv.calldata]
+                  refine ⟨compilerAfterArgs.shared, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.EVM.stateOp, EvmYul.Stack.pop,
+                      EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, hResultEq, Id.run]
+                  · exact SourceStateRel.ok hShared hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_blockhash
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Block .BLOCKHASH : EvmYul.Operation .Yul)) .blockhash := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_blockhash_ok fuel sourceShared
+                    store value] at hCall
+                  cases hCall
+                  have hResultEq :
+                      EvmYul.State.blockHash sourceShared.toState value =
+                        EvmYul.State.blockHash
+                          compilerAfterArgs.shared.toState value := by
+                    simp [EvmYul.State.blockHash, EvmYul.State.blockHashes,
+                      hShared.chain.executionEnv.header,
+                      hShared.chain.blocks]
+                  refine ⟨compilerAfterArgs.shared, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.EVM.stateOp, EvmYul.Stack.pop,
+                      EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, hResultEq, Id.run]
+                  · exact SourceStateRel.ok hShared hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_blobhash
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Block .BLOBHASH : EvmYul.Operation .Yul)) .blobhash := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_blobhash_ok fuel sourceShared
+                    store value] at hCall
+                  cases hCall
+                  have hResultEq :
+                      EvmYul.blobhash sourceShared.executionEnv value =
+                        EvmYul.blobhash
+                          compilerAfterArgs.shared.executionEnv value := by
+                    simp [EvmYul.blobhash,
+                      hShared.chain.executionEnv.blobVersionedHashes]
+                  refine ⟨compilerAfterArgs.shared, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, hResultEq, Id.run]
+                  · exact SourceStateRel.ok hShared hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_sload
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .SLOAD : EvmYul.Operation .Yul)) .sload := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons slot rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_sload_ok fuel sourceShared store
+                    slot] at hCall
+                  cases hCall
+                  let sharedAfter : EvmYul.SharedState .EVM :=
+                    { compilerAfterArgs.shared with
+                      toState :=
+                        (EvmYul.State.sload compilerAfterArgs.shared.toState
+                          slot).1 }
+                  have hResultEq :
+                      (EvmYul.State.sload sourceShared.toState slot).2 =
+                        (EvmYul.State.sload
+                          compilerAfterArgs.shared.toState slot).2 := by
+                    exact
+                      cfg.sloadRel hShared.chain.accountMap
+                        hShared.chain.executionEnv.codeOwner
+                  refine ⟨sharedAfter, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                      Id.run]
+                  · let targetState : EVMState :=
+                      { toSharedState := compilerAfterArgs.shared,
+                        pc := EvmYul.UInt256.ofNat 0,
+                        stack := [slot],
+                        execLength := 0 }
+                    have hSharedAfter :
+                        SharedStateRel cfg
+                          { sourceShared with
+                            toState :=
+                              (EvmYul.State.sload sourceShared.toState
+                                slot).1 }
+                          sharedAfter := by
+                      simpa [targetState, sharedAfter] using
+                        (SharedStateRel.sload
+                          (cfg := cfg) (sourceShared := sourceShared)
+                          (target := targetState) (slot := slot)
+                          hShared)
+                    exact SourceStateRel.ok hSharedAfter hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_tload
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .TLOAD : EvmYul.Operation .Yul)) .tload := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons slot rest =>
+              cases rest with
+              | nil =>
+                  rw [PrimSemantics.primCall_tload_ok fuel sourceShared store
+                    slot] at hCall
+                  cases hCall
+                  let sharedAfter : EvmYul.SharedState .EVM :=
+                    { compilerAfterArgs.shared with
+                      toState :=
+                        (EvmYul.State.tload compilerAfterArgs.shared.toState
+                          slot).1 }
+                  have hResultEq :
+                      (EvmYul.State.tload sourceShared.toState slot).2 =
+                        (EvmYul.State.tload
+                          compilerAfterArgs.shared.toState slot).2 := by
+                    exact
+                      cfg.tloadRel hShared.chain.accountMap
+                        hShared.chain.executionEnv.codeOwner
+                  refine ⟨sharedAfter, ?_, ?_⟩
+                  · simp [Locals.Source.PrimitiveSemantics.structured,
+                      Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                      Expressions.Structured.BasicOp.inputs,
+                      Structured.BasicOp.toPrimOp,
+                      Assembly.PrimOp.continuingStep?,
+                      Assembly.PrimStep.run, EvmYul.EVM.unaryStateOp,
+                      EvmYul.Stack.pop, EvmYul.Stack.push,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                      Id.run]
+                  · let targetState : EVMState :=
+                      { toSharedState := compilerAfterArgs.shared,
+                        pc := EvmYul.UInt256.ofNat 0,
+                        stack := [slot],
+                        execLength := 0 }
+                    have hSharedAfter :
+                        SharedStateRel cfg
+                          { sourceShared with
+                            toState :=
+                              (EvmYul.State.tload sourceShared.toState
+                                slot).1 }
+                          sharedAfter := by
+                      simpa [targetState, sharedAfter] using
+                        (SharedStateRel.tload
+                          (cfg := cfg) (sourceShared := sourceShared)
+                          (target := targetState) (slot := slot)
+                          hShared)
+                    exact SourceStateRel.ok hSharedAfter hVars
+              | cons extra tail =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_sstore
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .SSTORE : EvmYul.Operation .Yul)) .sstore := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons slot rest =>
+              cases rest with
+              | nil =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons value tail =>
+                  cases tail with
+                  | nil =>
+                      cases hPerm : sourceShared.executionEnv.perm
+                      · rw [PrimSemantics.primCall_sstore_static_error fuel
+                          sourceShared store slot value hPerm] at hCall
+                        cases hCall
+                      · rw [PrimSemantics.primCall_sstore_ok_of_writable fuel
+                          sourceShared store slot value hPerm] at hCall
+                        cases hCall
+                        let sharedAfter : EvmYul.SharedState .EVM :=
+                          { compilerAfterArgs.shared with
+                            toState :=
+                              EvmYul.State.sstore
+                                compilerAfterArgs.shared.toState slot value }
+                        refine ⟨sharedAfter, ?_, ?_⟩
+                        · simp [Locals.Source.PrimitiveSemantics.structured,
+                            Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                            Expressions.Structured.BasicOp.inputs,
+                            Structured.BasicOp.toPrimOp,
+                            Assembly.PrimOp.continuingStep?,
+                            Assembly.PrimStep.run, EvmYul.EVM.binaryStateOp,
+                            EvmYul.Stack.pop2,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC, sharedAfter, Id.run]
+                        · let targetState : EVMState :=
+                            { toSharedState := compilerAfterArgs.shared,
+                              pc := EvmYul.UInt256.ofNat 0,
+                              stack := [value, slot],
+                              execLength := 0 }
+                          have hSharedAfter :
+                              SharedStateRel cfg
+                                { sourceShared with
+                                  toState :=
+                                    EvmYul.State.sstore sourceShared.toState
+                                      slot value }
+                                sharedAfter := by
+                            simpa [targetState, sharedAfter] using
+                              (SharedStateRel.sstore
+                                (cfg := cfg) (sourceShared := sourceShared)
+                                (target := targetState) (slot := slot)
+                                (value := value) hShared)
+                          exact SourceStateRel.ok hSharedAfter hVars
+                  | cons extra more =>
+                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_tstore
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.StackMemFlow .TSTORE : EvmYul.Operation .Yul)) .tstore := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons slot rest =>
+              cases rest with
+              | nil =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons value tail =>
+                  cases tail with
+                  | nil =>
+                      cases hPerm : sourceShared.executionEnv.perm
+                      · rw [PrimSemantics.primCall_tstore_static_error fuel
+                          sourceShared store slot value hPerm] at hCall
+                        cases hCall
+                      · rw [PrimSemantics.primCall_tstore_ok_of_writable fuel
+                          sourceShared store slot value hPerm] at hCall
+                        cases hCall
+                        let sharedAfter : EvmYul.SharedState .EVM :=
+                          { compilerAfterArgs.shared with
+                            toState :=
+                              EvmYul.State.tstore
+                                compilerAfterArgs.shared.toState slot value }
+                        refine ⟨sharedAfter, ?_, ?_⟩
+                        · simp [Locals.Source.PrimitiveSemantics.structured,
+                            Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                            Expressions.Structured.BasicOp.inputs,
+                            Structured.BasicOp.toPrimOp,
+                            Assembly.PrimOp.continuingStep?,
+                            Assembly.PrimStep.run, EvmYul.EVM.binaryStateOp,
+                            EvmYul.Stack.pop2,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC, sharedAfter, Id.run]
+                        · let targetState : EVMState :=
+                            { toSharedState := compilerAfterArgs.shared,
+                              pc := EvmYul.UInt256.ofNat 0,
+                              stack := [value, slot],
+                              execLength := 0 }
+                          have hSharedAfter :
+                              SharedStateRel cfg
+                                { sourceShared with
+                                  toState :=
+                                    EvmYul.State.tstore sourceShared.toState
+                                      slot value }
+                                sharedAfter := by
+                            simpa [targetState, sharedAfter] using
+                              (SharedStateRel.tstore
+                                (cfg := cfg) (sourceShared := sourceShared)
+                                (target := targetState) (slot := slot)
+                                (value := value) hShared)
+                          exact SourceStateRel.ok hSharedAfter hVars
+                  | cons extra more =>
+                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_log0
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Log .LOG0 : EvmYul.Operation .Yul)) .log0 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero => simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons offset rest =>
+              cases rest with
+              | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size tail =>
+                  cases tail with
+                  | nil =>
+                      cases hPerm : sourceShared.executionEnv.perm
+                      · rw [PrimSemantics.primCall_log0_static_error fuel
+                          sourceShared store offset size hPerm] at hCall
+                        cases hCall
+                      · rw [PrimSemantics.primCall_log0_ok_of_writable fuel
+                          sourceShared store offset size hPerm] at hCall
+                        cases hCall
+                        let sharedAfter : EvmYul.SharedState .EVM :=
+                          EvmYul.SharedState.logOp offset size #[]
+                            compilerAfterArgs.shared
+                        refine ⟨sharedAfter, ?_, ?_⟩
+                        · simp [Locals.Source.PrimitiveSemantics.structured,
+                            Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                            Expressions.Structured.BasicOp.inputs,
+                            Structured.BasicOp.toPrimOp,
+                            Assembly.PrimOp.continuingStep?,
+                            Assembly.PrimStep.run, EvmYul.Stack.pop2,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC, sharedAfter]
+                        · exact
+                            SourceStateRel.ok
+                              (SharedStateRel.logOp
+                                (cfg := cfg) (sourceShared := sourceShared)
+                                (targetShared := compilerAfterArgs.shared)
+                                (offset := offset) (size := size)
+                                (topics := #[]) hShared)
+                              hVars
+                  | cons extra more =>
+                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_log1
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Log .LOG1 : EvmYul.Operation .Yul)) .log1 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero => simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons offset rest =>
+              cases rest with
+              | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size rest' =>
+                  cases rest' with
+                  | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+                  | cons topic tail =>
+                      cases tail with
+                      | nil =>
+                          cases hPerm : sourceShared.executionEnv.perm
+                          · rw [PrimSemantics.primCall_log1_static_error fuel
+                              sourceShared store offset size topic hPerm] at hCall
+                            cases hCall
+                          · rw [PrimSemantics.primCall_log1_ok_of_writable fuel
+                              sourceShared store offset size topic hPerm] at hCall
+                            cases hCall
+                            let sharedAfter : EvmYul.SharedState .EVM :=
+                              EvmYul.SharedState.logOp offset size #[topic]
+                                compilerAfterArgs.shared
+                            refine ⟨sharedAfter, ?_, ?_⟩
+                            · simp [Locals.Source.PrimitiveSemantics.structured,
+                                Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                                Expressions.Structured.BasicOp.inputs,
+                                Structured.BasicOp.toPrimOp,
+                                Assembly.PrimOp.continuingStep?,
+                                Assembly.PrimStep.run, EvmYul.Stack.pop3,
+                                EvmYul.EVM.State.replaceStackAndIncrPC,
+                                EvmYul.EVM.State.incrPC, sharedAfter]
+                            · exact
+                                SourceStateRel.ok
+                                  (SharedStateRel.logOp
+                                    (cfg := cfg)
+                                    (sourceShared := sourceShared)
+                                    (targetShared := compilerAfterArgs.shared)
+                                    (offset := offset) (size := size)
+                                    (topics := #[topic]) hShared)
+                                  hVars
+                      | cons extra more =>
+                          simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_log2
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Log .LOG2 : EvmYul.Operation .Yul)) .log2 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero => simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons offset rest =>
+              cases rest with
+              | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size rest' =>
+                  cases rest' with
+                  | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+                  | cons topic0 rest'' =>
+                      cases rest'' with
+                      | nil =>
+                          simp [Expressions.Structured.BasicOp.inputs] at hArity
+                      | cons topic1 tail =>
+                          cases tail with
+                          | nil =>
+                              cases hPerm : sourceShared.executionEnv.perm
+                              · rw [PrimSemantics.primCall_log2_static_error
+                                  fuel sourceShared store offset size topic0
+                                  topic1 hPerm] at hCall
+                                cases hCall
+                              · rw [PrimSemantics.primCall_log2_ok_of_writable
+                                  fuel sourceShared store offset size topic0
+                                  topic1 hPerm] at hCall
+                                cases hCall
+                                let sharedAfter : EvmYul.SharedState .EVM :=
+                                  EvmYul.SharedState.logOp offset size
+                                    #[topic0, topic1]
+                                    compilerAfterArgs.shared
+                                refine ⟨sharedAfter, ?_, ?_⟩
+                                · simp [Locals.Source.PrimitiveSemantics.structured,
+                                    Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                                    Expressions.Structured.BasicOp.inputs,
+                                    Structured.BasicOp.toPrimOp,
+                                    Assembly.PrimOp.continuingStep?,
+                                    Assembly.PrimStep.run, EvmYul.Stack.pop4,
+                                    EvmYul.EVM.State.replaceStackAndIncrPC,
+                                    EvmYul.EVM.State.incrPC, sharedAfter]
+                                · exact
+                                    SourceStateRel.ok
+                                      (SharedStateRel.logOp
+                                        (cfg := cfg)
+                                        (sourceShared := sourceShared)
+                                        (targetShared :=
+                                          compilerAfterArgs.shared)
+                                        (offset := offset) (size := size)
+                                        (topics := #[topic0, topic1])
+                                        hShared)
+                                      hVars
+                          | cons extra more =>
+                              simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_log3
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Log .LOG3 : EvmYul.Operation .Yul)) .log3 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero => simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons offset rest =>
+              cases rest with
+              | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size rest' =>
+                  cases rest' with
+                  | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+                  | cons topic0 rest'' =>
+                      cases rest'' with
+                      | nil =>
+                          simp [Expressions.Structured.BasicOp.inputs] at hArity
+                      | cons topic1 rest''' =>
+                          cases rest''' with
+                          | nil =>
+                              simp [Expressions.Structured.BasicOp.inputs] at hArity
+                          | cons topic2 tail =>
+                              cases tail with
+                              | nil =>
+                                  cases hPerm : sourceShared.executionEnv.perm
+                                  · rw [PrimSemantics.primCall_log3_static_error
+                                      fuel sourceShared store offset size topic0
+                                      topic1 topic2 hPerm] at hCall
+                                    cases hCall
+                                  · rw [PrimSemantics.primCall_log3_ok_of_writable
+                                      fuel sourceShared store offset size topic0
+                                      topic1 topic2 hPerm] at hCall
+                                    cases hCall
+                                    let sharedAfter :
+                                        EvmYul.SharedState .EVM :=
+                                      EvmYul.SharedState.logOp offset size
+                                        #[topic0, topic1, topic2]
+                                        compilerAfterArgs.shared
+                                    refine ⟨sharedAfter, ?_, ?_⟩
+                                    · simp [Locals.Source.PrimitiveSemantics.structured,
+                                        Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                                        Expressions.Structured.BasicOp.inputs,
+                                        Structured.BasicOp.toPrimOp,
+                                        Assembly.PrimOp.continuingStep?,
+                                        Assembly.PrimStep.run,
+                                        EvmYul.Stack.pop5,
+                                        EvmYul.EVM.State.replaceStackAndIncrPC,
+                                        EvmYul.EVM.State.incrPC, sharedAfter]
+                                    · exact
+                                        SourceStateRel.ok
+                                          (SharedStateRel.logOp
+                                            (cfg := cfg)
+                                            (sourceShared := sourceShared)
+                                            (targetShared :=
+                                              compilerAfterArgs.shared)
+                                            (offset := offset) (size := size)
+                                            (topics :=
+                                              #[topic0, topic1, topic2])
+                                            hShared)
+                                          hVars
+                              | cons extra more =>
+                                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_log4
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Log .LOG4 : EvmYul.Operation .Yul)) .log4 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero => simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons offset rest =>
+              cases rest with
+              | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size rest' =>
+                  cases rest' with
+                  | nil => simp [Expressions.Structured.BasicOp.inputs] at hArity
+                  | cons topic0 rest'' =>
+                      cases rest'' with
+                      | nil =>
+                          simp [Expressions.Structured.BasicOp.inputs] at hArity
+                      | cons topic1 rest''' =>
+                          cases rest''' with
+                          | nil =>
+                              simp [Expressions.Structured.BasicOp.inputs] at hArity
+                          | cons topic2 rest'''' =>
+                              cases rest'''' with
+                              | nil =>
+                                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+                              | cons topic3 tail =>
+                                  cases tail with
+                                  | nil =>
+                                      cases hPerm :
+                                          sourceShared.executionEnv.perm
+                                      · rw [PrimSemantics.primCall_log4_static_error
+                                          fuel sourceShared store offset size
+                                          topic0 topic1 topic2 topic3 hPerm] at hCall
+                                        cases hCall
+                                      · rw [PrimSemantics.primCall_log4_ok_of_writable
+                                          fuel sourceShared store offset size
+                                          topic0 topic1 topic2 topic3 hPerm] at hCall
+                                        cases hCall
+                                        let sharedAfter :
+                                            EvmYul.SharedState .EVM :=
+                                          EvmYul.SharedState.logOp offset size
+                                            #[topic0, topic1, topic2, topic3]
+                                            compilerAfterArgs.shared
+                                        refine ⟨sharedAfter, ?_, ?_⟩
+                                        · simp [Locals.Source.PrimitiveSemantics.structured,
+                                            Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                                            Expressions.Structured.BasicOp.inputs,
+                                            Structured.BasicOp.toPrimOp,
+                                            Assembly.PrimOp.continuingStep?,
+                                            Assembly.PrimStep.run,
+                                            EvmYul.Stack.pop6,
+                                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                                            EvmYul.EVM.State.incrPC,
+                                            sharedAfter]
+                                        · exact
+                                            SourceStateRel.ok
+                                              (SharedStateRel.logOp
+                                                (cfg := cfg)
+                                                (sourceShared := sourceShared)
+                                                (targetShared :=
+                                                  compilerAfterArgs.shared)
+                                                (offset := offset)
+                                                (size := size)
+                                                (topics :=
+                                                  #[topic0, topic1, topic2,
+                                                    topic3])
+                                                hShared)
+                                              hVars
+                                  | cons extra more =>
+                                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_keccak256
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Keccak .KECCAK256 : EvmYul.Operation .Yul)) .keccak256 := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    hRel hArity hCall
+  cases sourceFuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel =>
+      cases hRel with
+      | @ok sourceShared store sourceState hShared hVars =>
+          cases sourceValues with
+          | nil =>
+              simp [Expressions.Structured.BasicOp.inputs] at hArity
+          | cons start rest =>
+              cases rest with
+              | nil =>
+                  simp [Expressions.Structured.BasicOp.inputs] at hArity
+              | cons size tail =>
+                  cases tail with
+                  | nil =>
+                      rw [PrimSemantics.primCall_keccak256_ok fuel
+                        sourceShared store start size] at hCall
+                      cases hCall
+                      let sharedAfter : EvmYul.SharedState .EVM :=
+                        { compilerAfterArgs.shared with
+                          toMachineState :=
+                            (EvmYul.MachineState.keccak256
+                              compilerAfterArgs.shared.toMachineState start
+                              size).2 }
+                      have hResultEq :
+                          (EvmYul.MachineState.keccak256
+                            sourceShared.toMachineState start size).1 =
+                            (EvmYul.MachineState.keccak256
+                              compilerAfterArgs.shared.toMachineState start
+                              size).1 := by
+                        exact MachineStateRel.keccak256_value hShared.machine
+                      refine ⟨sharedAfter, ?_, ?_⟩
+                      · simp [Locals.Source.PrimitiveSemantics.structured,
+                          Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
+                          Expressions.Structured.BasicOp.inputs,
+                          Structured.BasicOp.toPrimOp,
+                          Assembly.PrimOp.continuingStep?,
+                          Assembly.PrimStep.run,
+                          EvmYul.EVM.binaryMachineStateOp',
+                          EvmYul.Stack.pop2, EvmYul.Stack.push,
+                          EvmYul.EVM.State.replaceStackAndIncrPC,
+                          EvmYul.EVM.State.incrPC, sharedAfter, hResultEq,
+                          Id.run]
+                      · let targetState : EVMState :=
+                          { toSharedState := compilerAfterArgs.shared,
+                            pc := EvmYul.UInt256.ofNat 0,
+                            stack := [size, start],
+                            execLength := 0 }
+                        have hSharedAfter :
+                            SharedStateRel cfg
+                              { sourceShared with
+                                toMachineState :=
+                                  (EvmYul.MachineState.keccak256
+                                    sourceShared.toMachineState start
+                                    size).2 }
+                              sharedAfter := by
+                          simpa [targetState, sharedAfter] using
+                            (SharedStateRel.keccak256
+                              (cfg := cfg) (sourceShared := sourceShared)
+                              (target := targetState) (start := start)
+                              (size := size) hShared)
+                        exact SourceStateRel.ok hSharedAfter hVars
+                  | cons extra more =>
+                      simp [Expressions.Structured.BasicOp.inputs] at hArity
+
+theorem primitiveStackSoundAtArity_structured_invalid
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.System .INVALID : EvmYul.Operation .Yul)) .invalid := by
+  intro sourceAfterArgs compilerAfterArgs sourceValues sourceAfterPrim values'
+    _hRel _hArity hCall
+  exact (PrimSemantics.primCall_invalid_impossible_of_ok hCall).elim
+
+theorem primitiveStackSoundAtArity_structured_of_safe_toBasicOp
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op) :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel yulPrim op := by
+  cases yulPrim with
+  | StopArith subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_add
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mul
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_sub
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_div
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_sdiv
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mod
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_smod
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_addmod
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mulmod
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_exp
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_signextend
+  | CompBit subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_lt
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_gt
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_slt
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_sgt
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_eq
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_iszero
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_and
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_or
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_xor
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_not
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_byte
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_shl
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_shr
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_sar
+  | Keccak subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      cases hBasic
+      exact primitiveStackSoundAtArity_structured_keccak256
+  | Env subop =>
+      cases subop <;>
+        simp [Safe.primitive, Prim.toBasicOp?] at hSafe hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_address
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_balance
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_origin
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_caller
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_callvalue
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_calldataload
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_calldatasize
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_calldatacopy
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_gasprice
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_returndatasize
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_returndatacopy
+  | Block subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_blockhash
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_coinbase
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_timestamp
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_number
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_prevrandao
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_gaslimit
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_chainid
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_selfbalance
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_basefee
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_blobhash
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_blobbasefee
+  | StackMemFlow subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_pop
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mload
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mstore
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_sload
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_sstore
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mstore8
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_msize
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_gas
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_tload
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_tstore
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_mcopy
+  | Log subop =>
+      cases subop <;> simp [Prim.toBasicOp?] at hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_log0
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_log1
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_log2
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_log3
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_log4
+  | System subop =>
+      cases subop <;>
+        simp [Safe.primitive, Prim.toBasicOp?] at hSafe hBasic
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_invalid
+
 /--
 Primitive-call expression bridge for the stack-order argument adapter.
 

@@ -28636,6 +28636,36 @@ theorem exprList_toStackSeq?_length_eq
     exprList_toSeq?_length_eq hSeq
   simpa [Expr.List.toStackSeq?, List.length_reverse] using hRevLen
 
+theorem evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {source sourceAfter : State} {values : List Word}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {op : Structured.BasicOp}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hEval :
+      EvmYul.Yul.evalArgs fuel args.reverse codeOverride source =
+        .ok (sourceAfter, values.reverse)) :
+    values.length = Expressions.Structured.BasicOp.inputs op := by
+  have hLowerLen :=
+    Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+  have hSeqLen :=
+    exprList_toStackSeq?_length_eq hSeq
+  have hArgsLen :
+      args.length = Expressions.Structured.BasicOp.inputs op :=
+    hLowerLen.symm.trans hSeqLen
+  have hEvalLen := Imported.evalArgs_length_of_ok hEval
+  simpa [List.length_reverse, hArgsLen] using hEvalLen
+
 /--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
@@ -44252,7 +44282,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_let_prim_of_lower_preludeR
     (hArgs :
       SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
         codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -44391,7 +44421,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_assign_prim_of_lower_prelu
     (hArgs :
       SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
         codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -44528,7 +44558,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_expr_prim_of_lower_prelude
     (hArgs :
       SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
         codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -44668,7 +44698,7 @@ theorem sourceResultSeqSoundWhenAtExactHiddenCtx_cons_expr_prim_of_lower_prelude
     (hArgs :
       SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
         codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -44808,7 +44838,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_pri
           some seq →
         SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel
           args codeOverride pre seq)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEval :
       ∀ {shared store compiler},
         SourceStateRel cfg layout (.Ok shared store) compiler →
@@ -61517,6 +61547,148 @@ theorem lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
                             hSafeArgs hScopedArgs hOkArgs hLowerArgs
                         rcases
                             lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope
+                              (cfg := cfg) (layout := layout) (prim := prim)
+                              (program := program) (ctx := ctx)
+                              (sourceFuel := sourceFuel)
+                              (yulPrim := yulPrim) (op := op)
+                              (args := args)
+                              (codeOverride := some yulProgram.contract)
+                              (freshState := freshState)
+                              (freshState' := freshArgsState)
+                              (pre := preArgs) (argExprs := argExprs)
+                              (seq := seq)
+                              hSafePrim hBasic hLowerArgs hSeq hOutputs
+                              hArgsRegular
+                              (hPrimSound hSafePrim hBasic hOutputs) with
+                          ⟨_hLowerChecked, hSound⟩
+                        cases hPreEq
+                        cases hLowerEq
+                        cases hStateEq
+                        exact hSound hInitial hEval
+                      · simp [hSeq, hOutputs] at hLower
+      | inr functionName =>
+          exact
+            lower1?_user_call_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+              (cfg := cfg) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (yulProgram := yulProgram) (program := program)
+              (context := context) (bound := bound) (ctx := ctx)
+              (coverLayout := coverLayout) (layout := layout)
+              (sourceFuel := sourceFuel) (functionName := functionName)
+              (args := args) (freshState := freshState)
+              (freshState' := freshState') (pre := pre)
+              (lowerExpr := lowerExpr)
+              hRecursive hCallFuel hLayoutSubset hArgs hCovers hSafe
+              hScoped hOk hResultOk hLower
+
+
+/--
+Arity-aware reserved-bridge variant of the checked `Expr.lower1?` dispatcher.
+-/
+theorem lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {coverLayout layout : List Name}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    (hRecursive :
+      ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hCallFuel : sourceFuel.succ ≤ bound)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hArgs :
+      SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
+        yulProgram.contract coverLayout sourceFuel)
+    (hPrimSound :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
+        PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hOk : UserCallArity.ExprOk yulProgram.contract expr)
+    (hResultOk :
+      ExprEvalResultOkAt cfg layout sourceFuel.succ expr
+        (some yulProgram.contract))
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lowerExpr, freshState')) :
+    ExprEvalPreludeSound cfg layout prim program ctx sourceFuel.succ expr
+      (some yulProgram.contract) pre lowerExpr := by
+  cases expr with
+  | Lit value =>
+      simp [Expr.lower1?, Expr.lower?] at hLower
+      rcases hLower with ⟨hPreEq, hLowerEq, _hStateEq⟩
+      cases hPreEq
+      cases hLowerEq
+      exact exprEvalPreludeSound_lit
+  | Var name =>
+      simp [Expr.lower1?, Expr.lower?] at hLower
+      rcases hLower with ⟨hPreEq, hLowerEq, _hStateEq⟩
+      cases hPreEq
+      cases hLowerEq
+      have hMem : identName name ∈ layout := by
+        simpa [SourceExprScoped] using hScoped
+      unfold ExprEvalPreludeSound
+      intro source compiler sourceAfter value hInitial hEval
+      exact
+        (exprEvalPreludeSound_var (cfg := cfg) (layout := layout)
+          (prim := prim) (program := program) (ctx := ctx)
+          (sourceFuel := sourceFuel.succ)
+          (codeOverride := some yulProgram.contract) hMem)
+          hInitial hEval
+  | Call fn args =>
+      cases fn with
+      | inl yulPrim =>
+          unfold ExprEvalPreludeSound
+          intro source compiler sourceAfter value hInitial hEval
+          have hSafePrim : Safe.primitive yulPrim := by
+            simpa [Safe.expr] using hSafe.1
+          have hSafeArgs : Safe.exprs args := by
+            simpa [Safe.expr] using hSafe.2
+          have hScopedArgs : SourceExprsScoped layout args := by
+            simpa [SourceExprScoped] using hScoped
+          have hOkArgs : UserCallArity.ExprsOk yulProgram.contract args := by
+            simpa [UserCallArity.ExprOk] using hOk
+          simp [Expr.lower1?, Expr.lower?] at hLower
+          cases hBasic : Prim.toBasicOp? yulPrim with
+          | none =>
+              simp [hBasic] at hLower
+          | some op =>
+              simp [hBasic] at hLower
+              cases hLowerArgs :
+                  Expr.List.lowerBound1? freshState args with
+              | none =>
+                  simp [hLowerArgs] at hLower
+              | some argsResult =>
+                  rcases argsResult with ⟨preArgs, argExprs, freshArgsState⟩
+                  simp [hLowerArgs] at hLower
+                  cases hSeq :
+                      Expr.List.toStackSeq? argExprs
+                          (Expressions.Structured.BasicOp.inputs op) with
+                  | none =>
+                      simp [hSeq] at hLower
+                  | some seq =>
+                      by_cases hOutputs :
+                          Expressions.Structured.BasicOp.outputs op = 1
+                      · simp [hSeq, hOutputs] at hLower
+                        rcases hLower with
+                          ⟨hPreEq, hLowerEq, hStateEq⟩
+                        have hArgsRegular :
+                            SourceArgListPreludeRegularAt cfg layout prim
+                              program ctx sourceFuel args
+                              (some yulProgram.contract) preArgs argExprs :=
+                          hArgs.lower (Nat.le_refl sourceFuel) hCovers
+                            hSafeArgs hScopedArgs hOkArgs hLowerArgs
+                        rcases
+                            lower1?_prim_exprEvalPreludeSound_of_lowerBound1?_regularAt_noScope_arity
                               (cfg := cfg) (layout := layout) (prim := prim)
                               (program := program) (ctx := ctx)
                               (sourceFuel := sourceFuel)
@@ -127465,6 +127637,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_if_of_programAccepted
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
         PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hGeneratedIszero :
+      PrimitiveStackSoundAt cfg layout prim sourceFuel.succ
+        ((.CompBit .ISZERO : EvmYul.Operation .Yul)) .iszero)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -136816,7 +136991,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_if
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -136993,7 +137168,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_if
                           exact exprEvalPreludeSound_zero
                       | succ exprFuel =>
                           exact
-                            lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+                            lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                               (cfg := cfg) (terminalRel := terminalRel)
                               (revertRel := revertRel) (prim := prim)
                               (yulProgram := yulProgram)
@@ -137371,7 +137546,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_sw
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -137595,7 +137770,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_sw
                             exact exprEvalPreludeSound_zero
                         | succ exprFuel =>
                             exact
-                              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+                              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                                 (cfg := cfg) (terminalRel := terminalRel)
                                 (revertRel := revertRel) (prim := prim)
                                 (yulProgram := yulProgram)
@@ -138979,11 +139154,16 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_pr
                                 ⟨_compilerAfterPre, compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -139097,7 +139277,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
           some seq →
         SourceArgListPreludeTerminalAt cfg layout outcomeLayout terminalRel
           revertRel prim program ctx sourceFuel args codeOverride pre)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEvalDomain :
       ∀ {shared store sharedAfter storeAfter value},
         StoreDomainExact layout store →
@@ -139316,11 +139496,16 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
                                 ⟨_compilerAfterPre, _compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -139819,11 +140004,16 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_pri
                                 ⟨_compilerAfterPre, _compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -142116,7 +142306,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_prog
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -142193,10 +142383,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_prog
         have hPrimIszero :
             PrimitiveStackSoundAt cfg layout prim sourceFuel.succ
               (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero :=
-          hPrimSound (fuel := sourceFuel.succ)
-            (yulPrim := (.CompBit .ISZERO : EvmYul.Operation .Yul))
-            (op := .iszero) (by omega) (by simp [Safe.primitive])
-            (by rfl) (by rfl)
+          hGeneratedIszero
         have hCondTerminal :
             SourceExprPreludeTerminalAt cfg layout konts.leave terminalRel
               revertRel prim program
@@ -142239,7 +142426,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_prog
               exact exprEvalPreludeSound_zero
           | succ condFuel =>
               exact
-                lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+                lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                   (cfg := cfg) (terminalRel := terminalRel)
                   (revertRel := revertRel) (prim := prim)
                   (yulProgram := yulProgram) (program := program)
@@ -142442,7 +142629,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -142810,7 +142997,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
         Expressions.Structured.BasicOp.outputs op = 1 →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -142905,7 +143092,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_
             exact exprEvalPreludeSound_zero
         | succ condFuel =>
             exact
-              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+              lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                 (cfg := cfg) (terminalRel := terminalRel)
                 (revertRel := revertRel) (prim := prim)
                 (yulProgram := yulProgram) (program := program)
@@ -142979,7 +143166,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_
                 exact exprEvalPreludeSound_zero
             | succ condFuel =>
                 exact
-                  lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+                  lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                     (cfg := cfg) (terminalRel := terminalRel)
                     (revertRel := revertRel) (prim := prim)
                     (yulProgram := yulProgram) (program := program)
@@ -143064,7 +143251,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_for_of_
                 exact exprEvalPreludeSound_zero
             | succ condFuel =>
                 exact
-                  lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge
+                  lower1?_exprEvalPreludeSound_of_argRegularAllCheckedAt_reservedBridge_arity
                     (cfg := cfg) (terminalRel := terminalRel)
                     (revertRel := revertRel) (prim := prim)
                     (yulProgram := yulProgram) (program := program)
@@ -157403,7 +157590,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_prim_a
           some seq →
         SourceArgListPreludeTerminalAt cfg layout layout terminalRel
           revertRel prim program ctx sourceFuel args codeOverride pre)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEvalDomain :
       ∀ {shared store sharedAfter storeAfter values},
         StoreDomainExact layout store →
@@ -157591,11 +157778,17 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_expr_prim_a
                                 ⟨_compilerAfterPre, compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs
+                                      op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower0?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -157813,7 +158006,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_prim
           some seq →
         SourceArgListPreludeTerminalAt cfg layout layout terminalRel
           revertRel prim program ctx sourceFuel args codeOverride pre)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEvalDomain :
       ∀ {shared store sharedAfter storeAfter value},
         StoreDomainExact layout store →
@@ -158032,11 +158225,17 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_prim
                                 ⟨_compilerAfterPre, _compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs
+                                      op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -158206,7 +158405,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_prim
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hTail :
       ∀ {compileFuel : Nat} {ctxMid : Functions.Source.Ctx},
         (∀ name : Name, name ∈ layout → name ∈ ctxMid.scope) →
@@ -158358,7 +158557,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_as
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hReservedTail : SourceNamesReserved reserved (Stmt.List.names rest))
     (hTail :
       ∀ {layoutTail : List Name} {ctxTail : Functions.Source.Ctx}
@@ -158466,7 +158665,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_prim_ac
           some seq →
         SourceArgListPreludeTerminalAt cfg layout layout terminalRel
           revertRel prim program ctx sourceFuel args codeOverride pre)
-    (hPrim : PrimitiveStackSoundAt cfg layout prim sourceFuel yulPrim op)
+    (hPrim : PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
     (hEvalDomain :
       ∀ {shared store sharedAfter storeAfter value},
         StoreDomainExact layout store →
@@ -158847,11 +159046,17 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_prim_ac
                                 ⟨_compilerAfterPre, _compilerAfterArgs,
                                   _ctxAfterArgs, _argFuel, _hPreRun,
                                   _hArgEval, hRelArgs⟩
-                              rcases hPrim hRelArgs hPrimCall with
+                              have hArgArity :
+                                  argValues.length =
+                                    Expressions.Structured.BasicOp.inputs
+                                      op :=
+                                evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
+                                  hArgsRaw hSeqRaw hEvalArgs
+                              rcases hPrim hRelArgs hArgArity hPrimCall with
                                 ⟨_compilerSharedAfter, _hPrimEval,
                                   hRelAfterPrim⟩
                               rcases
-                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt
+                                  lower1?_prim_exprValuePreludeSound_of_lowerBound1?_preludeRegularAt_arity
                                     (cfg := cfg) (layout := layout)
                                     (prim := prim) (program := program)
                                     (ctx := ctx) (sourceFuel := sourceFuel)
@@ -159123,7 +159328,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_prim_of
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hTail :
       ∀ {compileFuel : Nat} {ctxMid : Functions.Source.Ctx},
         (∀ other : Name,
@@ -159281,7 +159486,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_le
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hReservedTail : SourceNamesReserved reserved (Stmt.List.names rest))
     (hTail :
       ∀ {layoutTail : List Name} {ctxTail : Functions.Source.Ctx}
@@ -159399,7 +159604,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_ex
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hReservedTail : SourceNamesReserved reserved (Stmt.List.names rest))
     (hTail :
       ∀ {layoutTail : List Name} {ctxTail : Functions.Source.Ctx}
@@ -160995,7 +161200,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -161963,7 +162168,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_programAccept
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162045,7 +162250,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_programAc
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162168,7 +162373,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162305,7 +162510,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162411,7 +162616,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162524,7 +162729,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162614,7 +162819,7 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
         fuel < bound.succ →
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         fuel < bound.succ →
@@ -162686,7 +162891,7 @@ theorem programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_a
         {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
-        PrimitiveStackSoundAt cfg layout prim fuel yulPrim op)
+        PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
     (hResultOk :
       ∀ {layout : List Name} {fuel : Nat} {expr : AstExpr},
         Safe.expr expr →
@@ -167367,6 +167572,16 @@ theorem of_strict
       Reference.SourceBridgeFacts.primitiveStackSoundAtArity_of_stackSoundAt
         (hStack.primitiveStack hSafe hBasic)
 
+theorem structured
+    {cfg : Reference.StateRelConfig} :
+    RecursiveBridgePrimitiveStackArityContracts cfg
+      Locals.Source.PrimitiveSemantics.structured where
+  primitiveStack := by
+    intro layout fuel yulPrim op hSafe hBasic
+    exact
+      Reference.SourceBridgeFacts.primitiveStackSoundAtArity_structured_of_safe_toBasicOp
+        hSafe hBasic
+
 end RecursiveBridgePrimitiveStackArityContracts
 
 namespace RecursiveBridgePrimitiveArityContracts
@@ -167398,6 +167613,14 @@ theorem stack
     (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim) :
     RecursiveBridgePrimitiveStackArityContracts cfg prim where
   primitiveStack := hPrimitive.primitiveStack
+
+theorem structured
+    {cfg : Reference.StateRelConfig} :
+    RecursiveBridgePrimitiveArityContracts cfg
+      Locals.Source.PrimitiveSemantics.structured :=
+  of_stack
+    Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
+    RecursiveBridgePrimitiveStackArityContracts.structured
 
 end RecursiveBridgePrimitiveArityContracts
 
