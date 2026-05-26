@@ -450,6 +450,15 @@ The symbolic local/cleanup effects at the typed CFG boundary are:
 - `unwind targetShape`: pop the dead lexical region until the current shape is
   exactly `targetShape`.
 
+The typed-CFG backend lowers these symbolic local effects below the stack-free
+boundary. Multi-local declaration is a no-op once values are already on the
+stack; return-variable initialization pushes zero words; assignment stores each
+consumed result into its checked local slot; and procedure return duplicates the
+named return locals in source order before removing the old callee frame under
+them, preserving the hidden return token and caller tail for the generated
+dispatch code. This backend is still intentionally partial where the concrete
+EVM `DUP`/`SWAP` instruction set cannot reach the required slot.
+
 The typed CFG semantics now has both a block stepper and a fuelled whole-CFG
 runner. Instruction execution is shape-aware: the interpreter checks each
 symbolic instruction against the current shape, executes the corresponding EVM

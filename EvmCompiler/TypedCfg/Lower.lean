@@ -87,9 +87,21 @@ def removeBuriedUnder? (depth : Nat) : Option Assembly.Program := do
   let code ← liftBuriedToTop? depth
   some (code ++ [.prim .pop])
 
+def removeManyBuriedUnder? (depth : Nat) :
+    Nat → Option Assembly.Program
+  | 0 => some []
+  | count + 1 => do
+      let head ← removeBuriedUnder? depth
+      let tail ← removeManyBuriedUnder? depth count
+      some (head ++ tail)
+
 end StackShuffle
 
 namespace Instr
+
+def pushZeros : Nat → Assembly.Program
+  | 0 => []
+  | n + 1 => .push (EvmYul.UInt256.ofNat 0) :: pushZeros n
 
 def popMany : Nat → Assembly.Program
   | 0 => []
@@ -133,6 +145,53 @@ def swap? : Nat → Option Assembly.Program
   | 15 => some [.prim .swap16]
   | _ => none
 
+def localDepthFrom? (name : Name) : Shape → Nat → Option Nat
+  | [], _depth => none
+  | .local slotName :: rest, depth =>
+      if slotName = name then
+        some depth
+      else
+        localDepthFrom? name rest (depth + 1)
+  | _slot :: rest, depth =>
+      localDepthFrom? name rest (depth + 1)
+
+def localDepth? (name : Name) (shape : Shape) : Option Nat :=
+  localDepthFrom? name shape 0
+
+def localDepthUnderTop? (name : Name) : Shape → Option Nat
+  | _top :: rest => localDepth? name rest
+  | [] => none
+
+def storeLocalCode? (depth : Nat) : Option Assembly.Program := do
+  let swap ← swap? depth
+  some (swap ++ [.prim .pop])
+
+def lowerAssignLocalsWithShape? :
+    List Name → Shape → Option (Assembly.Program × Shape)
+  | [], shape => some ([], shape)
+  | name :: names, shape => do
+      let depth ← localDepthUnderTop? name shape
+      let head ← storeLocalCode? depth
+      let shape' ← (TypedCfg.Instr.storeLocal name depth).type? shape
+      let (tail, output) ← lowerAssignLocalsWithShape? names shape'
+      some (head ++ tail, output)
+
+def lowerDupLocalsForReturn? :
+    List Name → Shape → Option (Assembly.Program × Shape)
+  | [], shape => some ([], shape)
+  | name :: names, shape => do
+      let depth ← localDepth? name shape
+      let head ← dup? depth
+      let shape' ← (TypedCfg.Instr.dup depth).type? shape
+      let (tail, output) ← lowerDupLocalsForReturn? names shape'
+      some (head ++ tail, output)
+
+def lowerReturnLocalsWithShape? (names : List Name) (shape : Shape) :
+    Option Assembly.Program := do
+  let (dupCode, _dupShape) ← lowerDupLocalsForReturn? names.reverse shape
+  let cleanup ← StackShuffle.removeManyBuriedUnder? names.length shape.length
+  some (dupCode ++ cleanup)
+
 def lower? : Instr → Option Assembly.Program
   | .push value => some [.push value]
   | .prim op => some [.prim op]
@@ -140,12 +199,11 @@ def lower? : Instr → Option Assembly.Program
   | .dup depth => dup? depth
   | .swap depth => swap? depth
   | .declareLocal _name => some []
-  | .declareLocals _names => none
-  | .initLocals _names => none
+  | .declareLocals _names => some []
+  | .initLocals names => some (pushZeros names.length)
   | .loadLocal _name depth => dup? depth
   | .storeLocal _name depth => do
-      let swap ← swap? depth
-      some (swap ++ [.prim .pop])
+      storeLocalCode? depth
   | .assignLocals _names => none
   | .returnLocals _names => none
   | .unwind _target => none
@@ -156,6 +214,15 @@ def lowerWithShape? (instr : Instr) (shape : Shape) :
   match instr with
   | .unwind target =>
       some (popMany (shape.length - target.length), output)
+  | .assignLocals names => do
+      let (code, output') ← lowerAssignLocalsWithShape? names shape
+      if output' = output then
+        some (code, output)
+      else
+        none
+  | .returnLocals names => do
+      let code ← lowerReturnLocalsWithShape? names shape
+      some (code, output)
   | _ => do
       let code ← instr.lower?
       some (code, output)

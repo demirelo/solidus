@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 18:15 PDT.
+Last updated: 2026-05-25 18:30 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -98,8 +98,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - The compiler owns all stack facts: source-variable layout, typed-CFG
     shape, local depths, unwind targets, procedure entry/return shapes, call
     return labels, and terminal argument placement.
-  - Current checkpoint produces checked `TypedCfg`; lowering the new symbolic
-    multi-local effects to assembly remains a Stage 3 backend task.
+  - Current checkpoint produces checked `TypedCfg`; the typed-CFG backend now
+    lowers the generated multi-local symbolic effects to labeled assembly when
+    the needed `DUP`/`SWAP` accesses are representable by the current backend.
 - [ ] Prove stack-free CFG successor theorem.
   - `SeqSound []` base case.
   - `SeqSound (stmt :: rest)` from `HeadSound stmt` plus recursive tail sound.
@@ -157,7 +158,7 @@ StackFreeCfg, not directly into TypedCfg or assembly.
 - [ ] Prove symbolic local effects:
   `declareLocal`, `declareLocals`, `initLocals`, `loadLocal`, `storeLocal`,
   `assignLocals`, and `returnLocals`.
-- [ ] Implement assembly lowering for symbolic multi-local effects:
+- [x] Implement assembly lowering for symbolic multi-local effects:
   `declareLocals`, `initLocals`, `assignLocals`, and `returnLocals`.
 - [ ] Prove lexical `unwind` lowers to the corresponding `POP` sequence.
 - [ ] Prove typed `jump`/`jumpi` target valid labels with declared shapes.
