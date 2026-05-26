@@ -102,6 +102,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     semantics; concrete reuse of isolated EVM primitive stepping lives in
     `EvmCompiler.StackFreeCfg.PrimitiveAdapter`.
   - Blocks own lexical scope cleanup.
+  - Block, statement, statement-sequence, and loop execution restrict incoming
+    varstores to the current lexical scope before evaluating user syntax.
   - Loops consume `break`/`continue` and propagate `leave`/halts/errors.
   - Procedures allocate params/returns, zero return variables, treat `leave`
     as procedure exit, and keep EVM `RETURN` as terminal halt.

@@ -299,6 +299,7 @@ mutual
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 => do
+        let state := state.restrictTo ctx.scope
         let outcome ←
           StmtList.run fuel' prim program ctx block.stmts state
         .ok (outcome.restrictTo ctx.scope)
@@ -309,6 +310,7 @@ mutual
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 =>
+        let state := state.restrictTo ctx.scope
         match stmts with
         | [] => .ok (Outcome.regular state ctx.scope)
         | stmt :: rest => do
@@ -326,6 +328,7 @@ mutual
     match fuel with
     | 0 => .ok (Outcome.outOfFuel state ctx.scope)
     | fuel' + 1 =>
+        let state := state.restrictTo ctx.scope
         match stmt with
         | .expr expr => do
             let state' ← Expr.evalZero prim expr state
@@ -524,6 +527,7 @@ mutual
     match fuel with
     | 0 => .ok ((Outcome.outOfFuel state loopCtx.scope).restrictTo outerScope)
     | fuel' + 1 => do
+        let state := state.restrictTo loopCtx.scope
         let (stateAfterCond, condValue) ← Expr.evalCondition prim cond state
         if condValue then
           let bodyOutcome ←
