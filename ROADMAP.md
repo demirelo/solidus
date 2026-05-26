@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 06:46 PDT.
+Last updated: 2026-05-26 08:29 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -17,6 +17,12 @@ input stack shapes, terminators type-check against target block shapes, and
 EVM halts are terminal outcomes rather than continuations. The old
 `Structured.TypedContinuations` facade should be retired or bridged through
 this IR as the refactor proceeds.
+
+Current cleanup checkpoint: stale proof-facing wrappers that were no longer used
+by the main public theorem spine have been removed. `EvmCompiler.LayerAudit`
+now intentionally exposes only the current imported-Yul gas-aware top theorem
+roots; Solidity frontend and object/Yul-object interfaces remain owned by their
+actual modules rather than preserved through audit aliases.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -430,13 +436,15 @@ Current assumption-cleanup checkpoint:
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall`,
     so the preferred exported surface cannot hide a user-supplied arbitrary
     external-call agreement inside `RecursiveBridgeTargetRuntime`.
-  - [x] Export audit projections for the preferred no-call/create top package:
-    `sourceReferenceAccepted`, `lowerObjectCompileAccepted`, and
-    `emittedNoCallCreate`, making clear which facts are source validity,
-    explicit lower resource bounds, and checked compiler-derived facts.
-  - [x] Export audit projections for the then-remaining bytecode target boundary:
-    `targetFitsDecodeWindow` is an explicit resource/code-size bound, and
-    `targetJumpdestCorrect` is the imported jumpdest-scanner boundary.
+  - [x] Temporarily export audit projections for the preferred no-call/create
+    top package while auditing which facts were source validity, explicit lower
+    resource bounds, and checked compiler-derived facts. These projection
+    helpers were later removed once the checked bundle became the live public
+    spine.
+  - [x] Temporarily export audit projections for the then-remaining bytecode
+    target boundary while separating the explicit resource/code-size bound from
+    the imported jumpdest-scanner boundary. These projection helpers were later
+    removed once the bytecode checks moved into the checked compiler package.
   - [x] Replace the public `DecodeSafety` premise with the resource bound
     `Assembly.Bytecode.TargetFitsDecodeWindow`. The actual `DecodeSafety`
     facts are now proved from checked assembler layout plus that byte-length
@@ -480,18 +488,19 @@ Current assumption-cleanup checkpoint:
   source-facing package instead of only through a bespoke recursive-bridge
   resource record.
   - [x] Add `RecursiveBridgeCompileResources.of_sourceCompileAccepted`.
-  - [x] Add the projection
-    `RecursiveBridgeTopNoCallAssumptions.sourceCompileAccepted`.
+  - [x] Add the temporary projection
+    `RecursiveBridgeTopNoCallAssumptions.sourceCompileAccepted`; it was later
+    removed with the rest of the non-spine audit projection helpers.
   - [x] Add `RecursiveBridgeTopNoCallSourceCompileAssumptions`, whose public
     resource field is `Yul.Program.SourceCompileAccepted program`, and the
     checked wrapper to the result-level `EVM.X` theorem. The intermediate
     gasless/source-compile public wrapper and aliases were later removed when
     they stopped being part of the preferred surface.
-  - [x] Export source-compile package audit projections for source
-    acceptedness, source compile acceptedness, emitted no-call/create,
-    target decode-window bound, and target jumpdest correctness, so the
-    preferred top package has the same no-hidden-evidence audit surface as the
-    older resource package.
+  - [x] Temporarily export source-compile package audit projections for source
+    acceptedness, source compile acceptedness, emitted no-call/create, target
+    decode-window bound, and target jumpdest correctness. These were audit aids
+    for the no-hidden-evidence pass and were later removed after the checked
+    package became the public theorem spine.
   - [x] Add a canonical top-level observation relation for the imported
     dispatcher bridge and a checked constructor from
     `RecursiveBridgeSemanticCoreContracts` to
@@ -502,7 +511,7 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSemanticCoreContracts.ofSemanticContracts`, making the
     semantic core/redundant-observation split explicit in both directions.
   - [x] Split the remaining semantic core into named boundary packages:
-    `RecursiveBridgePrimitiveContracts`,
+    `RecursiveBridgePrimitiveArityContracts`,
     `RecursiveBridgeTerminalContracts`, and
     `RecursiveBridgeExprResultContracts`, with a checked constructor
     `RecursiveBridgeSemanticCoreContracts.ofBoundaries`. This makes clear which
@@ -3111,8 +3120,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
     for the compiler-derived block trace, pending the real sufficient-gas proof
     below the compiler.
 - [x] Layer audit gate: build, proof-hole scan, theorem names, remaining assumptions, and progress-log entry.
-- [x] Root imports `EvmCompiler.LayerAudit`, a checked theorem-spine tripwire naming each adjacent preservation theorem and keeping the imported-Yul `SourceBridge` boundary visually separate from completed adjacent proofs.
-  - [x] `EvmCompiler.LayerAudit` names every current interpreter boundary and adjacent connection proof, including the explicit transparent Objects adapter, the quarantined compiler-facing `Yul.Lowered.run`, and the final bundled imported-Yul recursive bridge theorem to the gas-aware EVM route.
+- [x] Root imports `EvmCompiler.LayerAudit`, a checked theorem-spine tripwire for
+  the current public imported-Yul gas-aware theorem roots.
+  - [x] `EvmCompiler.LayerAudit` now deliberately names only the two live
+    imported-Yul gas-aware top roots. Solidity frontend and object/Yul-object
+    public interfaces remain in their own modules, and stale audit/projection
+    aliases are not kept alive there.
 
 ## Proof Hardening
 

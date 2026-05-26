@@ -45,10 +45,6 @@ def RecursiveBridgeInitialWorldRel
         { shared.executionEnv with code := program.contract } }
     initial.toSharedState
 
-@[simp] theorem canonicalEntryState_toSharedState (initial : EVMState) :
-    (canonicalEntryState initial).toSharedState = initial.toSharedState :=
-  rfl
-
 @[simp] theorem canonicalEntryState_pc (initial : EVMState) :
     (canonicalEntryState initial).pc = Assembly.Program.pcAfter [] :=
   rfl
@@ -288,112 +284,6 @@ def withCanonicalObservation
   initialPc := hInitialPc
   initialStack := hInitialStack
 
-theorem sourceReferenceAccepted
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
-        revertRel prim outcomeRel program asm target shared store sourceFuel
-        initial referenceResult) :
-    Reference.Accepted program :=
-  hTop.sourceAccepted.reference
-
-theorem sourceCompile
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
-        revertRel prim outcomeRel program asm target shared store sourceFuel
-        initial referenceResult) :
-    SourceCompileAccepted program :=
-  hTop.sourceCompileAccepted
-
-theorem emittedNoCallCreate
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
-        revertRel prim outcomeRel program asm target shared store sourceFuel
-        initial referenceResult) :
-    asm.usesCallCreate = false :=
-  compileCheckedAssemblyTarget?_noCallCreate hTop.sourceAccepted.reference
-    hTop.compileTarget
-
-theorem targetFitsDecodeWindow
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
-        revertRel prim outcomeRel program asm target shared store sourceFuel
-        initial referenceResult) :
-    Assembly.Bytecode.TargetFitsDecodeWindow target :=
-  hTop.decodeWindow
-
-theorem targetJumpdestCorrect
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
-        revertRel prim outcomeRel program asm target shared store sourceFuel
-        initial referenceResult) :
-    Assembly.Bytecode.JumpdestCorrect target :=
-  hTop.jumpdestCorrect
-
 def toNoCallAssumptions
     {cfg : Reference.StateRelConfig}
     {terminalRel :
@@ -434,143 +324,6 @@ def toNoCallAssumptions
 end RecursiveBridgeTopNoCallSourceCompileAssumptions
 
 namespace RecursiveBridgeTopNoCallAssumptions
-
-theorem lowerObjectCompileAccepted
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult)
-    {lowerObj : Objects.Program}
-    (hLower : program.toObjects? = some lowerObj) :
-    Objects.Source.Program.CompileAccepted lowerObj :=
-  RecursiveBridgeCompileResources.lowerObjectCompileAccepted
-    hTop.sourceAccepted hTop.compileResources hLower
-
-theorem sourceReferenceAccepted
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult) :
-    Reference.Accepted program :=
-  hTop.sourceAccepted.reference
-
-theorem sourceCompileAccepted
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult) :
-    SourceCompileAccepted program where
-  source :=
-    sourceAccepted_of_accepted
-      (Reference.programAccepted_of_accepted hTop.sourceAccepted.reference)
-  objects := by
-    intro lowerObj hLower
-    exact
-      RecursiveBridgeCompileResources.lowerObjectCompileAccepted
-        hTop.sourceAccepted hTop.compileResources hLower
-
-theorem emittedNoCallCreate
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult) :
-    asm.usesCallCreate = false :=
-  compileCheckedAssemblyTarget?_noCallCreate hTop.sourceAccepted.reference
-    hTop.compileTarget
-
-theorem targetFitsDecodeWindow
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult) :
-    Assembly.Bytecode.TargetFitsDecodeWindow target :=
-  hTop.decodeWindow
-
-theorem targetJumpdestCorrect
-    {cfg : Reference.StateRelConfig}
-    {terminalRel :
-      Assembly.HaltKind → Word → Reference.State →
-        Objects.Source.State → Prop}
-    {revertRel : Reference.State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {outcomeRel : Reference.OutcomeRel}
-    {program : Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {sourceFuel : Nat} {initial : EVMState}
-    {referenceResult : Reference.Result}
-    (hTop :
-      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
-        outcomeRel program asm target shared store sourceFuel initial
-        referenceResult) :
-    Assembly.Bytecode.JumpdestCorrect target :=
-  hTop.jumpdestCorrect
 
 def toTopAssumptions
     {cfg : Reference.StateRelConfig}
@@ -930,7 +683,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     {referenceResult : Reference.Result}
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim)
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1002,7 +755,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     {referenceResult : Reference.Result}
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim)
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1064,7 +817,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     {referenceResult : Reference.Result}
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim)
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1139,7 +892,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
-    (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
+    (hPrimitiveStack : RecursiveBridgePrimitiveStackArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1195,7 +948,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
                                 result :=
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalResourceBoundaries_X
     hSourceAccepted hSourceCompileAccepted
-    (RecursiveBridgePrimitiveContracts.of_stack hPrimitiveSound
+    (RecursiveBridgePrimitiveArityContracts.of_stack hPrimitiveSound
       hPrimitiveStack)
     hTerminalContracts hExprNoSuccessfulOutOfFuel hInitialSharedRel hSourceFuelRun hCheckedCompileTarget decodeWindow
     jumpdestCorrect hInitialPc hInitialStack hTargetGasForX
@@ -1215,7 +968,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     {referenceResult : Reference.Result}
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
-    (hPrimitive : RecursiveBridgePrimitiveContracts cfg prim)
+    (hPrimitive : RecursiveBridgePrimitiveArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1276,7 +1029,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hSourceAccepted : RecursiveBridgeSourceAccepted program)
     (hSourceCompileAccepted : SourceCompileAccepted program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
-    (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
+    (hPrimitiveStack : RecursiveBridgePrimitiveStackArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1318,7 +1071,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalResourceBoundaries_X
     hSourceAccepted hSourceCompileAccepted
-    (RecursiveBridgePrimitiveContracts.of_stack hPrimitiveSound
+    (RecursiveBridgePrimitiveArityContracts.of_stack hPrimitiveSound
       hPrimitiveStack)
     hTerminalContracts hExprNoSuccessfulOutOfFuel hInitialSharedRel hSourceFuelRun hCheckedCompileTarget decodeWindow
     jumpdestCorrect hInitialPc hInitialStack hTargetGasForX
@@ -1348,7 +1101,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
-    (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
+    (hPrimitiveStack : RecursiveBridgePrimitiveStackArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
@@ -1431,7 +1184,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hPrimitiveSound : Locals.SourceLowering.PrimitiveSound prim)
-    (hPrimitiveStack : RecursiveBridgePrimitiveStackContracts cfg prim)
+    (hPrimitiveStack : RecursiveBridgePrimitiveStackArityContracts cfg prim)
     (hTerminalContracts :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
