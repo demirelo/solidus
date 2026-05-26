@@ -536,6 +536,107 @@ theorem compileCondition?_code {expr : StackFreeCfg.Expr}
 
 end ExprCompiler
 
+namespace StmtCode
+
+theorem declareLocals_type?_shape {names : List Name} {valueShape shape outShape : Shape}
+    (hDrop : valueShape.drop names.length = shape)
+    (hType :
+      (TypedCfg.Instr.declareLocals names).type? valueShape =
+        some outShape) :
+    outShape = Compiler.Layout.locals names ++ shape := by
+  unfold TypedCfg.Instr.type? at hType
+  by_cases hLe : names.length ≤ valueShape.length
+  · simp [hLe] at hType
+    have hRest : TypedCfg.Shape.pop names.length valueShape = shape := by
+      simpa [TypedCfg.Shape.pop] using hDrop
+    rw [← hType.2]
+    simp [Compiler.Layout.locals, TypedCfg.Instr.ShapeOps.locals, hRest]
+  · simp [hLe] at hType
+
+theorem assignLocals_type?_shape {names : List Name} {valueShape shape outShape : Shape}
+    (hDrop : valueShape.drop names.length = shape)
+    (hType :
+      (TypedCfg.Instr.assignLocals names).type? valueShape =
+        some outShape) :
+    outShape = shape := by
+  unfold TypedCfg.Instr.type? at hType
+  by_cases hLe : names.length ≤ valueShape.length
+  · simp [hLe] at hType
+    rw [← hType.2]
+    simpa [TypedCfg.Shape.pop] using hDrop
+  · simp [hLe] at hType
+
+theorem decl?_shape {names : List Name} {value? : Option Expr}
+    {shape outShape : Shape} {code : List TypedCfg.Instr}
+    (h :
+      Compiler.StmtCode.decl? names value? shape = some (code, outShape)) :
+    outShape = Compiler.Layout.locals names ++ shape := by
+  unfold Compiler.StmtCode.decl? at h
+  cases value? with
+  | none =>
+      cases hType :
+          (TypedCfg.Instr.declareLocals names).type?
+            (List.replicate names.length (TypedCfg.Slot.literal zero) ++
+              shape) with
+      | none =>
+          simp [hType] at h
+      | some typedShape =>
+          simp [hType] at h
+          rw [← h.2]
+          have hDrop :
+              (List.replicate names.length (TypedCfg.Slot.literal zero) ++
+                shape).drop names.length = shape := by
+            induction names with
+            | nil => rfl
+            | cons _ names ih =>
+                simp [List.replicate]
+          exact declareLocals_type?_shape hDrop hType
+  | some value =>
+      cases hCompile :
+          Compiler.Expr.compileN? value shape names.length with
+      | none =>
+          simp [hCompile] at h
+      | some result =>
+          cases result with
+          | mk valueCode valueShape =>
+              cases hType :
+                  (TypedCfg.Instr.declareLocals names).type? valueShape with
+              | none =>
+                  simp [hCompile, hType] at h
+              | some typedShape =>
+                  simp [hCompile, hType] at h
+                  rw [← h.2]
+                  exact
+                    declareLocals_type?_shape
+                      (ExprCompiler.compileN?_shape hCompile).2 hType
+
+theorem assign?_shape {names : List Name} {value : Expr}
+    {shape outShape : Shape} {code : List TypedCfg.Instr}
+    (h :
+      Compiler.StmtCode.assign? names value shape =
+        some (code, outShape)) :
+    outShape = shape := by
+  unfold Compiler.StmtCode.assign? at h
+  cases hCompile :
+      Compiler.Expr.compileN? value shape names.length with
+  | none =>
+      simp [hCompile] at h
+  | some result =>
+      cases result with
+      | mk valueCode valueShape =>
+          cases hType :
+              (TypedCfg.Instr.assignLocals names).type? valueShape with
+          | none =>
+              simp [hCompile, hType] at h
+          | some typedShape =>
+              simp [hCompile, hType] at h
+              rw [← h.2]
+              exact
+                assignLocals_type?_shape
+                  (ExprCompiler.compileN?_shape hCompile).2 hType
+
+end StmtCode
+
 end PreservationSupport
 end StackFreeCfg
 end EvmCompiler
