@@ -207,31 +207,87 @@ theorem CompiledAccountMapRel.empty :
       ⟨_, hMem, _⟩
     simp at hMem
 
+theorem accountMap_isEmpty_false_of_find?
+    {τ : EvmYul.OperationType}
+    {accountMap : EvmYul.AccountMap τ}
+    {addr : EvmYul.AccountAddress} {account : EvmYul.Account τ}
+    (hFind : accountMap.find? addr = some account) :
+    accountMap.isEmpty = false := by
+  cases hEmpty : accountMap.isEmpty
+  · rfl
+  · have hListEmpty : accountMap.toList = [] := by
+      simpa [Batteries.RBMap.isEmpty] using
+        (Batteries.RBSet.isEmpty_iff_toList_eq_nil
+          (t := (accountMap : Batteries.RBSet _ _))).mp hEmpty
+    rcases Batteries.RBMap.find?_some_mem_toList hFind with
+      ⟨_, hMem, _⟩
+    simp [hListEmpty] at hMem
+
+theorem accountMap_exists_find?_of_isEmpty_false
+    {τ : EvmYul.OperationType}
+    {accountMap : EvmYul.AccountMap τ}
+    (hEmpty : accountMap.isEmpty = false) :
+    ∃ addr account, accountMap.find? addr = some account := by
+  have hListNe : accountMap.toList ≠ [] := by
+    intro hNil
+    have hEmptyTrue : accountMap.isEmpty = true := by
+      simpa [Batteries.RBMap.isEmpty] using
+        (Batteries.RBSet.isEmpty_iff_toList_eq_nil
+          (t := (accountMap : Batteries.RBSet _ _))).mpr hNil
+    simp [hEmpty] at hEmptyTrue
+  cases hList : accountMap.toList with
+  | nil => exact False.elim (hListNe hList)
+  | cons entry _tail =>
+      rcases entry with ⟨addr, account⟩
+      refine ⟨addr, account, ?_⟩
+      rw [Batteries.RBMap.find?_some]
+      exact ⟨addr, by simp [hList], by simp⟩
+
+theorem CompiledAccountMapRel.isEmpty_eq
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm) :
+    yul.isEmpty = evm.isEmpty := by
+  cases hYul : yul.isEmpty
+  · cases hEvm : evm.isEmpty
+    · rfl
+    · rcases accountMap_exists_find?_of_isEmpty_false hYul with
+        ⟨addr, yulAccount, hFindYul⟩
+      rcases hWorld.find_yul hFindYul with
+        ⟨evmAccount, hFindEvm, _hAccount⟩
+      have hEvmFalse :=
+        accountMap_isEmpty_false_of_find? hFindEvm
+      simp [hEvm] at hEvmFalse
+  · cases hEvm : evm.isEmpty
+    · rcases accountMap_exists_find?_of_isEmpty_false hEvm with
+        ⟨addr, evmAccount, hFindEvm⟩
+      rcases hWorld.find_evm hFindEvm with
+        ⟨yulAccount, hFindYul, _hAccount⟩
+      have hYulFalse :=
+        accountMap_isEmpty_false_of_find? hFindYul
+      simp [hYul] at hYulFalse
+    · rfl
+
 theorem CompiledAccountMapRel.if_empty_parent
     {yulParent yulChild : EvmYul.AccountMap .Yul}
     {evmParent evmChild : EvmYul.AccountMap .EVM}
     (hParent : CompiledAccountMapRel yulParent evmParent)
     (hChild : CompiledAccountMapRel yulChild evmChild)
-    (hEmpty :
-      (yulChild == (∅ : EvmYul.AccountMap .Yul)) =
-        (evmChild == (∅ : EvmYul.AccountMap .EVM))) :
+    (hEmpty : yulChild.isEmpty = evmChild.isEmpty) :
     CompiledAccountMapRel
-      (if yulChild == (∅ : EvmYul.AccountMap .Yul) then
+      (if yulChild.isEmpty then
         yulParent
       else
         yulChild)
-      (if evmChild == (∅ : EvmYul.AccountMap .EVM) then
+      (if evmChild.isEmpty then
         evmParent
       else
         evmChild) := by
-  cases hEvm : (evmChild == (∅ : EvmYul.AccountMap .EVM))
-  · have hYul :
-        (yulChild == (∅ : EvmYul.AccountMap .Yul)) = false := by
+  cases hEvm : evmChild.isEmpty
+  · have hYul : yulChild.isEmpty = false := by
       simpa [hEvm] using hEmpty
     simp [hYul]
     exact hChild
-  · have hYul :
-        (yulChild == (∅ : EvmYul.AccountMap .Yul)) = true := by
+  · have hYul : yulChild.isEmpty = true := by
       simpa [hEvm] using hEmpty
     simp [hYul]
     exact hParent
@@ -1527,7 +1583,7 @@ theorem buildPrecompiledContractCallState_success_rel
           yulSubstateAfter, returnData))
     (hAccountMap :
       cfg.accountMapRel
-        (if yulAccountMapAfter == (∅ : EvmYul.AccountMap .Yul) then
+        (if yulAccountMapAfter.isEmpty then
           yul.accountMap
         else
           yulAccountMapAfter)
@@ -1613,13 +1669,13 @@ theorem sharedStateRel_callResultMergeWithTargetGas
     {targetGas : EvmYul.UInt256}
     (hAccountMap :
       cfg.accountMapRel yulAccountMap
-        (if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+        (if evmAccountMap.isEmpty then
           evm.accountMap
         else
           evmAccountMap))
     (hSubstate :
       yulSubstate =
-        if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+        if evmAccountMap.isEmpty then
           evm.substate
         else
           evmSubstate)
@@ -1645,12 +1701,12 @@ theorem sharedStateRel_callResultMergeWithTargetGas
               inOffset inSize outOffset outSize with
             gasAvailable := targetGas }
         accountMap :=
-          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          if evmAccountMap.isEmpty then
             evm.accountMap
           else
             evmAccountMap
         substate :=
-          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          if evmAccountMap.isEmpty then
             evm.substate
           else
             evmSubstate
@@ -1673,7 +1729,7 @@ theorem sharedStateRel_callSuccessMergeWithTargetGasOfEvmNonempty
     (hSubstate : yulSubstate = evmSubstate)
     (hCreated : yulCreated = evmCreated)
     (hEvmAccountMapNonempty :
-      (evmAccountMap == (∅ : EvmYul.AccountMap .EVM)) = false)
+      (evmAccountMap.isEmpty) = false)
     (returnData : ByteArray)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     (hGas :
@@ -1695,12 +1751,12 @@ theorem sharedStateRel_callSuccessMergeWithTargetGasOfEvmNonempty
               inOffset inSize outOffset outSize with
             gasAvailable := targetGas }
         accountMap :=
-          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          if evmAccountMap.isEmpty then
             evm.accountMap
           else
             evmAccountMap
         substate :=
-          if evmAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+          if evmAccountMap.isEmpty then
             evm.substate
           else
             evmSubstate
@@ -1732,13 +1788,13 @@ theorem restoreSuccessfulContractCallState_ok_rel
     {targetGas : EvmYul.UInt256}
     (hAccountMap :
       cfg.accountMapRel yulChild.accountMap
-        (if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+        (if evmChildAccountMap.isEmpty then
           evmParent.accountMap
         else
           evmChildAccountMap))
     (hSubstate :
       yulChild.substate =
-        if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+        if evmChildAccountMap.isEmpty then
           evmParent.substate
         else
           evmChildSubstate)
@@ -1763,12 +1819,12 @@ theorem restoreSuccessfulContractCallState_ok_rel
                 inOffset inSize outOffset outSize with
               gasAvailable := targetGas }
           accountMap :=
-            if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+            if evmChildAccountMap.isEmpty then
               evmParent.accountMap
             else
               evmChildAccountMap
           substate :=
-            if evmChildAccountMap == (∅ : EvmYul.AccountMap .EVM) then
+            if evmChildAccountMap.isEmpty then
               evmParent.substate
             else
               evmChildSubstate
@@ -2140,6 +2196,24 @@ theorem CompiledPrecompileResultRel.empty
       (success, (∅ : EvmYul.AccountMap .Yul), gas, substate, output)
       (success, (∅ : EvmYul.AccountMap .EVM), gas, substate, output) :=
   ⟨rfl, CompiledAccountMapRel.empty, rfl, rfl, rfl⟩
+
+theorem CompiledPrecompileResultRel.accountMap_merge
+    {yulParent : EvmYul.AccountMap .Yul}
+    {evmParent : EvmYul.AccountMap .EVM}
+    {yulRes :
+      Bool × EvmYul.AccountMap .Yul × EvmYul.UInt256 ×
+        EvmYul.Substate × ByteArray}
+    {evmRes :
+      Bool × EvmYul.AccountMap .EVM × EvmYul.UInt256 ×
+        EvmYul.Substate × ByteArray}
+    (hParent : CompiledAccountMapRel yulParent evmParent)
+    (hResult : CompiledPrecompileResultRel yulRes evmRes) :
+    CompiledAccountMapRel
+      (if yulRes.2.1.isEmpty then yulParent else yulRes.2.1)
+      (if evmRes.2.1.isEmpty then evmParent else evmRes.2.1) := by
+  exact
+    CompiledAccountMapRel.if_empty_parent
+      hParent hResult.accountMap hResult.accountMap.isEmpty_eq
 
 theorem CompiledAccountMapRel.precompile_ecrec
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
