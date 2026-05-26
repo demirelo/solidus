@@ -831,6 +831,42 @@ theorem machineStateRel_finishExternalCall
   · simp [EvmYul.MachineState.finishExternalCall]
   · simp [EvmYul.MachineState.finishExternalCall]
 
+theorem machineStateRel_gasAvailable_eq
+    {cfg : Reference.StateRelConfig}
+    {yul evm : EvmYul.MachineState}
+    (hMachine : Reference.MachineStateRel cfg yul evm) :
+    yul.gasAvailable = evm.gasAvailable := by
+  simpa [EvmYul.MachineState.gas] using
+    cfg.gasValueRel hMachine.gasAvailable
+
+theorem machineStateRel_freshExternalCall
+    {cfg : Reference.StateRelConfig}
+    {yulGas evmGas : EvmYul.UInt256}
+    (hGas : cfg.gasAvailableRel yulGas evmGas) :
+    Reference.MachineStateRel cfg
+      (EvmYul.MachineState.freshExternalCall yulGas)
+      (EvmYul.MachineState.freshExternalCall evmGas) := by
+  constructor
+  · simpa [EvmYul.MachineState.freshExternalCall] using hGas
+  · simp [EvmYul.MachineState.freshExternalCall]
+  · simp [EvmYul.MachineState.freshExternalCall]
+  · simp [EvmYul.MachineState.freshExternalCall]
+  · simp [EvmYul.MachineState.freshExternalCall]
+
+theorem sharedStateRel_freshExternalCall
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulGas evmGas : EvmYul.UInt256}
+    (hGas : cfg.gasAvailableRel yulGas evmGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas }
+      { evm with
+        toMachineState := EvmYul.MachineState.freshExternalCall evmGas } := by
+  rcases hShared with ⟨hChain, _hMachine⟩
+  exact ⟨hChain, machineStateRel_freshExternalCall hGas⟩
+
 theorem sharedStateRel_finishExternalCall
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
@@ -898,6 +934,85 @@ theorem sharedStateRel_finishExternalCallWithWorld
   · exact
       machineStateRel_finishExternalCall hMachine returnData
         inOffset inSize outOffset outSize
+
+theorem sharedStateRel_freshExternalCallWithWorld
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulEnv : EvmYul.ExecutionEnv .Yul}
+    {evmEnv : EvmYul.ExecutionEnv .EVM}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {yulGas evmGas : EvmYul.UInt256}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hExecutionEnv : Reference.ExecutionEnvRel cfg yulEnv evmEnv)
+    (hCreated : yulCreated = evmCreated)
+    (hGas : cfg.gasAvailableRel yulGas evmGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        executionEnv := yulEnv
+        createdAccounts := yulCreated }
+      { evm with
+        toMachineState := EvmYul.MachineState.freshExternalCall evmGas
+        accountMap := evmAccountMap
+        substate := evmSubstate
+        executionEnv := evmEnv
+        createdAccounts := evmCreated } := by
+  rcases hShared with ⟨hChain, _hMachine⟩
+  rcases hChain with
+    ⟨_hAccountMap, hSigma, hTotal, hReceipts, _hSubstate, _hEnv,
+      hBlocks, hGenesis, _hCreated⟩
+  constructor
+  · constructor
+    · exact hAccountMap
+    · simpa using hSigma
+    · simpa using hTotal
+    · simpa using hReceipts
+    · exact hSubstate
+    · exact hExecutionEnv
+    · simpa using hBlocks
+    · simpa using hGenesis
+    · exact hCreated
+  · exact machineStateRel_freshExternalCall hGas
+
+theorem Ccallgas_eq_of_dead_eq
+    {τ υ : EvmYul.OperationType}
+    {yulAccountMap : EvmYul.AccountMap τ}
+    {evmAccountMap : EvmYul.AccountMap υ}
+    {yulMachine evmMachine : EvmYul.MachineState}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {target recipient : EvmYul.AccountAddress}
+    {value gas : EvmYul.UInt256}
+    (hGas : yulMachine.gasAvailable = evmMachine.gasAvailable)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hDead :
+      EvmYul.State.dead yulAccountMap recipient =
+        EvmYul.State.dead evmAccountMap recipient) :
+    EvmYul.EVM.Ccallgas target recipient value gas
+        yulAccountMap yulMachine yulSubstate =
+      EvmYul.EVM.Ccallgas target recipient value gas
+        evmAccountMap evmMachine evmSubstate := by
+  subst evmSubstate
+  cases value
+  simp [EvmYul.EVM.Ccallgas, EvmYul.EVM.Cgascap,
+    EvmYul.EVM.Cextra, EvmYul.EVM.Cnew, hGas, hDead]
+
+theorem CompiledAccountMapRel.dead_eq_of_missing
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {addr : EvmYul.AccountAddress}
+    (hMissing : yul.find? addr = none) :
+    EvmYul.State.dead yul addr = EvmYul.State.dead evm addr := by
+  have hEvmMissing := hWorld.not_find_evm_of_not_find_yul hMissing
+  unfold EvmYul.State.dead
+  rw [hMissing, hEvmMissing]
+  rfl
 
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
