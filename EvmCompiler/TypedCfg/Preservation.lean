@@ -508,6 +508,20 @@ theorem sourceStepAt_pop_eq_targetRunList
   | ok state' =>
       rfl
 
+theorem pop_step_sourceAt {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState} {sourceEVM' : EVMState}
+    {full : Assembly.Program} {pc : Nat}
+    (hRel : PayloadRel program sites source target)
+    (hStep : Assembly.PrimOp.pop.step source.evm = .ok sourceEVM') :
+    ∃ target',
+      Assembly.Source.stepAt full pc (.prim .pop) target = .ok target' ∧
+        PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases PayloadRel.pop_step_target hRel hStep with
+    ⟨target', hRun, hRel'⟩
+  refine ⟨target', ?_, hRel'⟩
+  rw [sourceStepAt_pop_eq_targetRunList]
+  exact hRun
+
 theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState}
     {shape : Shape} {value : Word}
