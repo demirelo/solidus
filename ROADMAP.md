@@ -273,6 +273,15 @@ Current assumption-cleanup checkpoint:
     proved from accepted source plus checked compilation; `DecodeSafety` is
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
     `RecursiveBridgeTargetRuntime` is no longer the preferred public input.
+  - Remaining preferred inputs after the feature checker checkpoint:
+    `RecursiveBridgeFullSourceAccepted` is the source-validity boundary;
+    `RecursiveBridgeSourceRun` is the concrete imported source execution;
+    `RecursiveBridgeInitialWorldRel` is the source/target environment
+    relation; `RecursiveBridgeTerminalObservationContracts` is the terminal
+    and revert observation relation; `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts`
+    is the remaining expression-fuel resource boundary; and
+    `Assembly.GasAware.XResultRunnerCompleteness` is the target runtime/gas
+    bridge theorem still to be proved below the compiler.
 - [x] Classify the remaining `Reference.Safe.primitive` exclusions exactly.
   The public feature package now distinguishes local code-image operations
   (`CODESIZE`/`CODECOPY`), external account-code inspection (`EXTCODESIZE` /
