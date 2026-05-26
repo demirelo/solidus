@@ -183,6 +183,59 @@ def BlockSound (cfg : TypedCfg.Program) (program : Program)
           source)
         (TypedCfg.Program.runFrom fuel cfg label target)
 
+theorem stmt_zero {cfg : TypedCfg.Program} {program : Program}
+    {sourceCtx : Ctx} {targetCtx : Compiler.Context}
+    {stmt : Stmt} {label : Label} {shape : Shape}
+    {source : State} {target : TypedCfg.RunState}
+    (hCheck : cfg.typeCheck? = some ())
+    (hLabelShape : cfg.labelShape? label = some shape)
+    (hRel : StateRel sourceCtx.scope shape source target) :
+    FragmentResultRel targetCtx
+      (Stmt.run 0 PrimitiveSemantics.canonical program sourceCtx stmt source)
+      (TypedCfg.Program.runFrom 0 cfg label target) := by
+  rw [PreservationSupport.TypedProgram.runFrom_zero_of_labelShape?_stateRel
+    (program := cfg) (label := label) (shape := shape)
+    (scope := sourceCtx.scope) (source := source) (target := target)
+    hCheck hLabelShape hRel]
+  exact FragmentResultRel.outOfFuel rfl
+    (StateRel.shared_eq_of (StateRel.restrictSource hRel))
+
+theorem seq_zero {cfg : TypedCfg.Program} {program : Program}
+    {sourceCtx : Ctx} {targetCtx : Compiler.Context}
+    {stmts : List Stmt} {label : Label} {shape : Shape}
+    {source : State} {target : TypedCfg.RunState}
+    (hCheck : cfg.typeCheck? = some ())
+    (hLabelShape : cfg.labelShape? label = some shape)
+    (hRel : StateRel sourceCtx.scope shape source target) :
+    FragmentResultRel targetCtx
+      (StmtList.run 0 PrimitiveSemantics.canonical program sourceCtx stmts
+        source)
+      (TypedCfg.Program.runFrom 0 cfg label target) := by
+  rw [PreservationSupport.TypedProgram.runFrom_zero_of_labelShape?_stateRel
+    (program := cfg) (label := label) (shape := shape)
+    (scope := sourceCtx.scope) (source := source) (target := target)
+    hCheck hLabelShape hRel]
+  exact FragmentResultRel.outOfFuel rfl
+    (StateRel.shared_eq_of (StateRel.restrictSource hRel))
+
+theorem block_zero {cfg : TypedCfg.Program} {program : Program}
+    {sourceCtx : Ctx} {targetCtx : Compiler.Context}
+    {block : Block} {label : Label} {shape : Shape}
+    {source : State} {target : TypedCfg.RunState}
+    (hCheck : cfg.typeCheck? = some ())
+    (hLabelShape : cfg.labelShape? label = some shape)
+    (hRel : StateRel sourceCtx.scope shape source target) :
+    FragmentResultRel targetCtx
+      (Block.run 0 PrimitiveSemantics.canonical program sourceCtx block
+        source)
+      (TypedCfg.Program.runFrom 0 cfg label target) := by
+  rw [PreservationSupport.TypedProgram.runFrom_zero_of_labelShape?_stateRel
+    (program := cfg) (label := label) (shape := shape)
+    (scope := sourceCtx.scope) (source := source) (target := target)
+    hCheck hLabelShape hRel]
+  exact FragmentResultRel.outOfFuel rfl
+    (StateRel.shared_eq_of (StateRel.restrictSource hRel))
+
 end Internal
 
 namespace Program

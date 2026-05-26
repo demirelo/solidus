@@ -468,6 +468,56 @@ theorem restrictSource {scope : List Name} {shape : Shape}
 
 end StateRel
 
+namespace TypedProgram
+
+theorem runtimeWellFormed?_of_typeCheck? {program : TypedCfg.Program}
+    (h : program.typeCheck? = some ()) :
+  program.runtimeWellFormed? = true := by
+  unfold TypedCfg.Program.typeCheck? at h
+  split at h
+  · rename_i hCheck
+    simp only [Bool.and_eq_true] at hCheck
+    rcases hCheck with
+      ⟨⟨⟨⟨hLabels, hProcs⟩, _hProcTypes⟩, _hBlockTypes⟩, hEntry⟩
+    simp [TypedCfg.Program.runtimeWellFormed?, hLabels, hProcs, hEntry]
+  · cases h
+
+theorem suspendedAt?_of_labelShape?_matches
+    {program : TypedCfg.Program} {label : Label} {shape : Shape}
+    {target : TypedCfg.RunState}
+    (hCheck : program.typeCheck? = some ())
+    (hShape : program.labelShape? label = some shape)
+    (hMatches : shape.matchesStack target.evm.stack = true) :
+    program.suspendedAt? label target = true := by
+  have hRuntime := runtimeWellFormed?_of_typeCheck? hCheck
+  unfold TypedCfg.Program.suspendedAt?
+  simp [hRuntime]
+  unfold TypedCfg.Program.labelShape? at hShape
+  cases hBlock : program.findBlock? label with
+  | none =>
+      simp [hBlock] at hShape
+  | some block =>
+      simp [hBlock] at hShape
+      cases hShape
+      simp [hBlock, hMatches]
+
+theorem runFrom_zero_of_labelShape?_stateRel
+    {program : TypedCfg.Program} {label : Label} {shape : Shape}
+    {scope : List Name} {source : State} {target : TypedCfg.RunState}
+    (hCheck : program.typeCheck? = some ())
+    (hShape : program.labelShape? label = some shape)
+    (hRel : StateRel scope shape source target) :
+    TypedCfg.Program.runFrom 0 program label target =
+      .ok (.outOfFuel label target) := by
+  have hSuspended :=
+    suspendedAt?_of_labelShape?_matches
+      (program := program) (label := label) (shape := shape)
+      (target := target) hCheck hShape
+      (StateRel.block_input_matches hRel)
+  simp [TypedCfg.Program.runFrom, hSuspended]
+
+end TypedProgram
+
 namespace ExprCompiler
 
 theorem compileN?_shape {expr : StackFreeCfg.Expr} {shape outShape : Shape}
