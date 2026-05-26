@@ -168263,13 +168263,16 @@ Source-static bridge facts that can be checked directly from the imported Yul
 program syntax.
 
 These facts are separated from source acceptedness: lexical scoping,
-control-flow scoping, user-call arity, and the current no-shadowing predicate
-are finite source checks, while `Program.Accepted` remains the
-semantic/wellformedness boundary.  The no-shadowing predicate currently also
-checks `Safe.expr` at expression-bearing statements; that is constructed here
+control-flow scoping, user-call arity, supported-syntax coverage, and the
+current no-shadowing predicate are finite source checks, while
+`Program.SourceAcceptedCore` remains the semantic/wellformedness and lowered
+source-acceptedness boundary.  The no-shadowing predicate currently also checks
+`Safe.expr` at expression-bearing statements; that is constructed here
 explicitly rather than hidden inside `Reference.FullAccepted`.
 -/
 structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
+  supported :
+    Program.Supported program
   noShadowing :
     Reference.Safe.NoShadowing.program program
   sourceScoped :
@@ -168282,28 +168285,37 @@ structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
 namespace RecursiveBridgeSourceStaticFacts
 
 noncomputable def checked? (program : Program) : Bool :=
-  Reference.Safe.NoShadowing.program? program &&
-    (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
-      (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
-        Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program))
+  Program.supported? program &&
+    (Reference.Safe.NoShadowing.program? program &&
+      (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+        (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+          Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)))
 
 theorem of_checked? {program : Program}
     (hCheck : checked? program = true) :
     RecursiveBridgeSourceStaticFacts program := by
   have hAnd :
+      Program.supported? program = true ∧
+        (Reference.Safe.NoShadowing.program? program &&
+          (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
+            (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
+              Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program))) =
+          true :=
+    by simpa [checked?] using hCheck
+  have hStatic :
       Reference.Safe.NoShadowing.program? program = true ∧
         (Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program &&
           (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
             Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program)) =
           true :=
-    by simpa [checked?] using hCheck
+    by simpa using hAnd.2
   have hMid :
       Reference.SourceBridgeFacts.SourceLexical.ProgramScoped? program =
           true ∧
         (Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program &&
           Reference.SourceBridgeFacts.UserCallArity.ProgramOk? program) =
             true :=
-    by simpa using hAnd.2
+    by simpa using hStatic.2
   have hTail :
       Reference.SourceBridgeFacts.ControlFlow.ProgramScoped? program =
           true ∧
@@ -168311,8 +168323,9 @@ theorem of_checked? {program : Program}
           true :=
     by simpa using hMid.2
   exact
-    { noShadowing :=
-        Reference.Safe.NoShadowing.program_of_check hAnd.1
+    { supported := Program.supported_of_check hAnd.1
+      noShadowing :=
+        Reference.Safe.NoShadowing.program_of_check hStatic.1
       sourceScoped :=
         Reference.SourceBridgeFacts.SourceLexical.ProgramScoped.of_check
           hMid.1
@@ -170059,8 +170072,8 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
 /--
 Checked compiler/source boundary that also validates the source-static bridge
 facts.  Source acceptedness itself is still an explicit semantic boundary,
-but lexical scoping, control-flow scoping, and user-call arity are constructed
-from this check.
+but supported syntax, lexical scoping, no-shadowing, control-flow scoping, and
+user-call arity are constructed from this check.
 -/
 noncomputable def compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
     (program : Program) :

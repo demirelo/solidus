@@ -1136,6 +1136,71 @@ mutual
     | expr :: rest => names expr ++ List.names rest
 end
 
+noncomputable def supported? (results : Nat) (expr : AstExpr) : Bool :=
+  match lower? results (Fresh.initial (names expr)) expr with
+  | some _ => true
+  | none => false
+
+theorem supported_of_check {results : Nat} {expr : AstExpr}
+    (hCheck : supported? results expr = true) :
+    Supported results expr := by
+  unfold supported? at hCheck
+  cases hLower : lower? results (Fresh.initial (names expr)) expr with
+  | none =>
+      simp [hLower] at hCheck
+  | some lowered =>
+      rcases lowered with ⟨pre, lower, state'⟩
+      exact ⟨Fresh.initial (names expr), pre, lower, state', hLower⟩
+
+namespace List
+
+noncomputable def supportedSeq? (results : Nat)
+    (exprs : List AstExpr) : Bool :=
+  match lowerBound1? (Fresh.initial (Expr.List.names exprs)) exprs with
+  | some (_pre, lowerList, _state') =>
+      match toStackSeq? lowerList results with
+      | some _ => true
+      | none => false
+  | none => false
+
+theorem supportedSeq_of_check {results : Nat} {exprs : List AstExpr}
+    (hCheck : supportedSeq? results exprs = true) :
+    SupportedSeq results exprs := by
+  unfold supportedSeq? at hCheck
+  cases hLower :
+      lowerBound1? (Fresh.initial (Expr.List.names exprs)) exprs with
+  | none =>
+      simp [hLower] at hCheck
+  | some lowered =>
+      rcases lowered with ⟨pre, lowerList, state'⟩
+      cases hSeq : toStackSeq? lowerList results with
+      | none =>
+          simp [hLower, hSeq] at hCheck
+      | some lowerSeq =>
+          exact
+            ⟨Fresh.initial (Expr.List.names exprs), pre, lowerList, state',
+              lowerSeq, hLower, hSeq⟩
+
+noncomputable def supported1? : List AstExpr → Bool
+  | [] => true
+  | expr :: rest => Expr.supported? 1 expr && supported1? rest
+
+theorem supported1_of_check {exprs : List AstExpr}
+    (hCheck : supported1? exprs = true) :
+    Supported1 exprs := by
+  induction exprs with
+  | nil =>
+      exact Supported1.nil
+  | cons expr rest ih =>
+      have hAnd :
+          Expr.supported? 1 expr = true ∧ supported1? rest = true := by
+        simpa [supported1?] using hCheck
+      exact
+        Supported1.cons (Expr.supported_of_check hAnd.1)
+          (ih hAnd.2)
+
+end List
+
 abbrev AliasEnv := List (Name × AstExpr)
 
 namespace AliasEnv
@@ -1729,6 +1794,294 @@ mutual
         CaseListSupported ((value, body) :: rest)
 end
 
+mutual
+  noncomputable def supported? : AstStmt → Bool
+    | .Block body => stmtListSupported? body
+    | .Let names value =>
+        match value with
+        | none => true
+        | some (.Call (.inr functionName) args) =>
+            if ObjectBuiltin.unsupported? functionName then
+              false
+            else
+              Expr.List.supported1? args
+        | some value =>
+            match names with
+            | [_name] => Expr.supported? 1 value
+            | _ => false
+    | .Assign names value =>
+        match value with
+        | .Call (.inr functionName) args =>
+            if ObjectBuiltin.unsupported? functionName then
+              false
+            else
+              Expr.List.supported1? args
+        | value =>
+            match names with
+            | [_name] => Expr.supported? 1 value
+            | _ => false
+    | .ExprStmtCall expr =>
+        match expr with
+        | .Call (.inr functionName) args =>
+            if ObjectBuiltin.unsupported? functionName then
+              false
+            else
+              Expr.List.supported1? args
+        | .Call (.inl prim) args =>
+            match Prim.terminal? prim with
+            | some kind => Expr.List.supportedSeq? kind.argCount args
+            | none => Expr.supported? 0 (.Call (.inl prim) args)
+        | expr => Expr.supported? 0 expr
+    | .Switch scrutinee cases defaultBody =>
+        Expr.supported? 1 scrutinee &&
+          (caseListSupported? cases && stmtListSupported? defaultBody)
+    | .For cond post body =>
+        Expr.supported? 1 cond &&
+          (stmtListSupported? post && stmtListSupported? body)
+    | .If cond body =>
+        Expr.supported? 1 cond && stmtListSupported? body
+    | .Continue => true
+    | .Break => true
+    | .Leave => true
+
+  noncomputable def stmtListSupported? : List AstStmt → Bool
+    | [] => true
+    | stmt :: rest => supported? stmt && stmtListSupported? rest
+
+  noncomputable def caseListSupported? :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        stmtListSupported? body && caseListSupported? rest
+end
+
+mutual
+  theorem supported_of_check {stmt : AstStmt}
+      (hCheck : supported? stmt = true) :
+      Supported stmt := by
+    cases stmt with
+    | Block body =>
+        exact Supported.block (stmtListSupported_of_check hCheck)
+    | Let names value =>
+        cases value with
+        | none =>
+            exact Supported.letNone
+        | some value =>
+            cases value with
+            | Call target args =>
+                cases target with
+                | inl prim =>
+                    cases names with
+                    | nil =>
+                        simp [supported?] at hCheck
+                    | cons name rest =>
+                        cases rest with
+                        | nil =>
+                            exact
+                              Supported.letValue
+                                (Expr.supported_of_check hCheck)
+                        | cons next rest =>
+                            simp [supported?] at hCheck
+                | inr functionName =>
+                    cases hName : ObjectBuiltin.unsupported? functionName with
+                    | false =>
+                        have hArgs :
+                            Expr.List.supported1? args = true := by
+                          simp [supported?, hName] at hCheck
+                          exact hCheck
+                        exact
+                          Supported.letCall hName
+                            (Expr.List.supported1_of_check hArgs)
+                    | true =>
+                        simp [supported?, hName] at hCheck
+            | Lit value =>
+                cases names with
+                | nil =>
+                    simp [supported?] at hCheck
+                | cons name rest =>
+                    cases rest with
+                    | nil =>
+                        exact
+                          Supported.letValue
+                            (Expr.supported_of_check hCheck)
+                    | cons next rest =>
+                        simp [supported?] at hCheck
+            | Var name =>
+                cases names with
+                | nil =>
+                    simp [supported?] at hCheck
+                | cons target rest =>
+                    cases rest with
+                    | nil =>
+                        exact
+                          Supported.letValue
+                            (Expr.supported_of_check hCheck)
+                    | cons next rest =>
+                        simp [supported?] at hCheck
+    | Assign names value =>
+        cases value with
+        | Call target args =>
+            cases target with
+            | inl prim =>
+                cases names with
+                | nil =>
+                    simp [supported?] at hCheck
+                | cons name rest =>
+                    cases rest with
+                    | nil =>
+                        exact
+                          Supported.assignValue
+                            (Expr.supported_of_check hCheck)
+                    | cons next rest =>
+                        simp [supported?] at hCheck
+            | inr functionName =>
+                cases hName : ObjectBuiltin.unsupported? functionName with
+                | false =>
+                    have hArgs :
+                        Expr.List.supported1? args = true := by
+                      simp [supported?, hName] at hCheck
+                      exact hCheck
+                    exact
+                      Supported.assignCall hName
+                        (Expr.List.supported1_of_check hArgs)
+                | true =>
+                    simp [supported?, hName] at hCheck
+        | Lit value =>
+            cases names with
+            | nil =>
+                simp [supported?] at hCheck
+            | cons name rest =>
+                cases rest with
+                | nil =>
+                    exact
+                      Supported.assignValue
+                        (Expr.supported_of_check hCheck)
+                | cons next rest =>
+                    simp [supported?] at hCheck
+        | Var name =>
+            cases names with
+            | nil =>
+                simp [supported?] at hCheck
+            | cons target rest =>
+                cases rest with
+                | nil =>
+                    exact
+                      Supported.assignValue
+                        (Expr.supported_of_check hCheck)
+                | cons next rest =>
+                    simp [supported?] at hCheck
+    | ExprStmtCall expr =>
+        cases expr with
+        | Call target args =>
+            cases target with
+            | inl prim =>
+                cases hTerminal : Prim.terminal? prim with
+                | none =>
+                    have hExpr :
+                        Expr.supported? 0 (.Call (.inl prim) args) =
+                          true := by
+                      simpa [supported?, hTerminal] using hCheck
+                    exact
+                      Supported.expr
+                        (Expr.supported_of_check hExpr)
+                | some kind =>
+                    have hArgs :
+                        Expr.List.supportedSeq? kind.argCount args =
+                          true := by
+                      simpa [supported?, hTerminal] using hCheck
+                    exact
+                      Supported.terminalPrim hTerminal
+                        (Expr.List.supportedSeq_of_check hArgs)
+            | inr functionName =>
+                cases hName : ObjectBuiltin.unsupported? functionName with
+                | false =>
+                    have hArgs :
+                        Expr.List.supported1? args = true := by
+                      simp [supported?, hName] at hCheck
+                      exact hCheck
+                    exact
+                      Supported.exprCall hName
+                        (Expr.List.supported1_of_check hArgs)
+                | true =>
+                    simp [supported?, hName] at hCheck
+        | Lit value =>
+            exact Supported.expr (Expr.supported_of_check hCheck)
+        | Var name =>
+            exact Supported.expr (Expr.supported_of_check hCheck)
+    | Switch scrutinee cases defaultBody =>
+        have hHead :
+            Expr.supported? 1 scrutinee = true ∧
+              (caseListSupported? cases &&
+                stmtListSupported? defaultBody) = true := by
+          simpa [supported?] using hCheck
+        have hTail :
+            caseListSupported? cases = true ∧
+              stmtListSupported? defaultBody = true := by
+          simpa using hHead.2
+        exact
+          Supported.switch (Expr.supported_of_check hHead.1)
+            (caseListSupported_of_check hTail.1)
+            (stmtListSupported_of_check hTail.2)
+    | For cond post body =>
+        have hHead :
+            Expr.supported? 1 cond = true ∧
+              (stmtListSupported? post && stmtListSupported? body) = true := by
+          simpa [supported?] using hCheck
+        have hTail :
+            stmtListSupported? post = true ∧
+              stmtListSupported? body = true := by
+          simpa using hHead.2
+        exact
+          Supported.for_ (Expr.supported_of_check hHead.1)
+            (stmtListSupported_of_check hTail.1)
+            (stmtListSupported_of_check hTail.2)
+    | If cond body =>
+        have hAnd :
+            Expr.supported? 1 cond = true ∧
+              stmtListSupported? body = true := by
+          simpa [supported?] using hCheck
+        exact
+          Supported.if_ (Expr.supported_of_check hAnd.1)
+            (stmtListSupported_of_check hAnd.2)
+    | Continue =>
+        exact Supported.cont
+    | Break =>
+        exact Supported.brk
+    | Leave =>
+        exact Supported.leave
+
+  theorem stmtListSupported_of_check {stmts : List AstStmt}
+      (hCheck : stmtListSupported? stmts = true) :
+      StmtListSupported stmts := by
+    cases stmts with
+    | nil =>
+        exact StmtListSupported.nil
+    | cons stmt rest =>
+        have hAnd :
+            supported? stmt = true ∧ stmtListSupported? rest = true := by
+          simpa [stmtListSupported?] using hCheck
+        exact
+          StmtListSupported.cons (supported_of_check hAnd.1)
+            (stmtListSupported_of_check hAnd.2)
+
+  theorem caseListSupported_of_check
+      {cases : List (Word × List AstStmt)}
+      (hCheck : caseListSupported? cases = true) :
+      CaseListSupported cases := by
+    cases cases with
+    | nil =>
+        exact CaseListSupported.nil
+    | cons head rest =>
+        rcases head with ⟨value, body⟩
+        have hAnd :
+            stmtListSupported? body = true ∧
+              caseListSupported? rest = true := by
+          simpa [caseListSupported?] using hCheck
+        exact
+          CaseListSupported.cons (stmtListSupported_of_check hAnd.1)
+            (caseListSupported_of_check hAnd.2)
+end
+
 end Stmt
 
 namespace FunctionDefinition
@@ -1757,6 +2110,16 @@ noncomputable def toFunDef? (state : Fresh.State) (name : Name) :
 
 def Supported : AstFunctionDefinition → Prop
   | .Def _params _returns body => Stmt.StmtListSupported body
+
+noncomputable def supported? : AstFunctionDefinition → Bool
+  | .Def _params _returns body => Stmt.stmtListSupported? body
+
+theorem supported_of_check {fn : AstFunctionDefinition}
+    (hCheck : supported? fn = true) :
+    Supported fn := by
+  cases fn with
+  | Def params returns body =>
+      exact Stmt.stmtListSupported_of_check hCheck
 
 def simplifyAliases : AstFunctionDefinition → AstFunctionDefinition
   | .Def params returns body =>
@@ -1816,6 +2179,29 @@ inductive Supported :
       (hRest : Supported rest) :
       Supported ((name, fn) :: rest)
 
+noncomputable def supported? :
+    List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      FunctionDefinition.supported? fn && supported? rest
+
+theorem supported_of_check
+    {functions : List (Name × AstFunctionDefinition)}
+    (hCheck : supported? functions = true) :
+    Supported functions := by
+  induction functions with
+  | nil =>
+      exact Supported.nil
+  | cons head rest ih =>
+      rcases head with ⟨name, fn⟩
+      have hAnd :
+          FunctionDefinition.supported? fn = true ∧
+            supported? rest = true := by
+        simpa [supported?] using hCheck
+      exact
+        Supported.cons (FunctionDefinition.supported_of_check hAnd.1)
+          (ih hAnd.2)
+
 end FunctionList
 
 namespace Contract
@@ -1845,6 +2231,21 @@ def Supported (contract : AstContract) : Prop :=
   Stmt.Supported contract.dispatcher ∧
     FunctionList.Supported (functionEntries contract)
 
+noncomputable def supported? (contract : AstContract) : Bool :=
+  Stmt.supported? contract.dispatcher &&
+    FunctionList.supported? (functionEntries contract)
+
+theorem supported_of_check {contract : AstContract}
+    (hCheck : supported? contract = true) :
+    Supported contract := by
+  have hAnd :
+      Stmt.supported? contract.dispatcher = true ∧
+        FunctionList.supported? (functionEntries contract) = true := by
+    simpa [supported?] using hCheck
+  exact
+    ⟨Stmt.supported_of_check hAnd.1,
+      FunctionList.supported_of_check hAnd.2⟩
+
 end Contract
 
 namespace Program
@@ -1867,6 +2268,14 @@ def WF (program : Program) : Prop :=
 def Supported (program : Program) : Prop :=
   Contract.Supported program.contract
 
+noncomputable def supported? (program : Program) : Bool :=
+  Contract.supported? program.contract
+
+theorem supported_of_check {program : Program}
+    (hCheck : supported? program = true) :
+    Supported program :=
+  Contract.supported_of_check hCheck
+
 def Accepted (program : Program) : Prop :=
   WF program ∧ Supported program ∧
     ∃ lower : Objects.Program,
@@ -1877,6 +2286,11 @@ def SourceAccepted (program : Program) : Prop :=
     ∃ lower : Objects.Program,
       toObjects? program = some lower ∧ lower.SourceAccepted
 
+def SourceAcceptedCore (program : Program) : Prop :=
+  WF program ∧
+    ∃ lower : Objects.Program,
+      toObjects? program = some lower ∧ lower.SourceAccepted
+
 theorem sourceAccepted_of_accepted {program : Program}
     (hAccepted : Accepted program) :
     SourceAccepted program := by
@@ -1884,6 +2298,20 @@ theorem sourceAccepted_of_accepted {program : Program}
   exact
     ⟨hWF, hSupported, lower, hLower,
       Objects.Program.sourceAccepted_of_accepted hLowerAccepted⟩
+
+theorem sourceAcceptedCore_of_sourceAccepted {program : Program}
+    (hSourceAccepted : SourceAccepted program) :
+    SourceAcceptedCore program := by
+  rcases hSourceAccepted with ⟨hWF, _hSupported, lower, hLower,
+    hLowerSourceAccepted⟩
+  exact ⟨hWF, lower, hLower, hLowerSourceAccepted⟩
+
+theorem sourceAccepted_of_sourceAcceptedCore_supported {program : Program}
+    (hCore : SourceAcceptedCore program)
+    (hSupported : Supported program) :
+    SourceAccepted program := by
+  rcases hCore with ⟨hWF, lower, hLower, hLowerSourceAccepted⟩
+  exact ⟨hWF, hSupported, lower, hLower, hLowerSourceAccepted⟩
 
 theorem toObjects_wf {program : Program} {lower : Objects.Program}
     (hWF : program.WF)
