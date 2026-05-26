@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 16:32 PDT.
+Last updated: 2026-05-26 16:34 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3026,6 +3026,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
            - [x] Package precompile result preservation through the Yul precompile call-state builders: the proof now consumes the EVM precompile success bit and produces the matching Yul success/failure return state with EVM `Θ`'s conditional account-map/substate merge shape.
            - [x] Name the ordinary EVM child-code entry state and prove `Ξ (fuel + 1)` is exactly `X fuel` over that state, packaged into EVM success/revert child results.
            - [x] Connect that ordinary child entry state back to the already-proved fresh-call-frame `SharedStateRel`, and to the gas-aware `installCodeAndGas` state shape used by the bytecode theorem.
+           - [x] Expose checked bytecode/resource facts directly from the compiled-code relation, so ordinary child-code preservation can unpack emitted account code without re-opening compiler checkers by hand.
            - [ ] Prove the ordinary compiled-account child result relation against the conditional merge shape, then discharge the remaining success/revert/failure branches and gas-return relation.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.

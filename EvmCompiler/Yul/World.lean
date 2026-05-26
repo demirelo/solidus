@@ -50,6 +50,36 @@ theorem CompiledCodeRel.checked_or_empty
       (contract = default ∧ bytes = default) :=
   hCode
 
+theorem CompiledCodeRel.checkedBytecodeResources_or_empty
+    {contract : AstContract} {bytes : ByteArray}
+    (hCode : CompiledCodeRel contract bytes) :
+    (∃ (program : Program) (asm : Assembly.Program)
+        (target : Assembly.TargetProgram),
+      program.contract = contract ∧
+        Program.compileCheckedAssemblyTargetBytecodeResources? program =
+          some (asm, target) ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        bytes = Assembly.Bytecode.encodeTarget target) ∨
+      (contract = default ∧ bytes = default) := by
+  rcases hCode with hChecked | hEmpty
+  · rcases hChecked with
+      ⟨program, asm, target, hContract, hCompile, hBytes⟩
+    rcases
+        Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+          hCompile with
+      ⟨hBytecode, hResources⟩
+    rcases Program.compileCheckedAssemblyTargetBytecode?_eq_some
+        hBytecode with
+      ⟨_hTarget, hDecode, hJumpdest⟩
+    exact Or.inl
+      ⟨program, asm, target, hContract, hCompile, hBytecode,
+        hResources, hDecode, hJumpdest, hBytes⟩
+  · exact Or.inr hEmpty
+
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
 
