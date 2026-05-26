@@ -381,15 +381,22 @@ Current assumption-cleanup checkpoint:
     `sourceReferenceAccepted`, `lowerObjectCompileAccepted`, and
     `emittedNoCallCreate`, making clear which facts are source validity,
     explicit lower resource bounds, and checked compiler-derived facts.
-  - [x] Export audit projections for the remaining bytecode target boundary:
+  - [x] Export audit projections for the then-remaining bytecode target boundary:
     `targetFitsDecodeWindow` is an explicit resource/code-size bound, and
     `targetJumpdestCorrect` is the imported jumpdest-scanner boundary.
   - [x] Replace the public `DecodeSafety` premise with the resource bound
     `Assembly.Bytecode.TargetFitsDecodeWindow`. The actual `DecodeSafety`
     facts are now proved from checked assembler layout plus that byte-length
     bound by `Assembly.Bytecode.compile_decodeSafety`; `JumpdestCorrect`
-    remains explicit because the imported EVMYulLean jumpdest scanner is
-    opaque.
+    remained explicit at that checkpoint because the imported EVMYulLean
+    jumpdest scanner is opaque.
+  - [x] Add `Assembly.Bytecode.bytecodeBridgeChecked?` and
+    `Yul.Program.compileCheckedAssemblyTargetBytecode?`, so the preferred top
+    theorem constructs `TargetFitsDecodeWindow` and `JumpdestCorrect` from a
+    concrete bytecode check instead of taking them as standalone assumptions.
+    The jumpdest fact is checked against the imported scanner output for the
+    encoded target bytecode; it is intentionally not hidden in acceptedness or
+    claimed as a scanner-internal proof.
 - [x] Add the actual result-level gas-aware `EVM.X` top wrapper for the
   preferred no-call/create route.
   - [x] Add `Assembly.GasAware.XResultAgrees` and
@@ -467,7 +474,9 @@ Current assumption-cleanup checkpoint:
   gas-aware alias.
   - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and
     `recursiveBridgeTopNoCallToGasAwareEVM` now point at the source-compile
-    no-call/create canonical-observation result-level `EVM.X` theorem.
+    no-call/create canonical-observation result-level `EVM.X` theorem, with
+    the bytecode decode-window and jumpdest-scanner premises constructed from
+    `compileCheckedAssemblyTargetBytecode?`.
   - [x] The older gasless result bridge remains exported under the explicit
     names `recursiveBridgeTopToGaslessEVMResult` and
     `recursiveBridgeTopNoCallToGaslessEVMResult`.
@@ -3033,5 +3042,5 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 ## Proof Hardening
 
 - [ ] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
-- [ ] Replace `JumpdestCorrect` with an imported or locally proved scanner theorem if EVMYulLean exposes enough internals.
+- [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

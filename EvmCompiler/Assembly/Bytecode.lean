@@ -62,10 +62,12 @@ def decodeAt (bytes : ByteArray) (pc : Nat) (instr : TargetInstr) : Prop :=
   EvmYul.EVM.decode bytes (EvmYul.UInt256.ofNat pc) =
     some (instr.op, instr.arg)
 
-def jumpdestListed (bytes : ByteArray) (pc : Nat) : Prop :=
+def jumpdestListed? (bytes : ByteArray) (pc : Nat) : Bool :=
   (EvmYul.EVM.D_J bytes (EvmYul.UInt256.ofNat 0)).contains
-      (EvmYul.UInt256.ofNat pc) =
-    true
+      (EvmYul.UInt256.ofNat pc)
+
+def jumpdestListed (bytes : ByteArray) (pc : Nat) : Prop :=
+  jumpdestListed? bytes pc = true
 
 /--
 The byte-level facts needed to connect the AST-level compiler theorem to
@@ -120,6 +122,49 @@ structure JumpdestCorrect (target : TargetProgram) : Prop where
       located ∈ target.code →
         located.instr = TargetInstr.jumpdest →
           jumpdestListed (encodeTarget target) located.pc
+
+def targetFitsDecodeWindow? (target : TargetProgram) : Bool :=
+  decide (codeByteLength target.code < 18446744073709551616)
+
+def jumpdestCorrect? (target : TargetProgram) : Bool :=
+  target.code.all fun located =>
+    if located.instr = TargetInstr.jumpdest then
+      jumpdestListed? (encodeTarget target) located.pc
+    else
+      true
+
+def bytecodeBridgeChecked? (target : TargetProgram) : Bool :=
+  targetFitsDecodeWindow? target && jumpdestCorrect? target
+
+theorem targetFitsDecodeWindow_of_check {target : TargetProgram}
+    (hCheck : targetFitsDecodeWindow? target = true) :
+    TargetFitsDecodeWindow target := by
+  unfold TargetFitsDecodeWindow
+  exact of_decide_eq_true (by simpa [targetFitsDecodeWindow?] using hCheck)
+
+theorem jumpdestCorrect_of_check {target : TargetProgram}
+    (hCheck : jumpdestCorrect? target = true) :
+    JumpdestCorrect target where
+  jumpdests := by
+    intro located hMem hInstr
+    have hLocated :=
+      (List.all_eq_true.mp hCheck) located hMem
+    simpa [jumpdestCorrect?, jumpdestListed, hInstr] using hLocated
+
+theorem targetFitsDecodeWindow_of_bytecodeBridgeChecked
+    {target : TargetProgram}
+    (hCheck : bytecodeBridgeChecked? target = true) :
+    TargetFitsDecodeWindow target := by
+  unfold bytecodeBridgeChecked? at hCheck
+  cases hWindow : targetFitsDecodeWindow? target <;> simp [hWindow] at hCheck
+  exact targetFitsDecodeWindow_of_check hWindow
+
+theorem jumpdestCorrect_of_bytecodeBridgeChecked {target : TargetProgram}
+    (hCheck : bytecodeBridgeChecked? target = true) :
+    JumpdestCorrect target := by
+  unfold bytecodeBridgeChecked? at hCheck
+  cases hWindow : targetFitsDecodeWindow? target <;> simp [hWindow] at hCheck
+  exact jumpdestCorrect_of_check hCheck
 
 theorem fromBytes_toBytesLE (width value : Nat) :
     EvmYul.fromBytes' (toBytesLE width value) = value % (256 ^ width) := by

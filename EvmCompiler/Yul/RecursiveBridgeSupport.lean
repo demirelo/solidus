@@ -169001,6 +169001,46 @@ theorem compileCheckedAssemblyTarget?_eq_some
           exact ⟨by simpa [hCompile], hAssemble⟩
 
 /--
+Checked compiler boundary that also validates the bytecode facts consumed by
+the gas-aware EVM bridge.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecode? (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTarget? program with
+  | none => none
+  | some (asm, target) =>
+      if Assembly.Bytecode.bytecodeBridgeChecked? target then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecode?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecode? program = some (asm, target)) :
+    compileCheckedAssemblyTarget? program = some (asm, target) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target := by
+  unfold compileCheckedAssemblyTargetBytecode? at hCompileTarget
+  cases hBase : compileCheckedAssemblyTarget? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hChecked :
+          Assembly.Bytecode.bytecodeBridgeChecked? target' <;>
+        simp [hChecked] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          Assembly.Bytecode.targetFitsDecodeWindow_of_bytecodeBridgeChecked
+            (by simpa using hChecked),
+          Assembly.Bytecode.jumpdestCorrect_of_bytecodeBridgeChecked
+            (by simpa using hChecked)⟩
+
+/--
 Public theorem using one checked compile-and-assemble success premise.
 -/
 theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_compiledTarget
