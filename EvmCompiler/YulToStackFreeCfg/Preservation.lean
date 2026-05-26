@@ -444,6 +444,54 @@ def CompilePreserves (sharedRel : SharedRel) (exceptionRel : ExceptionRel)
     CompilesTo layout program target →
       PreservesLowered sharedRel exceptionRel fuelBudget layout program target
 
+/--
+Observation-boundary form of `CompilePreserves`.
+
+This is the top-down proof shape the imported-Yul bridge should usually use:
+prove preservation for any observable result returned by the public
+`lowerObserved?` gate, and recover the generated StackFreeCfg program only
+inside this lemma.  The statement mentions imported Yul, StackFreeCfg
+observations, the source/target initial-state relation, and fuel; it does not
+mention any lower compiler artifacts.
+-/
+theorem compilePreserves_iff_lowerObserved
+    (sharedRel : SharedRel) (exceptionRel : ExceptionRel)
+    (fuelBudget : FuelBudget) (layout : ObjectLayout) :
+    CompilePreserves sharedRel exceptionRel fuelBudget layout ↔
+      ∀ program sourceFuel targetFuel sourceInitial targetShared targetResult,
+        fuelBudget sourceFuel targetFuel →
+          InitialRel sharedRel sourceInitial targetShared →
+            YulToStackFreeCfg.Program.lowerObserved? layout
+              StackFreeCfg.PrimitiveSemantics.canonical targetFuel program
+              targetShared = some targetResult →
+              ResultRel sharedRel exceptionRel
+                (Reference.run sourceFuel program sourceInitial)
+                targetResult := by
+  constructor
+  · intro hCompile program sourceFuel targetFuel sourceInitial targetShared
+      targetResult hFuel hInitial hObserved
+    rcases
+        (lowerObserved?_eq_some_iff
+          (layout := layout)
+          (program := program)
+          (prim := StackFreeCfg.PrimitiveSemantics.canonical)
+          (fuel := targetFuel)
+          (shared := targetShared)
+          (result := targetResult)).mp hObserved with
+      ⟨target, hCompiles, hResult⟩
+    rw [hResult]
+    exact hCompile program target hCompiles sourceFuel targetFuel
+      sourceInitial targetShared hFuel hInitial
+  · intro hObserved program target hCompiles sourceFuel targetFuel
+      sourceInitial targetShared hFuel hInitial
+    exact hObserved program sourceFuel targetFuel sourceInitial targetShared
+      (StackFreeCfg.Program.runObserved StackFreeCfg.PrimitiveSemantics.canonical
+        targetFuel target targetShared)
+      hFuel hInitial
+      (lowerObserved?_of_compilesTo (layout := layout)
+        (program := program) (target := target) hCompiles
+        StackFreeCfg.PrimitiveSemantics.canonical targetFuel targetShared)
+
 end Program
 
 end Preservation
