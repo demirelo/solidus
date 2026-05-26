@@ -4,6 +4,7 @@ namespace EvmCompiler
 namespace TypedCfg
 
 structure ReturnFrame where
+  procName : Name
   returnLabel : Label
   callerStack : EvmYul.Stack Word
   retc : Nat
@@ -21,10 +22,10 @@ def initial (state : EVMState) : RunState where
 def withEVM (state : RunState) (evm : EVMState) : RunState :=
   { state with evm := evm }
 
-def pushReturn (state : RunState) (returnLabel : Label)
+def pushReturn (state : RunState) (procName : Name) (returnLabel : Label)
     (callerStack : EvmYul.Stack Word) (retc : Nat) : RunState :=
   { state with
-    returns := { returnLabel, callerStack, retc } :: state.returns }
+    returns := { procName, returnLabel, callerStack, retc } :: state.returns }
 
 def popReturn? (state : RunState) : Option (ReturnFrame × RunState) :=
   match state.returns with
@@ -180,12 +181,13 @@ def runTerm (program : Program) (term : Terminator) (state : RunState) :
           | some (args, callerStack) =>
               let evm := { state.evm with stack := args }
               let state' :=
-                (state.withEVM evm).pushReturn returnLabel callerStack proc.retc
+                (state.withEVM evm).pushReturn name returnLabel callerStack
+                  proc.retc
               .ok (.jump proc.entry state')
   | .ret name =>
       match program.findProc? name, state.popReturn? with
       | some proc, some (frame, returned) =>
-          if frame.retc = proc.retc then
+          if frame.procName = name ∧ frame.retc = proc.retc then
             match StackFrame.attachReturns? frame state.evm.stack with
             | none => .ok (.invalid state)
             | some stack =>

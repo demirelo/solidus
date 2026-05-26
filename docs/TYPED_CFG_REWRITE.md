@@ -214,8 +214,8 @@ shape, and that `ret f` exits with exactly the declared return words.
 The typed CFG interpreter represents calls with a semantic return frame:
 
 ```text
-call f k : split args from caller tail, run f on args only, remember k + tail
-ret f    : attach return values to the remembered caller tail, jump to k
+call f k : split args from caller tail, run f on args only, remember f + k + tail
+ret f    : require the top frame is for f, attach return values to its tail, jump to k
 ```
 
 This is intentionally cleaner than the concrete EVM implementation. The
