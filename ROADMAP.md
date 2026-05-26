@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-05-25 21:34 PDT.
+Last updated: 2026-05-25 21:43 PDT.
 
 This roadmap describes the current plan after the proof-tower reset. The old
 plan tried to harden the previous compiler directly. The current plan is
@@ -193,8 +193,10 @@ The parent thread integrates only patches that respect the layer boundaries.
 
 ## Immediate Checklist
 
-- [ ] Review the three worker outputs for boundary cleanliness.
-- [ ] Integrate any green, adjacent-only proof support.
+- [x] Review the three worker outputs for boundary cleanliness. Worker B's
+  StackFreeCfg support was usable; Worker A produced no final result before
+  being closed; Worker C was unavailable.
+- [x] Integrate any green, adjacent-only proof support.
 - [ ] Finish `TypedCfg -> labeled assembly` enough that generated label/token
   evidence is internal to the pass.
 - [ ] Finish `StackFreeCfg -> TypedCfg` successor/statement theorem without

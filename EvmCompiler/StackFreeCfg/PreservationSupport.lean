@@ -637,6 +637,55 @@ theorem assign?_shape {names : List Name} {value : Expr}
 
 end StmtCode
 
+namespace RegularShape
+
+theorem expr_shape {expr : Expr} {shape outShape : Shape}
+    (h : Compiler.Stmt.regularShape? (.expr expr) shape = some outShape) :
+    outShape = shape := by
+  unfold Compiler.Stmt.regularShape? at h
+  cases hZero : Compiler.Expr.compileZero? expr shape with
+  | none =>
+      simp [hZero] at h
+  | some code =>
+      simp [hZero] at h
+      exact h.symm
+
+theorem decl_shape {names : List Name} {value? : Option Expr}
+    {shape outShape : Shape}
+    (h :
+      Compiler.Stmt.regularShape? (.decl names value?) shape =
+        some outShape) :
+    outShape = Compiler.Layout.locals names ++ shape := by
+  unfold Compiler.Stmt.regularShape? at h
+  cases hDecl : Compiler.StmtCode.decl? names value? shape with
+  | none =>
+      simp [hDecl] at h
+  | some result =>
+      cases result with
+      | mk code stmtShape =>
+          simp [hDecl] at h
+          rw [← h]
+          exact StmtCode.decl?_shape hDecl
+
+theorem assign_shape {names : List Name} {value : Expr}
+    {shape outShape : Shape}
+    (h :
+      Compiler.Stmt.regularShape? (.assign names value) shape =
+        some outShape) :
+    outShape = shape := by
+  unfold Compiler.Stmt.regularShape? at h
+  cases hAssign : Compiler.StmtCode.assign? names value shape with
+  | none =>
+      simp [hAssign] at h
+  | some result =>
+      cases result with
+      | mk code stmtShape =>
+          simp [hAssign] at h
+          rw [← h]
+          exact StmtCode.assign?_shape hAssign
+
+end RegularShape
+
 end PreservationSupport
 end StackFreeCfg
 end EvmCompiler
