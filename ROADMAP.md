@@ -2,7 +2,7 @@
 
 ## Current Roadmap: Airtight Adjacent Layers
 
-Last updated: 2026-05-25 19:56 PDT.
+Last updated: 2026-05-25 20:04 PDT.
 
 Principle: every layer has its own independent source semantics, and every
 compiler proof targets exactly the next lower layer. No theorem above a layer
@@ -154,6 +154,10 @@ StackFreeCfg, not directly into TypedCfg or assembly.
   - Pass ordinary EVM/Yul primitives through shared primitive semantics.
   - Resolve object/data builtins `datasize`, `dataoffset`, and `datacopy`
     before or during this pass, with explicit object byte-layout evidence.
+    `datasize(name)` and `dataoffset(name)` consult the object layout;
+    `datacopy(t, f, l)` lowers to `codecopy(t, f, l)` after evaluating its
+    three value arguments, so callers normally write
+    `datacopy(t, dataoffset(name), datasize(name))`.
   - Model external calls/create/code queries either by direct shared semantics
     or by an explicit external-world oracle relation shared with the EVM
     target.

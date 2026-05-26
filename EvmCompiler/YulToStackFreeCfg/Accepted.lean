@@ -45,14 +45,6 @@ def objectExpr? (layout : ObjectLayout) (name : Name)
     (args : List AstExpr) : Bool :=
   (ObjectBuiltin.lowerExpr? layout name args).isSome
 
-def datacopyStmt? (layout : ObjectLayout) (args : List AstExpr) : Bool :=
-  match args with
-  | [_dst, objectArg, _size] =>
-      match ObjectBuiltin.objectName? objectArg with
-      | some objectName => (layout.dataOffset? objectName).isSome
-      | none => false
-  | _ => false
-
 mutual
   def exprArity? (env : Env) : AstExpr → Option Nat
     | .Lit _value => some 1
@@ -111,10 +103,7 @@ mutual
         exprList? env args && primStmt? prim args.length
     | .ExprStmtCall (.Call (.inr functionName) args) =>
         if functionName = "datacopy" then
-          datacopyStmt? env.objectLayout args &&
-            match args with
-            | [dst, _objectArg, size] => expr? env dst && expr? env size
-            | _ => false
+          args.length = 3 && exprList? env args
         else
           callStmt? env [] functionName args
     | .ExprStmtCall _ => false
@@ -271,12 +260,7 @@ mutual
         exprList? env scope args && Coverage.primStmt? prim args.length
     | .ExprStmtCall (.Call (.inr functionName) args) =>
         if functionName = "datacopy" then
-          Coverage.datacopyStmt? env.objectLayout args &&
-            match args with
-            | [dst, _objectArg, size] =>
-                exprArityIs? env scope dst 1 &&
-                  exprArityIs? env scope size 1
-            | _ => false
+          args.length = 3 && exprList? env scope args
         else
           callStmt? env scope [] functionName args
     | .ExprStmtCall _ => false

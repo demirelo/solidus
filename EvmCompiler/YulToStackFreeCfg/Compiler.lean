@@ -309,16 +309,9 @@ mutual
     | .ExprStmtCall (.Call (.inr functionName) args) =>
         if functionName = "datacopy" then
           match args with
-          | [dst, objectArg, size] => do
-              let objectName ← ObjectBuiltin.objectName? objectArg
-              let offset ← env.objectLayout.dataOffset? objectName
-              let (preSize, sizeExpr, state') ← lowerExpr? env state size
-              let (preDst, dstExpr, state'') ← lowerExpr? env state' dst
-              some
-                (preSize ++ preDst ++
-                  [.expr (.prim .codecopy
-                    [dstExpr, .literal offset, sizeExpr])],
-                  state'')
+          | [_dst, _offset, _size] => do
+              let (pre, lowerArgs, state') ← lowerExprArgs? env state args
+              some (pre ++ [.expr (.prim .codecopy lowerArgs)], state')
           | _ => none
         else do
           let (pre, lowerArgs, state') ←
