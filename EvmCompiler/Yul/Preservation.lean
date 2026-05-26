@@ -33,6 +33,39 @@ theorem compileChecked?_eq_some {program : Program} {asm : Assembly.Program}
       simp [hLower] at hCompile
       exact ⟨lower, rfl, hCompile⟩
 
+theorem accepted_of_sourceAccepted_compileChecked? {program : Program}
+    {asm : Assembly.Program}
+    (hSourceAccepted : program.SourceAccepted)
+    (hCompile : compileChecked? program = some asm) :
+    program.Accepted := by
+  rcases hSourceAccepted with
+    ⟨hWF, hSupported, lowerObj, hLowerObj, hObjSourceAccepted⟩
+  rcases compileChecked?_eq_some hCompile with
+    ⟨lowerExpr, hLowerExpr, hLowerCompile⟩
+  have hObjExpr : lowerObj.toExpressions? = some lowerExpr := by
+    unfold Program.toExpressions? at hLowerExpr
+    simp [hLowerObj] at hLowerExpr
+    exact hLowerExpr
+  have hExprAccepted : lowerExpr.Accepted :=
+    Structured.Preservation.ProcedurePreservation.accepted_of_compileChecked?
+      hLowerCompile
+  have hLocalsExpr :
+      lowerObj.toFunctions.toLocals.toExpressions? = some lowerExpr := by
+    simpa [Objects.Program.toExpressions?,
+      Functions.Inline.Program.toExpressions?, Functions.Program.toExpressions?]
+      using hObjExpr
+  have hLocalsAccepted : lowerObj.toFunctions.toLocals.Accepted :=
+    ⟨lowerExpr, hLocalsExpr, hExprAccepted⟩
+  have hFunctionsAccepted :
+      Functions.Inline.Program.Accepted lowerObj.toFunctions := by
+    change Functions.Program.Accepted lowerObj.toFunctions
+    exact
+      ⟨hObjSourceAccepted.2.1, hObjSourceAccepted.2.2,
+        hLocalsAccepted⟩
+  exact
+    ⟨hWF, hSupported, lowerObj, hLowerObj,
+      ⟨hObjSourceAccepted.1, hFunctionsAccepted⟩⟩
+
 theorem compileChecked?_noCallCreate_of_loweredFunctions
     {program : Program} {asm : Assembly.Program}
     (hLoweredFunctionsNoCall :

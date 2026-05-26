@@ -170101,6 +170101,28 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_so
           RecursiveBridgeSourceStaticFacts.of_checked?
             (by simpa using hFacts)⟩
 
+theorem compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_compileChecked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    compileChecked? program = some asm := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+        hCompileTarget with
+    ⟨hFeatures, _hStatic⟩
+  rcases compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some
+      hFeatures with
+    ⟨hResources, _hCoverage⟩
+  rcases compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResources with
+    ⟨hBytecode, _hFrameResources⟩
+  rcases compileCheckedAssemblyTargetBytecode?_eq_some hBytecode with
+    ⟨hTarget, _hDecodeWindow, _hJumpdest⟩
+  exact (compileCheckedAssemblyTarget?_eq_some hTarget).1
+
 /--
 Public theorem using one checked compile-and-assemble success premise.
 -/
