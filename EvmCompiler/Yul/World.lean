@@ -627,6 +627,79 @@ theorem CompiledAccountMapRel.callTransferAccountMap?_of_yul
       hWorld.callTransferUnchecked_preserve source recipient value
   · simp [EvmYul.Yul.callTransferAccountMap?, hEnough] at hTransfer
 
+theorem CompiledAccountMapRel.callTransferEnough_iff
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (source : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256) :
+    (value ≤ (yul.find? source |>.option ⟨0⟩ (·.balance))) ↔
+      value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance)) := by
+  have hBalance :
+      (yul.find? source |>.option ⟨0⟩ (·.balance)) =
+        (evm.find? source |>.option ⟨0⟩ (·.balance)) := by
+    cases hYul : yul.find? source with
+    | none =>
+        have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+        simp [Option.option, hEvm]
+    | some yulAccount =>
+        rcases hWorld.find_yul hYul with
+          ⟨evmAccount, hEvm, hAccount⟩
+        simp [Option.option, hEvm, hAccount.balance]
+  rw [hBalance]
+
+theorem CompiledAccountMapRel.callTransferAccountMap?_of_evm_enough
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256}
+    (hEnough :
+      value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance))) :
+    ∃ yulAfter,
+      EvmYul.Yul.callTransferAccountMap? yul source recipient value =
+          some yulAfter ∧
+        CompiledAccountMapRel yulAfter
+          (evmCallTransfer evm source recipient value) := by
+  have hYulEnough :
+      value ≤ (yul.find? source |>.option ⟨0⟩ (·.balance)) :=
+    (hWorld.callTransferEnough_iff source value).mpr hEnough
+  refine
+    ⟨callTransferUnchecked yul source recipient value, ?_, ?_⟩
+  · simp [EvmYul.Yul.callTransferAccountMap?, hYulEnough,
+      callTransferUnchecked]
+  · simpa [evmCallTransfer] using
+      hWorld.callTransferUnchecked_preserve source recipient value
+
+theorem CompiledAccountMapRel.callTransferAccountMap?_none_of_evm_not_enough
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256}
+    (hNotEnough :
+      ¬ value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance))) :
+    EvmYul.Yul.callTransferAccountMap? yul source recipient value = none := by
+  have hYulNotEnough :
+      ¬ value ≤ (yul.find? source |>.option ⟨0⟩ (·.balance)) := by
+    intro hYulEnough
+    exact hNotEnough
+      ((hWorld.callTransferEnough_iff source value).mp hYulEnough)
+  simp [EvmYul.Yul.callTransferAccountMap?, hYulNotEnough]
+
+theorem CompiledAccountMapRel.callTransferAccountMap?_none_iff_evm_not_enough
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256} :
+    EvmYul.Yul.callTransferAccountMap? yul source recipient value = none ↔
+      ¬ value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance)) := by
+  constructor
+  · intro hNone hEnough
+    rcases hWorld.callTransferAccountMap?_of_evm_enough
+        (source := source) (recipient := recipient) hEnough with
+      ⟨yulAfter, hSome, _hRel⟩
+    simp [hNone] at hSome
+  · intro hNotEnough
+    exact hWorld.callTransferAccountMap?_none_of_evm_not_enough hNotEnough
+
 theorem CompiledAccountMapRel.selfbalance
     {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
     (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
