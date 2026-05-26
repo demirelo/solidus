@@ -95,8 +95,11 @@ mutual
     | [] => some 0
     | expr :: rest => do
         let head ← Expr.Arity profile env expr
-        let tail ← ExprList.Arity profile env rest
-        some (head + tail)
+        if head = 1 then
+          let tail ← ExprList.Arity profile env rest
+          some (head + tail)
+        else
+          none
 end
 
 def Expr.One (profile : PrimitiveProfile) (env : List Name)
