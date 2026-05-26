@@ -155,6 +155,21 @@ theorem replace_visible_stack {program : Program} {sites : List CallSite}
   · simp [RunState.withEVM, h.shared_eq]
   · simpa [RunState.withEVM] using hMaterialize newVisible
 
+theorem with_visible_evm_from_suffix {program : Program}
+    {sites : List CallSite} {source : RunState}
+    {sourceEVM' : EVMState} {target' : Assembly.EVMState}
+    {suffix : EvmYul.Stack Word}
+    (hSuffix :
+      ∀ newVisible : EvmYul.Stack Word,
+        ReturnEncoding.stack? program sites source.returns newVisible =
+          some (newVisible ++ suffix))
+    (hShared : target'.toSharedState = sourceEVM'.toSharedState)
+    (hStack : target'.stack = sourceEVM'.stack ++ suffix) :
+    PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  constructor
+  · simpa [RunState.withEVM] using hShared
+  · simpa [RunState.withEVM, hStack] using hSuffix sourceEVM'.stack
+
 theorem push {program : Program} {sites : List CallSite}
     {source : RunState} {target : Assembly.EVMState} {value : Word}
     (h : PayloadRel program sites source target) :
@@ -406,6 +421,71 @@ theorem push_runWithShape?_target {program : Program} {sites : List CallSite}
   · constructor
     · rfl
     · exact PayloadRel.push hRel
+
+theorem pop_runWithShape?_target {program : Program} {sites : List CallSite}
+    {source : RunState} {target : Assembly.EVMState}
+    {shape : Shape} {slot : Slot}
+    (hMatches : Shape.matchesStack (slot :: shape) source.evm.stack = true)
+    (hRel : PayloadRel program sites source target) :
+    ∃ sourceEVM' target',
+      TypedCfg.Instr.runWithShape? .pop (slot :: shape) source.evm =
+          .ok (sourceEVM', shape) ∧
+        Assembly.Target.runList [.prim .pop] target = .ok target' ∧
+          PayloadRel program sites (source.withEVM sourceEVM') target' := by
+  rcases hRel.hidden_suffix with ⟨suffix, hTargetStack, hSuffix⟩
+  cases hSourceStack : source.evm.stack with
+  | nil =>
+      simp [Shape.matchesStack, hSourceStack] at hMatches
+  | cons value rest =>
+      have hRestMatches : Shape.matchesStack shape rest = true := by
+        have hSplit :
+            slot.matchesValue value = true ∧
+              Shape.matchesStack shape rest = true := by
+          simpa [Shape.matchesStack, hSourceStack] using hMatches
+        exact hSplit.2
+      let sourceEVM' := source.evm.replaceStackAndIncrPC rest
+      let target' := target.replaceStackAndIncrPC (rest ++ suffix)
+      refine ⟨sourceEVM', target', ?_, ?_, ?_⟩
+      · simp [TypedCfg.Instr.runWithShape?, TypedCfg.Instr.type?,
+          TypedCfg.Instr.run, Assembly.PrimOp.step,
+          Assembly.PrimOp.continuingStep?, Assembly.PrimStep.run,
+          EvmYul.Stack.pop, hSourceStack, sourceEVM',
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+        change
+          (if Shape.matchesStack shape rest = true then
+              Except.ok
+                ({ source.evm with
+                    pc := source.evm.pc + EvmYul.UInt256.ofNat 1
+                    stack := rest }, shape)
+            else
+              Except.error EvmYul.EVM.ExecutionException.InvalidInstruction) =
+            Except.ok
+              ({ source.evm with
+                  pc := source.evm.pc + EvmYul.UInt256.ofNat 1
+                  stack := rest }, shape)
+        rw [hRestMatches]
+        simp
+      · simp [Assembly.Target.runList, Assembly.Target.stepInstr,
+          Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+          Assembly.PrimStep.run, EvmYul.Stack.pop, hTargetStack,
+          hSourceStack, target',
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+        rfl
+      · exact
+          PayloadRel.with_visible_evm_from_suffix
+            (program := program) (sites := sites) (source := source)
+            (sourceEVM' := sourceEVM') (target' := target')
+            (suffix := suffix) hSuffix
+            (by
+              simp [sourceEVM', target',
+                EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC, hRel.shared_eq])
+            (by
+              simp [sourceEVM', target',
+                EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC])
 
 end InstrSemantics
 
