@@ -2082,6 +2082,64 @@ def xiInitialState
     blocks := blocks
     genesisBlockHeader := genesisBlockHeader }
 
+theorem xiInitialState_toSharedState_eq_freshExternalCall
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (gas : EvmYul.UInt256) (substate : EvmYul.Substate)
+    (env : EvmYul.ExecutionEnv .EVM) :
+    (xiInitialState createdAccounts genesisBlockHeader blocks accountMap sigma0
+        chainContext gas substate env).toSharedState =
+      ({ (default : EVMState) with
+        accountMap := accountMap
+        σ₀ := sigma0
+        totalGasUsedInBlock := chainContext.totalGasUsedInBlock
+        transactionReceipts := chainContext.transactionReceipts
+        substate := substate
+        executionEnv := env
+        blocks := blocks
+        genesisBlockHeader := genesisBlockHeader
+        createdAccounts := createdAccounts
+        toMachineState := EvmYul.MachineState.freshExternalCall gas }
+        : EVMState).toSharedState := by
+  simp [xiInitialState, EvmYul.MachineState.freshExternalCall]
+  exact ⟨rfl, rfl, rfl, rfl⟩
+
+theorem sharedStateRel_freshExternalCallWithWorldFromXiInitialState
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmAccountMap : EvmYul.AccountMap .EVM}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {yulEnv : EvmYul.ExecutionEnv .Yul}
+    {evmEnv : EvmYul.ExecutionEnv .EVM}
+    {yulCreated evmCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {yulGas evmGas : EvmYul.UInt256}
+    (hAccountMap : cfg.accountMapRel yulAccountMap evmAccountMap)
+    (hSubstate : yulSubstate = evmSubstate)
+    (hExecutionEnv : Reference.ExecutionEnvRel cfg yulEnv evmEnv)
+    (hCreated : yulCreated = evmCreated)
+    (hGas : cfg.gasAvailableRel yulGas evmGas) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        executionEnv := yulEnv
+        createdAccounts := yulCreated }
+      (xiInitialState evmCreated evm.genesisBlockHeader evm.blocks
+        evmAccountMap evm.σ₀
+        { totalGasUsedInBlock := evm.totalGasUsedInBlock
+          transactionReceipts := evm.transactionReceipts }
+        evmGas evmSubstate evmEnv).toSharedState := by
+  rw [xiInitialState_toSharedState_eq_freshExternalCall]
+  exact
+    sharedStateRel_freshExternalCallWithWorldFromFreshEvmFrame hShared
+      hAccountMap hSubstate hExecutionEnv hCreated hGas
+
 theorem Xi_succ_eq_X
     (fuel : Nat)
     (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
@@ -2123,6 +2181,58 @@ theorem Xi_succ_eq_X
   | error err => rfl
   | ok result =>
       cases result <;> rfl
+
+theorem xiInitialState_eq_installCodeAndGas
+    (target : Assembly.TargetProgram) (gasNat : Nat)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (initialGas : EvmYul.UInt256) (substate : EvmYul.Substate)
+    (env : EvmYul.ExecutionEnv .EVM) :
+    xiInitialState createdAccounts genesisBlockHeader blocks accountMap sigma0
+        chainContext (EvmYul.UInt256.ofNat gasNat) substate
+        { env with code := Assembly.Bytecode.encodeTarget target } =
+      Assembly.GasAware.installCodeAndGas target gasNat
+        { xiInitialState createdAccounts genesisBlockHeader blocks accountMap
+            sigma0 chainContext initialGas substate env with
+          pc := Assembly.Program.pcAfter []
+          stack := [] } := by
+  simp [xiInitialState, Assembly.GasAware.installCodeAndGas,
+    Assembly.Program.pcAfter]
+  constructor <;> rfl
+
+theorem Xi_succ_eq_X_installedCode
+    (fuel gasNat : Nat)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (initialGas : EvmYul.UInt256) (substate : EvmYul.Substate)
+    (env : EvmYul.ExecutionEnv .EVM)
+    (target : Assembly.TargetProgram) :
+    EvmYul.EVM.Ξ fuel.succ createdAccounts genesisBlockHeader blocks
+        accountMap sigma0 chainContext (EvmYul.UInt256.ofNat gasNat) substate
+        { env with code := Assembly.Bytecode.encodeTarget target } =
+      match EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            { xiInitialState createdAccounts genesisBlockHeader blocks
+                accountMap sigma0 chainContext initialGas substate env with
+              pc := Assembly.Program.pcAfter []
+              stack := [] }) with
+      | .error err => .error err
+      | .ok (.success evmState' output) =>
+          .ok (.success
+            (evmState'.createdAccounts, evmState'.accountMap,
+              evmState'.gasAvailable, evmState'.substate) output)
+      | .ok (.revert returnedGas output) =>
+          .ok (.revert returnedGas output) := by
+  rw [Xi_succ_eq_X]
+  rw [xiInitialState_eq_installCodeAndGas (initialGas := initialGas)]
+  have hZero : (⟨0⟩ : EvmYul.UInt256) = EvmYul.UInt256.ofNat 0 := rfl
+  simp [Assembly.GasAware.validJumps, hZero]
 
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}
