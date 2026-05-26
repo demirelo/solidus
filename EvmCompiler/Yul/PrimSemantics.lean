@@ -2262,6 +2262,154 @@ theorem step_selfdestruct_cons_cons_eq
       .error .InvalidArguments := by
   rfl
 
+theorem primCall_return_nil_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .RETURN : EvmYul.Operation .Yul)) [] =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .RETURN : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmReturn yulState lits with
+          | .error e => .error e
+          | .ok (s, v) =>
+              .error (EvmYul.Yul.Exception.YulHalt s (v.getD ⟨1⟩))) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_return_singleton_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (arg : Word) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .RETURN : EvmYul.Operation .Yul)) [arg] =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .RETURN : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmReturn yulState lits with
+          | .error e => .error e
+          | .ok (s, v) =>
+              .error (EvmYul.Yul.Exception.YulHalt s (v.getD ⟨1⟩))) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_return_cons_cons_cons_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (arg₁ arg₂ arg₃ : Word)
+    (rest : List Word) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .RETURN : EvmYul.Operation .Yul))
+        (arg₁ :: arg₂ :: arg₃ :: rest) =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .RETURN : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmReturn yulState lits with
+          | .error e => .error e
+          | .ok (s, v) =>
+              .error (EvmYul.Yul.Exception.YulHalt s (v.getD ⟨1⟩))) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_revert_nil_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .REVERT : EvmYul.Operation .Yul)) [] =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .REVERT : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmRevert yulState lits with
+          | .error e => .error e
+          | .ok (s, _) => .error (EvmYul.Yul.Exception.Revert s)) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_revert_singleton_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (arg : Word) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .REVERT : EvmYul.Operation .Yul)) [arg] =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .REVERT : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmRevert yulState lits with
+          | .error e => .error e
+          | .ok (s, _) => .error (EvmYul.Yul.Exception.Revert s)) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_revert_cons_cons_cons_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (arg₁ arg₂ arg₃ : Word)
+    (rest : List Word) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .REVERT : EvmYul.Operation .Yul))
+        (arg₁ :: arg₂ :: arg₃ :: rest) =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .REVERT : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmRevert yulState lits with
+          | .error e => .error e
+          | .ok (s, _) => .error (EvmYul.Yul.Exception.Revert s)) := by
+    rfl
+  rw [hStep]
+  simp [EvmYul.Yul.binaryMachineStateOp]
+
+theorem primCall_selfdestruct_static_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (args : List Word)
+    (hStatic : state.executionEnv.perm = false) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .SELFDESTRUCT : EvmYul.Operation .Yul)) args =
+      .error .StaticModeViolation := by
+  simp [EvmYul.Yul.primCall, hStatic]
+  rfl
+
+theorem primCall_selfdestruct_nil_eq
+    (fuel : Nat) (state : EvmYul.Yul.State)
+    (hStatic : ¬ state.executionEnv.perm = false) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .SELFDESTRUCT : EvmYul.Operation .Yul)) [] =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall, hStatic, step_selfdestruct_nil_eq]
+
+theorem primCall_selfdestruct_cons_cons_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (arg₁ arg₂ : Word)
+    (rest : List Word)
+    (hStatic : ¬ state.executionEnv.perm = false) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+        (arg₁ :: arg₂ :: rest) =
+      .error .InvalidArguments := by
+  simp [EvmYul.Yul.primCall, hStatic, step_selfdestruct_cons_cons_eq]
+
 theorem primCall_return_impossible_of_ok
     {fuel : Nat} {state outState : EvmYul.Yul.State}
     {args values : List Word}

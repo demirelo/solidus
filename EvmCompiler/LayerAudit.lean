@@ -2940,6 +2940,12 @@ abbrev recursiveBridgeCanonicalEntryState :=
 abbrev recursiveBridgeInitialWorldRel :=
   @Yul.Program.RecursiveBridgeInitialWorldRel
 
+abbrev recursiveBridgeTerminalObservationContracts :=
+  @Yul.Program.RecursiveBridgeTerminalObservationContracts
+
+abbrev recursiveBridgeTerminalContractsStructuredOfObservation :=
+  @Yul.Program.RecursiveBridgeTerminalContracts.structured_of_observation
+
 abbrev recursiveBridgeTopNoCallSourceCompileFullSourceCoveredStructuredPrimitiveCanonicalEntryToEVMXRunner :=
   @Yul.Program.compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_canonicalEntry_XRunner
 

@@ -1788,8 +1788,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
@@ -1840,7 +1840,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     hFullSourceAccepted hFeatureCoverage hCompileResources
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
-    hTerminal hExpr hInitialSharedRel hSourceRun
+    (RecursiveBridgeTerminalContracts.structured_of_observation hTerminal)
+    hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect hInitialPc hInitialStack
     hRunner
 
@@ -1860,8 +1861,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr : RecursiveBridgeExprResultContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
@@ -1898,7 +1899,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     hFullSourceAccepted hFeatureCoverage hCompileResources
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
-    hTerminal hExpr hInitialSharedRel hSourceRun
+    (RecursiveBridgeTerminalContracts.structured_of_observation hTerminal)
+    hExpr hInitialSharedRel hSourceRun
     hCompileTarget decodeWindow jumpdestCorrect hInitialPc hInitialStack
     hRunner
 
@@ -1927,8 +1929,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
     (hInitialSharedRel :
@@ -1998,8 +2000,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
     (hInitialSharedRel :
@@ -2062,8 +2064,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
     (hInitialWorld :
@@ -2112,7 +2114,9 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
                                 result :=
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_XRunner
     (initial := canonicalEntryState initial)
-    hFullSourceAccepted hFeatureCoverage hCompileResources hTerminal hExpr
+    hFullSourceAccepted hFeatureCoverage hCompileResources
+    hTerminal
+    hExpr
     (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
     hSourceRun hCompileTarget
     decodeWindow jumpdestCorrect
@@ -2135,8 +2139,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hFeatureCoverage : RecursiveBridgeFeatureCoverage program)
     (hCompileResources : RecursiveBridgeCompileResources program)
     (hTerminal :
-      RecursiveBridgeTerminalContracts cfg terminalRel revertRel
-        Locals.Source.PrimitiveSemantics.structured program)
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program)
     (hExpr :
       RecursiveBridgeExprNoSuccessfulOutOfFuelContracts cfg program)
     (hInitialWorld :
@@ -2168,7 +2172,9 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
               .error EvmYul.EVM.ExecutionException.OutOfGass :=
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitiveNoSuccessfulOutOfFuel_XRunner
     (initial := canonicalEntryState initial)
-    hFullSourceAccepted hFeatureCoverage hCompileResources hTerminal hExpr
+    hFullSourceAccepted hFeatureCoverage hCompileResources
+    hTerminal
+    hExpr
     (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
     hSourceRun hCompileTarget
     decodeWindow jumpdestCorrect

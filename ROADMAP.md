@@ -260,6 +260,15 @@ Current assumption-cleanup checkpoint:
   This is not compiler-constructible for an arbitrary `StateRelConfig`: account
   maps, code images, gas erasure, and total-gas agreement are deliberately
   supplied by the source/target environment relation.
+- [x] Split the structured terminal/revert contract into constructed terminal
+  primitive execution plus the remaining observation boundary. The preferred
+  structured-primitive gas-aware wrappers now take
+  `RecursiveBridgeTerminalObservationContracts`; the old
+  `RecursiveBridgeTerminalContracts` is constructed internally for structured
+  primitives by `RecursiveBridgeTerminalContracts.structured_of_observation`
+  using the checked imported-terminal relatability theorem. The terminal and
+  revert state relations remain a real semantic boundary, not compiler-created
+  evidence.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail

@@ -1369,6 +1369,134 @@ theorem structured_terminal_step_exists
   · exact structured_terminal_revert_step_exists hEval hShared hStack
   · exact structured_terminal_selfdestruct_step_exists hEval hShared hStack
 
+theorem structured_terminal_ok_of_stop_or_argCount
+    {kind : Assembly.HaltKind}
+    {shared : EvmYul.SharedState .EVM} {values : List Word}
+    (hOk : kind = .stop ∨ values.length = kind.argCount) :
+    ∃ sharedAfter : EvmYul.SharedState .EVM,
+      Source.PrimitiveSemantics.structured.terminal kind shared values =
+        .ok sharedAfter := by
+  cases kind
+  · let iso : EVMState :=
+      { toSharedState := shared,
+        pc := EvmYul.UInt256.ofNat 0,
+        stack := values.reverse,
+        execLength := 0 }
+    have hStep :
+        Structured.Terminal.step .stop iso =
+          .ok
+            { iso with
+              toMachineState := iso.toMachineState.setReturnData .empty } := by
+      simp [Structured.Terminal.step, Assembly.Target.stepInstr,
+        Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
+        Assembly.PrimOp.continuingStep?, Assembly.PrimOp.toEVM]
+      rfl
+    refine
+      ⟨({ iso with
+          toMachineState := iso.toMachineState.setReturnData .empty }).toSharedState,
+        ?_⟩
+    simp [Source.PrimitiveSemantics.structured, iso, hStep]
+  · have hLen : values.length = Assembly.HaltKind.argCount .return := by
+      cases hOk with
+      | inl h => cases h
+      | inr h => exact h
+    simp [Assembly.HaltKind.argCount] at hLen
+    cases values with
+    | nil => simp at hLen
+    | cons offset rest =>
+        cases rest with
+        | nil => simp at hLen
+        | cons size rest' =>
+            cases rest' with
+            | nil =>
+                let iso : EVMState :=
+                  { toSharedState := shared,
+                    pc := EvmYul.UInt256.ofNat 0,
+                    stack := [size, offset],
+                    execLength := 0 }
+                have hStep :
+                    Structured.Terminal.step .return iso =
+                      .ok
+                        (({ iso with
+                          toMachineState :=
+                            iso.toMachineState.evmReturn size offset
+                        }).replaceStackAndIncrPC []) := by
+                  apply structured_terminal_step_return_of_stack
+                  simp [iso]
+                refine
+                  ⟨((({ iso with
+                      toMachineState :=
+                        iso.toMachineState.evmReturn size offset
+                    }).replaceStackAndIncrPC [])).toSharedState, ?_⟩
+                simp [Source.PrimitiveSemantics.structured, iso, hStep]
+            | cons _ _ => simp at hLen
+  · have hLen : values.length = Assembly.HaltKind.argCount .revert := by
+      cases hOk with
+      | inl h => cases h
+      | inr h => exact h
+    simp [Assembly.HaltKind.argCount] at hLen
+    cases values with
+    | nil => simp at hLen
+    | cons offset rest =>
+        cases rest with
+        | nil => simp at hLen
+        | cons size rest' =>
+            cases rest' with
+            | nil =>
+                let iso : EVMState :=
+                  { toSharedState := shared,
+                    pc := EvmYul.UInt256.ofNat 0,
+                    stack := [size, offset],
+                    execLength := 0 }
+                have hStep :
+                    Structured.Terminal.step .revert iso =
+                      .ok
+                        (({ iso with
+                          toMachineState :=
+                            iso.toMachineState.evmRevert size offset
+                        }).replaceStackAndIncrPC []) := by
+                  apply structured_terminal_step_revert_of_stack
+                  simp [iso]
+                refine
+                  ⟨((({ iso with
+                      toMachineState :=
+                        iso.toMachineState.evmRevert size offset
+                    }).replaceStackAndIncrPC [])).toSharedState, ?_⟩
+                simp [Source.PrimitiveSemantics.structured, iso, hStep]
+            | cons _ _ => simp at hLen
+  · have hLen :
+        values.length = Assembly.HaltKind.argCount .selfdestruct := by
+      cases hOk with
+      | inl h => cases h
+      | inr h => exact h
+    simp [Assembly.HaltKind.argCount] at hLen
+    cases values with
+    | nil => simp at hLen
+    | cons recipient rest =>
+        cases rest with
+        | nil =>
+            let iso : EVMState :=
+              { toSharedState := shared,
+                pc := EvmYul.UInt256.ofNat 0,
+                stack := [recipient],
+                execLength := 0 }
+            have hStep :
+                Structured.Terminal.step .selfdestruct iso =
+                  .ok
+                    (({ iso with
+                      toSharedState :=
+                        selfdestructShared iso.toSharedState recipient
+                    }).replaceStackAndIncrPC []) := by
+              apply structured_terminal_step_selfdestruct_of_stack
+              simp [iso]
+            refine
+              ⟨((({ iso with
+                  toSharedState :=
+                    selfdestructShared iso.toSharedState recipient
+                }).replaceStackAndIncrPC [])).toSharedState, ?_⟩
+            simp [Source.PrimitiveSemantics.structured, iso, hStep]
+        | cons _ _ => simp at hLen
+
 theorem structured_primitiveSound :
     PrimitiveSound Source.PrimitiveSemantics.structured where
   eval_step hEval hShared hStack hStep :=

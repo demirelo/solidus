@@ -163265,6 +163265,271 @@ theorem sourceArgEvalRegular_pair_var_var
                     simp [Locals.Source.Expr.evalOne,
                       Locals.Source.Expr.eval, hVarsRight]
 
+/--
+The structured source primitive can execute any imported terminal call whose
+argument evaluation leads to a relatable terminal result.
+
+This discharges the primitive-execution half of the top terminal contract for
+the canonical structured primitive semantics. The remaining terminal/revert
+premise only has to relate the imported terminal observation to the source
+halt outcome.
+-/
+theorem structured_terminal_ok_of_imported_terminal_relatable
+    {sourceFuel : Nat} {source sourceAfterArgs : State}
+    {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+    {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {sourceResult : Except Exception State} {argValues : List Word}
+    {shared : EvmYul.SharedState .EVM}
+    (hTerminal : Prim.terminal? yulPrim = some kind)
+    (hRelatable : SourceResultRelatable sourceResult)
+    (hExecSeq :
+      EvmYul.Yul.execSeq sourceFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          codeOverride source =
+        sourceResult)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfterArgs, argValues.reverse)) :
+    ∃ sharedAfter : EvmYul.SharedState .EVM,
+      Locals.Source.PrimitiveSemantics.structured.terminal kind shared
+          argValues.reverse =
+        .ok sharedAfter := by
+  cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+  case StopArith op =>
+    cases op <;> simp at hTerminal
+    cases hTerminal
+    exact
+      Locals.SourceLowering.PrimitiveSemantics.structured_terminal_ok_of_stop_or_argCount
+        (Or.inl rfl)
+  case System op =>
+    cases op <;> simp [Prim.terminal?] at hTerminal
+    · cases hTerminal
+      cases sourceFuel with
+      | zero =>
+          simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          cases argValues with
+          | nil =>
+              have hPrim :
+                  EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                      ((.System .RETURN : EvmYul.Operation .Yul)) [] =
+                    .error .InvalidArguments :=
+                PrimSemantics.primCall_return_nil_eq fuel sourceAfterArgs
+              have hResult :=
+                execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                  (sourceFuel := fuel.succ) (source := source)
+                  (sourceAfterArgs := sourceAfterArgs)
+                  (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                  (args := args) (rest := rest)
+                  (codeOverride := codeOverride) (argValues := [])
+                  (err := .InvalidArguments) (sourceResult := sourceResult)
+                  hEvalArgs hPrim hExecSeq
+              rw [hResult] at hRelatable
+              simp [SourceResultRelatable] at hRelatable
+          | cons offset restValues =>
+              cases restValues with
+              | nil =>
+                  have hPrim :
+                      EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                          ((.System .RETURN : EvmYul.Operation .Yul))
+                          [offset] =
+                        .error .InvalidArguments :=
+                    PrimSemantics.primCall_return_singleton_eq fuel
+                      sourceAfterArgs offset
+                  have hResult :=
+                    execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride)
+                      (argValues := [offset])
+                      (err := .InvalidArguments)
+                      (sourceResult := sourceResult) hEvalArgs hPrim
+                      hExecSeq
+                  rw [hResult] at hRelatable
+                  simp [SourceResultRelatable] at hRelatable
+              | cons size more =>
+                  cases more with
+                  | nil =>
+                      exact
+                        Locals.SourceLowering.PrimitiveSemantics.structured_terminal_ok_of_stop_or_argCount
+                          (Or.inr (by simp [Assembly.HaltKind.argCount]))
+                  | cons extra extras =>
+                      have hPrim :
+                          EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                              ((.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (offset :: size :: extra :: extras) =
+                            .error .InvalidArguments :=
+                        PrimSemantics.primCall_return_cons_cons_cons_eq fuel
+                          sourceAfterArgs offset size extra extras
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim :=
+                            (.System .RETURN : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := offset :: size :: extra :: extras)
+                          (err := .InvalidArguments)
+                          (sourceResult := sourceResult) hEvalArgs hPrim
+                          hExecSeq
+                      rw [hResult] at hRelatable
+                      simp [SourceResultRelatable] at hRelatable
+    · cases hTerminal
+      cases sourceFuel with
+      | zero =>
+          simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          cases argValues with
+          | nil =>
+              have hPrim :
+                  EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                      ((.System .REVERT : EvmYul.Operation .Yul)) [] =
+                    .error .InvalidArguments :=
+                PrimSemantics.primCall_revert_nil_eq fuel sourceAfterArgs
+              have hResult :=
+                execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                  (sourceFuel := fuel.succ) (source := source)
+                  (sourceAfterArgs := sourceAfterArgs)
+                  (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                  (args := args) (rest := rest)
+                  (codeOverride := codeOverride) (argValues := [])
+                  (err := .InvalidArguments) (sourceResult := sourceResult)
+                  hEvalArgs hPrim hExecSeq
+              rw [hResult] at hRelatable
+              simp [SourceResultRelatable] at hRelatable
+          | cons offset restValues =>
+              cases restValues with
+              | nil =>
+                  have hPrim :
+                      EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                          ((.System .REVERT : EvmYul.Operation .Yul))
+                          [offset] =
+                        .error .InvalidArguments :=
+                    PrimSemantics.primCall_revert_singleton_eq fuel
+                      sourceAfterArgs offset
+                  have hResult :=
+                    execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride)
+                      (argValues := [offset])
+                      (err := .InvalidArguments)
+                      (sourceResult := sourceResult) hEvalArgs hPrim
+                      hExecSeq
+                  rw [hResult] at hRelatable
+                  simp [SourceResultRelatable] at hRelatable
+              | cons size more =>
+                  cases more with
+                  | nil =>
+                      exact
+                        Locals.SourceLowering.PrimitiveSemantics.structured_terminal_ok_of_stop_or_argCount
+                          (Or.inr (by simp [Assembly.HaltKind.argCount]))
+                  | cons extra extras =>
+                      have hPrim :
+                          EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                              ((.System .REVERT :
+                                EvmYul.Operation .Yul))
+                              (offset :: size :: extra :: extras) =
+                            .error .InvalidArguments :=
+                        PrimSemantics.primCall_revert_cons_cons_cons_eq fuel
+                          sourceAfterArgs offset size extra extras
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim :=
+                            (.System .REVERT : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := offset :: size :: extra :: extras)
+                          (err := .InvalidArguments)
+                          (sourceResult := sourceResult) hEvalArgs hPrim
+                          hExecSeq
+                      rw [hResult] at hRelatable
+                      simp [SourceResultRelatable] at hRelatable
+    · cases hTerminal
+      cases sourceFuel with
+      | zero =>
+          simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+          · have hPrim :
+                EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                    ((.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                    argValues =
+                  .error .StaticModeViolation :=
+              PrimSemantics.primCall_selfdestruct_static_eq fuel
+                sourceAfterArgs argValues hStatic
+            have hResult :=
+              execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.System .SELFDESTRUCT :
+                  EvmYul.Operation .Yul))
+                (args := args) (rest := rest)
+                (codeOverride := codeOverride) (argValues := argValues)
+                (err := .StaticModeViolation)
+                (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+            rw [hResult] at hRelatable
+            simp [SourceResultRelatable] at hRelatable
+          · cases argValues with
+            | nil =>
+                have hPrim :
+                    EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                        ((.System .SELFDESTRUCT :
+                          EvmYul.Operation .Yul)) [] =
+                      .error .InvalidArguments :=
+                  PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                    sourceAfterArgs hStatic
+                have hResult :=
+                  execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT :
+                      EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := [])
+                    (err := .InvalidArguments)
+                    (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+                rw [hResult] at hRelatable
+                simp [SourceResultRelatable] at hRelatable
+            | cons recipient more =>
+                cases more with
+                | nil =>
+                    exact
+                      Locals.SourceLowering.PrimitiveSemantics.structured_terminal_ok_of_stop_or_argCount
+                        (Or.inr (by simp [Assembly.HaltKind.argCount]))
+                | cons extra extras =>
+                    have hPrim :
+                        EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                            ((.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (recipient :: extra :: extras) =
+                          .error .InvalidArguments :=
+                      PrimSemantics.primCall_selfdestruct_cons_cons_eq fuel
+                        sourceAfterArgs recipient extra extras hStatic
+                    have hResult :=
+                      execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .SELFDESTRUCT :
+                          EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := recipient :: extra :: extras)
+                        (err := .InvalidArguments)
+                        (sourceResult := sourceResult) hEvalArgs hPrim
+                        hExecSeq
+                    rw [hResult] at hRelatable
+                    simp [SourceResultRelatable] at hRelatable
+
 end SourceBridgeFacts
 end Reference
 
@@ -167952,6 +168217,91 @@ structure RecursiveBridgeTerminalContracts
               outcomeLayout terminalRel revertRel sourceResult
               (Functions.Source.Outcome.halt kind
                 (compilerAfterArgs.withShared sharedAfter))
+
+/--
+Terminal/revert observation boundary for the preferred structured-primitive
+top theorem.
+
+The structured primitive terminal step itself is constructed from the imported
+terminal run by
+`Reference.SourceBridgeFacts.structured_terminal_ok_of_imported_terminal_relatable`.
+This package keeps only the semantic observation that cannot be compiler-
+generated: relating the imported `YulHalt`/`Revert` state to the source halt
+state after the structured terminal step.
+-/
+structure RecursiveBridgeTerminalObservationContracts
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (program : Program) : Prop where
+  terminal :
+    ∀ {layout outcomeLayout : List Name}
+      {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+      {args : List AstExpr} {rest : List AstStmt}
+      {allowed : Except Reference.Exception Reference.State → Prop}
+      {argFuel : Nat}
+      {source compiler sourceResult}
+      {sourceAfterArgs : Reference.State} {sourceValues : List Word},
+      Prim.terminal? yulPrim = some kind →
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout source
+        compiler →
+      allowed sourceResult →
+      Reference.SourceBridgeFacts.SourceResultRelatable sourceResult →
+      EvmYul.Yul.execSeq argFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          (some program.contract) source =
+        sourceResult →
+      EvmYul.Yul.evalArgs argFuel args.reverse
+          (some program.contract) source =
+        .ok (sourceAfterArgs, sourceValues.reverse) →
+      ∀ {compilerAfterArgs : Objects.Source.State}
+        {sharedAfter : EvmYul.SharedState .EVM},
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout
+          sourceAfterArgs compilerAfterArgs →
+        Locals.Source.PrimitiveSemantics.structured.terminal kind
+            compilerAfterArgs.shared sourceValues.reverse =
+          .ok sharedAfter →
+        Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg
+          outcomeLayout terminalRel revertRel sourceResult
+          (Functions.Source.Outcome.halt kind
+            (compilerAfterArgs.withShared sharedAfter))
+
+namespace RecursiveBridgeTerminalContracts
+
+theorem structured_of_observation
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    (hObservation :
+      RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
+        program) :
+    RecursiveBridgeTerminalContracts cfg terminalRel revertRel
+      Locals.Source.PrimitiveSemantics.structured program where
+  terminal := by
+    intro layout outcomeLayout yulPrim kind args rest allowed argFuel source
+      compiler sourceResult sourceAfterArgs sourceValues hTerminal hInitial
+      hAllowed hRelatable hExecSeq hEvalArgs compilerAfterArgs hArgsRel
+    rcases
+        Reference.SourceBridgeFacts.structured_terminal_ok_of_imported_terminal_relatable
+          (sourceFuel := argFuel) (source := source)
+          (sourceAfterArgs := sourceAfterArgs) (yulPrim := yulPrim)
+          (kind := kind) (args := args) (rest := rest)
+          (codeOverride := some program.contract)
+          (sourceResult := sourceResult) (argValues := sourceValues)
+          (shared := compilerAfterArgs.shared) hTerminal hRelatable
+          hExecSeq hEvalArgs with
+      ⟨sharedAfter, hTerminalRun⟩
+    exact
+      ⟨sharedAfter, hTerminalRun,
+        hObservation.terminal hTerminal hInitial hAllowed hRelatable
+          hExecSeq hEvalArgs hArgsRel hTerminalRun⟩
+
+end RecursiveBridgeTerminalContracts
 
 structure RecursiveBridgeExprResultContracts
     (cfg : Reference.StateRelConfig)
