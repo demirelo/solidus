@@ -42,10 +42,11 @@ this IR as the refactor proceeds.
        explicit contracts are proved.
      - [x] Shrink `RecursiveBridgeCompileResources`: lower-object source
        acceptedness is constructed from `RecursiveBridgeSourceAccepted`, so the
-       resource package now carries only the generated function program's
-       source/direct frame bound. The remaining removal path is a checked
-       frame-bound proof from lowering success, not another acceptedness
-       wrapper.
+       resource package was reduced to the generated function program's
+       source/direct frame bound; the preferred public theorem now constructs
+       that bound with `RecursiveBridgeCompileResources.checked?` through
+       `compileCheckedAssemblyTargetBytecodeResources?` instead of taking it as
+       a separate premise.
    - [x] Add preferred gas-aware top wrappers that take full source
      acceptedness plus explicit feature coverage instead of the old bundled
      source-fragment acceptedness predicate.
@@ -235,12 +236,11 @@ Current assumption-cleanup checkpoint:
     projections and the checked reconstruction of old
     `Reference.Safe.FeatureCoverage.program` from feature coverage plus
     successful checked compilation.
-  - Lower resource validity: `RecursiveBridgeCompileResources` supplies only
-    the generated lower function program's `SourceDirect.FrameBound.Program`.
-    Lower-object source acceptedness is reconstructed from
-    `RecursiveBridgeSourceAccepted`, and `LayerAudit` exposes the checked
-    reconstruction of the older `Objects.Source.Program.CompileAccepted`
-    package.
+  - Lower resource validity: the generated lower function program's
+    `SourceDirect.FrameBound.Program` is no longer a preferred public premise.
+    `Functions.SourceDirect.FrameBound.program?` checks it over the lowered
+    object, and `compileCheckedAssemblyTargetBytecodeResources?` bundles that
+    proof with checked compile/bytecode evidence.
   - Shared semantic contracts: `RecursiveBridgeSemanticContracts` names the
     primitive/terminal/revert/outcome agreement between the imported Yul model
     and the compiler source tower.
@@ -254,9 +254,9 @@ Current assumption-cleanup checkpoint:
     `RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel` constructs the
     internal dispatcher-body fuel fact used by the old bridge from that public
     source-run boundary.
-  - Target entry/runtime: checked compiler success, initial shared-state
-    relation, canonical entry PC/empty stack, code-size decode-window bound,
-    jumpdest-scanner correctness, and gas-aware runner completeness. The
+  - Target entry/runtime: checked compiler success, checked lower frame
+    resources, checked bytecode bridge facts, initial shared-state relation,
+    canonical entry PC/empty stack, and gas-aware runner completeness. The
     marker-only gas oracle, out-of-gas policy, and current-contract projection
     packages are constructed internally by trivial checked constructors.
   - Discharged/generated facts at the top boundary: emitted no-call/create is
@@ -397,6 +397,12 @@ Current assumption-cleanup checkpoint:
     The jumpdest fact is checked against the imported scanner output for the
     encoded target bytecode; it is intentionally not hidden in acceptedness or
     claimed as a scanner-internal proof.
+  - [x] Add `Functions.SourceDirect.FrameBound.program?`,
+    `RecursiveBridgeCompileResources.checked?`, and
+    `Yul.Program.compileCheckedAssemblyTargetBytecodeResources?`, so the
+    preferred gas-aware top theorem constructs the generated source/direct frame
+    bound from the lowered object and a concrete checker rather than exposing
+    `RecursiveBridgeCompileResources` as a caller premise.
 - [x] Add the actual result-level gas-aware `EVM.X` top wrapper for the
   preferred no-call/create route.
   - [x] Add `Assembly.GasAware.XResultAgrees` and

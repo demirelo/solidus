@@ -167601,6 +167601,28 @@ end RecursiveBridgeAccepted
 
 namespace RecursiveBridgeCompileResources
 
+noncomputable def checked? (program : Program) : Bool :=
+  match program.toObjects? with
+  | none => false
+  | some lowerObj =>
+      Functions.SourceDirect.FrameBound.program? lowerObj.toFunctions
+
+theorem of_checked? {program : Program}
+    (hCheck : checked? program = true) :
+    RecursiveBridgeCompileResources program where
+  functionFrameBound := by
+    intro lowerObj hLower
+    unfold checked? at hCheck
+    cases hObj : program.toObjects? with
+    | none =>
+        simp [hObj] at hCheck
+    | some obj =>
+        simp [hObj] at hCheck
+        have hEq : obj = lowerObj := by
+          simpa [hObj] using hLower
+        cases hEq
+        exact Functions.SourceDirect.FrameBound.program_of_check hCheck
+
 theorem of_sourceCompileAccepted {program : Program}
     (hAccepted : SourceCompileAccepted program) :
     RecursiveBridgeCompileResources program where
@@ -169039,6 +169061,45 @@ theorem compileCheckedAssemblyTargetBytecode?_eq_some
             (by simpa using hChecked),
           Assembly.Bytecode.jumpdestCorrect_of_bytecodeBridgeChecked
             (by simpa using hChecked)⟩
+
+/--
+Checked compiler boundary that validates both lower stack/frame resources and
+the bytecode facts consumed by the gas-aware EVM bridge.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResources?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTargetBytecode? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeCompileResources.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResources?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResources? program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecode? program = some (asm, target) ∧
+      RecursiveBridgeCompileResources program := by
+  unfold compileCheckedAssemblyTargetBytecodeResources? at hCompileTarget
+  cases hBase : compileCheckedAssemblyTargetBytecode? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hResources :
+          RecursiveBridgeCompileResources.checked? program <;>
+        simp [hResources] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeCompileResources.of_checked?
+            (by simpa using hResources)⟩
 
 /--
 Public theorem using one checked compile-and-assemble success premise.

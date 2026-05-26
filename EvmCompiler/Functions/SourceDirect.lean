@@ -3807,6 +3807,236 @@ def FunList : List Functions.FunDef → Prop
 def Program (program : Functions.Program) : Prop :=
   FunList program.functions ∧ Block [] [] program.body
 
+def le16? (width : Nat) : Bool :=
+  decide (width ≤ 16)
+
+mutual
+  def block? (returns env : List Name) : Functions.Block → Bool
+    | ⟨stmts⟩ => stmtList? returns env stmts
+
+  def stmt? (returns env : List Name) : Functions.Stmt → Bool
+    | .expr expr => le16? (env.length + Access.exprWidth expr)
+    | .let_ _name value => le16? (env.length + Access.exprWidth value)
+    | .assign _name value => le16? (env.length + Access.exprWidth value)
+    | .block body => block? returns env body
+    | .if_ cond body =>
+        le16? (env.length + Access.exprWidth cond) &&
+          block? returns env body
+    | .switch scrutinee cases defaultBody =>
+        le16? (env.length + Access.exprWidth scrutinee) &&
+          (caseList? returns env cases &&
+            default? returns env defaultBody)
+    | .for_ init cond post body =>
+        block? returns env init &&
+          (let loopEnv := Scope.Block.outEnv env init
+           le16? (loopEnv.length + Access.exprWidth cond) &&
+            (block? returns loopEnv post &&
+              block? returns loopEnv body))
+    | .brk => true
+    | .cont => true
+    | .leave => le16? (returns.length + env.length)
+    | .call targets _functionName args =>
+        le16? (env.length + Access.exprSeqWidth (Lower.argExprs args)) &&
+          le16? (targets.length + env.length)
+    | .terminal _kind => true
+    | .terminalArgs _kind args =>
+        le16? (env.length + Access.exprSeqWidth args)
+
+  def stmtList? (returns env : List Name) : List Functions.Stmt → Bool
+    | [] => true
+    | stmt :: rest =>
+        stmt? returns env stmt &&
+          stmtList? returns (Scope.Stmt.outEnv env stmt) rest
+
+  def caseList? (returns env : List Name) :
+      List (Word × Functions.Block) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        block? returns env body && caseList? returns env rest
+
+  def default? (returns env : List Name) : Option Functions.Block → Bool
+    | none => true
+    | some body => block? returns env body
+end
+
+def funDef? (fn : Functions.FunDef) : Bool :=
+  block? fn.returns (fn.returns ++ fn.params) fn.body &&
+    le16?
+      (fn.returns.length +
+        (Scope.Block.outEnv (fn.returns ++ fn.params) fn.body).length)
+
+def funList? : List Functions.FunDef → Bool
+  | [] => true
+  | fn :: rest => funDef? fn && funList? rest
+
+def program? (program : Functions.Program) : Bool :=
+  funList? program.functions && block? [] [] program.body
+
+theorem le16_of_check {width : Nat}
+    (hCheck : le16? width = true) :
+    width ≤ 16 := by
+  unfold le16? at hCheck
+  exact of_decide_eq_true hCheck
+
+mutual
+  theorem block_of_check {returns env : List Name} :
+      ∀ {block : Functions.Block},
+        block? returns env block = true →
+          Block returns env block := by
+    intro block hCheck
+    cases block with
+    | mk stmts =>
+        exact stmtList_of_check hCheck
+
+  theorem stmt_of_check {returns env : List Name} :
+      ∀ {stmt : Functions.Stmt},
+        stmt? returns env stmt = true →
+          Stmt returns env stmt := by
+    intro stmt hCheck
+    cases stmt with
+    | expr expr =>
+        exact le16_of_check (by simpa [stmt?] using hCheck)
+    | let_ _name value =>
+        exact le16_of_check (by simpa [stmt?] using hCheck)
+    | assign _name value =>
+        exact le16_of_check (by simpa [stmt?] using hCheck)
+    | block body =>
+        exact block_of_check (by simpa [stmt?] using hCheck)
+    | if_ cond body =>
+        have hAnd :
+            le16? (env.length + Access.exprWidth cond) = true ∧
+              block? returns env body = true :=
+          by simpa [stmt?] using hCheck
+        exact ⟨le16_of_check hAnd.1, block_of_check hAnd.2⟩
+    | switch scrutinee cases defaultBody =>
+        have hAnd :
+            le16? (env.length + Access.exprWidth scrutinee) = true ∧
+              (caseList? returns env cases &&
+                default? returns env defaultBody) = true :=
+          by simpa [stmt?] using hCheck
+        have hTail :
+            caseList? returns env cases = true ∧
+              default? returns env defaultBody = true :=
+          by simpa using hAnd.2
+        exact
+          ⟨le16_of_check hAnd.1, caseList_of_check hTail.1,
+            default_of_check hTail.2⟩
+    | for_ init cond post body =>
+        have hAnd :
+            block? returns env init = true ∧
+              (let loopEnv := Scope.Block.outEnv env init
+               le16? (loopEnv.length + Access.exprWidth cond) &&
+                (block? returns loopEnv post &&
+                  block? returns loopEnv body)) = true :=
+          by simpa [stmt?] using hCheck
+        let loopEnv := Scope.Block.outEnv env init
+        have hLoop :
+            le16? (loopEnv.length + Access.exprWidth cond) = true ∧
+              (block? returns loopEnv post &&
+                block? returns loopEnv body) = true :=
+          by simpa [loopEnv] using hAnd.2
+        have hPostBody :
+            block? returns loopEnv post = true ∧
+              block? returns loopEnv body = true :=
+          by simpa using hLoop.2
+        exact
+          ⟨block_of_check hAnd.1, le16_of_check hLoop.1,
+            block_of_check hPostBody.1, block_of_check hPostBody.2⟩
+    | brk =>
+        trivial
+    | cont =>
+        trivial
+    | leave =>
+        exact le16_of_check (by simpa [stmt?] using hCheck)
+    | call targets _functionName args =>
+        have hAnd :
+            le16?
+                (env.length + Access.exprSeqWidth (Lower.argExprs args)) =
+              true ∧
+              le16? (targets.length + env.length) = true :=
+          by simpa [stmt?] using hCheck
+        exact ⟨le16_of_check hAnd.1, le16_of_check hAnd.2⟩
+    | terminal _kind =>
+        trivial
+    | terminalArgs _kind args =>
+        exact le16_of_check (by simpa [stmt?] using hCheck)
+
+  theorem stmtList_of_check {returns env : List Name} :
+      ∀ {stmts : List Functions.Stmt},
+        stmtList? returns env stmts = true →
+          StmtList returns env stmts := by
+    intro stmts hCheck
+    cases stmts with
+    | nil =>
+        trivial
+    | cons stmt rest =>
+        have hAnd :
+            stmt? returns env stmt = true ∧
+              stmtList? returns (Scope.Stmt.outEnv env stmt) rest = true :=
+          by simpa [stmtList?] using hCheck
+        exact ⟨stmt_of_check hAnd.1, stmtList_of_check hAnd.2⟩
+
+  theorem caseList_of_check {returns env : List Name} :
+      ∀ {cases : List (Word × Functions.Block)},
+        caseList? returns env cases = true →
+          CaseList returns env cases := by
+    intro cases hCheck
+    cases cases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨_value, body⟩
+        have hAnd :
+            block? returns env body = true ∧
+              caseList? returns env rest = true :=
+          by simpa [caseList?] using hCheck
+        exact ⟨block_of_check hAnd.1, caseList_of_check hAnd.2⟩
+
+  theorem default_of_check {returns env : List Name} :
+      ∀ {defaultBody : Option Functions.Block},
+        default? returns env defaultBody = true →
+          Default returns env defaultBody := by
+    intro defaultBody hCheck
+    cases defaultBody with
+    | none =>
+        trivial
+    | some body =>
+        exact block_of_check hCheck
+end
+
+theorem funDef_of_check {fn : Functions.FunDef}
+    (hCheck : funDef? fn = true) :
+    FunDef fn := by
+  have hAnd :
+      block? fn.returns (fn.returns ++ fn.params) fn.body = true ∧
+        le16?
+          (fn.returns.length +
+            (Scope.Block.outEnv (fn.returns ++ fn.params) fn.body).length) =
+          true :=
+    by simpa [funDef?] using hCheck
+  exact ⟨block_of_check hAnd.1, le16_of_check hAnd.2⟩
+
+theorem funList_of_check :
+    ∀ {functions : List Functions.FunDef},
+      funList? functions = true →
+        FunList functions
+  | [], _hCheck => by
+      trivial
+  | fn :: rest, hCheck => by
+      have hAnd :
+          funDef? fn = true ∧ funList? rest = true :=
+        by simpa [funList?] using hCheck
+      exact ⟨funDef_of_check hAnd.1, funList_of_check hAnd.2⟩
+
+theorem program_of_check {program : Functions.Program}
+    (hCheck : program? program = true) :
+    Program program := by
+  have hAnd :
+      funList? program.functions = true ∧
+        block? [] [] program.body = true :=
+    by simpa [program?] using hCheck
+  exact ⟨funList_of_check hAnd.1, block_of_check hAnd.2⟩
+
 theorem funDef_body {fn : Functions.FunDef}
     (hBound : FunDef fn) :
     Block fn.returns (fn.returns ++ fn.params) fn.body := by
