@@ -58,6 +58,9 @@ Proof rule:
     output shape.
   - Fuel exhaustion is represented as a distinct `outOfFuel` outcome carrying
     the current label and run state, not as invalid execution.
+  - Raw `PC` is rejected at this layer because typed CFG has symbolic labels,
+    not concrete byte offsets; concrete PC behavior belongs below this
+    boundary.
 - [x] Keep EVM terminal halts distinct from structured `leave`.
 - [x] Implement typed-CFG-to-labeled-assembly lowering as a separate backend
   boundary.
