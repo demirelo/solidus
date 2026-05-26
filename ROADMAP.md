@@ -197,7 +197,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 03:24 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 03:29 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -244,6 +244,12 @@ Current assumption-cleanup checkpoint:
   `CurrentContractProjectionAssumption.trivial` now populate the old runtime
   package internally; the remaining target-side runtime premise is the
   substantive `XResultRunnerCompleteness`.
+- [x] Re-express the preferred expression result-shape premise as the narrower
+  resource boundary. The default gas-aware audit alias now routes through
+  wrappers that take `RecursiveBridgeExprNoSuccessfulOutOfFuelContracts` and
+  internally construct `RecursiveBridgeExprResultContracts` with the checked
+  safe-expression checkpoint theorem; this keeps the all-expression fuel
+  condition explicit instead of hiding it in an arbitrary result-shape package.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail
