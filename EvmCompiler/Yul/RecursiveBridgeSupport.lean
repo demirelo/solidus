@@ -167176,11 +167176,17 @@ Current semantic-feature coverage needed to reuse the existing recursive bridge.
 This is deliberately separate from full source acceptedness. Today it is
 not the whole old `Reference.Safe.program` fragment predicate: it carries only
 the semantic families that are still bridge boundaries. Object-builtin user-call
-coverage is constructed from successful compiler lowering.
+coverage is constructed from successful compiler lowering; the remaining
+fields distinguish local code-image, external account-code inspection, create,
+and external-call boundaries.
 -/
 structure RecursiveBridgeFeatureCoverage (program : Program) : Prop where
-  importedIncomplete :
-    Reference.Safe.FeatureCoverage.importedIncompleteProgram program
+  localCodeImage :
+    Reference.Safe.FeatureCoverage.localCodeImageProgram program
+  externalCodeImage :
+    Reference.Safe.FeatureCoverage.externalCodeImageProgram program
+  createBoundary :
+    Reference.Safe.FeatureCoverage.createBoundaryProgram program
   externalBoundary :
     Reference.Safe.FeatureCoverage.externalBoundaryProgram program
 
@@ -167191,10 +167197,15 @@ theorem to_program_of_objectBuiltin {program : Program}
     (hObjectBuiltin :
       Reference.Safe.FeatureCoverage.objectBuiltinProgram program) :
     Reference.Safe.FeatureCoverage.program program := by
+  have hImported :
+      Reference.Safe.FeatureCoverage.importedIncompleteProgram program :=
+    (Reference.Safe.FeatureCoverage.importedIncompleteProgram_iff_precise
+      program).mpr
+      ⟨hCoverage.localCodeImage, hCoverage.externalCodeImage,
+        hCoverage.createBoundary⟩
   exact
     (Reference.Safe.FeatureCoverage.program_iff_split program).mpr
-      ⟨hCoverage.importedIncomplete, hCoverage.externalBoundary,
-        hObjectBuiltin⟩
+      ⟨hImported, hCoverage.externalBoundary, hObjectBuiltin⟩
 
 theorem to_program_of_compileChecked? {program : Program}
     {asm : Assembly.Program}
@@ -167212,8 +167223,14 @@ theorem of_program {program : Program}
       (Reference.Safe.FeatureCoverage.program_iff_split program).mp
         hCoverage with
     ⟨hImportedIncomplete, hExternalBoundary, _hObjectBuiltin⟩
+  rcases
+      (Reference.Safe.FeatureCoverage.importedIncompleteProgram_iff_precise
+        program).mp hImportedIncomplete with
+    ⟨hLocalCodeImage, hExternalCodeImage, hCreateBoundary⟩
   exact
-    { importedIncomplete := hImportedIncomplete
+    { localCodeImage := hLocalCodeImage
+      externalCodeImage := hExternalCodeImage
+      createBoundary := hCreateBoundary
       externalBoundary := hExternalBoundary }
 
 end RecursiveBridgeFeatureCoverage

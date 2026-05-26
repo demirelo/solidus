@@ -197,7 +197,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-24 22:04 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 03:20 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -231,9 +231,12 @@ Current assumption-cleanup checkpoint:
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
     `RecursiveBridgeTargetRuntime` is no longer the preferred public input.
 - [x] Classify the remaining `Reference.Safe.primitive` exclusions exactly.
-  Code-image ops plus `CREATE`/`CREATE2` are imported-Nethermind-Yul
-  semantics gaps; `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` are the
-  external-call boundary.
+  The public feature package now distinguishes local code-image operations
+  (`CODESIZE`/`CODECOPY`), external account-code inspection (`EXTCODESIZE` /
+  `EXTCODECOPY` / `EXTCODEHASH`), create (`CREATE`/`CREATE2`), and external
+  calls (`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`) as separate semantic
+  boundaries. Object-builtin user-call coverage is no longer public evidence:
+  it is constructed from successful checked compilation.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail

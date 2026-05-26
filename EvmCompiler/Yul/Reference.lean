@@ -24,6 +24,17 @@ def codeImagePrimitive : EvmYul.Operation .Yul → Prop
   | .Env .EXTCODEHASH => True
   | _ => False
 
+def localCodeImagePrimitive : EvmYul.Operation .Yul → Prop
+  | .Env .CODESIZE => True
+  | .Env .CODECOPY => True
+  | _ => False
+
+def externalCodeImagePrimitive : EvmYul.Operation .Yul → Prop
+  | .Env .EXTCODESIZE => True
+  | .Env .EXTCODECOPY => True
+  | .Env .EXTCODEHASH => True
+  | _ => False
+
 def externalCallCreatePrimitive : EvmYul.Operation .Yul → Prop
   | .System .CREATE => True
   | .System .CALL => True
@@ -31,6 +42,11 @@ def externalCallCreatePrimitive : EvmYul.Operation .Yul → Prop
   | .System .DELEGATECALL => True
   | .System .CREATE2 => True
   | .System .STATICCALL => True
+  | _ => False
+
+def createBoundaryPrimitive : EvmYul.Operation .Yul → Prop
+  | .System .CREATE => True
+  | .System .CREATE2 => True
   | _ => False
 
 def yulImportedSemanticsIncompletePrimitive :
@@ -90,6 +106,24 @@ theorem primitive_iff_not_codeImage_not_external
     externalCallCreatePrimitive] <;> try rename_i subop <;> cases subop <;>
     simp [primitive, codeImagePrimitive, externalCallCreatePrimitive]
 
+theorem codeImagePrimitive_iff_local_or_external
+    (op : EvmYul.Operation .Yul) :
+    codeImagePrimitive op ↔
+      localCodeImagePrimitive op ∨ externalCodeImagePrimitive op := by
+  cases op <;> simp [codeImagePrimitive, localCodeImagePrimitive,
+    externalCodeImagePrimitive] <;> try rename_i subop <;> cases subop <;>
+    simp [codeImagePrimitive, localCodeImagePrimitive,
+      externalCodeImagePrimitive]
+
+theorem externalCallCreatePrimitive_iff_create_or_call
+    (op : EvmYul.Operation .Yul) :
+    externalCallCreatePrimitive op ↔
+      createBoundaryPrimitive op ∨ externalCallBoundaryPrimitive op := by
+  cases op <;> simp [externalCallCreatePrimitive, createBoundaryPrimitive,
+    externalCallBoundaryPrimitive] <;> try rename_i subop <;> cases subop <;>
+    simp [externalCallCreatePrimitive, createBoundaryPrimitive,
+      externalCallBoundaryPrimitive]
+
 theorem primitive_iff_not_importedIncomplete_not_externalBoundary
     (op : EvmYul.Operation .Yul) :
     primitive op ↔
@@ -99,6 +133,18 @@ theorem primitive_iff_not_importedIncomplete_not_externalBoundary
     externalCallBoundaryPrimitive] <;> try rename_i subop <;> cases subop <;>
     simp [primitive, yulImportedSemanticsIncompletePrimitive,
       externalCallBoundaryPrimitive]
+
+theorem importedIncompletePrimitive_iff_local_external_create
+    (op : EvmYul.Operation .Yul) :
+    yulImportedSemanticsIncompletePrimitive op = False ↔
+      localCodeImagePrimitive op = False ∧
+        externalCodeImagePrimitive op = False ∧
+          createBoundaryPrimitive op = False := by
+  cases op <;> simp [yulImportedSemanticsIncompletePrimitive,
+    localCodeImagePrimitive, externalCodeImagePrimitive,
+    createBoundaryPrimitive] <;> try rename_i subop <;> cases subop <;>
+    simp [yulImportedSemanticsIncompletePrimitive, localCodeImagePrimitive,
+      externalCodeImagePrimitive, createBoundaryPrimitive]
 
 theorem lowered_basicOp_not_callCreate
     {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
@@ -436,10 +482,409 @@ noncomputable def program
     Prop :=
   contract primitive userCall program.contract
 
+mutual
+  theorem expr_iff_primitive_split3
+      (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop)
+      (hPrimitive :
+        ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+      (expr' : AstExpr) →
+      expr primitive userCall expr' ↔
+        expr p1 userCall expr' ∧
+          expr p2 userCall expr' ∧
+            expr p3 userCall expr'
+    | .Lit _value => by
+        simp [expr]
+    | .Var _name => by
+        simp [expr]
+    | .Call (.inl prim) args => by
+        constructor
+        · intro h
+          rcases h with ⟨hPrim, hArgs⟩
+          rcases (hPrimitive prim).mp hPrim with ⟨hP1, hP2, hP3⟩
+          rcases
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive args).mp hArgs with
+            ⟨hArgs1, hArgs2, hArgs3⟩
+          exact
+            ⟨⟨hP1, hArgs1⟩, ⟨hP2, hArgs2⟩, ⟨hP3, hArgs3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hP1, hArgs1⟩, ⟨hP2, hArgs2⟩, ⟨hP3, hArgs3⟩⟩
+          exact
+            ⟨(hPrimitive prim).mpr ⟨hP1, hP2, hP3⟩,
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive args).mpr ⟨hArgs1, hArgs2, hArgs3⟩⟩
+    | .Call (.inr functionName) args => by
+        constructor
+        · intro h
+          rcases h with ⟨hCall, hArgs⟩
+          rcases
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive args).mp hArgs with
+            ⟨hArgs1, hArgs2, hArgs3⟩
+          exact
+            ⟨⟨hCall, hArgs1⟩, ⟨hCall, hArgs2⟩, ⟨hCall, hArgs3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hCall, hArgs1⟩, ⟨_hCall2, hArgs2⟩,
+              ⟨_hCall3, hArgs3⟩⟩
+          exact
+            ⟨hCall,
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive args).mpr ⟨hArgs1, hArgs2, hArgs3⟩⟩
+
+  theorem exprs_iff_primitive_split3
+      (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop)
+      (hPrimitive :
+        ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+      (exprs' : List AstExpr) →
+      exprs primitive userCall exprs' ↔
+        exprs p1 userCall exprs' ∧
+          exprs p2 userCall exprs' ∧
+            exprs p3 userCall exprs'
+    | [] => by
+        simp [exprs]
+    | head :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hHead, hRest⟩
+          rcases
+              (expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive head).mp hHead with
+            ⟨hHead1, hHead2, hHead3⟩
+          rcases
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mp hRest with
+            ⟨hRest1, hRest2, hRest3⟩
+          exact
+            ⟨⟨hHead1, hRest1⟩, ⟨hHead2, hRest2⟩,
+              ⟨hHead3, hRest3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hHead1, hRest1⟩, ⟨hHead2, hRest2⟩,
+              ⟨hHead3, hRest3⟩⟩
+          exact
+            ⟨(expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive head).mpr ⟨hHead1, hHead2, hHead3⟩,
+              (exprs_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mpr ⟨hRest1, hRest2, hRest3⟩⟩
+
+  theorem stmt_iff_primitive_split3
+      (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop)
+      (hPrimitive :
+        ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+      (stmt' : AstStmt) →
+      stmt primitive userCall stmt' ↔
+        stmt p1 userCall stmt' ∧
+          stmt p2 userCall stmt' ∧
+            stmt p3 userCall stmt'
+    | .Block body => by
+        simpa [stmt] using
+          stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+            hPrimitive body
+    | .Let _names none => by
+        simp [stmt]
+    | .Let _names (some value) => by
+        simpa [stmt] using
+          expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+            hPrimitive value
+    | .Assign _names value => by
+        simpa [stmt] using
+          expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+            hPrimitive value
+    | .ExprStmtCall value => by
+        simpa [stmt] using
+          expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+            hPrimitive value
+    | .Switch scrutinee cases defaultBody => by
+        constructor
+        · intro h
+          rcases h with ⟨hScrutinee, hCases, hDefault⟩
+          rcases
+              (expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive scrutinee).mp hScrutinee with
+            ⟨hScrutinee1, hScrutinee2, hScrutinee3⟩
+          rcases
+              (cases_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cases).mp hCases with
+            ⟨hCases1, hCases2, hCases3⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive defaultBody).mp hDefault with
+            ⟨hDefault1, hDefault2, hDefault3⟩
+          exact
+            ⟨⟨hScrutinee1, hCases1, hDefault1⟩,
+              ⟨hScrutinee2, hCases2, hDefault2⟩,
+              ⟨hScrutinee3, hCases3, hDefault3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hScrutinee1, hCases1, hDefault1⟩,
+              ⟨hScrutinee2, hCases2, hDefault2⟩,
+              ⟨hScrutinee3, hCases3, hDefault3⟩⟩
+          exact
+            ⟨(expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive scrutinee).mpr
+                ⟨hScrutinee1, hScrutinee2, hScrutinee3⟩,
+              (cases_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cases).mpr
+                ⟨hCases1, hCases2, hCases3⟩,
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive defaultBody).mpr
+                ⟨hDefault1, hDefault2, hDefault3⟩⟩
+    | .For cond post body => by
+        constructor
+        · intro h
+          rcases h with ⟨hCond, hPost, hBody⟩
+          rcases
+              (expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cond).mp hCond with
+            ⟨hCond1, hCond2, hCond3⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive post).mp hPost with
+            ⟨hPost1, hPost2, hPost3⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mp hBody with
+            ⟨hBody1, hBody2, hBody3⟩
+          exact
+            ⟨⟨hCond1, hPost1, hBody1⟩,
+              ⟨hCond2, hPost2, hBody2⟩,
+              ⟨hCond3, hPost3, hBody3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hCond1, hPost1, hBody1⟩,
+              ⟨hCond2, hPost2, hBody2⟩,
+              ⟨hCond3, hPost3, hBody3⟩⟩
+          exact
+            ⟨(expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cond).mpr ⟨hCond1, hCond2, hCond3⟩,
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive post).mpr ⟨hPost1, hPost2, hPost3⟩,
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mpr ⟨hBody1, hBody2, hBody3⟩⟩
+    | .If cond body => by
+        constructor
+        · intro h
+          rcases h with ⟨hCond, hBody⟩
+          rcases
+              (expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cond).mp hCond with
+            ⟨hCond1, hCond2, hCond3⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mp hBody with
+            ⟨hBody1, hBody2, hBody3⟩
+          exact
+            ⟨⟨hCond1, hBody1⟩, ⟨hCond2, hBody2⟩,
+              ⟨hCond3, hBody3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hCond1, hBody1⟩, ⟨hCond2, hBody2⟩,
+              ⟨hCond3, hBody3⟩⟩
+          exact
+            ⟨(expr_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive cond).mpr ⟨hCond1, hCond2, hCond3⟩,
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mpr ⟨hBody1, hBody2, hBody3⟩⟩
+    | .Continue => by
+        simp [stmt]
+    | .Break => by
+        simp [stmt]
+    | .Leave => by
+        simp [stmt]
+
+  theorem stmts_iff_primitive_split3
+      (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop)
+      (hPrimitive :
+        ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+      (stmts' : List AstStmt) →
+      stmts primitive userCall stmts' ↔
+        stmts p1 userCall stmts' ∧
+          stmts p2 userCall stmts' ∧
+            stmts p3 userCall stmts'
+    | [] => by
+        simp [stmts]
+    | head :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hHead, hRest⟩
+          rcases
+              (stmt_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive head).mp hHead with
+            ⟨hHead1, hHead2, hHead3⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mp hRest with
+            ⟨hRest1, hRest2, hRest3⟩
+          exact
+            ⟨⟨hHead1, hRest1⟩, ⟨hHead2, hRest2⟩,
+              ⟨hHead3, hRest3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hHead1, hRest1⟩, ⟨hHead2, hRest2⟩,
+              ⟨hHead3, hRest3⟩⟩
+          exact
+            ⟨(stmt_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive head).mpr ⟨hHead1, hHead2, hHead3⟩,
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mpr ⟨hRest1, hRest2, hRest3⟩⟩
+
+  theorem cases_iff_primitive_split3
+      (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+      (userCall : Name → Prop)
+      (hPrimitive :
+        ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+      (cases' : List (Word × List AstStmt)) →
+      casesSafe primitive userCall cases' ↔
+        casesSafe p1 userCall cases' ∧
+          casesSafe p2 userCall cases' ∧
+            casesSafe p3 userCall cases'
+    | [] => by
+        simp [casesSafe]
+    | (_value, body) :: rest => by
+        constructor
+        · intro h
+          rcases h with ⟨hBody, hRest⟩
+          rcases
+              (stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mp hBody with
+            ⟨hBody1, hBody2, hBody3⟩
+          rcases
+              (cases_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mp hRest with
+            ⟨hRest1, hRest2, hRest3⟩
+          exact
+            ⟨⟨hBody1, hRest1⟩, ⟨hBody2, hRest2⟩,
+              ⟨hBody3, hRest3⟩⟩
+        · intro h
+          rcases h with
+            ⟨⟨hBody1, hRest1⟩, ⟨hBody2, hRest2⟩,
+              ⟨hBody3, hRest3⟩⟩
+          exact
+            ⟨(stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive body).mpr ⟨hBody1, hBody2, hBody3⟩,
+              (cases_iff_primitive_split3 primitive p1 p2 p3 userCall
+                hPrimitive rest).mpr ⟨hRest1, hRest2, hRest3⟩⟩
+end
+
+theorem functionDefinition_iff_primitive_split3
+    (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop)
+    (hPrimitive :
+      ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+    (fn : AstFunctionDefinition) →
+    functionDefinition primitive userCall fn ↔
+      functionDefinition p1 userCall fn ∧
+        functionDefinition p2 userCall fn ∧
+          functionDefinition p3 userCall fn
+  | .Def _params _returns body => by
+      simpa [functionDefinition] using
+        stmts_iff_primitive_split3 primitive p1 p2 p3 userCall
+          hPrimitive body
+
+theorem functionEntries_iff_primitive_split3
+    (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop)
+    (hPrimitive :
+      ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op) :
+    (entries : List (Name × AstFunctionDefinition)) →
+    functionEntries primitive userCall entries ↔
+      functionEntries p1 userCall entries ∧
+        functionEntries p2 userCall entries ∧
+          functionEntries p3 userCall entries
+  | [] => by
+      simp [functionEntries]
+  | (_name, fn) :: rest => by
+      constructor
+      · intro h
+        rcases h with ⟨hFn, hRest⟩
+        rcases
+            (functionDefinition_iff_primitive_split3 primitive p1 p2 p3
+              userCall hPrimitive fn).mp hFn with
+          ⟨hFn1, hFn2, hFn3⟩
+        rcases
+            (functionEntries_iff_primitive_split3 primitive p1 p2 p3
+              userCall hPrimitive rest).mp hRest with
+          ⟨hRest1, hRest2, hRest3⟩
+        exact
+          ⟨⟨hFn1, hRest1⟩, ⟨hFn2, hRest2⟩, ⟨hFn3, hRest3⟩⟩
+      · intro h
+        rcases h with
+          ⟨⟨hFn1, hRest1⟩, ⟨hFn2, hRest2⟩, ⟨hFn3, hRest3⟩⟩
+        exact
+          ⟨(functionDefinition_iff_primitive_split3 primitive p1 p2 p3
+              userCall hPrimitive fn).mpr ⟨hFn1, hFn2, hFn3⟩,
+            (functionEntries_iff_primitive_split3 primitive p1 p2 p3
+              userCall hPrimitive rest).mpr ⟨hRest1, hRest2, hRest3⟩⟩
+
+theorem contract_iff_primitive_split3
+    (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop)
+    (hPrimitive :
+      ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op)
+    (contract' : AstContract) :
+    contract primitive userCall contract' ↔
+      contract p1 userCall contract' ∧
+        contract p2 userCall contract' ∧
+          contract p3 userCall contract' := by
+  constructor
+  · intro h
+    rcases h with ⟨hDispatcher, hFunctions⟩
+    rcases
+        (stmt_iff_primitive_split3 primitive p1 p2 p3 userCall hPrimitive
+          contract'.dispatcher).mp hDispatcher with
+      ⟨hDispatcher1, hDispatcher2, hDispatcher3⟩
+    rcases
+        (functionEntries_iff_primitive_split3 primitive p1 p2 p3 userCall
+          hPrimitive (Contract.functionEntries contract')).mp hFunctions with
+      ⟨hFunctions1, hFunctions2, hFunctions3⟩
+    exact
+      ⟨⟨hDispatcher1, hFunctions1⟩, ⟨hDispatcher2, hFunctions2⟩,
+        ⟨hDispatcher3, hFunctions3⟩⟩
+  · intro h
+    rcases h with
+      ⟨⟨hDispatcher1, hFunctions1⟩, ⟨hDispatcher2, hFunctions2⟩,
+        ⟨hDispatcher3, hFunctions3⟩⟩
+    exact
+      ⟨(stmt_iff_primitive_split3 primitive p1 p2 p3 userCall hPrimitive
+          contract'.dispatcher).mpr
+          ⟨hDispatcher1, hDispatcher2, hDispatcher3⟩,
+        (functionEntries_iff_primitive_split3 primitive p1 p2 p3 userCall
+          hPrimitive (Contract.functionEntries contract')).mpr
+          ⟨hFunctions1, hFunctions2, hFunctions3⟩⟩
+
+theorem program_iff_primitive_split3
+    (primitive p1 p2 p3 : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop)
+    (hPrimitive :
+      ∀ op, primitive op ↔ p1 op ∧ p2 op ∧ p3 op)
+    (program' : Program) :
+    program primitive userCall program' ↔
+      program p1 userCall program' ∧
+        program p2 userCall program' ∧
+          program p3 userCall program' := by
+  simpa [program] using
+    contract_iff_primitive_split3 primitive p1 p2 p3 userCall hPrimitive
+      program'.contract
+
 end Family
 
 def importedIncompletePrimitive (op : EvmYul.Operation .Yul) : Prop :=
   Safe.yulImportedSemanticsIncompletePrimitive op = False
+
+def localCodeImagePrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  Safe.localCodeImagePrimitive op = False
+
+def externalCodeImagePrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  Safe.externalCodeImagePrimitive op = False
+
+def createBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  Safe.createBoundaryPrimitive op = False
 
 def externalBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
   Safe.externalCallBoundaryPrimitive op = False
@@ -532,6 +977,18 @@ noncomputable def importedIncompleteProgram :
     Program → Prop :=
   Family.program importedIncompletePrimitive Family.anyUserCall
 
+noncomputable def localCodeImageProgram :
+    Program → Prop :=
+  Family.program localCodeImagePrimitive Family.anyUserCall
+
+noncomputable def externalCodeImageProgram :
+    Program → Prop :=
+  Family.program externalCodeImagePrimitive Family.anyUserCall
+
+noncomputable def createBoundaryProgram :
+    Program → Prop :=
+  Family.program createBoundaryPrimitive Family.anyUserCall
+
 noncomputable def externalBoundaryProgram :
     Program → Prop :=
   Family.program externalBoundaryPrimitive Family.anyUserCall
@@ -539,6 +996,25 @@ noncomputable def externalBoundaryProgram :
 noncomputable def objectBuiltinProgram :
     Program → Prop :=
   Family.program Family.anyPrimitive objectBuiltinUserCall
+
+theorem importedIncompletePrimitive_iff_precise
+    (op : EvmYul.Operation .Yul) :
+    importedIncompletePrimitive op ↔
+      localCodeImagePrimitive op ∧
+        externalCodeImagePrimitive op ∧ createBoundaryPrimitive op := by
+  exact Safe.importedIncompletePrimitive_iff_local_external_create op
+
+theorem importedIncompleteProgram_iff_precise
+    (program : Program) :
+    importedIncompleteProgram program ↔
+      localCodeImageProgram program ∧
+        externalCodeImageProgram program ∧ createBoundaryProgram program := by
+  simpa [importedIncompleteProgram, localCodeImageProgram,
+    externalCodeImageProgram, createBoundaryProgram] using
+    Family.program_iff_primitive_split3 importedIncompletePrimitive
+      localCodeImagePrimitive externalCodeImagePrimitive
+      createBoundaryPrimitive Family.anyUserCall
+      importedIncompletePrimitive_iff_precise program
 
 mutual
   def expr : AstExpr → Prop
