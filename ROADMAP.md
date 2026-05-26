@@ -2999,6 +2999,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
      emitted assembly syntactically contains no call/create opcodes discharge
      `ExternalInteractionAssumption` without a separate agreement premise.
    - [ ] Add explicit external-world/account-code call semantics and state relation before re-admitting `CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, or `STATICCALL`.
+     - [x] Add a concrete compiled-code/account/account-map relation for external worlds, plus call-target lookup lemmas for precompile and ordinary compiled-account cases.
+     - [ ] Correct or explicitly model the precompile mismatch: EVM `CALL` uses `toExecute` and addresses 1-10 as precompiles, while the imported Yul `CALL` path currently account-lookups and dispatches Yul code.
+     - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
    - [x] Add checked lowering decomposition for bound binary primitive arguments and a compiler-output-aware `add(left, right)` bridge theorem that composes the generated hidden-argument prelude with generic `toStackSeq?` target replay and the target `ADD` proof.
