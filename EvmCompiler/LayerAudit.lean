@@ -2742,8 +2742,8 @@ abbrev recursiveBridgeFeatureCoverage :=
 abbrev recursiveBridgeSourceAcceptedToFullAndCoverage :=
   @Yul.Program.RecursiveBridgeSourceAccepted.toFullAndCoverage
 
-abbrev recursiveBridgeSourceAcceptedOfFullAndCoverage :=
-  @Yul.Program.RecursiveBridgeSourceAccepted.ofFullAndCoverage
+abbrev recursiveBridgeSourceAcceptedOfFullCoverageAndCompileChecked :=
+  @Yul.Program.RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
 
 abbrev recursiveBridgeCompileResources :=
   @Yul.Program.RecursiveBridgeCompileResources

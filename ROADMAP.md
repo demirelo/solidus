@@ -197,7 +197,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 03:20 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 03:24 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -224,8 +224,9 @@ Current assumption-cleanup checkpoint:
     `.regular .OutOfFuel` marker.
   - Target entry/runtime: checked compiler success, initial shared-state
     relation, canonical entry PC/empty stack, code-size decode-window bound,
-    jumpdest-scanner correctness, gas oracle, out-of-gas policy, and
-    current-contract projection.
+    jumpdest-scanner correctness, and gas-aware runner completeness. The
+    marker-only gas oracle, out-of-gas policy, and current-contract projection
+    packages are constructed internally by trivial checked constructors.
   - Discharged/generated facts at the top boundary: emitted no-call/create is
     proved from accepted source plus checked compilation; `DecodeSafety` is
     proved from checked assembler layout plus `TargetFitsDecodeWindow`; raw
@@ -237,6 +238,12 @@ Current assumption-cleanup checkpoint:
   calls (`CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL`) as separate semantic
   boundaries. Object-builtin user-call coverage is no longer public evidence:
   it is constructed from successful checked compilation.
+- [x] Remove the marker-only gas bookkeeping premises from the preferred
+  gas-aware top wrappers. `GasOracleAssumption.trivial`,
+  `OutOfGasPolicyAssumption.trivial`, and
+  `CurrentContractProjectionAssumption.trivial` now populate the old runtime
+  package internally; the remaining target-side runtime premise is the
+  substantive `XResultRunnerCompleteness`.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail

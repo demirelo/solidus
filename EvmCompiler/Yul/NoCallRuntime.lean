@@ -914,10 +914,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -958,8 +954,14 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X
     (RecursiveBridgeTopNoCallSourceCompileAssumptions.withCanonicalObservation
       hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
-      hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-      outOfGasPolicy currentContractProjection hInitialPc hInitialStack)
+      hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+      (Assembly.GasOracleAssumption.trivial (program := asm)
+        (initial := initial))
+      (Assembly.OutOfGasPolicyAssumption.trivial (program := asm)
+        (initial := initial))
+      (Assembly.CurrentContractProjectionAssumption.trivial (program := asm)
+        (initial := initial))
+      hInitialPc hInitialStack)
     hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
@@ -992,10 +994,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1025,8 +1023,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       _hGasOracle, _hOutOfGas, _hProjection, hTrace, hRuns⟩ :=
     compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
       hSourceAccepted hSourceCompileAccepted hSemantics hInitialSharedRel
-      hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-      outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
+      hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+      hInitialPc hInitialStack hX
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound, hRun,
       hOutcome, hWholeRel, hTrace, fun gas hGas hUInt256 => by
@@ -1067,10 +1065,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1113,8 +1107,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (RecursiveBridgeSemanticCoreContracts.ofBoundaries hPrimitive hTerminal
       hExpr)
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
-    hX
+    hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1148,10 +1141,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1180,8 +1169,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (RecursiveBridgeSemanticCoreContracts.ofBoundaries hPrimitive hTerminal
       hExpr)
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
-    hX
+    hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1215,10 +1203,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1259,8 +1243,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
     hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal hExpr
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
-    hX
+    hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1295,10 +1278,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1341,8 +1320,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (RecursiveBridgePrimitiveContracts.of_stack hPrimitiveSound
       hPrimitiveStack)
     hTerminal hExpr hInitialSharedRel hSourceRun hCompileTarget decodeWindow
-    jumpdestCorrect gasOracle outOfGasPolicy currentContractProjection
-    hInitialPc hInitialStack hX
+    jumpdestCorrect hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1376,10 +1354,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1406,8 +1380,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalBoundaries_X
     hSourceAccepted hSourceCompileAccepted hPrimitive hTerminal hExpr
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
-    gasOracle outOfGasPolicy currentContractProjection hInitialPc hInitialStack
-    hX
+    hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1442,10 +1415,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1474,8 +1443,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (RecursiveBridgePrimitiveContracts.of_stack hPrimitiveSound
       hPrimitiveStack)
     hTerminal hExpr hInitialSharedRel hSourceRun hCompileTarget decodeWindow
-    jumpdestCorrect gasOracle outOfGasPolicy currentContractProjection
-    hInitialPc hInitialStack hX
+    jumpdestCorrect hInitialPc hInitialStack hX
 
 /--
 Preferred full-source acceptedness wrapper for the current gas-aware route.
@@ -1519,10 +1487,6 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1569,8 +1533,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
       hCompileResources)
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
-    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-    outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+    hInitialPc hInitialStack hX
 
 theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     {cfg : Reference.StateRelConfig}
@@ -1606,10 +1570,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hX :
@@ -1642,8 +1602,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
       hCompileResources)
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
-    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-    outOfGasPolicy currentContractProjection hInitialPc hInitialStack hX
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+    hInitialPc hInitialStack hX
 
 /--
 Preferred full-source gas-aware wrapper using the named runner-completeness
@@ -1651,7 +1611,8 @@ boundary instead of a raw trace-to-`X` certificate callback.
 
 The compiler still derives the concrete `BlockTraceResult`; the remaining
 premise is exactly the gas-aware runner theorem for the assembled
-program/target/initial state.
+program/target/initial state. The marker-only gas bookkeeping packages are
+constructed internally by their checked trivial constructors.
 -/
 theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_XRunner
     {cfg : Reference.StateRelConfig}
@@ -1687,10 +1648,6 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hRunner :
@@ -1727,8 +1684,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
   compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     hFullSourceAccepted hFeatureCoverage hCompileResources
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
-    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-    outOfGasPolicy currentContractProjection hInitialPc hInitialStack
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+    hInitialPc hInitialStack
     (fun hTrace =>
       Assembly.GasAware.XResultRunnerCompleteness.toPreconditions
         hRunner hTrace)
@@ -1767,10 +1724,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hRunner :
@@ -1793,8 +1746,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
   compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonicalSplitResourceBoundaries_X
     hFullSourceAccepted hFeatureCoverage hCompileResources
     hPrimitiveSound hPrimitiveStack hTerminal hExpr hInitialSharedRel
-    hSourceRun hCompileTarget decodeWindow jumpdestCorrect gasOracle
-    outOfGasPolicy currentContractProjection hInitialPc hInitialStack
+    hSourceRun hCompileTarget decodeWindow jumpdestCorrect
+    hInitialPc hInitialStack
     (fun hTrace =>
       Assembly.GasAware.XResultRunnerCompleteness.toPreconditions
         hRunner hTrace)
@@ -1830,10 +1783,6 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hRunner :
@@ -1872,8 +1821,8 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun
-    hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
-    currentContractProjection hInitialPc hInitialStack hRunner
+    hCompileTarget decodeWindow jumpdestCorrect hInitialPc hInitialStack
+    hRunner
 
 theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_XRunner
     {cfg : Reference.StateRelConfig}
@@ -1906,10 +1855,6 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
       compileCheckedAssemblyTarget? program = some (asm, target))
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
-    (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
-    (currentContractProjection :
-      Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = [])
     (hRunner :
@@ -1934,8 +1879,8 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     Locals.SourceLowering.PrimitiveSemantics.structured_primitiveSound
     RecursiveBridgePrimitiveStackArityContracts.structured
     hTerminal hExpr hInitialSharedRel hSourceRun
-    hCompileTarget decodeWindow jumpdestCorrect gasOracle outOfGasPolicy
-    currentContractProjection hInitialPc hInitialStack hRunner
+    hCompileTarget decodeWindow jumpdestCorrect hInitialPc hInitialStack
+    hRunner
 
 end Program
 end Yul
