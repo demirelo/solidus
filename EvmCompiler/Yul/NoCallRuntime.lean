@@ -934,7 +934,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialWorld :
       RecursiveBridgeInitialWorldRel cfg program shared initial)
     (hSourceRun :
@@ -983,7 +983,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
     hSourceAccepted hSourceCompileAccepted
     (RecursiveBridgeSemanticCoreContracts.ofBoundaries hPrimitive hTerminal
-      hExpr)
+      hExpr.to_resultContracts)
     hInitialWorld hSourceRun hCompileTarget decodeWindow jumpdestCorrect
     hInitialPc hInitialStack hX
 
@@ -1006,7 +1006,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1045,7 +1045,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
   compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X
     hSourceAccepted hSourceCompileAccepted
     (RecursiveBridgeSemanticCoreContracts.ofBoundaries hPrimitive hTerminal
-      hExpr)
+      hExpr.to_resultContracts)
     hInitialSharedRel hSourceRun hCompileTarget decodeWindow jumpdestCorrect
     hInitialPc hInitialStack hX
 
@@ -1068,7 +1068,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1143,7 +1143,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1219,7 +1219,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1280,7 +1280,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_programAcceptedRecursiveBr
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1352,7 +1352,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1435,7 +1435,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hTerminal :
       RecursiveBridgeTerminalContracts cfg terminalRel revertRel prim
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1501,7 +1501,7 @@ theorem compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAl
     (hTerminal :
       RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1577,7 +1577,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursive
     (hTerminal :
       RecursiveBridgeTerminalObservationContracts cfg terminalRel revertRel
         program)
-    (hExpr : RecursiveBridgeExprResultContracts cfg program)
+    (hExpr : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
     (hInitialSharedRel :
       Reference.SharedStateRel cfg
         { shared with
@@ -1713,7 +1713,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
   exact
     compile_whole_program_result_sound_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_X
       (hStatic.2.toFullSourceAccepted hProgramAccepted) hFeatures.2
-      hResources.2 hTerminal hExpr.to_resultContracts
+      hResources.2 hTerminal hExpr
       (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
       hSourceRun hBytecode.1 hBytecode.2.1 hBytecode.2.2
       (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
@@ -1784,7 +1784,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
   exact
     compile_whole_program_result_no_out_of_gas_of_fullSourceCoveredRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_X
       (hStatic.2.toFullSourceAccepted hProgramAccepted) hFeatures.2
-      hResources.2 hTerminal hExpr.to_resultContracts
+      hResources.2 hTerminal hExpr
       (RecursiveBridgeInitialWorldRel.to_canonicalEntryState hInitialWorld)
       hSourceRun hBytecode.1 hBytecode.2.1 hBytecode.2.2
       (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)

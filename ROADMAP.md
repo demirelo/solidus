@@ -333,10 +333,10 @@ Current assumption-cleanup checkpoint:
   package internally; the remaining target-side runtime premise is now the
   exact trace-to-`X` gas precondition callback.
 - [x] Re-express the preferred expression result-shape premise as the narrower
-  source-fuel resource boundary. The default gas-aware audit alias now takes
-  `RecursiveBridgeExprNoOutOfFuelContracts` directly and constructs
-  `RecursiveBridgeExprResultContracts` internally from checked safe-expression
-  checkpoint preservation.
+  source-fuel resource boundary. The no-call/gas-aware wrapper spine above
+  semantic-core construction now takes `RecursiveBridgeExprNoOutOfFuelContracts`
+  directly and constructs `RecursiveBridgeExprResultContracts` internally from
+  checked safe-expression checkpoint preservation.
 - [x] Construct canonical target entry state in the preferred gas-aware wrapper.
   The default audit alias now takes an initial shared-state relation against an
   arbitrary EVM state and runs the target from `canonicalEntryState initial`,
@@ -515,10 +515,11 @@ Current assumption-cleanup checkpoint:
     gas-aware aliases now route through this split-boundary surface rather than
     through the opaque semantic-core bundle.
   - [x] Shrink the expression result-shape package to the actual remaining
-    resource premise. The preferred gas-aware aliases now take
-    `RecursiveBridgeExprNoOutOfFuelContracts` directly; checkpoint preservation
-    for safe expressions constructs `RecursiveBridgeExprResultContracts`
-    internally, leaving only the successful `.OutOfFuel` source-fuel boundary.
+    resource premise. The no-call/gas-aware wrapper spine above semantic-core
+    construction now takes `RecursiveBridgeExprNoOutOfFuelContracts` directly;
+    checkpoint preservation for safe expressions constructs
+    `RecursiveBridgeExprResultContracts` internally, leaving only the
+    successful `.OutOfFuel` source-fuel boundary.
   - [x] Add the result-level canonical `EVM.X` wrapper
     `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_canonical_X`,
     and route the preferred `LayerAudit` gas-aware aliases through it. The
