@@ -123,6 +123,9 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
   - Declaration targets are not in scope while their initializer/call
     arguments are evaluated; assignment targets are checked before evaluating
     the right-hand side, matching the Yul evaluation boundary.
+  - Procedure-call name/arity and terminal-argument arity are checked before
+    argument evaluation, so malformed source calls do not get argument
+    side-effects.
   - Empty declaration and assignment target lists are source errors; empty
     procedure-call target lists remain valid only for zero-return calls.
   - Raw execution rejects duplicate procedure names and malformed procedure

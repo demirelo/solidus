@@ -443,13 +443,13 @@ mutual
             if !(state.canAssign? targets) then
               invalid
             else
-            let (stateAfterArgs, argValues) ←
-              Expr.evalArgsScoped prim ctx.scope args state
             match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
-                if argValues.length = proc.params.length ∧
+                if args.length = proc.params.length ∧
                     targets.length = proc.returns.length then
+                  let (stateAfterArgs, argValues) ←
+                    Expr.evalArgsScoped prim ctx.scope args state
                   let returnVars ←
                     match
                         Store.insertMany proc.returns
@@ -499,13 +499,13 @@ mutual
             if !(state.canDeclareNonempty? names) then
               invalid
             else
-            let (stateAfterArgs, argValues) ←
-              Expr.evalArgsScoped prim ctx.scope args state
             match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
-                if argValues.length = proc.params.length ∧
+                if args.length = proc.params.length ∧
                     names.length = proc.returns.length then
+                  let (stateAfterArgs, argValues) ←
+                    Expr.evalArgsScoped prim ctx.scope args state
                   let returnVars ←
                     match
                         Store.insertMany proc.returns
@@ -552,10 +552,13 @@ mutual
                 else
                   invalid
         | .terminal kind args => do
-            let (stateAfterArgs, values) ←
-              Expr.evalArgsScoped prim ctx.scope args state
-            let shared ← prim.terminal kind stateAfterArgs.shared values
-            .ok (Outcome.halt kind (stateAfterArgs.withShared shared) ctx.scope)
+            if args.length = kind.argCount then
+              let (stateAfterArgs, values) ←
+                Expr.evalArgsScoped prim ctx.scope args state
+              let shared ← prim.terminal kind stateAfterArgs.shared values
+              .ok (Outcome.halt kind (stateAfterArgs.withShared shared) ctx.scope)
+            else
+              invalid
         | .invalid =>
             .ok (Outcome.invalid state ctx.scope)
 
