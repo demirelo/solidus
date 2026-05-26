@@ -7,12 +7,10 @@ namespace Locals
 /-
 Stack-free source semantics for the locals abstraction.
 
-The existing `Locals.Direct` interpreter is the checked stack-lowering backend:
-it interprets locals by looking up stack depths, emitting DUP/SWAP/POP behavior,
-and threading concrete EVM stacks.  This namespace is the source-side contract
-the layers above locals should target instead.  Stack slots, layout depths, and
-return-frame encodings belong in the compiler relation from this semantics to
-the stack-shaped backend.
+This namespace is the source-side contract the layers above locals should
+target. Stack slots, layout depths, and return-frame encodings belong in
+compiler relations below this semantics, not in the meaning of the source
+language.
 -/
 namespace Source
 

@@ -7,12 +7,11 @@ namespace Functions
 /-
 Stack-free source semantics for the function abstraction.
 
-`Functions.Direct` is still the lowering target into the locals/procedure
-backend.  This namespace is the source contract that higher layers should see:
-function calls evaluate arguments to values, execute a fresh function-local
-environment with parameter and return variables, and assign returned values back
-to named caller targets.  It deliberately does not mention stack frames, return
-tokens, layout depths, cleanup code, or procedure return machinery.
+This namespace is the source contract that higher layers should see: function
+calls evaluate arguments to values, execute a fresh function-local environment
+with parameter and return variables, and assign returned values back to named
+caller targets. It deliberately does not mention stack frames, return tokens,
+layout depths, cleanup code, or procedure return machinery.
 -/
 namespace Source
 
