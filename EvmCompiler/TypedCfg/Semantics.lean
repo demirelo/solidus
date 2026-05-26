@@ -305,8 +305,11 @@ def run (program : Program) (block : Block) (state : RunState) :
   if !block.input.matchesStack state.evm.stack then
     .ok (.invalid state)
   else
-  let (evm, _shape) ← runBodyWithShape? block.body block.input state.evm
-  runTerm program block.term (state.withEVM evm)
+  let (evm, outputShape) ← runBodyWithShape? block.body block.input state.evm
+  let state' := state.withEVM evm
+  match block.term.type? program outputShape with
+  | none => .ok (.invalid state')
+  | some _ => runTerm program block.term state'
 
 end Block
 

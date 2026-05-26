@@ -56,6 +56,9 @@ Proof rule:
     input shape, including exact values for literal slots.
   - Every instruction step rechecks the runtime stack against the computed
     output shape.
+  - Block terminators are checked against the body output shape before
+    execution, so malformed jumps, calls, returns, and halts become semantic
+    `invalid` outcomes even for unchecked raw programs.
   - Fuel exhaustion is represented as a distinct `outOfFuel` outcome carrying
     the current label and run state, not as invalid execution.
   - Raw `PC` is rejected at this layer because typed CFG has symbolic labels,
