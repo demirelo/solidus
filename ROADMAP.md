@@ -110,6 +110,8 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     the right-hand side, matching the Yul evaluation boundary.
   - Empty declaration and assignment target lists are source errors; empty
     procedure-call target lists remain valid only for zero-return calls.
+  - Raw execution rejects duplicate procedure names and malformed procedure
+    frames whose params/returns collide.
 - [x] Create `EvmCompiler.StackFreeCfg.Accepted`.
   - Reject only malformed/ill-scoped/ill-typed programs.
   - Record explicit unsupported features, if any, as source-language coverage
@@ -119,6 +121,7 @@ Goal: define the first true stack-free compiler target above `TypedCfg`.
     than the isolated primitive adapter's synthetic program counter.
   - Reject empty declaration, assignment, and declaration-by-call targets
     while preserving statement calls to zero-return procedures.
+  - Reject duplicate switch case values.
   - Provide executable `Program.accepted?` for the compiler gate; theorem work
     still needs to connect this checker to the Prop-level `Accepted`.
 - [x] Create `EvmCompiler.StackFreeCfg.Compiler`.

@@ -259,6 +259,39 @@ def select (scrutinee : Word) :
 
 end Switch
 
+namespace Proc
+
+def frameNames (proc : Proc) : List Name :=
+  proc.returns ++ proc.params
+
+def frameNamesWellFormed? (proc : Proc) : Bool :=
+  decide proc.frameNames.Nodup
+
+end Proc
+
+namespace Program
+
+def procNamesUnique? (program : Program) : Bool :=
+  decide (program.procs.map Proc.name).Nodup
+
+def procsWellFormed? (program : Program) : Bool :=
+  program.procs.all Proc.frameNamesWellFormed?
+
+def wellFormed? (program : Program) : Bool :=
+  program.procNamesUnique? && program.procsWellFormed?
+
+def findCallableProc? (program : Program) (name : Name) : Option Proc := do
+  if program.procNamesUnique? then
+    let proc ← program.findProc? name
+    if proc.frameNamesWellFormed? then
+      some proc
+    else
+      none
+  else
+    none
+
+end Program
+
 mutual
   def Block.run (fuel : Nat) (prim : PrimitiveSemantics) (program : Program)
       (ctx : Ctx) (block : Block) (state : State) :
@@ -372,7 +405,7 @@ mutual
               invalid
             else
             let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
-            match program.findProc? functionName with
+            match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
                 if argValues.length = proc.params.length ∧
@@ -427,7 +460,7 @@ mutual
               invalid
             else
             let (stateAfterArgs, argValues) ← Expr.evalArgs prim args state
-            match program.findProc? functionName with
+            match program.findCallableProc? functionName with
             | none => invalid
             | some proc =>
                 if argValues.length = proc.params.length ∧
@@ -522,7 +555,10 @@ namespace Program
 
 def runState (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
     (state : State) : Except Exception Outcome :=
-  Block.run fuel prim program Ctx.initial program.body state
+  if program.wellFormed? then
+    Block.run fuel prim program Ctx.initial program.body state
+  else
+    invalid
 
 def run (prim : PrimitiveSemantics) (fuel : Nat) (program : Program)
     (shared : SharedState) : Except Exception Outcome :=

@@ -143,6 +143,10 @@ def ExprList.allOne? (profile : PrimitiveProfile) (env : List Name) :
   | expr :: rest =>
       Expr.one? profile env expr && ExprList.allOne? profile env rest
 
+def caseValues : List (Word × Block) → List Word
+  | [] => []
+  | (value, _body) :: rest => value :: caseValues rest
+
 mutual
   def Block.OutEnv (env : List Name) : Block → Option (List Name)
     | ⟨stmts⟩ => StmtList.OutEnv env stmts
@@ -206,6 +210,7 @@ mutual
           Block.Accepted profile sigs canBreak canContinue canLeave env body
     | .switch scrutinee cases defaultBody =>
         Expr.One profile env scrutinee ∧
+          (caseValues cases).Nodup ∧
           Cases.Accepted profile sigs canBreak canContinue canLeave env cases ∧
           Default.Accepted profile sigs canBreak canContinue canLeave env
             defaultBody
@@ -294,6 +299,7 @@ mutual
           Block.accepted? profile sigs canBreak canContinue canLeave env body
     | .switch scrutinee cases defaultBody =>
         Expr.one? profile env scrutinee &&
+          decide (caseValues cases).Nodup &&
           Cases.accepted? profile sigs canBreak canContinue canLeave env cases &&
           Default.accepted? profile sigs canBreak canContinue canLeave env
             defaultBody
