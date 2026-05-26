@@ -81,6 +81,54 @@ theorem CompiledAccountRel.with_balance
       tstorage := hAccount.tstorage
       code := hAccount.code }
 
+theorem CompiledAccountRel.update_storage
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm)
+    (slot value : EvmYul.UInt256) :
+    CompiledAccountRel
+      (EvmYul.Account.updateStorage yul slot value)
+      (EvmYul.Account.updateStorage evm slot value) := by
+  unfold EvmYul.Account.updateStorage
+  by_cases hZero : (value == default) = true
+  · simp [hZero]
+    exact
+      { nonce := hAccount.nonce
+        balance := hAccount.balance
+        storage := by simp [hAccount.storage]
+        tstorage := hAccount.tstorage
+        code := hAccount.code }
+  · simp [hZero]
+    exact
+      { nonce := hAccount.nonce
+        balance := hAccount.balance
+        storage := by simp [hAccount.storage]
+        tstorage := hAccount.tstorage
+        code := hAccount.code }
+
+theorem CompiledAccountRel.update_transientStorage
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm)
+    (slot value : EvmYul.UInt256) :
+    CompiledAccountRel
+      (EvmYul.Account.updateTransientStorage yul slot value)
+      (EvmYul.Account.updateTransientStorage evm slot value) := by
+  unfold EvmYul.Account.updateTransientStorage
+  by_cases hZero : (value == default) = true
+  · simp [hZero]
+    exact
+      { nonce := hAccount.nonce
+        balance := hAccount.balance
+        storage := hAccount.storage
+        tstorage := by simp [hAccount.tstorage]
+        code := hAccount.code }
+  · simp [hZero]
+    exact
+      { nonce := hAccount.nonce
+        balance := hAccount.balance
+        storage := hAccount.storage
+        tstorage := by simp [hAccount.tstorage]
+        code := hAccount.code }
+
 theorem CompiledAccountRel.default_with_balance
     (balance : EvmYul.UInt256) :
     CompiledAccountRel
@@ -142,6 +190,89 @@ theorem CompiledAccountMapRel.find_evm
       yul.find? addr = some yulAccount ∧
         CompiledAccountRel yulAccount evmAccount :=
   hWorld.evm_to_yul addr evmAccount hFind
+
+theorem CompiledAccountMapRel.not_find_yul_of_not_find_evm
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {addr : EvmYul.AccountAddress}
+    (hFind : evm.find? addr = none) :
+    yul.find? addr = none := by
+  cases hYul : yul.find? addr with
+  | none => rfl
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with ⟨evmAccount, hEvm, _⟩
+      simp [hFind] at hEvm
+
+theorem CompiledAccountMapRel.not_find_evm_of_not_find_yul
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {addr : EvmYul.AccountAddress}
+    (hFind : yul.find? addr = none) :
+    evm.find? addr = none := by
+  cases hEvm : evm.find? addr with
+  | none => rfl
+  | some evmAccount =>
+      rcases hWorld.find_evm hEvm with ⟨yulAccount, hYul, _⟩
+      simp [hFind] at hYul
+
+theorem CompiledAccountMapRel.balance_at
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) :
+    (yul.find? addr |>.elim ⟨0⟩ (·.balance)) =
+      (evm.find? addr |>.elim ⟨0⟩ (·.balance)) := by
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [hEvm]
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      simp [hEvm, hAccount.balance]
+
+theorem CompiledAccountMapRel.storage_at
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) (slot : EvmYul.UInt256) :
+    (yul.find? addr |>.option ⟨0⟩
+        (EvmYul.Account.lookupStorage (k := slot))) =
+      (evm.find? addr |>.option ⟨0⟩
+        (EvmYul.Account.lookupStorage (k := slot))) := by
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      rw [hEvm]
+      rfl
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      rw [hEvm]
+      exact
+        congrArg (fun storage =>
+          Batteries.RBMap.findD storage slot (⟨0⟩ : EvmYul.UInt256))
+          hAccount.storage
+
+theorem CompiledAccountMapRel.transientStorage_at
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) (slot : EvmYul.UInt256) :
+    (yul.find? addr |>.option ⟨0⟩
+        (EvmYul.Account.lookupTransientStorage (k := slot))) =
+      (evm.find? addr |>.option ⟨0⟩
+        (EvmYul.Account.lookupTransientStorage (k := slot))) := by
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      rw [hEvm]
+      rfl
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      rw [hEvm]
+      exact
+        congrArg (fun storage =>
+          Batteries.RBMap.findD storage slot (⟨0⟩ : EvmYul.UInt256))
+          hAccount.tstorage
 
 theorem CompiledAccountMapRel.insert
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -206,6 +337,54 @@ theorem CompiledAccountMapRel.increaseBalance
             rw [← hAccount.balance]
             exact hAccount.with_balance (yulAccount.balance + amount)
           exact hWorld.insert addr hIncreased
+
+theorem CompiledAccountMapRel.updateStorage_at
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) (slot value : EvmYul.UInt256) :
+    CompiledAccountMapRel
+      (match yul.find? addr with
+      | none => yul
+      | some account =>
+          yul.insert addr (EvmYul.Account.updateStorage account slot value))
+      (match evm.find? addr with
+      | none => evm
+      | some account =>
+          evm.insert addr (EvmYul.Account.updateStorage account slot value)) := by
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [hEvm, hWorld]
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      simp [hEvm]
+      exact hWorld.insert addr (hAccount.update_storage slot value)
+
+theorem CompiledAccountMapRel.updateTransientStorage_at
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) (slot value : EvmYul.UInt256) :
+    CompiledAccountMapRel
+      (match yul.find? addr with
+      | none => yul
+      | some account =>
+          yul.insert addr
+            (EvmYul.Account.updateTransientStorage account slot value))
+      (match evm.find? addr with
+      | none => evm
+      | some account =>
+          evm.insert addr
+            (EvmYul.Account.updateTransientStorage account slot value)) := by
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [hEvm, hWorld]
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      simp [hEvm]
+      exact hWorld.insert addr (hAccount.update_transientStorage slot value)
 
 theorem CompiledAccountMapRel.decreaseBalance_of_yul
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -273,6 +452,154 @@ theorem CompiledAccountMapRel.transferBalance_of_yul
           ?_, ?_⟩
       · simp [hEvmDecrease]
       · exact hDecreasedWorld.increaseBalance toAddr amount
+
+theorem CompiledAccountMapRel.selfbalance
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner) :
+    EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm := by
+  unfold EvmYul.State.selfbalance
+  rw [hOwner]
+  exact hWorld.balance_at evm.executionEnv.codeOwner
+
+theorem CompiledAccountMapRel.balance
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {address : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap) :
+    (EvmYul.State.balance yul address).2 =
+      (EvmYul.State.balance evm address).2 := by
+  simpa [EvmYul.State.balance] using
+    hWorld.balance_at (EvmYul.AccountAddress.ofUInt256 address)
+
+theorem CompiledAccountMapRel.sload
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {slot : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner) :
+    (EvmYul.State.sload yul slot).2 =
+      (EvmYul.State.sload evm slot).2 := by
+  unfold EvmYul.State.sload EvmYul.State.lookupAccount
+  rw [hOwner]
+  exact hWorld.storage_at evm.executionEnv.codeOwner slot
+
+theorem CompiledAccountMapRel.sstore_accountMap
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {slot value : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (_hSigma : yul.σ₀ = evm.σ₀)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner)
+    (_hSubstate : yul.substate = evm.substate) :
+    CompiledAccountMapRel
+      (EvmYul.State.sstore yul slot value).accountMap
+      (EvmYul.State.sstore evm slot value).accountMap := by
+  unfold EvmYul.State.sstore EvmYul.State.lookupAccount
+    EvmYul.State.setAccount EvmYul.State.addAccessedStorageKey
+  rw [hOwner]
+  cases hYul : yul.accountMap.find? evm.executionEnv.codeOwner with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [Option.option, hYul, hEvm]
+      exact hWorld
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with ⟨evmAccount, hEvm, hAccount⟩
+      simp [Option.option, hYul, hEvm]
+      exact hWorld.insert evm.executionEnv.codeOwner
+        (hAccount.update_storage slot value)
+
+theorem CompiledAccountMapRel.sstore_substate
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {slot value : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hSigma : yul.σ₀ = evm.σ₀)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner)
+    (hSubstate : yul.substate = evm.substate) :
+    (EvmYul.State.sstore yul slot value).substate =
+      (EvmYul.State.sstore evm slot value).substate := by
+  unfold EvmYul.State.sstore EvmYul.State.lookupAccount
+    EvmYul.State.setAccount EvmYul.State.addAccessedStorageKey
+  rw [hOwner]
+  cases hYul : yul.accountMap.find? evm.executionEnv.codeOwner with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [Option.option, hYul, hEvm, hSubstate]
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with ⟨evmAccount, hEvm, hAccount⟩
+      simp [Option.option, Batteries.RBMap.find!, hYul, hEvm, hSigma,
+        hSubstate, hAccount.storage]
+
+theorem CompiledAccountMapRel.tload
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {slot : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner) :
+    (EvmYul.State.tload yul slot).2 =
+      (EvmYul.State.tload evm slot).2 := by
+  unfold EvmYul.State.tload EvmYul.State.lookupAccount
+  rw [hOwner]
+  exact hWorld.transientStorage_at evm.executionEnv.codeOwner slot
+
+theorem CompiledAccountMapRel.tstore_accountMap
+    {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
+    {slot value : Word}
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hOwner : yul.executionEnv.codeOwner = evm.executionEnv.codeOwner) :
+    CompiledAccountMapRel
+      (EvmYul.State.tstore yul slot value).accountMap
+      (EvmYul.State.tstore evm slot value).accountMap := by
+  unfold EvmYul.State.tstore EvmYul.State.lookupAccount EvmYul.State.updateAccount
+  rw [hOwner]
+  cases hYul : yul.accountMap.find? evm.executionEnv.codeOwner with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      simp [Option.option, hYul, hEvm]
+      exact hWorld
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with ⟨evmAccount, hEvm, hAccount⟩
+      simp [Option.option, hYul, hEvm]
+      exact hWorld.insert evm.executionEnv.codeOwner
+        (hAccount.update_transientStorage slot value)
+
+noncomputable def stateRelConfig
+    (varStackRel : Reference.VarStackRel)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop) :
+    Reference.StateRelConfig where
+  accountMapRel := accountMapRel
+  selfbalanceRel := by
+    intro yul evm hWorld hOwner
+    exact hWorld.selfbalance hOwner
+  balanceRel := by
+    intro yul evm address hWorld
+    exact hWorld.balance
+  sloadRel := by
+    intro yul evm slot hWorld hOwner
+    exact hWorld.sload hOwner
+  sstoreAccountMapRel := by
+    intro yul evm slot value hWorld hSigma hOwner hSubstate
+    exact hWorld.sstore_accountMap hSigma hOwner hSubstate
+  sstoreSubstateRel := by
+    intro yul evm slot value hWorld hSigma hOwner hSubstate
+    exact hWorld.sstore_substate hSigma hOwner hSubstate
+  tloadRel := by
+    intro yul evm slot hWorld hOwner
+    exact hWorld.tload hOwner
+  tstoreAccountMapRel := by
+    intro yul evm slot value hWorld hOwner
+    exact hWorld.tstore_accountMap hOwner
+  codeRel := codeImageRel
+  varStackRel := varStackRel
+  terminalRel := terminalRel
+  revertRel := revertRel
+  gasAvailableRel := gasAvailableRel
+  gasValueRel := gasValueRel
+  totalGasRel := totalGasRel
 
 theorem CompiledAccountMapRel.toExecute_precompiled
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}

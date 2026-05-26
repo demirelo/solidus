@@ -3003,6 +3003,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
      - [ ] Correct or explicitly model the precompile mismatch: EVM `CALL` uses `toExecute` and addresses 1-10 as precompiles, while the imported Yul `CALL` path currently account-lookups and dispatches Yul code.
      - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
        - [x] Prove compiled-world preservation for account insertion, balance increase/decrease, and source-successful balance transfer, including default empty accounts materialized by balance increases.
+       - [x] Prove concrete compiled-world `StateRelConfig` hooks for `SELFBALANCE`, `BALANCE`, `SLOAD`, `SSTORE`, `TLOAD`, and `TSTORE`, including `SSTORE` refund/substate agreement.
        - [ ] Prove callee entry-state construction and result/world merge for the ordinary compiled-account `CALL` path.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
