@@ -197,7 +197,7 @@ dispatcher, assembly, bytecode, and gas-aware theorem surfaces. Mark an item
 only when the corresponding Lean theorem exists, is exported through the public
 bridge surface when relevant, and the current verification command has passed.
 
-Last updated: 2026-05-26 03:29 PDT. Coarse blockers stay unchecked until every
+Last updated: 2026-05-26 03:31 PDT. Coarse blockers stay unchecked until every
 indented subtask below them is checked. The proof route has pivoted slightly
 top-down: finish the accepted-program recursive bridge spine first, then plug
 the three user-call statement cases and remaining structured-control /
@@ -250,6 +250,11 @@ Current assumption-cleanup checkpoint:
   internally construct `RecursiveBridgeExprResultContracts` with the checked
   safe-expression checkpoint theorem; this keeps the all-expression fuel
   condition explicit instead of hiding it in an arbitrary result-shape package.
+- [x] Construct canonical target entry state in the preferred gas-aware wrapper.
+  The default audit alias now takes an initial shared-state relation against an
+  arbitrary EVM state and runs the target from `canonicalEntryState initial`,
+  so `pc = pcAfter []` and `stack = []` are compiler-entry construction facts
+  rather than public assumptions.
 - [x] Add the target-side no-call/create runtime constructor
   `RecursiveBridgeTargetRuntime.withNoCallCreate`.
 - [x] Add the local primitive guardrail
