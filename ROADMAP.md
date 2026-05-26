@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-26 15:43 PDT.
+Last updated: 2026-05-26 15:58 PDT.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3001,6 +3001,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - [ ] Add explicit external-world/account-code call semantics and state relation before re-admitting `CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, or `STATICCALL`.
      - [x] Add a concrete compiled-code/account/account-map relation for external worlds, plus a total `toExecute` relation covering precompiled addresses, ordinary compiled-account code, and missing/default-code accounts.
      - [x] Correct the imported-interpreter precompile dispatch mismatch: Yul `CALL`, `STATICCALL`, `CALLCODE`, and `DELEGATECALL` now dispatch through `toExecute`, so precompile addresses 1-10 execute shared precompile bodies instead of account-map Yul code.
+     - [x] Correct EVM precompile result merging so `Θ` preserves the current child `createdAccounts` set instead of replacing it with `∅`, matching the shared Yul/EVM precompile behavior and avoiding a hidden world-relation mismatch.
      - [ ] Audit the remaining gas/frame differences around external calls: Yul still has fuel/erased parent-gas accounting, while EVM updates `gasAvailable`; the proof should express or narrow this relation explicitly instead of treating it as a call oracle.
      - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
        - [x] Prove compiled-world preservation for account insertion, balance increase/decrease, and source-successful balance transfer, including default empty accounts materialized by balance increases.
