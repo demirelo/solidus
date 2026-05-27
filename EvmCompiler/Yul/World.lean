@@ -3310,6 +3310,199 @@ theorem sharedStateRel_of_eraseGas_eq
     · simpa [hReturnData] using hMachine.returnData
     · simpa [hHReturn] using hMachine.H_return
 
+theorem sharedStateRel_of_eraseControl_eq
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {evm target : EVMState}
+    (hShared : Reference.SharedStateRel cfg yul target.toSharedState)
+    (hErase :
+      Structured.Preservation.eraseControl evm =
+        Structured.Preservation.eraseControl target)
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        evm.gasAvailable) :
+    Reference.SharedStateRel cfg yul evm.toSharedState := by
+  have hAccountMap : evm.accountMap = target.accountMap := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.accountMap) hErase
+  have hSigma : evm.σ₀ = target.σ₀ := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.σ₀) hErase
+  have hTotal :
+      evm.totalGasUsedInBlock = target.totalGasUsedInBlock := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.totalGasUsedInBlock) hErase
+  have hReceipts :
+      evm.transactionReceipts = target.transactionReceipts := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.transactionReceipts) hErase
+  have hSubstate : evm.substate = target.substate := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.substate) hErase
+  have hEnv : evm.executionEnv = target.executionEnv := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.executionEnv) hErase
+  have hBlocks : evm.blocks = target.blocks := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.blocks) hErase
+  have hGenesis : evm.genesisBlockHeader = target.genesisBlockHeader := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.genesisBlockHeader) hErase
+  have hCreated : evm.createdAccounts = target.createdAccounts := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.createdAccounts) hErase
+  have hActiveWords :
+      evm.toMachineState.activeWords =
+        target.toMachineState.activeWords := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg
+        (fun state : EVMState => state.toMachineState.activeWords) hErase
+  have hMemory :
+      evm.toMachineState.memory = target.toMachineState.memory := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.toMachineState.memory) hErase
+  have hReturnData :
+      evm.toMachineState.returnData =
+        target.toMachineState.returnData := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg
+        (fun state : EVMState => state.toMachineState.returnData) hErase
+  have hHReturn :
+      evm.toMachineState.H_return =
+        target.toMachineState.H_return := by
+    simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.toMachineState.H_return)
+        hErase
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · constructor
+    · simpa [hAccountMap] using hChain.accountMap
+    · simpa [hSigma] using hChain.σ₀
+    · simpa [hTotal] using hChain.totalGasUsedInBlock
+    · simpa [hReceipts] using hChain.transactionReceipts
+    · simpa [hSubstate] using hChain.substate
+    · simpa [hEnv] using hChain.executionEnv
+    · simpa [hBlocks] using hChain.blocks
+    · simpa [hGenesis] using hChain.genesisBlockHeader
+    · simpa [hCreated] using hChain.createdAccounts
+  · constructor
+    · exact hGas
+    · simpa [hActiveWords] using hMachine.activeWords
+    · simpa [hMemory] using hMachine.memory
+    · simpa [hReturnData] using hMachine.returnData
+    · simpa [hHReturn] using hMachine.H_return
+
+theorem wholeProgramOutcomeRel_regular_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {source : Objects.Source.State} {target : EVMState}
+    (hSource :
+      Reference.SharedStateRel cfg yul source.shared)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.regular source) (.running target))
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        target.gasAvailable) :
+    Reference.SharedStateRel cfg yul target.toSharedState := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular] at hBlock hStructured
+      have hDirectShared :
+          Reference.SharedStateRel cfg yul directState.evm.toSharedState := by
+        simpa [hBlock.1.1] using hSource
+      exact
+        sharedStateRel_of_eraseControl_eq hDirectShared hStructured.symm
+          hGas
+
+theorem wholeProgramOutcomeRel_regular_accountMap_eq
+    {source : Objects.Source.State} {target : EVMState}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.regular source) (.running target)) :
+    target.accountMap = source.shared.accountMap := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular] at hBlock hStructured
+      have hTargetAccountMap :
+          target.accountMap = directState.evm.accountMap := by
+        simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+          congrArg (fun state : EVMState => state.accountMap)
+            hStructured.symm
+      have hDirectAccountMap :
+          directState.evm.accountMap = source.shared.accountMap := by
+        simpa using
+          congrArg (fun shared : EvmYul.SharedState .EVM =>
+            shared.accountMap) hBlock.1.1
+      exact hTargetAccountMap.trans hDirectAccountMap
+
+theorem wholeProgramOutcomeRel_regular_compiledAccountMapRel
+    {yul : EvmYul.SharedState .Yul}
+    {source : Objects.Source.State} {target : EVMState}
+    (hWorld :
+      CompiledAccountMapRel yul.accountMap source.shared.accountMap)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.regular source) (.running target)) :
+    CompiledAccountMapRel yul.accountMap target.accountMap := by
+  have hMap := wholeProgramOutcomeRel_regular_accountMap_eq hRel
+  simpa [hMap] using hWorld
+
+theorem dispatcherOutcomeRel_regular_ok_whole_running_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {target : EVMState}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok finalShared finalStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.running target))
+    (hGas :
+      cfg.gasAvailableRel finalShared.toMachineState.gasAvailable
+        target.gasAvailable) :
+    Reference.SharedStateRel cfg finalShared target.toSharedState := by
+  rcases hOutcomeRel with ⟨bodyState, hFinal, hSourceRel⟩
+  cases hSourceRel with
+  | regular hRel =>
+      cases hRel with
+      | ok hShared hVars =>
+          rename_i compiler shared store
+          simp [Program.installContract, EvmYul.Yul.State.reviveJump,
+            EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore] at hFinal
+          rcases hFinal with ⟨hFinalShared, _hFinalStore⟩
+          have hSharedFinal :
+              Reference.SharedStateRel cfg finalShared compiler.shared := by
+            simpa [hFinalShared.symm] using hShared
+          exact
+            wholeProgramOutcomeRel_regular_sharedStateRel hSharedFinal hWhole
+              hGas
+  | brk hRel =>
+      exact False.elim (wholeProgramOutcomeRel_brk_false hWhole)
+  | cont hRel =>
+      exact False.elim (wholeProgramOutcomeRel_cont_false hWhole)
+  | leave hRel =>
+      exact False.elim (wholeProgramOutcomeRel_leave_false hWhole)
+
 theorem sharedStateRel_of_XResultAgrees_running_success
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul}
