@@ -21996,6 +21996,349 @@ theorem evalArgs_reverse_ok_domain_exact_of_eval_ok_domain
     hDomain hEval
 
 /--
+Open-evaluator state-domain invariant.
+
+Unlike the closed `evalArgs` domain lemmas above, this proposition follows
+open CALL suspensions: if evaluation exposes an external request, every
+possible response must resume to another result satisfying the same invariant.
+For completed results, every successful state carries the expected local-store
+domain. Error results are vacuous.
+-/
+inductive YulOpenResultStateStoreDomainExact
+    (layout : List Name) (α : Type) :
+    OpenExternal.YulOpenResult (State × α) → Prop where
+  | done {result : Except Exception (State × α)} :
+      (∀ {state : State} {value : α},
+        result = .ok (state, value) →
+          StateStoreDomainExact layout state) →
+      YulOpenResultStateStoreDomainExact layout α (.done result)
+  | call
+      {call :
+        OpenExternal.OpenCall
+          (OpenExternal.YulOpenResult (State × α))} :
+      (∀ response,
+        YulOpenResultStateStoreDomainExact layout α
+          (call.resume response)) →
+      YulOpenResultStateStoreDomainExact layout α (.call call)
+
+namespace YulOpenResultStateStoreDomainExact
+
+theorem done_ok_state_domain
+    {layout : List Name} {α : Type}
+    {state : State} {value : α}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout α
+        (.done (.ok (state, value)))) :
+    StateStoreDomainExact layout state := by
+  cases hResult with
+  | done hDone =>
+      exact hDone rfl
+
+theorem done_ok_store_domain
+    {layout : List Name} {α : Type}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {value : α}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout α
+        (.done (.ok (.Ok shared store, value)))) :
+    StoreDomainExact layout store := by
+  have hState :
+      StateStoreDomainExact layout (.Ok shared store : State) :=
+    done_ok_state_domain hResult
+  simpa [StateStoreDomainExact] using hState
+
+theorem consResult
+    {layout : List Name} {arg : Word}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout (List Word) result) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.consResult arg result) := by
+  induction hResult with
+  | done hDone =>
+      rename_i result
+      cases result with
+      | error err =>
+          simp [OpenExternal.YulOpen.consResult,
+            OpenExternal.YulOpenResult.map,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk)
+      | ok pair =>
+          rcases pair with ⟨state₀, values₀⟩
+          simp [OpenExternal.YulOpen.consResult,
+            OpenExternal.YulOpenResult.map,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk
+            exact hDone rfl)
+  | call hResume ih =>
+      simp [OpenExternal.YulOpen.consResult,
+        OpenExternal.YulOpenResult.map,
+        OpenExternal.YulOpenResult.bind]
+      exact YulOpenResultStateStoreDomainExact.call ih
+
+theorem reverseResult
+    {layout : List Name}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout (List Word) result) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.reverseResult result) := by
+  induction hResult with
+  | done hDone =>
+      rename_i result
+      cases result with
+      | error err =>
+          simp [OpenExternal.YulOpen.reverseResult,
+            OpenExternal.YulOpenResult.map,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk)
+      | ok pair =>
+          rcases pair with ⟨state₀, values₀⟩
+          simp [OpenExternal.YulOpen.reverseResult,
+            OpenExternal.YulOpenResult.map,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk
+            exact hDone rfl)
+  | call hResume ih =>
+      simp [OpenExternal.YulOpen.reverseResult,
+        OpenExternal.YulOpenResult.map,
+        OpenExternal.YulOpenResult.bind]
+      exact YulOpenResultStateStoreDomainExact.call ih
+
+theorem headResult
+    {layout : List Name}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout (List Word) result) :
+    YulOpenResultStateStoreDomainExact layout Word
+      (OpenExternal.YulOpen.headResult result) := by
+  induction hResult with
+  | done hDone =>
+      rename_i result
+      cases result with
+      | error err =>
+          simp [OpenExternal.YulOpen.headResult,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state value hOk
+            cases hOk)
+      | ok pair =>
+          rcases pair with ⟨state₀, values₀⟩
+          simp [OpenExternal.YulOpen.headResult,
+            OpenExternal.YulOpenResult.bind, EvmYul.Yul.head']
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state value hOk
+            cases hOk
+            exact hDone rfl)
+  | call hResume ih =>
+      simp [OpenExternal.YulOpen.headResult,
+        OpenExternal.YulOpenResult.bind]
+      exact YulOpenResultStateStoreDomainExact.call ih
+
+theorem evalTail_of_head
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {head : OpenExternal.YulOpenResult (State × Word)}
+    (hHead :
+      YulOpenResultStateStoreDomainExact layout Word head)
+    (hArgs :
+      ∀ {fuelTail : Nat} {state : State},
+        fuel = fuelTail.succ →
+        StateStoreDomainExact layout state →
+        YulOpenResultStateStoreDomainExact layout (List Word)
+          (OpenExternal.YulOpen.evalArgs fuelTail args codeOverride state)) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalTail fuel args codeOverride head) := by
+  induction hHead with
+  | done hDone =>
+      rename_i result
+      cases result with
+      | error err =>
+          simp [OpenExternal.YulOpen.evalTail,
+            OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk)
+      | ok pair =>
+          rcases pair with ⟨state₀, value₀⟩
+          cases fuel with
+          | zero =>
+              simp [OpenExternal.YulOpen.evalTail,
+                OpenExternal.YulOpenResult.bind]
+              exact YulOpenResultStateStoreDomainExact.done (by
+                intro state values hOk
+                cases hOk)
+          | succ fuelTail =>
+              have hState : StateStoreDomainExact layout state₀ :=
+                hDone rfl
+              have hTail :
+                  YulOpenResultStateStoreDomainExact layout (List Word)
+                    (OpenExternal.YulOpen.evalArgs fuelTail args
+                      codeOverride state₀) :=
+                hArgs rfl hState
+              simpa [OpenExternal.YulOpen.evalTail,
+                OpenExternal.YulOpenResult.bind] using
+                consResult (layout := layout) (arg := value₀) hTail
+  | call hResume ih =>
+      simp [OpenExternal.YulOpen.evalTail,
+        OpenExternal.YulOpenResult.bind]
+      exact YulOpenResultStateStoreDomainExact.call (by
+        intro response
+        simpa [OpenExternal.YulOpen.evalTail,
+          OpenExternal.YulOpenResult.bind] using ih response)
+
+theorem evalArgs_of_eval
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr} {state₀ : State},
+        expr ∈ args →
+        StateStoreDomainExact layout state₀ →
+        YulOpenResultStateStoreDomainExact layout Word
+          (OpenExternal.YulOpen.eval evalFuel expr codeOverride state₀))
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalArgs fuel args codeOverride state) := by
+  induction args generalizing fuel state with
+  | nil =>
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state values hOk
+            cases hOk)
+      | succ fuel' =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.ok]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro stateAfter values hOk
+            cases hOk
+            exact hDomain)
+  | cons head tail ih =>
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro stateAfter values hOk
+            cases hOk)
+      | succ fuel' =>
+          have hHead :
+              YulOpenResultStateStoreDomainExact layout Word
+                (OpenExternal.YulOpen.eval fuel' head codeOverride state) :=
+            hEach (by simp) hDomain
+          simp [OpenExternal.YulOpen.evalArgs]
+          exact
+            evalTail_of_head
+              (layout := layout) (fuel := fuel') (args := tail)
+              (codeOverride := codeOverride)
+              (head :=
+                OpenExternal.YulOpen.eval fuel' head codeOverride state)
+              hHead
+              (by
+                intro fuelTail stateTail hFuel hDomainTail
+                cases hFuel
+                exact
+                  ih
+                    (by
+                      intro evalFuel expr state₀ hMem hDomain₀
+                      exact hEach (by simp [hMem]) hDomain₀)
+                    hDomainTail)
+
+theorem evalArgs_reverse_of_eval
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr} {state₀ : State},
+        expr ∈ args →
+        StateStoreDomainExact layout state₀ →
+        YulOpenResultStateStoreDomainExact layout Word
+          (OpenExternal.YulOpen.eval evalFuel expr codeOverride state₀))
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state) :=
+  evalArgs_of_eval
+    (layout := layout) (fuel := fuel) (args := args.reverse)
+    (codeOverride := codeOverride) (state := state)
+    (hEach := by
+      intro evalFuel expr state₀ hMem hDomain₀
+      exact hEach (by simpa using hMem) hDomain₀)
+    hDomain
+
+end YulOpenResultStateStoreDomainExact
+
+/--
+Open local-domain contract for a reversed Yul argument list.
+
+This is the replacement shape for the remaining closed `evalArgs` domain
+premise: argument evaluation may suspend on nested external calls, and every
+shared response must preserve the local-store domain for the continuation.
+-/
+structure YulOpenEvalArgsReverseStateDomainExactContract
+    (layout : List Name) (fuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract) : Prop where
+  evalArgsResult :
+    ∀ {state : State},
+      StateStoreDomainExact layout state →
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state)
+
+namespace YulOpenEvalArgsReverseStateDomainExactContract
+
+theorem of_eval
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr} {state₀ : State},
+        expr ∈ args →
+        StateStoreDomainExact layout state₀ →
+        YulOpenResultStateStoreDomainExact layout Word
+          (OpenExternal.YulOpen.eval evalFuel expr codeOverride state₀)) :
+    YulOpenEvalArgsReverseStateDomainExactContract layout fuel args
+      codeOverride where
+  evalArgsResult := by
+    intro state hDomain
+    exact
+      YulOpenResultStateStoreDomainExact.evalArgs_reverse_of_eval
+        (layout := layout) (fuel := fuel) (args := args)
+        (codeOverride := codeOverride) (state := state) hEach hDomain
+
+theorem done_ok_store_domain
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {shared sharedAfter : EvmYul.SharedState .Yul}
+    {store storeAfter : EvmYul.Yul.VarStore} {values : List Word}
+    (hContract :
+      YulOpenEvalArgsReverseStateDomainExactContract layout fuel args
+        codeOverride)
+    (hDomain : StoreDomainExact layout store)
+    (hEval :
+      OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store) =
+        .done (.ok (.Ok sharedAfter storeAfter, values))) :
+    StoreDomainExact layout storeAfter := by
+  have hResult :
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store)) :=
+    hContract.evalArgsResult
+      (by simpa [StateStoreDomainExact] using hDomain)
+  rw [hEval] at hResult
+  exact
+    YulOpenResultStateStoreDomainExact.done_ok_store_domain hResult
+
+end YulOpenEvalArgsReverseStateDomainExactContract
+
+/--
 Local-varstore domain preservation for a reversed Yul argument list.
 
 This is the named proof boundary needed by the open external-call route.  For

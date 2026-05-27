@@ -1,5 +1,11 @@
 # Progress Log
 
+- 2026-05-27 16:39 PDT - proof/open-yul-arg-domain-contract - Added `YulOpenResultStateStoreDomainExact` and `YulOpenEvalArgsReverseStateDomainExactContract`, giving the open Yul argument evaluator a checked local-domain invariant that follows nested CALL suspensions through every response and recovers `StoreDomainExact` for completed reversed-argument evaluation. Verification: `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
+
+- 2026-05-27 16:37 PDT - compaction resume/proof/open-arg-domain-contract - Resumed after compaction on the abstract external-call goal; current checkpoint is to verify the new open Yul argument-domain contract and then decide whether to commit it as the next proof layer.
+
+- 2026-05-27 16:30 PDT - compaction resume/proof/open-arg-domain-contract - Resumed after compaction on the abstract external-call goal; next checkpoint is to replace the remaining closed eval-args domain premise with an open Yul-evaluator domain contract that can account for nested CALL suspension/resume.
+
 - 2026-05-27 13:55 PDT - proof/open-external-statement-continuations - Added exact assignment/let open CALL statement continuations from the expression-prelude boundary, proving universal post-response status-word writes preserve exact source/compiler state. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
 
 - 2026-05-27 13:54 PDT - compaction resume/proof/open-external-statement-continuations - Resumed after compaction while verifying assignment/let open CALL statement continuations; current checkpoint is to finish the Lean check and then wire or record the statement-level continuation layer.

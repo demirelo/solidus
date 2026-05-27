@@ -173,7 +173,13 @@ actual modules rather than preserved through audit aliases.
        external account-code inspection, and `CREATE`/`CREATE2`.
      - [ ] Finish the open argument semantics so nested CALL-family expression
        evaluation suspends at the same request/response boundary instead of
-       using closed `evalArgs`/`primCall` branches.
+       using closed `evalArgs`/`primCall` branches. The open
+       `YulOpenResultStateStoreDomainExact` and
+       `YulOpenEvalArgsReverseStateDomainExactContract` layer now proves the
+       local-domain invariant through nested suspended Yul calls; remaining
+       work is to build expression-level constructors for that contract and
+       replace the old closed `EvalArgsReverseOkDomainExactContract`
+       consumers.
    - [ ] Update the public acceptedness theorem so these operations are either
      supported directly or covered by the explicit full-semantics oracle
      contract.
@@ -3225,11 +3231,13 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   status-word and local-domain preservation. The stale closed CALL branch
   that split precompile and
   child-code execution in `RecursiveBridgeSupport` has been deleted so the live
-  proof no longer points back at a concrete callee/chain interpreter.
-  Remaining work is to replace the recursive closed assignment/let
-  consumers with this open sequence frontier, construct the CALL-safe
-  `EvalArgsReverseOkDomainExactContract` from an open argument/response
-  semantics that can suspend on nested CALLs, and then compose to the EVM stack
-  boundary.
+  proof no longer points back at a concrete callee/chain interpreter. The
+  open Yul argument-domain layer now follows nested CALL suspensions through
+  every response and recovers exact local-domain preservation for completed
+  reversed-argument evaluation. Remaining work is to replace the recursive
+  closed assignment/let consumers with this open sequence frontier, construct
+  expression-level instances of the open argument-domain contract, remove the
+  old closed argument-domain premise from accepted CALL wrappers, and then
+  compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
