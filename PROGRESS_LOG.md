@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 13:55 PDT - proof/open-external-statement-continuations - Added exact assignment/let open CALL statement continuations from the expression-prelude boundary, proving universal post-response status-word writes preserve exact source/compiler state. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
+
+- 2026-05-27 13:54 PDT - compaction resume/proof/open-external-statement-continuations - Resumed after compaction while verifying assignment/let open CALL statement continuations; current checkpoint is to finish the Lean check and then wire or record the statement-level continuation layer.
+
 - 2026-05-27 07:19 PDT - proof/call-capable-child-top-surface - Split `Reference.Safe.NoShadowing` back to lexical freshness only, removing the hidden `Safe.expr`/feature-coverage restriction from `Reference.FullAccepted`, and added `Program.RecursiveBridgeCALLTopAssumptions` plus `World.OrdinaryCALLChildCALLTopAssumptions.of_branchFacts_stateRelConfig` so ordinary CALL child assumptions can be constructed from branch facts with CALL-admitting feature coverage rather than the old no-external-call package. Verification: `lake build EvmCompiler.Yul.Reference EvmCompiler.Yul.RecursiveBridgeSupport EvmCompiler.Yul.World`, touched-file proof-escape scan, `git diff --check`, and targeted axiom audit passed; axioms are standard only (`propext`, `Classical.choice`, `Quot.sound`).
 
 - 2026-05-27 07:12 PDT - compaction-resume/call-capable-child-spine - Resumed the active whole-world external-operations goal after adding CALL-admitting feature coverage; current checkpoint is to separate the ordinary CALL child theorem surface from the old no-external-call recursive bridge acceptedness route.

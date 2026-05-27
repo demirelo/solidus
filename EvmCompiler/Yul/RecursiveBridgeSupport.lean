@@ -31213,6 +31213,401 @@ theorem lower1?_prim_openPrimitiveCallExprPreludeSoundAt_of_lowerBound1?_prelude
         hKind hBasic hArgs
 
 /--
+Post-response relation for a regular source statement whose target continuation
+also returns the next function-source context.
+
+The source side has no context component; the target context is carried so
+assignment and declaration continuations can expose the context that the tail
+proof must resume from.
+-/
+def OpenRegularStmtOpenCallResultRel
+    (cfg : StateRelConfig) (layoutAfter : List Name) :
+    State → Objects.Source.State × Functions.Source.Ctx → Prop :=
+  fun source compilerResult =>
+    SourceStateExactRel cfg layoutAfter source compilerResult.1
+
+def openPrimitiveCallAssignSourceStmtCall
+    {Effect : Type} (site : OpenExternal.CallSite)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (sourceStore : EvmYul.Yul.VarStore)
+    (name : EvmYul.Identifier) :
+    OpenExternal.OpenCall Effect State where
+  site := site
+  resume := fun response =>
+    .Ok (site.finishShared sourceShared response)
+      (sourceStore.insert (identName name) response.statusWord)
+
+def openPrimitiveCallAssignCompilerStmtCall
+    {Effect : Type} (site : OpenExternal.CallSite)
+    (compiler : Objects.Source.State) (ctx : Functions.Source.Ctx)
+    (name : EvmYul.Identifier) :
+    OpenExternal.OpenCall Effect
+      (Objects.Source.State × Functions.Source.Ctx) where
+  site := site
+  resume := fun response =>
+    ((compiler.withShared
+        (site.finishShared compiler.shared response)).insert
+          (identName name) response.statusWord,
+      ctx)
+
+def openPrimitiveCallLetSourceStmtCall
+    {Effect : Type} (site : OpenExternal.CallSite)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (sourceStore : EvmYul.Yul.VarStore)
+    (name : EvmYul.Identifier) :
+    OpenExternal.OpenCall Effect State where
+  site := site
+  resume := fun response =>
+    .Ok (site.finishShared sourceShared response)
+      (sourceStore.insert (identName name) response.statusWord)
+
+def openPrimitiveCallLetCompilerStmtCall
+    {Effect : Type} (site : OpenExternal.CallSite)
+    (compiler : Objects.Source.State) (ctx : Functions.Source.Ctx)
+    (name : EvmYul.Identifier) :
+    OpenExternal.OpenCall Effect
+      (Objects.Source.State × Functions.Source.Ctx) where
+  site := site
+  resume := fun response =>
+    ((compiler.withShared
+        (site.finishShared compiler.shared response)).insert
+          (identName name) response.statusWord,
+      { ctx with scope := identName name :: ctx.scope })
+
+theorem openPrimitiveCallAssignStmtOpenCallRel_of_primitive
+    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State} {ctx : Functions.Source.Ctx}
+    {sourceCall :
+      OpenExternal.OpenCall Effect (State × List Word)}
+    {compilerCall :
+      OpenExternal.OpenCall Effect
+        (Objects.Source.State × List Word)}
+    (name : EvmYul.Identifier)
+    (hCallRel :
+      OpenExternal.OpenCallRel
+        (SourceStateRel.OpenPrimitiveResultRel cfg layout)
+        sourceCall compilerCall)
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler)
+    (hDomain : StoreDomainExact layout sourceStore)
+    (hTargetMem : identName name ∈ layout) :
+    OpenExternal.OpenCallRel
+      (OpenRegularStmtOpenCallResultRel cfg layout)
+      (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+        sourceCall.site
+        sourceShared sourceStore name)
+      (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+        compilerCall.site
+        compiler ctx name) := by
+  constructor
+  · exact hCallRel.sameSite
+  · intro response
+    dsimp [OpenRegularStmtOpenCallResultRel,
+      openPrimitiveCallAssignSourceStmtCall,
+      openPrimitiveCallAssignCompilerStmtCall]
+    rw [← hCallRel.sameSite]
+    have hFinished :
+        SourceStateRel cfg layout
+          (.Ok (sourceCall.site.finishShared sourceShared response)
+            sourceStore)
+          (compiler.withShared
+            (sourceCall.site.finishShared compiler.shared response)) :=
+      SourceStateRel.finishOpenExternalCall
+        (cfg := cfg) (layout := layout)
+        (compiler := compiler) (site := sourceCall.site)
+        (response := response) hRel
+    cases hFinished with
+    | ok hShared hVars =>
+        exact
+          SourceStateExactRel.ok hShared
+            (sourceStoreRel_insert_visible hVars)
+            (StoreDomainExact.insert_mem hDomain hTargetMem)
+
+theorem openPrimitiveCallLetStmtOpenCallRel_of_primitive
+    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State} {ctx : Functions.Source.Ctx}
+    {sourceCall :
+      OpenExternal.OpenCall Effect (State × List Word)}
+    {compilerCall :
+      OpenExternal.OpenCall Effect
+        (Objects.Source.State × List Word)}
+    (name : EvmYul.Identifier)
+    (hCallRel :
+      OpenExternal.OpenCallRel
+        (SourceStateRel.OpenPrimitiveResultRel cfg layout)
+        sourceCall compilerCall)
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler)
+    (hDomain : StoreDomainExact layout sourceStore)
+    (hFresh : identName name ∉ layout) :
+    OpenExternal.OpenCallRel
+      (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
+      (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+        sourceCall.site
+        sourceShared sourceStore name)
+      (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+        compilerCall.site
+        compiler ctx name) := by
+  constructor
+  · exact hCallRel.sameSite
+  · intro response
+    dsimp [OpenRegularStmtOpenCallResultRel,
+      openPrimitiveCallLetSourceStmtCall,
+      openPrimitiveCallLetCompilerStmtCall]
+    rw [← hCallRel.sameSite]
+    have hFinished :
+        SourceStateRel cfg layout
+          (.Ok (sourceCall.site.finishShared sourceShared response)
+            sourceStore)
+          (compiler.withShared
+            (sourceCall.site.finishShared compiler.shared response)) :=
+      SourceStateRel.finishOpenExternalCall
+        (cfg := cfg) (layout := layout)
+        (compiler := compiler) (site := sourceCall.site)
+        (response := response) hRel
+    cases hFinished with
+    | ok hShared hVars =>
+        exact
+          SourceStateExactRel.ok hShared
+            (sourceStoreRel_cons_insert hVars hFresh)
+            (StoreDomainExact.insert hDomain)
+
+/--
+Open statement-level CALL-family continuation for assignment heads.
+
+This consumes the expression-prelude open CALL boundary and exposes the exact
+post-response assignment continuation: for every shared response, both sides
+write the returned status word to the assigned source-visible variable.
+-/
+def OpenPrimitiveCallAssignStmtPreludeSoundAt
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (op : Structured.BasicOp) (kind : OpenExternal.CallKind)
+    (args : List AstExpr) (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt)
+    (lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
+    (name : EvmYul.Identifier) : Prop :=
+  ∀ {Effect : Type}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State} {values : List Word},
+    SourceStateExactRel cfg layout (.Ok sourceShared sourceStore) compiler →
+    EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+        (.Ok sourceShared sourceStore) =
+      .ok (.Ok sourceSharedAfter sourceStoreAfter, values) →
+    values.length = Expressions.Structured.BasicOp.inputs op →
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+    ∃ sourcePrimitiveCall :
+        OpenExternal.OpenCall Effect (State × List Word),
+    ∃ compilerPrimitiveCall :
+        OpenExternal.OpenCall Effect
+          (Objects.Source.State × List Word),
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+          (.Ok sourceSharedAfter sourceStoreAfter) kind
+            (kind.args operands) =
+        some sourcePrimitiveCall ∧
+      SourceStateRel.compilerPrimitiveOpenCall?
+          (Effect := Effect) compilerAfterArgs kind values =
+        some compilerPrimitiveCall ∧
+      OpenExternal.OpenCallRel
+        (OpenRegularStmtOpenCallResultRel cfg layout)
+        (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+          sourcePrimitiveCall.site
+          sourceSharedAfter sourceStoreAfter name)
+        (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+          compilerPrimitiveCall.site
+          compilerAfterArgs ctxAfter name)
+
+theorem openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {name : EvmYul.Identifier}
+    (hExpr :
+      OpenPrimitiveCallExprPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args codeOverride pre lowerArgs)
+    (hTargetMem : identName name ∈ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    OpenPrimitiveCallAssignStmtPreludeSoundAt cfg layout prim program ctx
+      sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
+  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+    compiler values hInitialExact hEvalArgs hValuesArity
+  have hInitialRel :
+      SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler :=
+    SourceStateExactRel.toRel hInitialExact
+  rcases hExpr (Effect := Effect) hInitialRel hEvalArgs hValuesArity with
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
+      compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
+  have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
+    hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
+  have hStmtRel :
+      OpenExternal.OpenCallRel
+        (OpenRegularStmtOpenCallResultRel cfg layout)
+        (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+          sourcePrimitiveCall.site
+          sourceSharedAfter sourceStoreAfter name)
+        (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+          compilerPrimitiveCall.site compilerAfterArgs ctxAfter name) :=
+    openPrimitiveCallAssignStmtOpenCallRel_of_primitive
+      (cfg := cfg) (layout := layout) (sourceShared := sourceSharedAfter)
+      (sourceStore := sourceStoreAfter) (compiler := compilerAfterArgs)
+      (ctx := ctxAfter) (sourceCall := sourcePrimitiveCall)
+      (compilerCall := compilerPrimitiveCall) name hCallRel hRelArgs
+      hDomainAfter hTargetMem
+  exact
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      sourcePrimitiveCall, compilerPrimitiveCall, hPreRun, hArgEval,
+      hRelArgs, hSourceCall, hCompilerCall, hStmtRel⟩
+
+/--
+Open statement-level CALL-family continuation for declaration heads.
+
+This is the `let` analogue of
+`OpenPrimitiveCallAssignStmtPreludeSoundAt`: every shared response is
+continued by declaring the new source-visible variable and binding it to the
+returned status word.
+-/
+def OpenPrimitiveCallLetStmtPreludeSoundAt
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (op : Structured.BasicOp) (kind : OpenExternal.CallKind)
+    (args : List AstExpr) (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt)
+    (lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
+    (name : EvmYul.Identifier) : Prop :=
+  ∀ {Effect : Type}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State} {values : List Word},
+    SourceStateExactRel cfg layout (.Ok sourceShared sourceStore) compiler →
+    EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+        (.Ok sourceShared sourceStore) =
+      .ok (.Ok sourceSharedAfter sourceStoreAfter, values) →
+    values.length = Expressions.Structured.BasicOp.inputs op →
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+    ∃ sourcePrimitiveCall :
+        OpenExternal.OpenCall Effect (State × List Word),
+    ∃ compilerPrimitiveCall :
+        OpenExternal.OpenCall Effect
+          (Objects.Source.State × List Word),
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+          (.Ok sourceSharedAfter sourceStoreAfter) kind
+            (kind.args operands) =
+        some sourcePrimitiveCall ∧
+      SourceStateRel.compilerPrimitiveOpenCall?
+          (Effect := Effect) compilerAfterArgs kind values =
+        some compilerPrimitiveCall ∧
+      OpenExternal.OpenCallRel
+        (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
+        (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+          sourcePrimitiveCall.site
+          sourceSharedAfter sourceStoreAfter name)
+        (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+          compilerPrimitiveCall.site
+          compilerAfterArgs ctxAfter name)
+
+theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {name : EvmYul.Identifier}
+    (hExpr :
+      OpenPrimitiveCallExprPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args codeOverride pre lowerArgs)
+    (hFresh : identName name ∉ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    OpenPrimitiveCallLetStmtPreludeSoundAt cfg layout prim program ctx
+      sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
+  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+    compiler values hInitialExact hEvalArgs hValuesArity
+  have hInitialRel :
+      SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler :=
+    SourceStateExactRel.toRel hInitialExact
+  rcases hExpr (Effect := Effect) hInitialRel hEvalArgs hValuesArity with
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
+      compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
+  have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
+    hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
+  have hStmtRel :
+      OpenExternal.OpenCallRel
+        (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
+        (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+          sourcePrimitiveCall.site
+          sourceSharedAfter sourceStoreAfter name)
+        (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+          compilerPrimitiveCall.site compilerAfterArgs ctxAfter name) :=
+    openPrimitiveCallLetStmtOpenCallRel_of_primitive
+      (cfg := cfg) (layout := layout) (sourceShared := sourceSharedAfter)
+      (sourceStore := sourceStoreAfter) (compiler := compilerAfterArgs)
+      (ctx := ctxAfter) (sourceCall := sourcePrimitiveCall)
+      (compilerCall := compilerPrimitiveCall) name hCallRel hRelArgs
+      hDomainAfter hFresh
+  exact
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      sourcePrimitiveCall, compilerPrimitiveCall, hPreRun, hArgEval,
+      hRelArgs, hSourceCall, hCompilerCall, hStmtRel⟩
+
+/--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
 -/

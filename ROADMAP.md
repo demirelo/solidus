@@ -3338,7 +3338,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   requested-gas operand, and the argument-prelude source/compiler,
   EVM-stack, and one-result expression-prelude adapters now reconstruct CALL
   operands from primitive arity and expose the open primitive
-  request/response relation; remaining work is to replace the closed
-  assignment/let primitive consumers with open statement continuations.
+  request/response relation, while assignment/let statement-continuation
+  contracts now expose exact post-response status-word writes; remaining work
+  is to wire the closed assignment/let consumers to these open continuations and
+  then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
