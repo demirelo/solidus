@@ -2836,6 +2836,254 @@ theorem buildContractCallEmptyReturnState_afterAccess_none_rel
       sharedStateRel_finishExternalCallAfterAccessWithTargetGas
         hShared addr ByteArray.empty inOffset inSize outOffset outSize hGas
 
+theorem EVM_call_insufficientFunds_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hNotEnough :
+      ¬ value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance))) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          substate :=
+            (EvmYul.State.addAccessedAccount charged.toState target).substate }) := by
+  simp [EvmYul.EVM.call, hNotEnough]
+
+theorem call_insufficientFunds_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hChargedShared :
+      Reference.SharedStateRel cfg yul
+        ({ evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          : EvmYul.EVM.State).toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hNotEnough :
+      ¬ value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner target value =
+        none ∧
+      ∃ yulAfter,
+        EvmYul.Yul.buildContractCallEmptyReturnState
+            (EvmYul.Yul.addAccessedAccount (.Ok yul store) target)
+            none inOffset inSize outOffset outSize ⟨0⟩ =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  constructor
+  · exact EVM_call_insufficientFunds_eq hNotEnough
+  · constructor
+    · have hOwner :
+        yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+          rcases hChargedShared with ⟨hChain, _hMachine⟩
+          simpa using hChain.executionEnv.codeOwner
+      exact
+        hParentWorld.callTransferAccountMap?_none_of_evm_not_enough
+          (source := yul.executionEnv.codeOwner)
+          (recipient := EvmYul.AccountAddress.ofUInt256 address)
+          (value := value)
+          (by simpa [hOwner] using hNotEnough)
+    · exact
+        buildContractCallEmptyReturnState_afterAccess_none_rel
+          hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+          inOffset inSize outOffset outSize ⟨0⟩ hGas
+
+theorem EVM_call_depthLimit_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepthLimit : ¬ evm.executionEnv.depth < 1024) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          substate :=
+            (EvmYul.State.addAccessedAccount charged.toState target).substate }) := by
+  simp [EvmYul.EVM.call, hEnough, hDepthLimit]
+
+theorem call_depthLimit_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hChargedShared :
+      Reference.SharedStateRel cfg yul
+        ({ evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          : EvmYul.EVM.State).toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepthLimit : ¬ evm.executionEnv.depth < 1024)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      (∃ yulCallMap,
+        EvmYul.Yul.callTransferAccountMap? yul.accountMap
+            yul.executionEnv.codeOwner target value =
+          some yulCallMap ∧
+        CompiledAccountMapRel yulCallMap
+          (evmCallTransfer evm.accountMap yul.executionEnv.codeOwner
+            target value)) ∧
+      (1024 : Nat) ≤ yul.executionEnv.depth ∧
+      ∃ yulAfter,
+        EvmYul.Yul.buildContractCallEmptyReturnState
+            (EvmYul.Yul.addAccessedAccount (.Ok yul store) target)
+            none inOffset inSize outOffset outSize ⟨0⟩ =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  constructor
+  · exact EVM_call_depthLimit_eq hEnough hDepthLimit
+  · have hOwner :
+        yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.codeOwner
+    have hDepth :
+        yul.executionEnv.depth = evm.executionEnv.depth := by
+      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.depth
+    constructor
+    · exact
+        hParentWorld.callTransferAccountMap?_of_evm_enough
+          (source := yul.executionEnv.codeOwner)
+          (recipient := EvmYul.AccountAddress.ofUInt256 address)
+          (value := value)
+          (by simpa [hOwner] using hEnough)
+    · constructor
+      · rw [hDepth]
+        exact Nat.not_lt.mp hDepthLimit
+      · exact
+          buildContractCallEmptyReturnState_afterAccess_none_rel
+            hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+            inOffset inSize outOffset outSize ⟨0⟩ hGas
+
 theorem buildContractCallReturnState_ok_rel
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
