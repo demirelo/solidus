@@ -8,7 +8,16 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 01:38 PDT.
+Last updated: 2026-05-27 11:30 PDT.
+
+Current external-call direction: the speculative concrete `World` proof route
+has been retired. The new CALL-family route is an open external-call theorem:
+prove that imported Yul and compiled EVM reach the same external call site
+(same call kind, gas, caller/recipient/code address, value, calldata, static
+permission, and local return-copy window), then quantify universally over an
+arbitrary shared response. The response may encode state-altering outside-world
+effects through an abstract effect type; the compiler theorem must not assume
+anything about that effect beyond both sides receiving the same response.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled

@@ -6,6 +6,6 @@ import EvmCompiler.Yul.PrimSemantics
 import EvmCompiler.Yul.Semantics
 import EvmCompiler.Yul.Preservation
 import EvmCompiler.Yul.RecursiveBridgeSupport
-import EvmCompiler.Yul.World
+import EvmCompiler.Yul.OpenExternal
 import EvmCompiler.Yul.NoCallCreate
 import EvmCompiler.Yul.NoCallRuntime
