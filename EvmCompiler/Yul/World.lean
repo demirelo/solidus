@@ -3760,6 +3760,141 @@ theorem dispatcherOutcomeRel_regular_ok_whole_childRelations
       dispatcherOutcomeRel_regular_ok_whole_running_compiledAccountMapRel
         hOutcomeRel hWholeTarget⟩
 
+theorem dispatcherOutcomeRel_yulHalt_ok_whole_childRelations
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {value : Word}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.yulHalt (.Ok finalShared finalStore) value) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hTerminalShared :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok finalShared finalStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            finalShared compiler.shared)
+    (hGas :
+      ∀ {halt}, targetOutcome = .halted halt →
+        gasAvailableRel finalShared.toMachineState.gasAvailable
+          halt.state.gasAvailable) :
+    ∃ kind compiler halt,
+      terminalRel kind value (.Ok finalShared finalStore) compiler ∧
+        sourceOutcome = Functions.Source.Outcome.halt kind compiler ∧
+        targetOutcome = .halted halt ∧
+        halt.kind = kind ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          finalShared halt.state.toSharedState ∧
+        CompiledAccountMapRel finalShared.accountMap halt.state.accountMap := by
+  rcases dispatcherOutcomeRel_yulHalt_whole_halted hOutcomeRel hWhole with
+    ⟨kind, compiler, halt, hTerminal, hSource, hTarget, hKind⟩
+  have hWholeHalt :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind compiler) (.halted halt) := by
+    simpa [hSource, hTarget] using hWhole
+  have hSharedSource := hTerminalShared hTerminal
+  have hWorldSource :
+      CompiledAccountMapRel finalShared.accountMap
+        compiler.shared.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hSharedSource
+  exact
+    ⟨kind, compiler, halt, hTerminal, hSource, hTarget, hKind,
+      wholeProgramOutcomeRel_halt_sharedStateRel hSharedSource hWholeHalt
+        (hGas hTarget),
+      wholeProgramOutcomeRel_halt_compiledAccountMapRel hWorldSource
+        hWholeHalt⟩
+
+theorem dispatcherOutcomeRel_revert_ok_whole_childRelations
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.revert (.Ok finalShared finalStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok finalShared finalStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            finalShared compiler.shared)
+    (hGas :
+      ∀ {halt}, targetOutcome = .halted halt →
+        gasAvailableRel finalShared.toMachineState.gasAvailable
+          halt.state.gasAvailable) :
+    ∃ compiler halt,
+      revertRel (.Ok finalShared finalStore) compiler ∧
+        sourceOutcome = Functions.Source.Outcome.halt .revert compiler ∧
+        targetOutcome = .halted halt ∧
+        halt.kind = .revert ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          finalShared halt.state.toSharedState ∧
+        CompiledAccountMapRel finalShared.accountMap halt.state.accountMap := by
+  rcases dispatcherOutcomeRel_revert_whole_halted hOutcomeRel hWhole with
+    ⟨compiler, halt, hRevert, hSource, hTarget, hKind⟩
+  have hWholeHalt :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt .revert compiler) (.halted halt) := by
+    simpa [hSource, hTarget] using hWhole
+  have hSharedSource := hRevertShared hRevert
+  have hWorldSource :
+      CompiledAccountMapRel finalShared.accountMap
+        compiler.shared.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hSharedSource
+  exact
+    ⟨compiler, halt, hRevert, hSource, hTarget, hKind,
+      wholeProgramOutcomeRel_halt_sharedStateRel hSharedSource hWholeHalt
+        (hGas hTarget),
+      wholeProgramOutcomeRel_halt_compiledAccountMapRel hWorldSource
+        hWholeHalt⟩
+
 theorem sharedStateRel_of_XResultAgrees_running_success
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul}
@@ -3794,6 +3929,35 @@ theorem XResultAgrees_running_success_shape
   cases result with
   | success evm output => exact ⟨evm, output, rfl, hAgree⟩
   | revert returnedGas output => cases hAgree
+
+theorem XResultAgrees_halted_nonrevert_success_shape
+    {halt : Assembly.Halt}
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    (hAgree : Assembly.GasAware.XResultAgrees (.halted halt) result)
+    (hNotRevert : halt.kind ≠ .revert) :
+    ∃ evm output,
+      result = .success evm output ∧
+        Assembly.GasAware.XResultAgrees (.halted halt)
+          (.success evm output) := by
+  cases result with
+  | success evm output => exact ⟨evm, output, rfl, hAgree⟩
+  | revert returnedGas output =>
+      exact False.elim (hNotRevert hAgree.1)
+
+theorem XResultAgrees_halted_revert_shape
+    {halt : Assembly.Halt}
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    (hAgree : Assembly.GasAware.XResultAgrees (.halted halt) result)
+    (hRevert : halt.kind = .revert) :
+    ∃ returnedGas output,
+      result = .revert returnedGas output ∧
+        Assembly.GasAware.XResultAgrees (.halted halt)
+          (.revert returnedGas output) := by
+  cases result with
+  | success evm output =>
+      exact False.elim (hAgree.1 hRevert)
+  | revert returnedGas output =>
+      exact ⟨returnedGas, output, rfl, hAgree⟩
 
 theorem sharedStateRel_of_XResultAgrees_halted_success
     {cfg : Reference.StateRelConfig}
@@ -5245,6 +5409,204 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel
         hTargetChild hTargetChildWorld hAgree hChildGas
         inOffset inSize outOffset outSize hGas⟩
 
+theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {value : Word}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.yulHalt (.Ok yulChild childStore) value) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hTerminalShared :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hTerminalNonRevert :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          kind ≠ .revert)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice valueWei weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            evmParent.substate source origin recipient gasPrice valueWei
+            weiValue calldata depth header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (hTargetChildGas :
+      ∀ {halt}, targetOutcome = .halted halt →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    (hEvmChildGas :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hReturnedGas :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel
+          (yulParent.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas) :
+    ∃ kind compiler halt evmChild output,
+      terminalRel kind value (.Ok yulChild childStore) compiler ∧
+        targetOutcome = .halted halt ∧
+        halt.kind = kind ∧
+        evmResult = .success evmChild output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          evmParent.substate source origin recipient
+          (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice valueWei weiValue calldata
+          depth header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then evmParent.substate
+              else evmChild.substate,
+              true, output) ∧
+        halt.kind ≠ .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreSuccessfulContractCallState
+                (.Ok yulParent parentStore)
+                (.Ok yulChild childStore)
+                restoreStore output inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := targetGas }
+                accountMap :=
+                  if evmChild.accountMap.isEmpty then
+                    evmParent.accountMap
+                  else
+                    evmChild.accountMap
+                substate :=
+                  if evmChild.accountMap.isEmpty then
+                    evmParent.substate
+                  else
+                    evmChild.substate
+                createdAccounts := evmChild.createdAccounts } := by
+  rcases
+      dispatcherOutcomeRel_yulHalt_ok_whole_childRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hOutcomeRel hWhole hTerminalShared hTargetChildGas with
+    ⟨kind, compiler, halt, hTerminal, _hSource, hTarget, hKind,
+      hTargetChild, hTargetChildWorld⟩
+  have hNotRevert : halt.kind ≠ .revert := by
+    intro hRevert
+    exact hTerminalNonRevert hTerminal (hKind.symm.trans hRevert)
+  have hAgreeHalted :
+      Assembly.GasAware.XResultAgrees (.halted halt) evmResult := by
+    simpa [hTarget] using hAgree
+  rcases
+      XResultAgrees_halted_nonrevert_success_shape hAgreeHalted
+        hNotRevert with
+    ⟨evmChild, output, hResult, hAgreeSuccess⟩
+  have hXSuccess :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            evmParent.substate source origin recipient gasPrice valueWei
+            weiValue calldata depth header perm) =
+        .ok (.success evmChild output) := by
+    simpa [hResult] using hX
+  have hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hParent
+  have hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel).accountMapRel
+            yulMap evmMap := by
+    intro yulMap evmMap hRel
+    simpa [stateRelConfig, accountMapRel] using hRel
+  have hGasSuccess :
+      gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas :=
+    hReturnedGas hResult
+  rcases
+      ordinaryCodeCall_haltedSuccessBranch_rel
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hParent hParentWorld hCfgAccountMap
+        parentStore childStore restoreStore
+        hTargetChild hTargetChildWorld hXSuccess hAgreeSuccess
+        (hEvmChildGas hResult)
+        inOffset inSize outOffset outSize hGasSuccess with
+    ⟨hTheta, hSuccess⟩
+  exact
+    ⟨kind, compiler, halt, evmChild, output, hTerminal, hTarget, hKind,
+      hResult, hTheta, hSuccess⟩
+
 theorem Theta_code_revert_of_X_installedCode
     {fuel gasNat : Nat}
     {blobVersionedHashes : List ByteArray}
@@ -5359,6 +5721,166 @@ theorem ordinaryCodeCall_revertBranch_rel
       restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace
         hParent parentStore childStore addr hTargetChild hTrace hAgree
         inOffset inSize outOffset outSize hGas⟩
+
+theorem ordinaryCodeCall_revertBranch_rel_of_childOutcome
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.revert (.Ok yulChild childStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (hTargetChildGas :
+      ∀ {halt}, targetOutcome = .halted halt →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    {asm : Assembly.Program} {targetFuel : Nat} {initial : EVMState}
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hReturnedGas :
+      ∀ {returnedGas output}, evmResult = .revert returnedGas output →
+        gasAvailableRel
+          (yulParent.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize).gasAvailable
+          returnedGas) :
+    ∃ compiler halt returnedGas output,
+      revertRel (.Ok yulChild childStore) compiler ∧
+        targetOutcome = .halted halt ∧
+        evmResult = .revert returnedGas output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmParent.createdAccounts, evmParent.accountMap, returnedGas,
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate,
+              false, output) ∧
+        halt.kind = .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreRevertedContractCallState
+                (EvmYul.Yul.addAccessedAccount
+                  (.Ok yulParent parentStore) addr)
+                (.Ok yulChild childStore)
+                inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := returnedGas }
+                substate :=
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate } := by
+  rcases
+      dispatcherOutcomeRel_revert_ok_whole_childRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hOutcomeRel hWhole hRevertShared hTargetChildGas with
+    ⟨compiler, halt, hRevert, _hSource, hTarget, hKind,
+      hTargetChild, _hTargetChildWorld⟩
+  have hAgreeHalted :
+      Assembly.GasAware.XResultAgrees (.halted halt) evmResult := by
+    simpa [hTarget] using hAgree
+  rcases XResultAgrees_halted_revert_shape hAgreeHalted hKind with
+    ⟨returnedGas, output, hResult, hAgreeRevert⟩
+  have hXRevert :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.revert returnedGas output) := by
+    simpa [hResult] using hX
+  have hTraceHalt :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        (.halted halt) := by
+    simpa [hTarget] using hTrace
+  rcases
+      ordinaryCodeCall_revertBranch_rel
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hParent parentStore childStore addr
+        hTargetChild hTraceHalt hXRevert hAgreeRevert
+        inOffset inSize outOffset outSize (hReturnedGas hResult) with
+    ⟨hTheta, hRestore⟩
+  exact
+    ⟨compiler, halt, returnedGas, output, hRevert, hTarget, hResult,
+      hTheta, hRestore⟩
 
 theorem Theta_code_non_oog_error_of_X_installedCode
     {fuel gasNat : Nat}
