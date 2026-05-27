@@ -22047,6 +22047,35 @@ theorem done_ok_store_domain
     done_ok_state_domain hResult
   simpa [StateStoreDomainExact] using hState
 
+theorem bind
+    {layout : List Name} {α β : Type}
+    {result : OpenExternal.YulOpenResult (State × α)}
+    {next : State × α → OpenExternal.YulOpenResult (State × β)}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout α result)
+    (hNext :
+      ∀ {state : State} {value : α},
+        StateStoreDomainExact layout state →
+        YulOpenResultStateStoreDomainExact layout β (next (state, value))) :
+    YulOpenResultStateStoreDomainExact layout β
+      (OpenExternal.YulOpenResult.bind result next) := by
+  induction hResult with
+  | done hDone =>
+      rename_i result
+      cases result with
+      | error err =>
+          simp [OpenExternal.YulOpenResult.bind]
+          exact YulOpenResultStateStoreDomainExact.done (by
+            intro state value hOk
+            cases hOk)
+      | ok pair =>
+          rcases pair with ⟨state₀, value₀⟩
+          simp [OpenExternal.YulOpenResult.bind]
+          exact hNext (hDone rfl)
+  | call hResume ih =>
+      simp [OpenExternal.YulOpenResult.bind]
+      exact YulOpenResultStateStoreDomainExact.call ih
+
 theorem consResult
     {layout : List Name} {arg : Word}
     {result : OpenExternal.YulOpenResult (State × List Word)}
@@ -22337,6 +22366,237 @@ theorem done_ok_store_domain
     YulOpenResultStateStoreDomainExact.done_ok_store_domain hResult
 
 end YulOpenEvalArgsReverseStateDomainExactContract
+
+theorem yulPrimitiveEvalValuesOpenCall?_none_of_safe_primitive
+    {prim : EvmYul.Operation .Yul} {state : State} {args : List Word}
+    (hSafe : Safe.primitive prim) :
+    OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall? state prim args =
+      none := by
+  have hKind :
+      OpenExternal.CallKind.ofYulOperation? prim = none := by
+    cases prim with
+    | StopArith op => rfl
+    | CompBit op => rfl
+    | Keccak op => rfl
+    | Env op => cases op <;> rfl
+    | Block op => rfl
+    | StackMemFlow op => cases op <;> rfl
+    | Log op => cases op <;> rfl
+    | System op =>
+        cases op <;>
+          simp [OpenExternal.CallKind.ofYulOperation?, Safe.primitive] at hSafe ⊢
+  simp [OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?, hKind]
+
+theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_safe_primitiveFamilies
+    (fuel : Nat) :
+    (∀ {layout : List Name} {expr : AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.expr expr →
+      StateStoreDomainExact layout state →
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalValues fuel expr codeOverride state)) ∧
+    (∀ {layout : List Name} {args : List AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.exprs args →
+      StateStoreDomainExact layout state →
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs fuel args codeOverride state)) := by
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro layout expr codeOverride state _hSafe _hDomain
+        simp [OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpenResult.error]
+        exact YulOpenResultStateStoreDomainExact.done (by
+          intro stateAfter values hOk
+          cases hOk)
+      · intro layout args codeOverride state _hSafe _hDomain
+        simp [OpenExternal.YulOpen.evalArgs,
+          OpenExternal.YulOpenResult.error]
+        exact YulOpenResultStateStoreDomainExact.done (by
+          intro stateAfter values hOk
+          cases hOk)
+  | succ fuel' =>
+      have ihFuel := ih fuel' (Nat.lt_succ_self fuel')
+      constructor
+      · intro layout expr codeOverride state hSafe hDomain
+        cases expr with
+        | Lit value =>
+            simp [OpenExternal.YulOpen.evalValues,
+              OpenExternal.YulOpenResult.ok]
+            exact YulOpenResultStateStoreDomainExact.done (by
+              intro stateAfter values hOk
+              cases hOk
+              exact hDomain)
+        | Var name =>
+            cases hLookup : EvmYul.Yul.State.lookup? name state with
+            | none =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.error, hLookup]
+                exact YulOpenResultStateStoreDomainExact.done (by
+                  intro stateAfter values hOk
+                  cases hOk)
+            | some value =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.ok, hLookup]
+                exact YulOpenResultStateStoreDomainExact.done (by
+                  intro stateAfter values hOk
+                  cases hOk
+                  exact hDomain)
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                have hSafePrim : Safe.primitive prim := hSafe.1
+                have hSafeArgs : Safe.exprs args := hSafe.2
+                have hArgsDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                        codeOverride state) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (safe_exprs_reverse hSafeArgs) hDomain
+                have hArgsReverseDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.reverseResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  YulOpenResultStateStoreDomainExact.reverseResult hArgsDomain
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenResultStateStoreDomainExact.bind
+                    hArgsReverseDomain
+                    (by
+                      intro stateArgs argValues hArgsStateDomain
+                      have hNoOpen :
+                          OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                              stateArgs prim argValues =
+                            none :=
+                        yulPrimitiveEvalValuesOpenCall?_none_of_safe_primitive
+                          hSafePrim
+                      simp [hNoOpen]
+                      exact YulOpenResultStateStoreDomainExact.done (by
+                        intro stateAfter values hOk
+                        exact
+                          primCall_safe_state_domain_exact_of_ok
+                            hSafePrim hArgsStateDomain hOk))
+            | inr functionName =>
+                have hSafeArgs : Safe.exprs args := hSafe.2
+                have hArgsDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                        codeOverride state) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (safe_exprs_reverse hSafeArgs) hDomain
+                have hArgsReverseDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.reverseResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  YulOpenResultStateStoreDomainExact.reverseResult hArgsDomain
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenResultStateStoreDomainExact.bind
+                    hArgsReverseDomain
+                    (by
+                      intro stateArgs argValues hArgsStateDomain
+                      exact YulOpenResultStateStoreDomainExact.done (by
+                        intro stateAfter values hOk
+                        exact
+                          call_ok_state_domain_exact_of_state
+                            hArgsStateDomain hOk))
+      · intro layout args codeOverride state hSafe hDomain
+        cases args with
+        | nil =>
+            simp [OpenExternal.YulOpen.evalArgs,
+              OpenExternal.YulOpenResult.ok]
+            exact YulOpenResultStateStoreDomainExact.done (by
+              intro stateAfter values hOk
+              cases hOk
+              exact hDomain)
+        | cons head tail =>
+            have hHeadSafe : Safe.expr head := hSafe.1
+            have hTailSafe : Safe.exprs tail := hSafe.2
+            have hHeadDomain :
+                YulOpenResultStateStoreDomainExact layout Word
+                  (OpenExternal.YulOpen.eval fuel' head codeOverride state) :=
+              by
+                simpa [OpenExternal.YulOpen.eval] using
+                  YulOpenResultStateStoreDomainExact.headResult
+                    (ihFuel.1 (layout := layout) (expr := head)
+                      (codeOverride := codeOverride) (state := state)
+                      hHeadSafe hDomain)
+            simp [OpenExternal.YulOpen.evalArgs]
+            exact
+              YulOpenResultStateStoreDomainExact.evalTail_of_head
+                (layout := layout) (fuel := fuel') (args := tail)
+                (codeOverride := codeOverride)
+                (head :=
+                  OpenExternal.YulOpen.eval fuel' head codeOverride state)
+                hHeadDomain
+                (by
+                  intro fuelTail stateTail hFuel hDomainTail
+                  cases hFuel
+                  exact
+                    (ih fuelTail (by omega)).2
+                      (layout := layout) (args := tail)
+                      (codeOverride := codeOverride) (state := stateTail)
+                      hTailSafe hDomainTail)
+
+theorem yulOpenEvalValues_state_domain_exact_of_safe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.expr expr)
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalValues fuel expr codeOverride state) :=
+  (yulOpenEvalValues_evalArgs_state_domain_exact_of_safe_primitiveFamilies
+    fuel).1 hSafe hDomain
+
+theorem yulOpenEval_state_domain_exact_of_safe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.expr expr)
+    (hDomain : StateStoreDomainExact layout state) :
+  YulOpenResultStateStoreDomainExact layout Word
+      (OpenExternal.YulOpen.eval fuel expr codeOverride state) :=
+  by
+    simpa [OpenExternal.YulOpen.eval] using
+      YulOpenResultStateStoreDomainExact.headResult
+        (yulOpenEvalValues_state_domain_exact_of_safe_primitiveFamilies
+          (fuel := fuel) hSafe hDomain)
+
+theorem yulOpenEvalArgsReverse_state_domain_exact_of_safe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.exprs args)
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state) :=
+  YulOpenResultStateStoreDomainExact.evalArgs_reverse_of_eval
+    (layout := layout) (fuel := fuel) (args := args)
+    (codeOverride := codeOverride) (state := state)
+    (hEach := by
+      intro evalFuel expr state₀ hMem hDomain₀
+      exact
+        yulOpenEval_state_domain_exact_of_safe_primitiveFamilies
+          (layout := layout) (fuel := evalFuel) (expr := expr)
+          (codeOverride := codeOverride) (state := state₀)
+          (safe_exprs_mem hSafe hMem) hDomain₀)
+    hDomain
+
+theorem YulOpenEvalArgsReverseStateDomainExactContract.of_safe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    (hSafe : Safe.exprs args) :
+    YulOpenEvalArgsReverseStateDomainExactContract layout fuel args
+      codeOverride where
+  evalArgsResult := by
+    intro state hDomain
+    exact
+      yulOpenEvalArgsReverse_state_domain_exact_of_safe_primitiveFamilies
+        (layout := layout) (fuel := fuel) (args := args)
+        (codeOverride := codeOverride) (state := state) hSafe hDomain
 
 /--
 Local-varstore domain preservation for a reversed Yul argument list.

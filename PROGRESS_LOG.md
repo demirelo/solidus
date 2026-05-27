@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 16:52 PDT - proof/open-yul-safe-domain-constructor - Added the Safe/no-external-call constructor for `YulOpenEvalArgsReverseStateDomainExactContract`, including an open-result bind invariant and proof that `Safe.primitive` cannot produce a CALL-family open request. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
+
+- 2026-05-27 16:47 PDT - compaction resume/proof/open-yul-safe-domain - Resumed after compaction on the abstract external-call goal; current checkpoint is to finish the Safe/no-external-call constructor for the open Yul argument-domain contract and verify it cleanly.
+
 - 2026-05-27 16:39 PDT - proof/open-yul-arg-domain-contract - Added `YulOpenResultStateStoreDomainExact` and `YulOpenEvalArgsReverseStateDomainExactContract`, giving the open Yul argument evaluator a checked local-domain invariant that follows nested CALL suspensions through every response and recovers `StoreDomainExact` for completed reversed-argument evaluation. Verification: `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
 
 - 2026-05-27 16:37 PDT - compaction resume/proof/open-arg-domain-contract - Resumed after compaction on the abstract external-call goal; current checkpoint is to verify the new open Yul argument-domain contract and then decide whether to commit it as the next proof layer.
