@@ -2359,6 +2359,70 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success
       (hTargetChildWorld.of_eraseGas_eq hErase)
       returnData inOffset inSize outOffset outSize hGas
 
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success_empty_output
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {targetChild evmChild : EVMState}
+    {output : ByteArray}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild targetChild.toSharedState)
+    (hTargetChildWorld :
+      CompiledAccountMapRel yulChild.accountMap targetChild.accountMap)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.running targetChild)
+        (.success evmChild output))
+    (hChildGas :
+      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
+        evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (.Ok yulParent parentStore)
+          (.Ok yulChild childStore)
+          restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.accountMap
+            else
+              evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.substate
+            else
+              evmChild.substate
+          createdAccounts := evmChild.createdAccounts } := by
+  have hOutput := XResultAgrees_running_success_output_empty hAgree
+  subst output
+  exact
+    restoreSuccessfulContractCallState_of_XResultAgrees_running_success
+      hParent hParentWorld hCfgAccountMap
+      parentStore childStore restoreStore hTargetChild hTargetChildWorld
+      hAgree hChildGas inOffset inSize outOffset outSize hGas
+
 theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}
@@ -2856,6 +2920,81 @@ def thetaCodeXInitialState
           perm) with
       pc := Assembly.Program.pcAfter []
       stack := [] }
+
+theorem sharedStateRel_callFrameFromThetaCodeXInitialState
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    {yulAccountMap : EvmYul.AccountMap .Yul}
+    {evmSubstate : EvmYul.Substate}
+    {yulCreated : Batteries.RBSet EvmYul.AccountAddress compare}
+    {yulGas : EvmYul.UInt256}
+    {yulCode : AstContract}
+    {yulSubstate : EvmYul.Substate}
+    (source origin recipient : EvmYul.AccountAddress)
+    (gasPrice value weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool)
+    (blobVersionedHashes : List ByteArray)
+    (target : Assembly.TargetProgram) (gasNat : Nat)
+    (hAccountMap :
+      cfg.accountMapRel yulAccountMap
+        (EvmYul.EVM.thetaCallTransfer evm.accountMap source recipient value))
+    (hSubstate : yulSubstate = evmSubstate)
+    (hCode :
+      cfg.codeRel yulCode (Assembly.Bytecode.encodeTarget target))
+    (hCreated : yulCreated = evm.createdAccounts)
+    (hGas :
+      cfg.gasAvailableRel yulGas (EvmYul.UInt256.ofNat gasNat)) :
+    Reference.SharedStateRel cfg
+      { yul with
+        toMachineState := EvmYul.MachineState.freshExternalCall yulGas
+        accountMap := yulAccountMap
+        substate := yulSubstate
+        executionEnv :=
+          { codeOwner := recipient
+            sender := origin
+            source := source
+            weiValue := weiValue
+            calldata := calldata
+            code := yulCode
+            gasPrice := gasPrice.toNat
+            header := header
+            depth := depth
+            perm := perm
+            blobVersionedHashes := blobVersionedHashes }
+        createdAccounts := yulCreated }
+      (thetaCodeXInitialState target gasNat blobVersionedHashes
+        evm.createdAccounts evm.genesisBlockHeader evm.blocks
+        evm.accountMap evm.σ₀
+        { totalGasUsedInBlock := evm.totalGasUsedInBlock
+          transactionReceipts := evm.transactionReceipts }
+        evmSubstate source origin recipient gasPrice value weiValue
+        calldata depth header perm).toSharedState := by
+  simpa [thetaCodeXInitialState, Assembly.GasAware.installCodeAndGas,
+    xiInitialState, EvmYul.EVM.thetaCallExecutionEnv,
+    EvmYul.MachineState.freshExternalCall, Assembly.Program.pcAfter] using
+    sharedStateRel_callFrameFromFreshEvmFrame
+      (cfg := cfg)
+      (yul := yul)
+      (evm := evm)
+      hShared
+      (yulAccountMap := yulAccountMap)
+      (evmAccountMap :=
+        EvmYul.EVM.thetaCallTransfer evm.accountMap source recipient value)
+      (yulSubstate := yulSubstate)
+      (evmSubstate := evmSubstate)
+      (yulCreated := yulCreated)
+      (evmCreated := evm.createdAccounts)
+      (yulGas := yulGas)
+      (evmGas := EvmYul.UInt256.ofNat gasNat)
+      (yulCode := yulCode)
+      (evmCode := Assembly.Bytecode.encodeTarget target)
+      hAccountMap hSubstate hCode hCreated hGas
+      recipient origin source weiValue calldata gasPrice.toNat depth header
+      perm blobVersionedHashes
 
 theorem Theta_code_succ_succ_eq_X_installedCode
     (fuel gasNat : Nat)
