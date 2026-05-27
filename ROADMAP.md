@@ -3343,9 +3343,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   whose mutation keeps the Yul/compiler/EVM shared-state relation; assignment/let
   statement-continuation contracts, checked statement-lowering constructors,
   and CALL-safe argument-bundle adapters expose exact post-response status-word
-  writes at the same lowering boundary the closed consumers inspect. Remaining
-  work is to replace the recursive closed assignment/let consumers with these
-  open continuations, discharge the remaining CALL-safe eval-args domain facts,
-  and then compose to the EVM stack boundary.
+  writes at the same lowering boundary the closed consumers inspect. The first
+  open recursive-consumer frontier now attaches those assignment/let heads to
+  the existing closed tail proof as an open head-plus-tail continuation, without
+  unfolding closed `primCall`. Remaining work is to replace the recursive
+  closed assignment/let consumers with this open sequence frontier, discharge
+  the remaining CALL-safe eval-args domain facts, and then compose to the EVM
+  stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
