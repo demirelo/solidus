@@ -5548,6 +5548,214 @@ theorem call_noCode_emptyReturn_rel
           (hCfgAccountMap (by simpa [hOwner] using hCallMapRel))
           inOffset inSize outOffset outSize ⟨1⟩ hGas
 
+theorem EVM_call_precompiled_success_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hSuccess :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        true) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let childEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall
+                precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if precompileResult.2.1.isEmpty then evm.accountMap
+            else precompileResult.2.1
+          substate :=
+            if precompileResult.2.1.isEmpty then accessedSubstate
+            else precompileResult.2.2.2.1 }) := by
+  dsimp at hSuccess ⊢
+  have hSource :
+      EvmYul.AccountAddress.ofUInt256
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) =
+        evm.executionEnv.codeOwner :=
+    AccountAddress_ofUInt256_ofNat evm.executionEnv.codeOwner
+  simp [EvmYul.EVM.call, EvmYul.toExecute, hEnough, hDepth,
+    hPrecompile, hSource, evmCallTransfer_eq_thetaCallTransfer] at hSuccess ⊢
+  have hNotLt :
+      ¬ ((evm.accountMap.find? evm.executionEnv.codeOwner).elim
+          ⟨0⟩ fun account => account.balance) < value := by
+    intro hLt
+    cases hFind : evm.accountMap.find? evm.executionEnv.codeOwner with
+    | none =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ 0 at hEnough
+        change 0 < value.val at hLt
+        omega
+    | some account =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ account.balance.val at hEnough
+        change account.balance.val < value.val at hLt
+        omega
+  have hNotDepthEq : ¬ evm.executionEnv.depth = 1024 := by
+    omega
+  simpa [EvmYul.EVM.Θ, hNotLt, hNotDepthEq] using hSuccess
+
+theorem EVM_call_precompiled_failure_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hFailure :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        false) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let childEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall
+                precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if precompileResult.2.1.isEmpty then evm.accountMap
+            else precompileResult.2.1
+          substate :=
+            if precompileResult.2.1.isEmpty then accessedSubstate
+            else precompileResult.2.2.2.1 }) := by
+  dsimp at hFailure ⊢
+  have hSource :
+      EvmYul.AccountAddress.ofUInt256
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) =
+        evm.executionEnv.codeOwner :=
+    AccountAddress_ofUInt256_ofNat evm.executionEnv.codeOwner
+  simp [EvmYul.EVM.call, EvmYul.toExecute, hEnough, hDepth,
+    hPrecompile, hSource, evmCallTransfer_eq_thetaCallTransfer] at hFailure ⊢
+  have hNotLt :
+      ¬ ((evm.accountMap.find? evm.executionEnv.codeOwner).elim
+          ⟨0⟩ fun account => account.balance) < value := by
+    intro hLt
+    cases hFind : evm.accountMap.find? evm.executionEnv.codeOwner with
+    | none =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ 0 at hEnough
+        change 0 < value.val at hLt
+        omega
+    | some account =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ account.balance.val at hEnough
+        change account.balance.val < value.val at hLt
+        omega
+  have hNotDepthEq : ¬ evm.executionEnv.depth = 1024 := by
+    omega
+  simpa [EvmYul.EVM.Θ, hNotLt, hNotDepthEq] using hFailure
+
 def thetaCodeRawInitialState
     (_target : Assembly.TargetProgram) (gasNat : Nat)
     (blobVersionedHashes : List ByteArray)
