@@ -3335,9 +3335,10 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 - [ ] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
 - [ ] Complete the CALL-family open external semantics spine: requests are
   forwarded-gas-free at the outside-world boundary while preserving the
-  requested-gas operand, and the argument-prelude/EVM-stack adapters now expose
-  the open primitive request/response relation; remaining work is to replace
-  the closed primitive execution consumer with an open primitive/expression
-  proof.
+  requested-gas operand, and the argument-prelude source/compiler plus
+  EVM-stack adapters now reconstruct CALL operands from primitive arity and
+  expose the open primitive request/response relation; remaining work is to
+  replace the closed primitive execution consumer with an open
+  primitive/expression proof.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
