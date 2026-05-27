@@ -3084,6 +3084,86 @@ theorem call_depthLimit_emptyReturn_rel
             hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
             inOffset inSize outOffset outSize ⟨0⟩ hGas
 
+theorem UInt256_sub_zero (value : EvmYul.UInt256) :
+    value - EvmYul.UInt256.ofNat 0 = value := by
+  cases value with
+  | mk val =>
+      change
+        EvmYul.UInt256.mk
+            (val - (EvmYul.UInt256.ofNat 0).val) =
+          EvmYul.UInt256.mk val
+      congr
+      have hZero :
+          (EvmYul.UInt256.ofNat 0).val =
+            (0 : Fin EvmYul.UInt256.size) := rfl
+      rw [hZero]
+      apply Fin.ext
+      rw [(Fin.coe_sub_iff_le).mpr]
+      · simp
+      · exact Fin.zero_le val
+
+theorem EVM_decode_default (pc : EvmYul.UInt256) :
+    EvmYul.EVM.decode (default : ByteArray) pc = none := by
+  unfold EvmYul.EVM.decode ByteArray.get?
+  have hNotLt :
+      ¬ pc.toNat < (default : ByteArray).size := by
+    rw [show (default : ByteArray).size = 0 from rfl]
+    exact Nat.not_lt_zero _
+  simp [hNotLt]
+
+theorem EVM_C'_STOP (state : EvmYul.EVM.State) :
+    EvmYul.EVM.C' state EvmYul.Operation.STOP = 0 := by
+  simp [EvmYul.EVM.C', EvmYul.EVM.InstructionGasGroups.Wzero,
+    EvmYul.EVM.InstructionGasGroups.Wcopy,
+    EvmYul.EVM.InstructionGasGroups.Wextaccount,
+    GasConstants.Gzero]
+
+theorem EVM_memoryExpansionCost_STOP (state : EvmYul.EVM.State) :
+    EvmYul.EVM.memoryExpansionCost state EvmYul.Operation.STOP = 0 := by
+  simp [EvmYul.EVM.memoryExpansionCost,
+    EvmYul.EVM.memoryExpansionCost.μᵢ', EvmYul.EVM.Cₘ]
+
+def EVM_stopState (state : EvmYul.EVM.State) : EvmYul.EVM.State :=
+  { { state with execLength := state.execLength + 1 } with
+    toMachineState := state.toMachineState.setReturnData ByteArray.empty }
+
+theorem EVM_step_STOP_zero
+    {fuel : Nat} (state : EvmYul.EVM.State) :
+    EvmYul.EVM.step fuel.succ 0
+        (some (EvmYul.Operation.STOP, none)) state =
+      .ok (EVM_stopState state) := by
+  unfold EvmYul.EVM.step
+  dsimp
+  change
+    (EvmYul.step (τ := .EVM) EvmYul.Operation.STOP none)
+      ({ { state with execLength := state.execLength + 1 } with
+        gasAvailable := state.gasAvailable - EvmYul.UInt256.ofNat 0 }) =
+      _
+  rw [UInt256_sub_zero]
+  rfl
+
+theorem EVM_X_emptyCode_STOP_success
+    {fuel : Nat} {validJumps : Array EvmYul.UInt256}
+    {state : EvmYul.EVM.State}
+    (hCode : state.executionEnv.code = default)
+    (hStack : state.stack = []) :
+    EvmYul.EVM.X fuel.succ.succ validJumps state =
+      .ok (.success (EVM_stopState state) ByteArray.empty) := by
+  simp [EvmYul.EVM.X, hCode, EVM_decode_default,
+    EVM_memoryExpansionCost_STOP, EVM_C'_STOP, hStack,
+    EvmYul.EVM.δ, EvmYul.EVM.α, EvmYul.Operation.isCreate,
+    UInt256_sub_zero, EVM_stopState]
+  change
+    (do
+      let evmState' ←
+        EvmYul.EVM.step fuel.succ 0
+          (some (EvmYul.Operation.STOP, none))
+          ({ state with stack := [] })
+      Except.ok (EvmYul.EVM.ExecutionResult.success evmState'
+        ByteArray.empty)) = _
+  rw [EVM_step_STOP_zero]
+  rfl
+
 theorem buildContractCallReturnState_ok_rel
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
@@ -4945,6 +5025,28 @@ theorem Xi_succ_eq_X
   | ok result =>
       cases result <;> rfl
 
+theorem Xi_emptyCode_STOP_success
+    {fuel : Nat}
+    {createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare}
+    {genesisBlockHeader : EvmYul.BlockHeader}
+    {blocks : EvmYul.ProcessedBlocks}
+    {accountMap sigma0 : EvmYul.AccountMap .EVM}
+    {chainContext : EvmYul.EVM.ChildFrameChainContext}
+    {gas : EvmYul.UInt256}
+    {substate : EvmYul.Substate}
+    {env : EvmYul.ExecutionEnv .EVM}
+    (hCode : env.code = default) :
+    EvmYul.EVM.Ξ fuel.succ.succ.succ createdAccounts genesisBlockHeader
+        blocks accountMap sigma0 chainContext gas substate env =
+      .ok (.success (createdAccounts, accountMap, gas, substate)
+        ByteArray.empty) := by
+  rw [Xi_succ_eq_X]
+  rw [EVM_X_emptyCode_STOP_success]
+  · simp [EVM_stopState, xiInitialState,
+      EvmYul.MachineState.setReturnData]
+  · simp [xiInitialState, hCode]
+  · rfl
+
 theorem xiInitialState_eq_installCodeAndGas
     (target : Assembly.TargetProgram) (gasNat : Nat)
     (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
@@ -5061,6 +5163,36 @@ theorem Theta_code_succ_eq_Xi
           simp
       | revert returnedGas output =>
           simp
+
+theorem Theta_emptyCode_STOP_success
+    (fuel : Nat)
+    (blobVersionedHashes : List ByteArray)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (substate : EvmYul.Substate)
+    (source origin recipient : EvmYul.AccountAddress)
+    (gas gasPrice value weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool) :
+    let accountMapAfter :=
+      EvmYul.EVM.thetaCallTransfer accountMap source recipient value
+    EvmYul.EVM.Θ fuel.succ.succ.succ.succ blobVersionedHashes
+        createdAccounts genesisBlockHeader blocks accountMap sigma0
+        chainContext substate source origin recipient (.Code default)
+        gas gasPrice value weiValue calldata depth header perm =
+      .ok (createdAccounts,
+        if accountMapAfter.isEmpty then accountMap else accountMapAfter,
+        gas, substate, true, ByteArray.empty) := by
+  dsimp
+  rw [Theta_code_succ_eq_Xi]
+  rw [Xi_emptyCode_STOP_success]
+  · simp
+  · simp [EvmYul.EVM.thetaCallExecutionEnv]
 
 def thetaCodeRawInitialState
     (_target : Assembly.TargetProgram) (gasNat : Nat)
