@@ -22675,6 +22675,32 @@ theorem of_safe_primitiveFamilies
 
 end EvalArgsReverseOkDomainExactContract
 
+/--
+Local-varstore preservation for the Yul side of an open CALL-family response.
+
+The response may arbitrarily mutate the shared account/substate component, but
+`OpenExternal.CallKind.yulOpenCall?` resumes the suspended caller with the same
+Yul varstore. This is the small semantic fact the nested open-argument proof
+needs instead of unfolding any concrete closed `primCall` branch.
+-/
+theorem yulOpenCall?_resume_ok_domain_exact
+    {layout : List Name} {kind : OpenExternal.CallKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {call : OpenExternal.OpenCall (State × List Word)}
+    (hDomain : StoreDomainExact layout store)
+    (hCall :
+      OpenExternal.CallKind.yulOpenCall? (.Ok shared store) kind args =
+        some call)
+    (response : OpenExternal.CallResponse) :
+    ∃ sharedAfter,
+      (call.resume response).1 = .Ok sharedAfter store ∧
+        StoreDomainExact layout store := by
+  rcases
+      OpenExternal.CallKind.yulOpenCall?_resume_ok_store hCall response with
+    ⟨sharedAfter, hResume⟩
+  exact ⟨sharedAfter, hResume, hDomain⟩
+
 theorem sourceAssignTargets_contains_of_checkAssignment_evalArgs_domain
     {cfg : StateRelConfig} {layout : List Name}
     {fuel : Nat} {args : List AstExpr} {codeOverride : Option AstContract}

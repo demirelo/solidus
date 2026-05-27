@@ -783,6 +783,14 @@ def finishYulState
   state.setSharedState
     (site.finishShared state.toSharedState response)
 
+@[simp] theorem finishYulState_ok
+    (site : CallSite) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) (response : CallResponse) :
+    site.finishYulState (.Ok shared store) response =
+      .Ok (site.finishShared shared response) store := by
+  simp [finishYulState, EvmYul.Yul.State.setSharedState,
+    EvmYul.Yul.State.toSharedState]
+
 end CallSite
 
 /--
@@ -837,6 +845,24 @@ def evmOpenCall?
                 site.finishShared state.toSharedState response
               stack := response.statusWord :: rest } }
   | none => none
+
+theorem yulOpenCall?_resume_ok_store
+    {kind : CallKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {call : OpenCall (EvmYul.Yul.State × List Word)}
+    (hCall : yulOpenCall? (.Ok shared store) kind args = some call)
+    (response : CallResponse) :
+    ∃ sharedAfter,
+      (call.resume response).1 = .Ok sharedAfter store := by
+  unfold yulOpenCall? at hCall
+  cases hSite : kind.yulCallSite? (.Ok shared store) args with
+  | none =>
+      simp [hSite] at hCall
+  | some site =>
+      simp [hSite] at hCall
+      cases hCall
+      exact ⟨site.finishShared shared response, by simp⟩
 
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
     (shared : EvmYul.SharedState .EVM)

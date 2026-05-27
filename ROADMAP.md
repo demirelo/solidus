@@ -3354,7 +3354,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   The formerly raw nested-CALL argument-domain premise is now named as
   `EvalArgsReverseOkDomainExactContract`, with checked constructors from the
   old no-CALL primitive-family theorem and from a generic per-expression domain
-  theorem. Remaining work is to replace the recursive closed assignment/let
+  theorem; the open Yul CALL response continuation now also has a checked
+  local-frame lemma showing that arbitrary response mutations preserve the
+  suspended varstore/domain. Remaining work is to replace the recursive closed assignment/let
   consumers with this open sequence frontier, construct the CALL-safe
   `EvalArgsReverseOkDomainExactContract` from an open argument/response
   semantics that can suspend on nested CALLs, and then compose to the EVM stack
