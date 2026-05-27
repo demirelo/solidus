@@ -1945,6 +1945,91 @@ def evmCallTransfer (evm : EvmYul.AccountMap .EVM)
     (value : EvmYul.UInt256) : EvmYul.AccountMap .EVM :=
   callTransferUnchecked evm source recipient value
 
+theorem evmCallTransfer_eq_thetaCallTransfer
+    (evm : EvmYul.AccountMap .EVM)
+    (source recipient : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256) :
+    evmCallTransfer evm source recipient value =
+      EvmYul.EVM.thetaCallTransfer evm source recipient value := by
+  unfold evmCallTransfer callTransferUnchecked
+    EvmYul.Yul.callTransferUnchecked EvmYul.Yul.callSourceDebit
+    EvmYul.Yul.callRecipientCredit EvmYul.EVM.thetaCallTransfer
+    EvmYul.EVM.thetaCallSourceDebit EvmYul.EVM.thetaCallRecipientCredit
+  cases evm.find? recipient with
+  | none =>
+      by_cases hValue : (value != (⟨0⟩ : EvmYul.UInt256)) = true
+      · simp [hValue]
+        split <;> simp_all
+      · simp [hValue]
+        split <;> simp_all
+  | some _account =>
+      simp
+      split <;> simp_all
+
+theorem callRecipientCredit_isEmpty_false_of_parent_false
+    {τ : EvmYul.OperationType}
+    {accountMap : EvmYul.AccountMap τ}
+    (recipient : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256)
+    (hParent : accountMap.isEmpty = false) :
+    (callRecipientCredit accountMap recipient value).isEmpty = false := by
+  unfold callRecipientCredit EvmYul.Yul.callRecipientCredit
+  cases hRecipient : accountMap.find? recipient with
+  | none =>
+      by_cases hValue :
+          (value != (⟨0⟩ : EvmYul.UInt256)) = true
+      · have hFind :
+            (accountMap.insert recipient
+                { (default : EvmYul.Account τ) with balance := value }).find?
+              recipient =
+                some { (default : EvmYul.Account τ) with balance := value } := by
+          simp [Batteries.RBMap.find?_insert]
+        simpa [hRecipient, hValue] using
+          accountMap_isEmpty_false_of_find? hFind
+      · simp [hValue, hParent]
+  | some account =>
+      have hFind :
+          (accountMap.insert recipient
+              { account with balance := account.balance + value }).find?
+            recipient =
+              some { account with balance := account.balance + value } := by
+        simp [Batteries.RBMap.find?_insert]
+      simpa [hRecipient] using accountMap_isEmpty_false_of_find? hFind
+
+theorem callSourceDebit_isEmpty_false_of_parent_false
+    {τ : EvmYul.OperationType}
+    {accountMap : EvmYul.AccountMap τ}
+    (source : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256)
+    (hParent : accountMap.isEmpty = false) :
+    (callSourceDebit accountMap source value).isEmpty = false := by
+  unfold callSourceDebit EvmYul.Yul.callSourceDebit
+  cases hSource : accountMap.find? source with
+  | none =>
+      simp [hParent]
+  | some account =>
+      have hFind :
+          (accountMap.insert source
+              { account with balance := account.balance - value }).find?
+            source =
+              some { account with balance := account.balance - value } := by
+        simp [Batteries.RBMap.find?_insert]
+      simpa [hSource] using accountMap_isEmpty_false_of_find? hFind
+
+theorem callTransferUnchecked_isEmpty_false_of_parent_false
+    {τ : EvmYul.OperationType}
+    {accountMap : EvmYul.AccountMap τ}
+    (source recipient : EvmYul.AccountAddress)
+    (value : EvmYul.UInt256)
+    (hParent : accountMap.isEmpty = false) :
+    (callTransferUnchecked accountMap source recipient value).isEmpty =
+      false := by
+  unfold callTransferUnchecked EvmYul.Yul.callTransferUnchecked
+  exact
+    callSourceDebit_isEmpty_false_of_parent_false source value
+      (callRecipientCredit_isEmpty_false_of_parent_false recipient value
+        hParent)
+
 theorem CompiledAccountMapRel.callTransferUnchecked_preserve
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
     (hWorld : CompiledAccountMapRel yul evm)
@@ -2075,6 +2160,64 @@ theorem CompiledAccountMapRel.callTransferAccountMap?_of_evm_enough
       callTransferUnchecked]
   · simpa [evmCallTransfer] using
       hWorld.callTransferUnchecked_preserve source recipient value
+
+theorem CompiledAccountMapRel.of_empty_child_to_empty_parent
+    {yulChild : EvmYul.AccountMap .Yul}
+    {evmChild evmParent : EvmYul.AccountMap .EVM}
+    (hChild : CompiledAccountMapRel yulChild evmChild)
+    (hChildEmpty : evmChild.isEmpty = true)
+    (hParentEmpty : evmParent.isEmpty = true) :
+    CompiledAccountMapRel yulChild evmParent := by
+  refine
+    { yul_to_evm := ?_
+      evm_to_yul := ?_ }
+  · intro addr yulAccount hFindYul
+    rcases hChild.find_yul hFindYul with
+      ⟨evmAccount, hFindEvmChild, _hAccount⟩
+    have hNonempty :=
+      accountMap_isEmpty_false_of_find? hFindEvmChild
+    simp [hChildEmpty] at hNonempty
+  · intro addr evmAccount hFindEvmParent
+    have hNonempty :=
+      accountMap_isEmpty_false_of_find? hFindEvmParent
+    simp [hParentEmpty] at hNonempty
+
+theorem CompiledAccountMapRel.callTransferAccountMap?_of_evm_enough_merge
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256}
+    (hEnough :
+      value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance))) :
+    ∃ yulAfter,
+      EvmYul.Yul.callTransferAccountMap? yul source recipient value =
+          some yulAfter ∧
+        CompiledAccountMapRel yulAfter
+          (if (evmCallTransfer evm source recipient value).isEmpty then
+            evm
+          else
+            evmCallTransfer evm source recipient value) := by
+  rcases
+      hWorld.callTransferAccountMap?_of_evm_enough
+        (source := source) (recipient := recipient) hEnough with
+    ⟨yulAfter, hTransfer, hTransferRel⟩
+  refine ⟨yulAfter, hTransfer, ?_⟩
+  cases hEmpty :
+      (evmCallTransfer evm source recipient value).isEmpty
+  · simpa [hEmpty] using hTransferRel
+  · have hParentEmpty : evm.isEmpty = true := by
+      cases hParent : evm.isEmpty
+      · have hTransferNonempty :
+            (evmCallTransfer evm source recipient value).isEmpty = false := by
+          simpa [evmCallTransfer] using
+            callTransferUnchecked_isEmpty_false_of_parent_false
+              source recipient value hParent
+        simp [hEmpty] at hTransferNonempty
+      · rfl
+    simp
+    exact
+      CompiledAccountMapRel.of_empty_child_to_empty_parent
+        hTransferRel hEmpty hParentEmpty
 
 theorem CompiledAccountMapRel.callTransferAccountMap?_none_of_evm_not_enough
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -3101,6 +3244,25 @@ theorem UInt256_sub_zero (value : EvmYul.UInt256) :
       rw [(Fin.coe_sub_iff_le).mpr]
       · simp
       · exact Fin.zero_le val
+
+theorem AccountAddress_ofUInt256_ofNat
+    (addr : EvmYul.AccountAddress) :
+    EvmYul.AccountAddress.ofUInt256 (EvmYul.UInt256.ofNat addr) =
+      addr := by
+  apply Fin.ext
+  unfold EvmYul.AccountAddress.ofUInt256
+  rw [Fin.val_ofNat]
+  have hAddrLtUInt :
+      (addr : Nat) < EvmYul.UInt256.size := by
+    exact Nat.lt_trans addr.isLt (by decide)
+  have hVal :
+      (EvmYul.UInt256.ofNat addr).val.val = addr.val := by
+    unfold EvmYul.UInt256.ofNat
+    change (Fin.ofNat EvmYul.UInt256.size addr.val).val = addr.val
+    rw [Fin.val_ofNat]
+    exact Nat.mod_eq_of_lt hAddrLtUInt
+  rw [hVal]
+  simp [Nat.mod_eq_of_lt addr.isLt]
 
 theorem EVM_decode_default (pc : EvmYul.UInt256) :
     EvmYul.EVM.decode (default : ByteArray) pc = none := by
@@ -5193,6 +5355,198 @@ theorem Theta_emptyCode_STOP_success
   rw [Xi_emptyCode_STOP_success]
   · simp
   · simp [EvmYul.EVM.thetaCallExecutionEnv]
+
+theorem EVM_call_noCode_success_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hMissing :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = none) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if callMap.isEmpty then evm.accountMap else callMap
+          substate :=
+            (EvmYul.State.addAccessedAccount charged.toState target).substate }) := by
+  dsimp
+  have hSource :
+      EvmYul.AccountAddress.ofUInt256
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) =
+        evm.executionEnv.codeOwner :=
+    AccountAddress_ofUInt256_ofNat evm.executionEnv.codeOwner
+  have hFuel : fuel + 4 = fuel.succ.succ.succ.succ := by
+    omega
+  simp [EvmYul.EVM.call, hEnough, hDepth, EvmYul.toExecute,
+    hNotPrecompile, hMissing, hSource]
+  rw [hFuel]
+  rw [show
+    (Id.run (EvmYul.ToExecute.Code default) :
+      EvmYul.ToExecute .EVM) = EvmYul.ToExecute.Code default from rfl]
+  rw [Theta_emptyCode_STOP_success]
+  have hNotLt :
+      ¬ ((evm.accountMap.find? evm.executionEnv.codeOwner).elim
+          ⟨0⟩ fun account => account.balance) < value := by
+    intro hLt
+    cases hFind : evm.accountMap.find? evm.executionEnv.codeOwner with
+    | none =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ 0 at hEnough
+        change 0 < value.val at hLt
+        omega
+    | some account =>
+        simp [hFind, Option.option] at hEnough hLt
+        change value.val ≤ account.balance.val at hEnough
+        change account.balance.val < value.val at hLt
+        omega
+  have hNotDepthEq : ¬ evm.executionEnv.depth = 1024 := by
+    omega
+  simp [evmCallTransfer_eq_thetaCallTransfer, hNotLt, hNotDepthEq]
+
+theorem call_noCode_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hChargedShared :
+      Reference.SharedStateRel cfg yul
+        ({ evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          : EvmYul.EVM.State).toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hMissing :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if callMap.isEmpty then evm.accountMap else callMap
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulCallMap,
+        EvmYul.Yul.callTransferAccountMap? yul.accountMap
+            yul.executionEnv.codeOwner target value =
+          some yulCallMap ∧
+        CompiledAccountMapRel yulCallMap
+          (if callMap.isEmpty then evm.accountMap else callMap) ∧
+        yul.accountMap.find? target = none ∧
+        EvmYul.PrecompiledContract.ofAddress? target = none ∧
+        ∃ yulAfter,
+          EvmYul.Yul.buildContractCallEmptyReturnState
+              (EvmYul.Yul.addAccessedAccount (.Ok yul store) target)
+              (some yulCallMap)
+              inOffset inSize outOffset outSize ⟨1⟩ =
+            .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+          Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  constructor
+  · exact
+      EVM_call_noCode_success_eq hEnough hDepth hNotPrecompile hMissing
+  · have hOwner :
+        yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.codeOwner
+    have hMissingYul :
+        yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+          none :=
+      hParentWorld.not_find_yul_of_not_find_evm hMissing
+    rcases
+        hParentWorld.callTransferAccountMap?_of_evm_enough_merge
+          (source := yul.executionEnv.codeOwner)
+          (recipient := EvmYul.AccountAddress.ofUInt256 address)
+          (value := value)
+          (by simpa [hOwner] using hEnough) with
+      ⟨yulCallMap, hTransfer, hCallMapRel⟩
+    refine ⟨yulCallMap, hTransfer, ?_, hMissingYul, hNotPrecompile, ?_⟩
+    · simpa [hOwner] using hCallMapRel
+    · exact
+        buildContractCallEmptyReturnState_afterAccess_some_rel
+          hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+          (hCfgAccountMap (by simpa [hOwner] using hCallMapRel))
+          inOffset inSize outOffset outSize ⟨1⟩ hGas
 
 def thetaCodeRawInitialState
     (_target : Assembly.TargetProgram) (gasNat : Nat)
