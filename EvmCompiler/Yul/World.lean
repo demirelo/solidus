@@ -72,6 +72,24 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_compileChecke
     ⟨hTarget, _hDecodeWindow, _hJumpdest⟩
   exact (Program.compileCheckedAssemblyTarget?_eq_some hTarget).1
 
+theorem compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_eq_some
+        hCompileTarget with
+    ⟨hResources, _hStatic⟩
+  rcases Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResources with
+    ⟨hBytecode, _hResources⟩
+  rcases Program.compileCheckedAssemblyTargetBytecode?_eq_some hBytecode with
+    ⟨hTarget, _hDecodeWindow, _hJumpdest⟩
+  exact (Program.compileCheckedAssemblyTarget?_eq_some hTarget).2
+
 theorem sourceCompileAccepted_of_sourceAccepted_resources
     {program : Program}
     (hSource : Program.SourceAccepted program)
@@ -386,6 +404,145 @@ theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary
     ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
       hWholeRel, hDecode, hJumpdest⟩
 
+theorem blockTraceResult_of_sourceStaticBoundary_runNResult
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : Assembly.StepResult}
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hTargetRun :
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome) :
+    Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+      targetOutcome := by
+  exact
+    (Assembly.Preservation.compile_runN_result_block_trace_sound
+      (hCompile :=
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_assemblyCompile
+          hCompileBoundary)
+      hTargetRun).2
+
+theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary_trace
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {referenceInitial : Reference.State}
+    {referenceResult : Reference.Result}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hReferenceRun :
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult)
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel referenceResult sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∃ targetFuel targetOutcome,
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  rcases
+      compile_preserves_of_reference_source_runs_sourceStaticBoundary
+        (prim := prim) hPrim (outcomeRel := outcomeRel)
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (referenceInitial := referenceInitial)
+        (referenceResult := referenceResult) (initial := initial)
+        (sourceOutcome := sourceOutcome)
+        hReferenceRun hSourceRun hOutcomeRel hCompileBoundary hInitialPc
+        hInitialStack with
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel, hDecode, hJumpdest⟩
+  exact
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel,
+      blockTraceResult_of_sourceStaticBoundary_runNResult hCompileBoundary
+        hTargetRun,
+      hDecode, hJumpdest⟩
+
+theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {referenceInitial : Reference.State}
+    {referenceResult : Reference.Result}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hReferenceRun :
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult)
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel referenceResult sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome ∧
+      (∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            ∃ result,
+              EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                  (Assembly.GasAware.installCodeAndGas target gas initial) =
+                .ok result ∧
+              Assembly.GasAware.XResultAgrees targetOutcome result) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  rcases
+      compile_preserves_of_reference_source_runs_sourceStaticBoundary_trace
+        (prim := prim) hPrim (outcomeRel := outcomeRel)
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (referenceInitial := referenceInitial)
+        (referenceResult := referenceResult) (initial := initial)
+        (sourceOutcome := sourceOutcome)
+        hReferenceRun hSourceRun hOutcomeRel hCompileBoundary hInitialPc
+        hInitialStack with
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel, hTrace, hDecode, hJumpdest⟩
+  let hPreconditions := hTargetGasForX hTrace
+  exact
+    ⟨targetFuel, targetOutcome, hPreconditions.evmFuel,
+      hPreconditions.gasBound, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel, hTrace, hPreconditions.runsAboveBound, hDecode, hJumpdest⟩
+
 theorem compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -523,6 +680,195 @@ theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundar
       (sourceOutcome := sourceOutcome)
       (runResult_revert_of_installed_callDispatcher hInstalled hCall)
       hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+
+theorem compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state' : EvmYul.Yul.State} {rets : List EvmYul.UInt256}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .ok (state', rets))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.regular state') sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.regular state') ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.regular state') sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome ∧
+      (∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            ∃ result,
+              EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                  (Assembly.GasAware.installCodeAndGas target gas initial) =
+                .ok result ∧
+              Assembly.GasAware.XResultAgrees targetOutcome result) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .regular state') (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_regular_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX
+
+theorem compile_preserves_of_installed_callDispatcher_yulHalt_sourceStaticBoundary_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {haltState : EvmYul.Yul.State} {value : EvmYul.UInt256}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.YulHalt haltState value))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.yulHalt haltState value) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.yulHalt haltState value) ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.yulHalt haltState value) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome ∧
+      (∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            ∃ result,
+              EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                  (Assembly.GasAware.installCodeAndGas target gas initial) =
+                .ok result ∧
+              Assembly.GasAware.XResultAgrees targetOutcome result) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .yulHalt haltState value) (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_yulHalt_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX
+
+theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundary_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {revertState : EvmYul.Yul.State}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.Revert revertState))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.revert revertState) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target initial
+          targetOutcome) :
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.revert revertState) ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.revert revertState) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome ∧
+      (∀ gas,
+        gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            ∃ result,
+              EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                  (Assembly.GasAware.installCodeAndGas target gas initial) =
+                .ok result ∧
+              Assembly.GasAware.XResultAgrees targetOutcome result) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .revert revertState) (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_revert_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX
 
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
