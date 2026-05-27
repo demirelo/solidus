@@ -31084,8 +31084,7 @@ def OpenPrimitiveCallExprPreludeSoundAt
     (pre : List Functions.Stmt)
     (lowerArgs :
       Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)) : Prop :=
-  ∀ {Effect : Type}
-    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+  ∀ {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State} {values : List Word},
     SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler →
@@ -31106,18 +31105,20 @@ def OpenPrimitiveCallExprPreludeSoundAt
       SourceStateRel cfg layout
         (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
       ∃ sourceCall :
-          OpenExternal.OpenCall Effect (State × List Word),
+          OpenExternal.OpenCall (State × List Word),
       ∃ compilerCall :
-          OpenExternal.OpenCall Effect
+          OpenExternal.OpenCall
             (Objects.Source.State × List Word),
-        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+        OpenExternal.CallKind.yulOpenCall?
             (.Ok sourceSharedAfter sourceStoreAfter) kind
               (kind.args operands) =
           some sourceCall ∧
         SourceStateRel.compilerPrimitiveOpenCall?
-            (Effect := Effect) compilerAfterArgs kind values =
+            compilerAfterArgs kind values =
           some compilerCall ∧
         OpenExternal.OpenCallRel
+          (Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared)
           (SourceStateRel.OpenPrimitiveResultRel cfg layout)
             sourceCall compilerCall
 
@@ -31139,7 +31140,7 @@ theorem openPrimitiveCallExprPreludeSoundAt_of_arg_stack_preludeRegularAt_callKi
         codeOverride pre lowerArgs) :
     OpenPrimitiveCallExprPreludeSoundAt cfg layout prim program ctx
       sourceFuel yulPrim op kind args codeOverride pre lowerArgs := by
-  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+  intro sourceShared sourceSharedAfter sourceStore sourceStoreAfter
     compiler values hInitial hEvalArgs hValuesArity
   have hInputs :
       Expressions.Structured.BasicOp.inputs op = kind.inputArity :=
@@ -31157,7 +31158,7 @@ theorem openPrimitiveCallExprPreludeSoundAt_of_arg_stack_preludeRegularAt_callKi
       hPreRun, hArgEval, hRelArgs⟩
   rcases
       SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
-        (Effect := Effect) hRelArgs kind operands with
+        hRelArgs kind operands with
     ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
   exact
     ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
@@ -31227,21 +31228,21 @@ def OpenRegularStmtOpenCallResultRel
     SourceStateExactRel cfg layoutAfter source compilerResult.1
 
 def openPrimitiveCallAssignSourceStmtCall
-    {Effect : Type} (site : OpenExternal.CallSite)
+    (site : OpenExternal.CallSite)
     (sourceShared : EvmYul.SharedState .Yul)
     (sourceStore : EvmYul.Yul.VarStore)
     (name : EvmYul.Identifier) :
-    OpenExternal.OpenCall Effect State where
+    OpenExternal.OpenCall State where
   site := site
   resume := fun response =>
     .Ok (site.finishShared sourceShared response)
       (sourceStore.insert (identName name) response.statusWord)
 
 def openPrimitiveCallAssignCompilerStmtCall
-    {Effect : Type} (site : OpenExternal.CallSite)
+    (site : OpenExternal.CallSite)
     (compiler : Objects.Source.State) (ctx : Functions.Source.Ctx)
     (name : EvmYul.Identifier) :
-    OpenExternal.OpenCall Effect
+    OpenExternal.OpenCall
       (Objects.Source.State × Functions.Source.Ctx) where
   site := site
   resume := fun response =>
@@ -31251,21 +31252,21 @@ def openPrimitiveCallAssignCompilerStmtCall
       ctx)
 
 def openPrimitiveCallLetSourceStmtCall
-    {Effect : Type} (site : OpenExternal.CallSite)
+    (site : OpenExternal.CallSite)
     (sourceShared : EvmYul.SharedState .Yul)
     (sourceStore : EvmYul.Yul.VarStore)
     (name : EvmYul.Identifier) :
-    OpenExternal.OpenCall Effect State where
+    OpenExternal.OpenCall State where
   site := site
   resume := fun response =>
     .Ok (site.finishShared sourceShared response)
       (sourceStore.insert (identName name) response.statusWord)
 
 def openPrimitiveCallLetCompilerStmtCall
-    {Effect : Type} (site : OpenExternal.CallSite)
+    (site : OpenExternal.CallSite)
     (compiler : Objects.Source.State) (ctx : Functions.Source.Ctx)
     (name : EvmYul.Identifier) :
-    OpenExternal.OpenCall Effect
+    OpenExternal.OpenCall
       (Objects.Source.State × Functions.Source.Ctx) where
   site := site
   resume := fun response =>
@@ -31275,18 +31276,20 @@ def openPrimitiveCallLetCompilerStmtCall
       { ctx with scope := identName name :: ctx.scope })
 
 theorem openPrimitiveCallAssignStmtOpenCallRel_of_primitive
-    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {cfg : StateRelConfig} {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
     {sourceStore : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State} {ctx : Functions.Source.Ctx}
     {sourceCall :
-      OpenExternal.OpenCall Effect (State × List Word)}
+      OpenExternal.OpenCall (State × List Word)}
     {compilerCall :
-      OpenExternal.OpenCall Effect
+      OpenExternal.OpenCall
         (Objects.Source.State × List Word)}
     (name : EvmYul.Identifier)
     (hCallRel :
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceShared compiler.shared)
         (SourceStateRel.OpenPrimitiveResultRel cfg layout)
         sourceCall compilerCall)
     (hRel :
@@ -31294,16 +31297,18 @@ theorem openPrimitiveCallAssignStmtOpenCallRel_of_primitive
     (hDomain : StoreDomainExact layout sourceStore)
     (hTargetMem : identName name ∈ layout) :
     OpenExternal.OpenCallRel
+      (Reference.SharedStateRel.OpenExternalResponseRel
+        cfg sourceShared compiler.shared)
       (OpenRegularStmtOpenCallResultRel cfg layout)
-      (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+      (openPrimitiveCallAssignSourceStmtCall
         sourceCall.site
         sourceShared sourceStore name)
-      (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+      (openPrimitiveCallAssignCompilerStmtCall
         compilerCall.site
         compiler ctx name) := by
   constructor
   · exact hCallRel.sameSite
-  · intro response
+  · intro response hResponse
     dsimp [OpenRegularStmtOpenCallResultRel,
       openPrimitiveCallAssignSourceStmtCall,
       openPrimitiveCallAssignCompilerStmtCall]
@@ -31317,7 +31322,7 @@ theorem openPrimitiveCallAssignStmtOpenCallRel_of_primitive
       SourceStateRel.finishOpenExternalCall
         (cfg := cfg) (layout := layout)
         (compiler := compiler) (site := sourceCall.site)
-        (response := response) hRel
+        (response := response) hRel hResponse
     cases hFinished with
     | ok hShared hVars =>
         exact
@@ -31326,18 +31331,20 @@ theorem openPrimitiveCallAssignStmtOpenCallRel_of_primitive
             (StoreDomainExact.insert_mem hDomain hTargetMem)
 
 theorem openPrimitiveCallLetStmtOpenCallRel_of_primitive
-    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {cfg : StateRelConfig} {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
     {sourceStore : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State} {ctx : Functions.Source.Ctx}
     {sourceCall :
-      OpenExternal.OpenCall Effect (State × List Word)}
+      OpenExternal.OpenCall (State × List Word)}
     {compilerCall :
-      OpenExternal.OpenCall Effect
+      OpenExternal.OpenCall
         (Objects.Source.State × List Word)}
     (name : EvmYul.Identifier)
     (hCallRel :
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceShared compiler.shared)
         (SourceStateRel.OpenPrimitiveResultRel cfg layout)
         sourceCall compilerCall)
     (hRel :
@@ -31345,16 +31352,18 @@ theorem openPrimitiveCallLetStmtOpenCallRel_of_primitive
     (hDomain : StoreDomainExact layout sourceStore)
     (hFresh : identName name ∉ layout) :
     OpenExternal.OpenCallRel
+      (Reference.SharedStateRel.OpenExternalResponseRel
+        cfg sourceShared compiler.shared)
       (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
-      (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+      (openPrimitiveCallLetSourceStmtCall
         sourceCall.site
         sourceShared sourceStore name)
-      (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+      (openPrimitiveCallLetCompilerStmtCall
         compilerCall.site
         compiler ctx name) := by
   constructor
   · exact hCallRel.sameSite
-  · intro response
+  · intro response hResponse
     dsimp [OpenRegularStmtOpenCallResultRel,
       openPrimitiveCallLetSourceStmtCall,
       openPrimitiveCallLetCompilerStmtCall]
@@ -31368,7 +31377,7 @@ theorem openPrimitiveCallLetStmtOpenCallRel_of_primitive
       SourceStateRel.finishOpenExternalCall
         (cfg := cfg) (layout := layout)
         (compiler := compiler) (site := sourceCall.site)
-        (response := response) hRel
+        (response := response) hRel hResponse
     cases hFinished with
     | ok hShared hVars =>
         exact
@@ -31394,8 +31403,7 @@ def OpenPrimitiveCallAssignStmtPreludeSoundAt
     (lowerArgs :
       Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
     (name : EvmYul.Identifier) : Prop :=
-  ∀ {Effect : Type}
-    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+  ∀ {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State} {values : List Word},
     SourceStateExactRel cfg layout (.Ok sourceShared sourceStore) compiler →
@@ -31409,9 +31417,9 @@ def OpenPrimitiveCallAssignStmtPreludeSoundAt
     ∃ ctxAfter : Functions.Source.Ctx,
     ∃ targetFuel : Nat,
     ∃ sourcePrimitiveCall :
-        OpenExternal.OpenCall Effect (State × List Word),
+        OpenExternal.OpenCall (State × List Word),
     ∃ compilerPrimitiveCall :
-        OpenExternal.OpenCall Effect
+        OpenExternal.OpenCall
           (Objects.Source.State × List Word),
       Functions.Source.Block.runOpen prim program ctx targetFuel
           { stmts := pre } compiler =
@@ -31420,19 +31428,21 @@ def OpenPrimitiveCallAssignStmtPreludeSoundAt
         .ok (compilerAfterArgs, values) ∧
       SourceStateRel cfg layout
         (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
-      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+      OpenExternal.CallKind.yulOpenCall?
           (.Ok sourceSharedAfter sourceStoreAfter) kind
             (kind.args operands) =
         some sourcePrimitiveCall ∧
       SourceStateRel.compilerPrimitiveOpenCall?
-          (Effect := Effect) compilerAfterArgs kind values =
+          compilerAfterArgs kind values =
         some compilerPrimitiveCall ∧
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared)
         (OpenRegularStmtOpenCallResultRel cfg layout)
-        (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+        (openPrimitiveCallAssignSourceStmtCall
           sourcePrimitiveCall.site
           sourceSharedAfter sourceStoreAfter name)
-        (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+        (openPrimitiveCallAssignCompilerStmtCall
           compilerPrimitiveCall.site
           compilerAfterArgs ctxAfter name)
 
@@ -31461,12 +31471,12 @@ theorem openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
         StoreDomainExact layout storeAfter) :
     OpenPrimitiveCallAssignStmtPreludeSoundAt cfg layout prim program ctx
       sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
-  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+  intro sourceShared sourceSharedAfter sourceStore sourceStoreAfter
     compiler values hInitialExact hEvalArgs hValuesArity
   have hInitialRel :
       SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler :=
     SourceStateExactRel.toRel hInitialExact
-  rcases hExpr (Effect := Effect) hInitialRel hEvalArgs hValuesArity with
+  rcases hExpr hInitialRel hEvalArgs hValuesArity with
     ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
       hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
       compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
@@ -31474,11 +31484,13 @@ theorem openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
     hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
   have hStmtRel :
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared)
         (OpenRegularStmtOpenCallResultRel cfg layout)
-        (openPrimitiveCallAssignSourceStmtCall (Effect := Effect)
+        (openPrimitiveCallAssignSourceStmtCall
           sourcePrimitiveCall.site
           sourceSharedAfter sourceStoreAfter name)
-        (openPrimitiveCallAssignCompilerStmtCall (Effect := Effect)
+        (openPrimitiveCallAssignCompilerStmtCall
           compilerPrimitiveCall.site compilerAfterArgs ctxAfter name) :=
     openPrimitiveCallAssignStmtOpenCallRel_of_primitive
       (cfg := cfg) (layout := layout) (sourceShared := sourceSharedAfter)
@@ -31510,8 +31522,7 @@ def OpenPrimitiveCallLetStmtPreludeSoundAt
     (lowerArgs :
       Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
     (name : EvmYul.Identifier) : Prop :=
-  ∀ {Effect : Type}
-    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+  ∀ {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State} {values : List Word},
     SourceStateExactRel cfg layout (.Ok sourceShared sourceStore) compiler →
@@ -31525,9 +31536,9 @@ def OpenPrimitiveCallLetStmtPreludeSoundAt
     ∃ ctxAfter : Functions.Source.Ctx,
     ∃ targetFuel : Nat,
     ∃ sourcePrimitiveCall :
-        OpenExternal.OpenCall Effect (State × List Word),
+        OpenExternal.OpenCall (State × List Word),
     ∃ compilerPrimitiveCall :
-        OpenExternal.OpenCall Effect
+        OpenExternal.OpenCall
           (Objects.Source.State × List Word),
       Functions.Source.Block.runOpen prim program ctx targetFuel
           { stmts := pre } compiler =
@@ -31536,19 +31547,21 @@ def OpenPrimitiveCallLetStmtPreludeSoundAt
         .ok (compilerAfterArgs, values) ∧
       SourceStateRel cfg layout
         (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
-      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+      OpenExternal.CallKind.yulOpenCall?
           (.Ok sourceSharedAfter sourceStoreAfter) kind
             (kind.args operands) =
         some sourcePrimitiveCall ∧
       SourceStateRel.compilerPrimitiveOpenCall?
-          (Effect := Effect) compilerAfterArgs kind values =
+          compilerAfterArgs kind values =
         some compilerPrimitiveCall ∧
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared)
         (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
-        (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+        (openPrimitiveCallLetSourceStmtCall
           sourcePrimitiveCall.site
           sourceSharedAfter sourceStoreAfter name)
-        (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+        (openPrimitiveCallLetCompilerStmtCall
           compilerPrimitiveCall.site
           compilerAfterArgs ctxAfter name)
 
@@ -31577,12 +31590,12 @@ theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
         StoreDomainExact layout storeAfter) :
     OpenPrimitiveCallLetStmtPreludeSoundAt cfg layout prim program ctx
       sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
-  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+  intro sourceShared sourceSharedAfter sourceStore sourceStoreAfter
     compiler values hInitialExact hEvalArgs hValuesArity
   have hInitialRel :
       SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler :=
     SourceStateExactRel.toRel hInitialExact
-  rcases hExpr (Effect := Effect) hInitialRel hEvalArgs hValuesArity with
+  rcases hExpr hInitialRel hEvalArgs hValuesArity with
     ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
       hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
       compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
@@ -31590,11 +31603,13 @@ theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
     hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
   have hStmtRel :
       OpenExternal.OpenCallRel
+        (Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared)
         (OpenRegularStmtOpenCallResultRel cfg (identName name :: layout))
-        (openPrimitiveCallLetSourceStmtCall (Effect := Effect)
+        (openPrimitiveCallLetSourceStmtCall
           sourcePrimitiveCall.site
           sourceSharedAfter sourceStoreAfter name)
-        (openPrimitiveCallLetCompilerStmtCall (Effect := Effect)
+        (openPrimitiveCallLetCompilerStmtCall
           compilerPrimitiveCall.site compilerAfterArgs ctxAfter name) :=
     openPrimitiveCallLetStmtOpenCallRel_of_primitive
       (cfg := cfg) (layout := layout) (sourceShared := sourceSharedAfter)
@@ -176603,7 +176618,7 @@ relation, so future CALL consumers should use this theorem rather than asking
 callers for another semantic assumption.
 -/
 def OpenPrimitiveCallSound (cfg : Reference.StateRelConfig) : Prop :=
-  ∀ {Effect : Type} {layout : List Name}
+  ∀ {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
     {store : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State},
@@ -176612,17 +176627,19 @@ def OpenPrimitiveCallSound (cfg : Reference.StateRelConfig) : Prop :=
     ∀ (kind : OpenExternal.CallKind)
       (operands : OpenExternal.CallOperands),
       ∃ sourceCall :
-          OpenExternal.OpenCall Effect (Reference.State × List Word),
+          OpenExternal.OpenCall (Reference.State × List Word),
       ∃ compilerCall :
-          OpenExternal.OpenCall Effect
+          OpenExternal.OpenCall
             (Objects.Source.State × List Word),
-        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+        OpenExternal.CallKind.yulOpenCall?
             (.Ok sourceShared store) kind (kind.args operands) =
           some sourceCall ∧
         Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
-            (Effect := Effect) compiler kind (kind.args operands).reverse =
+            compiler kind (kind.args operands).reverse =
           some compilerCall ∧
         OpenExternal.OpenCallRel
+          (Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceShared compiler.shared)
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
             cfg layout) sourceCall compilerCall
 
@@ -176641,10 +176658,10 @@ theorem openPrimitiveCallSound
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store) :
     OpenPrimitiveCallSound cfg := by
-  intro Effect layout sourceShared sourceStore compiler hRel kind operands
+  intro layout sourceShared sourceStore compiler hRel kind operands
   exact
     Reference.SourceBridgeFacts.SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
-      (Effect := Effect) hRel kind operands
+      hRel kind operands
 
 /--
 Constructed open-call contract directly against the EVM stack boundary.
@@ -176656,7 +176673,7 @@ on top of an arbitrary stack suffix, then the imported Yul call and EVM call
 have the same open site and preserve every shared response.
 -/
 def OpenPrimitiveEVMCallSound (cfg : Reference.StateRelConfig) : Prop :=
-  ∀ {Effect : Type} {layout : List Name}
+  ∀ {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
     {store : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -176668,16 +176685,18 @@ def OpenPrimitiveEVMCallSound (cfg : Reference.StateRelConfig) : Prop :=
       (operands : OpenExternal.CallOperands)
       (baseStack : OpenExternal.Stack),
       ∃ sourceCall :
-          OpenExternal.OpenCall Effect (Reference.State × List Word),
-      ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
-        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+          OpenExternal.OpenCall (Reference.State × List Word),
+      ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+        OpenExternal.CallKind.yulOpenCall?
             (.Ok sourceShared store) kind (kind.args operands) =
           some sourceCall ∧
-        OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+        OpenExternal.CallKind.evmOpenCall?
             ({ evmState with stack := kind.args operands ++ baseStack }
               : EvmYul.EVM.State) kind =
           some evmCall ∧
         OpenExternal.OpenCallRel
+          (Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceShared compiler.shared)
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
             cfg layout baseStack) sourceCall evmCall
 
@@ -176696,11 +176715,11 @@ theorem openPrimitiveEVMCallSound
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store) :
     OpenPrimitiveEVMCallSound cfg := by
-  intro Effect layout sourceShared sourceStore compiler evmState hRel
+  intro layout sourceShared sourceStore compiler evmState hRel
     hEVMShared kind operands baseStack
   exact
     Reference.SourceBridgeFacts.SourceStateRel.openExternalPrimitiveEVMOpenCallRel_of_args
-      (Effect := Effect) hRel hEVMShared kind operands baseStack
+      hRel hEVMShared kind operands baseStack
 
 /--
 Consumes the regular argument-prelude proof at a CALL-family primitive boundary.
@@ -176726,7 +176745,7 @@ theorem openPrimitiveCallSound_of_argStackPrelude
     (hContracts :
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    {Effect : Type} {layout : List Name}
+    {layout : List Name}
     {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -176763,19 +176782,21 @@ theorem openPrimitiveCallSound_of_argStackPrelude
       Reference.SourceBridgeFacts.SourceStateRel cfg layout
         (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
       ∃ sourceCall :
-          OpenExternal.OpenCall Effect (Reference.State × List Word),
+          OpenExternal.OpenCall (Reference.State × List Word),
       ∃ compilerCall :
-          OpenExternal.OpenCall Effect
+          OpenExternal.OpenCall
             (Objects.Source.State × List Word),
-        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+        OpenExternal.CallKind.yulOpenCall?
             (.Ok sourceSharedAfter sourceStoreAfter) kind
               (kind.args operands) =
           some sourceCall ∧
         Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
-            (Effect := Effect) compilerAfterArgs kind
+            compilerAfterArgs kind
               (kind.args operands).reverse =
           some compilerCall ∧
         OpenExternal.OpenCallRel
+          (Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared)
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
             cfg layout) sourceCall compilerCall := by
   rcases hArgsRegular hInitial hEvalArgs with
@@ -176783,7 +176804,7 @@ theorem openPrimitiveCallSound_of_argStackPrelude
       hPreRun, hArgEval, hRelArgs⟩
   have hOpen : OpenPrimitiveCallSound cfg :=
     openPrimitiveCallSound hContracts
-  rcases hOpen (Effect := Effect) hRelArgs kind operands with
+  rcases hOpen hRelArgs kind operands with
     ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
   exact
     ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
@@ -176813,7 +176834,7 @@ theorem openPrimitiveCallSound_of_argStackPrelude_callKind
     (hContracts :
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    {Effect : Type} {layout : List Name}
+    {layout : List Name}
     {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -176857,18 +176878,20 @@ theorem openPrimitiveCallSound_of_argStackPrelude_callKind
       Reference.SourceBridgeFacts.SourceStateRel cfg layout
         (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
       ∃ sourceCall :
-          OpenExternal.OpenCall Effect (Reference.State × List Word),
+          OpenExternal.OpenCall (Reference.State × List Word),
       ∃ compilerCall :
-          OpenExternal.OpenCall Effect
+          OpenExternal.OpenCall
             (Objects.Source.State × List Word),
-        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+        OpenExternal.CallKind.yulOpenCall?
             (.Ok sourceSharedAfter sourceStoreAfter) kind
               (kind.args operands) =
           some sourceCall ∧
         Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
-            (Effect := Effect) compilerAfterArgs kind values =
+            compilerAfterArgs kind values =
           some compilerCall ∧
         OpenExternal.OpenCallRel
+          (Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared)
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
             cfg layout) sourceCall compilerCall := by
   have hInputs :
@@ -176887,7 +176910,7 @@ theorem openPrimitiveCallSound_of_argStackPrelude_callKind
         (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
         (prim := prim) (outcomeRel := outcomeRel) (program := program)
         (shared := shared) (store := store) hContracts
-        (Effect := Effect) (layout := layout)
+        (layout := layout)
         (sourceShared := sourceShared)
         (sourceSharedAfter := sourceSharedAfter)
         (sourceStore := sourceStore)
@@ -176928,7 +176951,7 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
     (hContracts :
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    {Effect : Type} {layout : List Name}
+    {layout : List Name}
     {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -176968,18 +176991,20 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
         evmState.toSharedState = compilerAfterArgs.shared →
         ∀ (baseStack : OpenExternal.Stack),
           ∃ sourceCall :
-              OpenExternal.OpenCall Effect (Reference.State × List Word),
-          ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
-            OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+              OpenExternal.OpenCall (Reference.State × List Word),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.yulOpenCall?
                 (.Ok sourceSharedAfter sourceStoreAfter) kind
                   (kind.args operands) =
               some sourceCall ∧
-            OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+            OpenExternal.CallKind.evmOpenCall?
                 ({ evmState with
                     stack := kind.args operands ++ baseStack }
                   : EvmYul.EVM.State) kind =
               some evmCall ∧
             OpenExternal.OpenCallRel
+              (Reference.SharedStateRel.OpenExternalResponseRel
+                cfg sourceSharedAfter compilerAfterArgs.shared)
               (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
                 cfg layout baseStack) sourceCall evmCall := by
   rcases hArgsRegular hInitial hEvalArgs with
@@ -176992,8 +177017,7 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
       hPreRun, hArgEval, hRelArgs, by
         intro evmState hEVMShared baseStack
         exact
-          hOpen (Effect := Effect) hRelArgs hEVMShared kind operands
-            baseStack⟩
+          hOpen hRelArgs hEVMShared kind operands baseStack⟩
 
 /--
 CALL-family argument-prelude consumer with operands reconstructed from arity.
@@ -177017,7 +177041,7 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude_callKind
     (hContracts :
       RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
         outcomeRel program shared store)
-    {Effect : Type} {layout : List Name}
+    {layout : List Name}
     {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -177064,18 +177088,20 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude_callKind
         evmState.toSharedState = compilerAfterArgs.shared →
         ∀ (baseStack : OpenExternal.Stack),
           ∃ sourceCall :
-              OpenExternal.OpenCall Effect (Reference.State × List Word),
-          ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
-            OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+              OpenExternal.OpenCall (Reference.State × List Word),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.yulOpenCall?
                 (.Ok sourceSharedAfter sourceStoreAfter) kind
                   (kind.args operands) =
               some sourceCall ∧
-            OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+            OpenExternal.CallKind.evmOpenCall?
                 ({ evmState with
                     stack := kind.args operands ++ baseStack }
                   : EvmYul.EVM.State) kind =
               some evmCall ∧
             OpenExternal.OpenCallRel
+              (Reference.SharedStateRel.OpenExternalResponseRel
+                cfg sourceSharedAfter compilerAfterArgs.shared)
               (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
                 cfg layout baseStack) sourceCall evmCall := by
   have hInputs :
@@ -177094,7 +177120,7 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude_callKind
         (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
         (prim := prim) (outcomeRel := outcomeRel) (program := program)
         (shared := shared) (store := store) hContracts
-        (Effect := Effect) (layout := layout)
+        (layout := layout)
         (sourceShared := sourceShared)
         (sourceSharedAfter := sourceSharedAfter)
         (sourceStore := sourceStore)
@@ -177932,7 +177958,7 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
       RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim
         outcomeRel program asm target shared store sourceFuelTop initial
         referenceResult)
-    {Effect : Type} {layout : List Name}
+    {layout : List Name}
     {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
     {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -177972,18 +177998,20 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
         evmState.toSharedState = compilerAfterArgs.shared →
         ∀ (baseStack : OpenExternal.Stack),
           ∃ sourceCall :
-              OpenExternal.OpenCall Effect (Reference.State × List Word),
-          ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
-            OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+              OpenExternal.OpenCall (Reference.State × List Word),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.yulOpenCall?
                 (.Ok sourceSharedAfter sourceStoreAfter) kind
                   (kind.args operands) =
               some sourceCall ∧
-            OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+            OpenExternal.CallKind.evmOpenCall?
                 ({ evmState with
                     stack := kind.args operands ++ baseStack }
                   : EvmYul.EVM.State) kind =
               some evmCall ∧
             OpenExternal.OpenCallRel
+              (Reference.SharedStateRel.OpenExternalResponseRel
+                cfg sourceSharedAfter compilerAfterArgs.shared)
               (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
                 cfg layout baseStack) sourceCall evmCall :=
   hTop.semantics.openPrimitiveEVMCallSound_of_argStackPrelude

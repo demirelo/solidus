@@ -695,22 +695,62 @@ theorem callSite_eq_of_args
 end CallKind
 
 /--
-An arbitrary response from the outside world.
+An abstract mutation of contract-visible internal state while the caller frame
+is suspended at an external call.
 
-`Effect` is intentionally abstract. It can later be instantiated with a concrete
-post-world delta, an account-map transformer, a trace token, or `PUnit` for
-tests that only care about status/gas/return data. The compiler theorem should
-quantify over this response rather than proving facts about one chosen world.
+The external callee is not modeled as stateful here. Reentrancy is
+over-approximated by allowing the call response to carry an arbitrary mutation
+of the account/substate portion of the caller-visible chain state: balances,
+storage, transient storage, logs/refunds/access lists, and newly-created
+accounts. This intentionally does not touch the caller's frame-local machine
+state or execution environment: the return-data copy/status continuation below
+is still the caller's local work. The proof boundary decides which internal
+mutations are related on the Yul and EVM sides.
 -/
-structure CallResponse (Effect : Type u) where
+structure ReentrantStateMutation where
+  accountMap :
+    {τ : EvmYul.OperationType} →
+      EvmYul.AccountMap τ → EvmYul.AccountMap τ
+  substate : EvmYul.Substate → EvmYul.Substate
+  createdAccounts :
+    Batteries.RBSet Address compare → Batteries.RBSet Address compare
+
+namespace ReentrantStateMutation
+
+def apply (mutation : ReentrantStateMutation)
+    {τ : EvmYul.OperationType} (state : EvmYul.State τ) :
+    EvmYul.State τ :=
+  { state with
+    accountMap := mutation.accountMap state.accountMap
+    substate := mutation.substate state.substate
+    createdAccounts := mutation.createdAccounts state.createdAccounts }
+
+def identity : ReentrantStateMutation where
+  accountMap := fun accountMap => accountMap
+  substate := fun substate => substate
+  createdAccounts := fun createdAccounts => createdAccounts
+
+end ReentrantStateMutation
+
+/--
+An arbitrary external-call response.
+
+The black-box callee can return any status/returndata pair. It can also have
+triggered arbitrary reentrant execution before returning, represented by
+`internalMutation`. The compiler proof quantifies over all responses whose
+internal mutation preserves the relevant source/target relation, instead of
+proving facts about a concrete scheduler, precompile table, or child-code
+semantics.
+-/
+structure CallResponse where
   success : Bool
   returnedGas : Word
   returnData : ByteArray
-  effect : Effect
+  internalMutation : ReentrantStateMutation
 
 namespace CallResponse
 
-def statusWord {Effect : Type u} (response : CallResponse Effect) : Word :=
+def statusWord (response : CallResponse) : Word :=
   if response.success then EvmYul.UInt256.ofNat 1 else EvmYul.UInt256.ofNat 0
 
 end CallResponse
@@ -728,17 +768,18 @@ def ReturnWindow.finishMachine
 
 namespace CallSite
 
-def finishShared {Effect : Type u} {τ : EvmYul.OperationType}
+def finishShared {τ : EvmYul.OperationType}
     (site : CallSite) (shared : EvmYul.SharedState τ)
-    (response : CallResponse Effect) : EvmYul.SharedState τ :=
+    (response : CallResponse) : EvmYul.SharedState τ :=
   { shared with
+    toState := response.internalMutation.apply shared.toState
     toMachineState :=
       site.returnWindow.finishMachine shared.toMachineState
         response.returnData }
 
-def finishYulState {Effect : Type u}
+def finishYulState
     (site : CallSite) (state : EvmYul.Yul.State)
-    (response : CallResponse Effect) : EvmYul.Yul.State :=
+    (response : CallResponse) : EvmYul.Yul.State :=
   state.setSharedState
     (site.finishShared state.toSharedState response)
 
@@ -749,18 +790,18 @@ An open external call: a visible request plus a continuation for every possible
 response.
 
 The continuation consumes the response as data. It is intentionally not a
-function from a concrete blockchain world.
+function from a concrete external-world interpreter.
 -/
-structure OpenCall (Effect : Type u) (State : Type v) where
+structure OpenCall (State : Type v) where
   site : CallSite
-  resume : CallResponse Effect → State
+  resume : CallResponse → State
 
 namespace CallKind
 
 def yulOpenCall?
-    {Effect : Type u} (state : EvmYul.Yul.State) (kind : CallKind)
+    (state : EvmYul.Yul.State) (kind : CallKind)
     (args : List Word) :
-    Option (OpenCall Effect (EvmYul.Yul.State × List Word)) :=
+    Option (OpenCall (EvmYul.Yul.State × List Word)) :=
   match kind.yulCallSite? state args with
   | some site =>
       some
@@ -771,9 +812,9 @@ def yulOpenCall?
   | none => none
 
 def primitiveSharedOpenCall?
-    {Effect : Type u} (shared : EvmYul.SharedState .EVM)
+    (shared : EvmYul.SharedState .EVM)
     (kind : CallKind) (values : List Word) :
-    Option (OpenCall Effect (EvmYul.SharedState .EVM × List Word)) :=
+    Option (OpenCall (EvmYul.SharedState .EVM × List Word)) :=
   match primitiveCallSite? shared kind values with
   | some site =>
       some
@@ -784,8 +825,8 @@ def primitiveSharedOpenCall?
   | none => none
 
 def evmOpenCall?
-    {Effect : Type u} (state : EvmYul.EVM.State) (kind : CallKind) :
-    Option (OpenCall Effect EvmYul.EVM.State) :=
+    (state : EvmYul.EVM.State) (kind : CallKind) :
+    Option (OpenCall EvmYul.EVM.State) :=
   match kind.evmCallSite? state with
   | some (rest, site) =>
       some
@@ -798,9 +839,9 @@ def evmOpenCall?
   | none => none
 
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
-    {Effect : Type u} (shared : EvmYul.SharedState .EVM)
+    (shared : EvmYul.SharedState .EVM)
     (kind : CallKind) (operands : CallOperands) :
-    primitiveSharedOpenCall? (Effect := Effect) shared kind
+    primitiveSharedOpenCall? shared kind
         (kind.args operands).reverse =
       some
         { site :=
@@ -814,9 +855,9 @@ def evmOpenCall?
   cases kind <;> rfl
 
 @[simp] theorem evmOpenCall?_args
-    {Effect : Type u} (state : EvmYul.EVM.State)
+    (state : EvmYul.EVM.State)
     (kind : CallKind) (operands : CallOperands) (baseStack : Stack) :
-    evmOpenCall? (Effect := Effect)
+    evmOpenCall?
         ({ state with stack := kind.args operands ++ baseStack }
           : EvmYul.EVM.State) kind =
       some
@@ -839,51 +880,60 @@ The theorem shape for the open external boundary.
 
 Both sides must issue the same `CallSite`. Then, for every possible response,
 the same response is fed to both continuations and the resulting states remain
-related. This is the universal quantification over arbitrary outside-world
-behavior; there is no premise constraining which responses are allowed.
+related. This is the universal quantification over arbitrary external-call
+responses. The `responseRel` premise says which arbitrary internal mutations
+are admissible for this particular source/target boundary; for the compiler
+proof this is where reentrant mutations are required to preserve the state
+relation.
 -/
 structure OpenCallRel
-    {Effect : Type u} {SourceState : Type v} {TargetState : Type w}
+    {SourceState : Type v} {TargetState : Type w}
+    (responseRel : CallResponse → Prop)
     (stateRel : SourceState → TargetState → Prop)
-    (source : OpenCall Effect SourceState)
-    (target : OpenCall Effect TargetState) : Prop where
+    (source : OpenCall SourceState)
+    (target : OpenCall TargetState) : Prop where
   sameSite : source.site = target.site
   preservesAllResponses :
-    ∀ response, stateRel (source.resume response) (target.resume response)
+    ∀ response, responseRel response →
+      stateRel (source.resume response) (target.resume response)
 
 namespace OpenCallRel
 
 theorem preserves_response
-    {Effect : Type u} {SourceState : Type v} {TargetState : Type w}
+    {SourceState : Type v} {TargetState : Type w}
+    {responseRel : CallResponse → Prop}
     {stateRel : SourceState → TargetState → Prop}
-    {source : OpenCall Effect SourceState}
-    {target : OpenCall Effect TargetState}
-    (hRel : OpenCallRel stateRel source target)
-    (response : CallResponse Effect) :
+    {source : OpenCall SourceState}
+    {target : OpenCall TargetState}
+    (hRel : OpenCallRel responseRel stateRel source target)
+    (response : CallResponse) (hResponse : responseRel response) :
     stateRel (source.resume response) (target.resume response) :=
-  hRel.preservesAllResponses response
+  hRel.preservesAllResponses response hResponse
 
 theorem trans
-    {Effect : Type u} {LeftState : Type v} {MidState : Type w}
+    {LeftState : Type v} {MidState : Type w}
     {RightState : Type}
+    {leftResponseRel rightResponseRel : CallResponse → Prop}
     {leftRel : LeftState → MidState → Prop}
     {rightRel : MidState → RightState → Prop}
-    {left : OpenCall Effect LeftState}
-    {mid : OpenCall Effect MidState}
-    {right : OpenCall Effect RightState}
-    (hLeft : OpenCallRel leftRel left mid)
-    (hRight : OpenCallRel rightRel mid right) :
+    {left : OpenCall LeftState}
+    {mid : OpenCall MidState}
+    {right : OpenCall RightState}
+    (hLeft : OpenCallRel leftResponseRel leftRel left mid)
+    (hRight : OpenCallRel rightResponseRel rightRel mid right) :
     OpenCallRel
+      (fun response => leftResponseRel response ∧ rightResponseRel response)
       (fun leftResult rightResult =>
         ∃ midResult, leftRel leftResult midResult ∧
           rightRel midResult rightResult)
       left right where
   sameSite := hLeft.sameSite.trans hRight.sameSite
   preservesAllResponses := by
-    intro response
+    intro response hResponse
     exact
-      ⟨mid.resume response, hLeft.preservesAllResponses response,
-        hRight.preservesAllResponses response⟩
+      ⟨mid.resume response,
+        hLeft.preservesAllResponses response hResponse.1,
+        hRight.preservesAllResponses response hResponse.2⟩
 
 end OpenCallRel
 
@@ -905,33 +955,33 @@ def PrimitiveEVMResultRel (baseStack : Stack) :
 namespace CallKind
 
 theorem primitiveSharedOpenCallRel_evmOpenCall_of_args
-    {Effect : Type u} {shared : EvmYul.SharedState .EVM}
+    {shared : EvmYul.SharedState .EVM}
     (state : EvmYul.EVM.State)
     (hShared : state.toSharedState = shared)
     (kind : CallKind) (operands : CallOperands) (baseStack : Stack) :
     ∃ primitiveCall :
-        OpenCall Effect (EvmYul.SharedState .EVM × List Word),
-    ∃ evmCall : OpenCall Effect EvmYul.EVM.State,
-      primitiveSharedOpenCall? (Effect := Effect) shared kind
+        OpenCall (EvmYul.SharedState .EVM × List Word),
+    ∃ evmCall : OpenCall EvmYul.EVM.State,
+      primitiveSharedOpenCall? shared kind
           (kind.args operands).reverse =
         some primitiveCall ∧
-      evmOpenCall? (Effect := Effect)
+      evmOpenCall?
           ({ state with stack := kind.args operands ++ baseStack }
             : EvmYul.EVM.State) kind =
         some evmCall ∧
-      OpenCallRel (PrimitiveEVMResultRel baseStack)
+      OpenCallRel (fun _ => True) (PrimitiveEVMResultRel baseStack)
         primitiveCall evmCall := by
   subst shared
   let site :=
     (CallContext.ofEVMState state).callSite kind
       (kind.canonicalOperands operands)
   let primitiveCall :
-      OpenCall Effect (EvmYul.SharedState .EVM × List Word) :=
+      OpenCall (EvmYul.SharedState .EVM × List Word) :=
     { site := site
       resume := fun response =>
         (site.finishShared state.toSharedState response,
           [response.statusWord]) }
-  let evmCall : OpenCall Effect EvmYul.EVM.State :=
+  let evmCall : OpenCall EvmYul.EVM.State :=
     { site := site
       resume := fun response =>
         { state with
@@ -942,7 +992,7 @@ theorem primitiveSharedOpenCallRel_evmOpenCall_of_args
   · cases kind <;> rfl
   · constructor
     · rfl
-    · intro response
+    · intro response _hResponse
       simp [primitiveCall, evmCall, PrimitiveEVMResultRel]
 
 end CallKind

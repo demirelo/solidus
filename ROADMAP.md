@@ -3338,12 +3338,14 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   requested-gas operand, and the argument-prelude source/compiler,
   EVM-stack, and one-result expression-prelude adapters now reconstruct CALL
   operands from primitive arity and expose the open primitive
-  request/response relation, while assignment/let statement-continuation
-  contracts, checked statement-lowering constructors, and CALL-safe
-  argument-bundle adapters now expose exact post-response status-word writes
-  at the same lowering boundary the closed consumers inspect; remaining work
-  is to replace the recursive closed assignment/let consumers with these open
-  continuations, discharge the remaining CALL-safe eval-args domain facts, and
-  then compose to the EVM stack boundary.
+  request/response relation. Responses now carry an arbitrary reentrant
+  account/substate mutation, with preservation quantified over every response
+  whose mutation keeps the Yul/compiler/EVM shared-state relation; assignment/let
+  statement-continuation contracts, checked statement-lowering constructors,
+  and CALL-safe argument-bundle adapters expose exact post-response status-word
+  writes at the same lowering boundary the closed consumers inspect. Remaining
+  work is to replace the recursive closed assignment/let consumers with these
+  open continuations, discharge the remaining CALL-safe eval-args domain facts,
+  and then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
