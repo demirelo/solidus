@@ -12,6 +12,12 @@ def installCodeAndGas (target : TargetProgram) (gas : Nat)
     executionEnv := { state.executionEnv with code := Bytecode.encodeTarget target }
   }
 
+theorem installCodeAndGas_idempotent (target : TargetProgram) (gas : Nat)
+    (state : EVMState) :
+    installCodeAndGas target gas (installCodeAndGas target gas state) =
+      installCodeAndGas target gas state := by
+  simp [installCodeAndGas]
+
 def validJumps (target : TargetProgram) : Array EvmYul.UInt256 :=
   EvmYul.EVM.D_J (Bytecode.encodeTarget target) (EvmYul.UInt256.ofNat 0)
 
@@ -107,6 +113,21 @@ structure SufficientGasForXResult
 
 abbrev XResultPreconditionAssumptions :=
   SufficientGasForXResult
+
+theorem SufficientGasForXResult.runsAtInstalledGas {target : TargetProgram}
+    {initial : EVMState} {targetResult : StepResult} {gas : Nat}
+    (hGasForX :
+      SufficientGasForXResult target (installCodeAndGas target gas initial)
+        targetResult)
+    (hGas : hGasForX.gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    ∃ result,
+      EvmYul.EVM.X hGasForX.evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok result ∧
+      XResultAgrees targetResult result := by
+  simpa [installCodeAndGas_idempotent] using
+    hGasForX.runsAboveBound gas hGas hUInt256
 
 theorem XRunsSuccessfullyAbove.not_out_of_gas {target : TargetProgram}
     {initial sourceFinal : EVMState} {evmFuel gasBound gas : Nat}
