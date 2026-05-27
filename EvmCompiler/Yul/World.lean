@@ -543,6 +543,91 @@ theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary_XResult
       hPreconditions.gasBound, hReferenceRun', hTargetRun, hOutcomeRel',
       hWholeRel, hTrace, hPreconditions.runsAboveBound, hDecode, hJumpdest⟩
 
+theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary_installedGas_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gas : Nat}
+    {referenceInitial : Reference.State}
+    {referenceResult : Reference.Result}
+    {rawInitial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hReferenceRun :
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult)
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel referenceResult sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).pc =
+        Assembly.Program.pcAfter [])
+    (hInitialStack :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    ∃ targetFuel targetOutcome evmFuel gasBound evmResult,
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult ∧
+      Assembly.Source.runNResult asm targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+        targetOutcome ∧
+      gasBound ≤ gas ∧
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok evmResult ∧
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  rcases
+      compile_preserves_of_reference_source_runs_sourceStaticBoundary_trace
+        (prim := prim) hPrim (outcomeRel := outcomeRel)
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (referenceInitial := referenceInitial)
+        (referenceResult := referenceResult)
+        (initial := Assembly.GasAware.installCodeAndGas target gas rawInitial)
+        (sourceOutcome := sourceOutcome)
+        hReferenceRun hSourceRun hOutcomeRel hCompileBoundary hInitialPc
+        hInitialStack with
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel, hTrace, hDecode, hJumpdest⟩
+  let hPreconditions := hTargetGasForX hTrace
+  have hGas : hPreconditions.gasBound ≤ gas :=
+    hGasBound hTrace
+  rcases hPreconditions.runsAtInstalledGas hGas hUInt256 with
+    ⟨evmResult, hX, hAgree⟩
+  exact
+    ⟨targetFuel, targetOutcome, hPreconditions.evmFuel,
+      hPreconditions.gasBound, evmResult, hReferenceRun', hTargetRun,
+      hOutcomeRel', hWholeRel, hTrace, hGas, hX, hAgree, hDecode,
+      hJumpdest⟩
+
 theorem compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -869,6 +954,236 @@ theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundar
       (runResult_revert_of_installed_callDispatcher hInstalled hCall)
       hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
       hTargetGasForX
+
+theorem compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary_installedGas_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gas : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state' : EvmYul.Yul.State} {rets : List EvmYul.UInt256}
+    {rawInitial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .ok (state', rets))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.regular state') sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).pc =
+        Assembly.Program.pcAfter [])
+    (hInitialStack :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    ∃ targetFuel targetOutcome evmFuel gasBound evmResult,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.regular state') ∧
+      Assembly.Source.runNResult asm targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok targetOutcome ∧
+      outcomeRel (.regular state') sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+        targetOutcome ∧
+      gasBound ≤ gas ∧
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok evmResult ∧
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_installedGas_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (gas := gas) (referenceInitial := .Ok shared store)
+      (referenceResult := .regular state') (rawInitial := rawInitial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_regular_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX hGasBound hUInt256
+
+theorem compile_preserves_of_installed_callDispatcher_yulHalt_sourceStaticBoundary_installedGas_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gas : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {haltState : EvmYul.Yul.State} {value : EvmYul.UInt256}
+    {rawInitial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.YulHalt haltState value))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.yulHalt haltState value) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).pc =
+        Assembly.Program.pcAfter [])
+    (hInitialStack :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    ∃ targetFuel targetOutcome evmFuel gasBound evmResult,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.yulHalt haltState value) ∧
+      Assembly.Source.runNResult asm targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok targetOutcome ∧
+      outcomeRel (.yulHalt haltState value) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+        targetOutcome ∧
+      gasBound ≤ gas ∧
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok evmResult ∧
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_installedGas_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (gas := gas) (referenceInitial := .Ok shared store)
+      (referenceResult := .yulHalt haltState value)
+      (rawInitial := rawInitial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_yulHalt_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX hGasBound hUInt256
+
+theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundary_installedGas_XResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gas : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {revertState : EvmYul.Yul.State}
+    {rawInitial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.Revert revertState))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.revert revertState) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).pc =
+        Assembly.Program.pcAfter [])
+    (hInitialStack :
+      (Assembly.GasAware.installCodeAndGas target gas rawInitial).stack = [])
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gas)
+    (hUInt256 : gas < EvmYul.UInt256.size) :
+    ∃ targetFuel targetOutcome evmFuel gasBound evmResult,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.revert revertState) ∧
+      Assembly.Source.runNResult asm targetFuel
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok targetOutcome ∧
+      outcomeRel (.revert revertState) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (Assembly.GasAware.installCodeAndGas target gas rawInitial)
+        targetOutcome ∧
+      gasBound ≤ gas ∧
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (Assembly.GasAware.installCodeAndGas target gas rawInitial) =
+        .ok evmResult ∧
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary_installedGas_XResult
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (gas := gas) (referenceInitial := .Ok shared store)
+      (referenceResult := .revert revertState)
+      (rawInitial := rawInitial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_revert_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+      hTargetGasForX hGasBound hUInt256
 
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
@@ -4007,6 +4322,106 @@ theorem ordinaryCodeCall_runningSuccessBranch_rel
   exact
     ⟨Theta_code_success_of_X_installedCode hX,
       restoreSuccessfulContractCallState_of_XResultAgrees_running_success_empty_output
+        hParent hParentWorld hCfgAccountMap
+        parentStore childStore restoreStore
+        hTargetChild hTargetChildWorld hAgree hChildGas
+        inOffset inSize outOffset outSize hGas⟩
+
+theorem ordinaryCodeCall_haltedSuccessBranch_rel
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata output : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hTargetChildWorld :
+      CompiledAccountMapRel yulChild.accountMap halt.state.accountMap)
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            evmParent.substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok (.success evmChild output))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild output))
+    (hChildGas :
+      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
+        evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+        evmParent.createdAccounts evmParent.genesisBlockHeader
+        evmParent.blocks evmParent.accountMap evmParent.σ₀
+        { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+          transactionReceipts := evmParent.transactionReceipts }
+        evmParent.substate source origin recipient
+        (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (evmChild.createdAccounts,
+        if evmChild.accountMap.isEmpty then evmParent.accountMap
+        else evmChild.accountMap,
+        evmChild.gasAvailable,
+        if evmChild.accountMap.isEmpty then evmParent.substate
+        else evmChild.substate,
+        true, output) ∧
+      halt.kind ≠ .revert ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (.Ok yulParent parentStore)
+              (.Ok yulChild childStore)
+              restoreStore output inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel cfg yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGas }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  exact
+    ⟨Theta_code_success_of_X_installedCode hX,
+      restoreSuccessfulContractCallState_of_XResultAgrees_halted_success
         hParent hParentWorld hCfgAccountMap
         parentStore childStore restoreStore
         hTargetChild hTargetChildWorld hAgree hChildGas
