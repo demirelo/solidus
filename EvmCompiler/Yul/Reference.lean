@@ -5582,9 +5582,10 @@ pure control/stack compiler proof:
 * `varStackRel` relates a Yul varstore to the compiler's stack layout;
 * `terminalRel` and `revertRel` relate imported Yul terminal results
   (`YulHalt`/`Revert`) to compiler halt states; and
-* `gasAvailableRel`, `gasValueRel`, and `totalGasRel` make the gas-erasure
-  boundary explicit. `gasValueRel` is the extra oracle agreement needed for the
-  visible Yul `gas()` primitive.
+* `gasAvailableRel`, `gasValueRel`, `callGasRel`, and `totalGasRel` make the
+  gas-erasure boundary explicit. `gasValueRel` is the extra oracle agreement
+  needed for the visible Yul `gas()` primitive; `callGasRel` is the matching
+  resource/account-map agreement needed for CALL-family request equality.
 -/
 structure StateRelConfig where
   accountMapRel : AccountMapRel
@@ -5649,6 +5650,18 @@ structure StateRelConfig where
     ∀ {yul evm : EvmYul.MachineState},
       gasAvailableRel yul.gasAvailable evm.gasAvailable →
         EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm
+  callGasRel :
+    ∀ {yul : EvmYul.SharedState .Yul}
+        {evm : EvmYul.SharedState .EVM}
+        {codeAddress recipient : OpenExternal.Address}
+        {value requestedGas : Word},
+      accountMapRel yul.accountMap evm.accountMap →
+      yul.substate = evm.substate →
+      gasAvailableRel yul.gasAvailable evm.gasAvailable →
+        (OpenExternal.CallContext.ofYulSharedState yul).callGas
+          codeAddress recipient value requestedGas =
+        (OpenExternal.CallContext.ofEVMSharedState evm).callGas
+          codeAddress recipient value requestedGas
   totalGasRel : Nat → Nat → Prop
 
 structure ExecutionEnvRel (cfg : StateRelConfig)
@@ -5934,17 +5947,11 @@ structure SharedStateRel (cfg : StateRelConfig)
 
 namespace SharedStateRel
 
-theorem openExternalCallContextRel_withCallGasRel
+theorem openExternalCallContextRel
     {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
     {targetShared : EvmYul.SharedState .EVM}
-    (hShared : SharedStateRel cfg sourceShared targetShared)
-    (hCallGas :
-      ∀ codeAddress recipient value requestedGas,
-        (OpenExternal.CallContext.ofYulSharedState sourceShared).callGas
-          codeAddress recipient value requestedGas =
-        (OpenExternal.CallContext.ofEVMSharedState targetShared).callGas
-          codeAddress recipient value requestedGas) :
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
     OpenExternal.CallContextRel
       (OpenExternal.CallContext.ofYulSharedState sourceShared)
       (OpenExternal.CallContext.ofEVMSharedState targetShared) := by
@@ -5954,7 +5961,9 @@ theorem openExternalCallContextRel_withCallGasRel
       sourceAddress := hShared.chain.executionEnv.source
       weiValue := hShared.chain.executionEnv.weiValue
       permission := hShared.chain.executionEnv.perm
-      callGas := hCallGas }
+      callGas := fun _ _ _ _ =>
+        cfg.callGasRel hShared.chain.accountMap hShared.chain.substate
+          hShared.machine.gasAvailable }
 
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
