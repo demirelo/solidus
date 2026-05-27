@@ -1924,6 +1924,302 @@ theorem restoreRevertedContractCallState_afterAccess_ok_rel
         hParent addr yulChild.toMachineState.H_return
         inOffset inSize outOffset outSize hGas
 
+theorem sharedStateRel_of_eraseGas_eq
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {evm target : EVMState}
+    (hShared : Reference.SharedStateRel cfg yul target.toSharedState)
+    (hErase : Assembly.eraseGas evm = Assembly.eraseGas target)
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        evm.gasAvailable) :
+    Reference.SharedStateRel cfg yul evm.toSharedState := by
+  have hAccountMap : evm.accountMap = target.accountMap := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.accountMap) hErase
+  have hSigma : evm.σ₀ = target.σ₀ := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.σ₀) hErase
+  have hTotal :
+      evm.totalGasUsedInBlock = target.totalGasUsedInBlock := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.totalGasUsedInBlock) hErase
+  have hReceipts :
+      evm.transactionReceipts = target.transactionReceipts := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.transactionReceipts) hErase
+  have hSubstate : evm.substate = target.substate := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.substate) hErase
+  have hEnv : evm.executionEnv = target.executionEnv := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.executionEnv) hErase
+  have hBlocks : evm.blocks = target.blocks := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.blocks) hErase
+  have hGenesis : evm.genesisBlockHeader = target.genesisBlockHeader := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.genesisBlockHeader) hErase
+  have hCreated : evm.createdAccounts = target.createdAccounts := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.createdAccounts) hErase
+  have hActiveWords :
+      evm.toMachineState.activeWords =
+        target.toMachineState.activeWords := by
+    simpa [Assembly.eraseGas] using
+      congrArg
+        (fun state : EVMState => state.toMachineState.activeWords) hErase
+  have hMemory :
+      evm.toMachineState.memory = target.toMachineState.memory := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.toMachineState.memory) hErase
+  have hReturnData :
+      evm.toMachineState.returnData =
+        target.toMachineState.returnData := by
+    simpa [Assembly.eraseGas] using
+      congrArg
+        (fun state : EVMState => state.toMachineState.returnData) hErase
+  have hHReturn :
+      evm.toMachineState.H_return =
+        target.toMachineState.H_return := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.toMachineState.H_return) hErase
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · constructor
+    · simpa [hAccountMap] using hChain.accountMap
+    · simpa [hSigma] using hChain.σ₀
+    · simpa [hTotal] using hChain.totalGasUsedInBlock
+    · simpa [hReceipts] using hChain.transactionReceipts
+    · simpa [hSubstate] using hChain.substate
+    · simpa [hEnv] using hChain.executionEnv
+    · simpa [hBlocks] using hChain.blocks
+    · simpa [hGenesis] using hChain.genesisBlockHeader
+    · simpa [hCreated] using hChain.createdAccounts
+  · constructor
+    · exact hGas
+    · simpa [hActiveWords] using hMachine.activeWords
+    · simpa [hMemory] using hMachine.memory
+    · simpa [hReturnData] using hMachine.returnData
+    · simpa [hHReturn] using hMachine.H_return
+
+theorem sharedStateRel_of_XResultAgrees_running_success
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {target evm : EVMState}
+    {output : ByteArray}
+    (hShared : Reference.SharedStateRel cfg yul target.toSharedState)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.running target)
+        (.success evm output))
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        evm.gasAvailable) :
+    Reference.SharedStateRel cfg yul evm.toSharedState :=
+  sharedStateRel_of_eraseGas_eq hShared hAgree hGas
+
+theorem sharedStateRel_of_XResultAgrees_halted_success
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evm : EVMState}
+    {output : ByteArray}
+    (hShared : Reference.SharedStateRel cfg yul halt.state.toSharedState)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evm output))
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        evm.gasAvailable) :
+    halt.kind ≠ .revert ∧
+      Reference.SharedStateRel cfg yul evm.toSharedState ∧
+        output = halt.output := by
+  rcases hAgree with ⟨hNotRevert, hErase, hOutput⟩
+  exact
+    ⟨hNotRevert, sharedStateRel_of_eraseGas_eq hShared hErase hGas,
+      hOutput⟩
+
+theorem XResultAgrees_halted_revert
+    {halt : Assembly.Halt}
+    {returnedGas : EvmYul.UInt256}
+    {output : ByteArray}
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.revert returnedGas output)) :
+    halt.kind = .revert ∧ output = halt.output := by
+  simpa [Assembly.GasAware.XResultAgrees] using hAgree
+
+theorem restoreSuccessfulContractCallState_childEvm_nonempty_rel
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {evmChild : EVMState}
+    (hChild :
+      Reference.SharedStateRel cfg yulChild evmChild.toSharedState)
+    (hNonempty : evmChild.accountMap.isEmpty = false)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (.Ok yulParent parentStore)
+          (.Ok yulChild childStore)
+          restoreStore returnData inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall returnData
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.accountMap
+            else
+              evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.substate
+            else
+              evmChild.substate
+          createdAccounts := evmChild.createdAccounts } := by
+  rcases hChild with ⟨hChildChain, _hChildMachine⟩
+  exact
+    restoreSuccessfulContractCallState_ok_rel
+      hParent parentStore childStore restoreStore
+      (yulChild := yulChild)
+      (evmChildAccountMap := evmChild.accountMap)
+      (evmChildSubstate := evmChild.substate)
+      (evmChildCreated := evmChild.createdAccounts)
+      (targetGas := targetGas)
+      (by simpa [hNonempty] using hChildChain.accountMap)
+      (by simpa [hNonempty] using hChildChain.substate)
+      hChildChain.createdAccounts
+      returnData inOffset inSize outOffset outSize hGas
+
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success_nonempty
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {targetChild evmChild : EVMState}
+    {returnData : ByteArray}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild targetChild.toSharedState)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.running targetChild)
+        (.success evmChild returnData))
+    (hChildGas :
+      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
+        evmChild.gasAvailable)
+    (hNonempty : evmChild.accountMap.isEmpty = false)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (.Ok yulParent parentStore)
+          (.Ok yulChild childStore)
+          restoreStore returnData inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall returnData
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.accountMap
+            else
+              evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.substate
+            else
+              evmChild.substate
+          createdAccounts := evmChild.createdAccounts } := by
+  exact
+    restoreSuccessfulContractCallState_childEvm_nonempty_rel
+      hParent parentStore childStore restoreStore
+      (sharedStateRel_of_XResultAgrees_running_success
+        hTargetChild hAgree hChildGas)
+      hNonempty returnData inOffset inSize outOffset outSize hGas
+
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_nonempty
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {returnData : ByteArray}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild returnData))
+    (hChildGas :
+      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
+        evmChild.gasAvailable)
+    (hNonempty : evmChild.accountMap.isEmpty = false)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    halt.kind ≠ .revert ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreSuccessfulContractCallState
+            (.Ok yulParent parentStore)
+            (.Ok yulChild childStore)
+            restoreStore returnData inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall returnData
+                  inOffset inSize outOffset outSize with
+                gasAvailable := targetGas }
+            accountMap :=
+              if evmChild.accountMap.isEmpty then
+                evmParent.accountMap
+              else
+                evmChild.accountMap
+            substate :=
+              if evmChild.accountMap.isEmpty then
+                evmParent.substate
+              else
+                evmChild.substate
+            createdAccounts := evmChild.createdAccounts } := by
+  rcases
+    sharedStateRel_of_XResultAgrees_halted_success
+      hTargetChild hAgree hChildGas with
+    ⟨hNotRevert, hChild, _hOutput⟩
+  exact
+    ⟨hNotRevert,
+      restoreSuccessfulContractCallState_childEvm_nonempty_rel
+        hParent parentStore childStore restoreStore hChild hNonempty
+        returnData inOffset inSize outOffset outSize hGas⟩
+
 theorem sharedStateRel_freshExternalCallWithWorld
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
