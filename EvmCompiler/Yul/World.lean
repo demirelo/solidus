@@ -188,6 +188,30 @@ theorem CompiledCodeRel.checkedBytecodeResourcesSourceStatic_or_empty
         hResources, hDecode, hJumpdest, hBytes⟩
   · exact Or.inr hEmpty
 
+theorem CompiledCodeRel.checkedBytecodeResourcesSourceStatic_of_not_empty
+    {contract : AstContract} {bytes : ByteArray}
+    (hCode : CompiledCodeRel contract bytes)
+    (hNotEmpty : ¬ (contract = default ∧ bytes = default)) :
+    ∃ (program : Program) (asm : Assembly.Program)
+        (target : Assembly.TargetProgram),
+      program.contract = contract ∧
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+          some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        bytes = Assembly.Bytecode.encodeTarget target := by
+  rcases CompiledCodeRel.checkedBytecodeResourcesSourceStatic_or_empty
+      hCode with hChecked | hEmpty
+  · exact hChecked
+  · exact False.elim (hNotEmpty hEmpty)
+
 theorem installContract_ok_eq_self_of_code
     {program : Program} {shared : EvmYul.SharedState .Yul}
     {store : EvmYul.Yul.VarStore}
@@ -295,6 +319,210 @@ theorem runResult_error_of_installed_callDispatcher
   | UnknownIdentifier name => rfl
   | DuplicateDeclaration name => rfl
   | YulEXTCODESIZENotImplemented => rfl
+
+theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {referenceInitial : Reference.State}
+    {referenceResult : Reference.Result}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hReferenceRun :
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult)
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel referenceResult sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∃ targetFuel targetOutcome,
+      Reference.runResult referenceFuel program referenceInitial =
+        .ok referenceResult ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_eq_some
+        hCompileBoundary with
+    ⟨hResourcesCompile, hStatic⟩
+  rcases Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResourcesCompile with
+    ⟨hBytecode, hResources⟩
+  rcases Program.compileCheckedAssemblyTargetBytecode?_eq_some hBytecode with
+    ⟨_hTarget, hDecode, hJumpdest⟩
+  have hSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.sourceAcceptedCore hStatic.supported
+  have hSourceCompileAccepted : Program.SourceCompileAccepted program :=
+    sourceCompileAccepted_of_sourceAccepted_resources
+      hSourceAccepted hResources
+  have hCompileChecked : Program.compileChecked? program = some asm :=
+    compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_compileChecked
+      hCompileBoundary
+  rcases
+      _root_.EvmCompiler.Yul.Program.compile_preserves_of_reference_source_runs_compileAccepted
+        (prim := prim) hPrim (outcomeRel := outcomeRel)
+        (program := program) (asm := asm)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (referenceInitial := referenceInitial)
+        (referenceResult := referenceResult) (initial := initial)
+        (sourceOutcome := sourceOutcome)
+        hReferenceRun hSourceRun hOutcomeRel hCompileChecked
+        hSourceCompileAccepted hInitialPc hInitialStack with
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel⟩
+  exact
+    ⟨targetFuel, targetOutcome, hReferenceRun', hTargetRun, hOutcomeRel',
+      hWholeRel, hDecode, hJumpdest⟩
+
+theorem compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state' : EvmYul.Yul.State} {rets : List EvmYul.UInt256}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .ok (state', rets))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.regular state') sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∃ targetFuel targetOutcome,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.regular state') ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.regular state') sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .regular state') (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_regular_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+
+theorem compile_preserves_of_installed_callDispatcher_yulHalt_sourceStaticBoundary
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {haltState : EvmYul.Yul.State} {value : EvmYul.UInt256}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.YulHalt haltState value))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.yulHalt haltState value) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∃ targetFuel targetOutcome,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.yulHalt haltState value) ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.yulHalt haltState value) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .yulHalt haltState value) (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_yulHalt_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
+
+theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundary
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {revertState : EvmYul.Yul.State}
+    {initial : EVMState}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hInstalled : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok shared store) =
+        .error (.Revert revertState))
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program initial =
+        .ok sourceOutcome)
+    (hOutcomeRel : outcomeRel (.revert revertState) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∃ targetFuel targetOutcome,
+      Reference.runResult referenceFuel program (.Ok shared store) =
+        .ok (.revert revertState) ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel (.revert revertState) sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+      Assembly.Bytecode.JumpdestCorrect target := by
+  exact
+    compile_preserves_of_reference_source_runs_sourceStaticBoundary
+      (prim := prim) hPrim (outcomeRel := outcomeRel)
+      (program := program) (asm := asm) (target := target)
+      (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+      (referenceInitial := .Ok shared store)
+      (referenceResult := .revert revertState) (initial := initial)
+      (sourceOutcome := sourceOutcome)
+      (runResult_revert_of_installed_callDispatcher hInstalled hCall)
+      hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
 
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
