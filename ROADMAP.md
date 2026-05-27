@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 14:00 PDT.
+Last updated: 2026-05-27 14:07 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -3339,10 +3339,11 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   EVM-stack, and one-result expression-prelude adapters now reconstruct CALL
   operands from primitive arity and expose the open primitive
   request/response relation, while assignment/let statement-continuation
-  contracts and checked statement-lowering constructors now expose exact
-  post-response status-word writes at the same lowering boundary the closed
-  consumers inspect; remaining work is to replace the recursive closed
-  assignment/let consumers with these open continuations and then compose to
-  the EVM stack boundary.
+  contracts, checked statement-lowering constructors, and CALL-safe
+  argument-bundle adapters now expose exact post-response status-word writes
+  at the same lowering boundary the closed consumers inspect; remaining work
+  is to replace the recursive closed assignment/let consumers with these open
+  continuations, discharge the remaining CALL-safe eval-args domain facts, and
+  then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

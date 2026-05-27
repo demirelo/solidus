@@ -135152,6 +135152,223 @@ theorem sourceArgStackPreludeRegularAt_of_checkedAt_lowerBound1?_toStackSeq
     (Expr.List.lowerBound1?_lowerArgs_vars hLower) hSeq
 
 /--
+Family-checked hidden-context argument-prelude adapter.
+
+This is the feature-parametric counterpart of
+`sourceArgStackPreludeRegularAt_of_checkedAt_lowerBound1?_toStackSeq`. CALL
+frontiers use it through the `Safe.CallSafe` specialization so nested argument
+expressions may contain exactly the primitive/user-call family admitted by the
+CALL bridge.
+-/
+theorem sourceArgStackPreludeRegularAt_of_familyCheckedAt_lowerBound1?_toStackSeq
+    {coveredPrim : EvmYul.Operation .Yul → Prop}
+    {coveredUserCall : Name → Prop}
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {ctx : Functions.Source.Ctx} {sourceFuel : Nat}
+    {freshState freshState' : Fresh.State} {args : List AstExpr}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {results : Nat} {seq : Locals.ExprSeq results}
+    (hAll :
+      SourceArgListPreludeRegularAllFamilyCheckedAt coveredPrim
+        coveredUserCall cfg layout prim program contract
+        (reserved ++ layout) sourceFuel)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe :
+      Safe.FeatureCoverage.Family.exprs coveredPrim coveredUserCall args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq : Expr.List.toStackSeq? argExprs results = some seq) :
+    SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+      (some contract) pre seq :=
+  sourceArgStackPreludeRegularAt_of_argListRegularAt_varMap_toStackSeq
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
+    (codeOverride := some contract) (pre := pre)
+    (lowerArgs := argExprs) (results := results) (seq := seq)
+    (hAll.lower (Nat.le_refl sourceFuel) hCovers hSafe hScoped hOk hLower)
+    (Expr.List.lowerBound1?_lowerArgs_vars hLower) hSeq
+
+/-- CALL-safe specialization of the family-checked hidden argument adapter. -/
+theorem sourceArgStackPreludeRegularAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {ctx : Functions.Source.Ctx} {sourceFuel : Nat}
+    {freshState freshState' : Fresh.State} {args : List AstExpr}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {results : Nat} {seq : Locals.ExprSeq results}
+    (hAll :
+      SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+        contract (reserved ++ layout) sourceFuel)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq : Expr.List.toStackSeq? argExprs results = some seq) :
+    SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+      (some contract) pre seq :=
+  sourceArgStackPreludeRegularAt_of_familyCheckedAt_lowerBound1?_toStackSeq
+    (coveredPrim := Safe.CallSafe.primitive)
+    (coveredUserCall := Safe.CallSafe.userCall)
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (prim := prim) (program := program) (contract := contract) (ctx := ctx)
+    (sourceFuel := sourceFuel) (freshState := freshState)
+    (freshState' := freshState') (args := args) (pre := pre)
+    (argExprs := argExprs) (results := results) (seq := seq)
+    hAll hCovers hSafe hScoped hOk hLower hSeq
+
+/--
+CALL-safe checked assignment lowering into the open CALL statement boundary.
+
+This consumes the CALL-safe argument bundle directly and returns the open
+request/response continuation expected by the external-call model.
+-/
+theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallStmtPreludeSoundAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {ctx : Functions.Source.Ctx} {sourceFuel lowerFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hAll :
+      SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+        contract (reserved ++ layout) sourceFuel)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hTargetMem : identName name ∈ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Assign [name] (.Call (.inl yulPrim) args)) =
+      some
+        (pre ++
+          [Functions.Stmt.assign (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallAssignStmtPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args (some contract) pre seq name := by
+  have hArgsRegular :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args (some contract) pre seq :=
+    sourceArgStackPreludeRegularAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (prim := prim) (program := program) (contract := contract)
+      (ctx := ctx) (sourceFuel := sourceFuel) (freshState := freshState)
+      (freshState' := freshState') (args := args) (pre := pre)
+      (argExprs := argExprs)
+      (results := Expressions.Structured.BasicOp.inputs op) (seq := seq)
+      hAll hCovers hSafe hScoped hOk hLowerArgs hSeq
+  exact
+    toFunctionsListFuel?_assign_prim_openPrimitiveCallStmtPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (lowerFuel := lowerFuel)
+      (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+      (codeOverride := some contract) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) name hKind hBasic hLowerArgs hSeq hOutputs
+      hArgsRegular hTargetMem hEvalArgsDomain
+
+/-- CALL-safe checked declaration lowering into the open CALL statement boundary. -/
+theorem toFunctionsListFuel?_let_prim_openPrimitiveCallStmtPreludeSoundAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {ctx : Functions.Source.Ctx} {sourceFuel lowerFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hAll :
+      SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+        contract (reserved ++ layout) sourceFuel)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hFresh : identName name ∉ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Let [name] (some (.Call (.inl yulPrim) args))) =
+      some
+        (pre ++
+          [Functions.Stmt.let_ (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallLetStmtPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args (some contract) pre seq name := by
+  have hArgsRegular :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args (some contract) pre seq :=
+    sourceArgStackPreludeRegularAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (prim := prim) (program := program) (contract := contract)
+      (ctx := ctx) (sourceFuel := sourceFuel) (freshState := freshState)
+      (freshState' := freshState') (args := args) (pre := pre)
+      (argExprs := argExprs)
+      (results := Expressions.Structured.BasicOp.inputs op) (seq := seq)
+      hAll hCovers hSafe hScoped hOk hLowerArgs hSeq
+  exact
+    toFunctionsListFuel?_let_prim_openPrimitiveCallStmtPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (lowerFuel := lowerFuel)
+      (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+      (codeOverride := some contract) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) name hKind hBasic hLowerArgs hSeq hOutputs
+      hArgsRegular hFresh hEvalArgsDomain
+
+/--
 Checked hidden-context sequence constructor for a successful zero-result
 primitive expression statement, deriving the generated argument prelude from
 the recursive checked argument bundle.
