@@ -3460,6 +3460,85 @@ theorem wholeProgramOutcomeRel_regular_compiledAccountMapRel
   have hMap := wholeProgramOutcomeRel_regular_accountMap_eq hRel
   simpa [hMap] using hWorld
 
+theorem wholeProgramOutcomeRel_halt_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {halt : Assembly.Halt}
+    (hSource :
+      Reference.SharedStateRel cfg yul source.shared)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) (.halted halt))
+    (hGas :
+      cfg.gasAvailableRel yul.toMachineState.gasAvailable
+        halt.state.gasAvailable) :
+    Reference.SharedStateRel cfg yul halt.state.toSharedState := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.halt,
+          Locals.Source.Outcome.halt] at hBlock hStructured
+      · rename_i directKind
+        rcases hStructured with ⟨_hKind, tokens, hFrame⟩
+        have hDirectShared :
+            Reference.SharedStateRel cfg yul directState.evm.toSharedState := by
+          simpa [hBlock.2.symm] using hSource
+        have hStackShared :
+            Reference.SharedStateRel cfg yul
+              ({ directState.evm with stack := halt.state.stack }
+                : EVMState).toSharedState := by
+          simpa using hDirectShared
+        exact
+          sharedStateRel_of_eraseControl_eq hStackShared hFrame.dataRel hGas
+
+theorem wholeProgramOutcomeRel_halt_accountMap_eq
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {halt : Assembly.Halt}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) (.halted halt)) :
+    halt.state.accountMap = source.shared.accountMap := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.halt,
+          Locals.Source.Outcome.halt] at hBlock hStructured
+      · rename_i directKind
+        rcases hStructured with ⟨_hKind, tokens, hFrame⟩
+        have hTargetAccountMap :
+            halt.state.accountMap = directState.evm.accountMap := by
+          simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+            congrArg (fun state : EVMState => state.accountMap)
+              hFrame.dataRel
+        have hDirectAccountMap :
+            directState.evm.accountMap = source.shared.accountMap := by
+          simpa using
+            congrArg (fun shared : EvmYul.SharedState .EVM =>
+              shared.accountMap) hBlock.2.symm
+        exact hTargetAccountMap.trans hDirectAccountMap
+
+theorem wholeProgramOutcomeRel_halt_compiledAccountMapRel
+    {yul : EvmYul.SharedState .Yul}
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {halt : Assembly.Halt}
+    (hWorld :
+      CompiledAccountMapRel yul.accountMap source.shared.accountMap)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) (.halted halt)) :
+    CompiledAccountMapRel yul.accountMap halt.state.accountMap := by
+  have hMap := wholeProgramOutcomeRel_halt_accountMap_eq hRel
+  simpa [hMap] using hWorld
+
 theorem dispatcherOutcomeRel_regular_ok_whole_running_sharedStateRel
     {cfg : Reference.StateRelConfig}
     {terminalRel :
@@ -3503,6 +3582,184 @@ theorem dispatcherOutcomeRel_regular_ok_whole_running_sharedStateRel
   | leave hRel =>
       exact False.elim (wholeProgramOutcomeRel_leave_false hWhole)
 
+theorem compiledAccountMapRel_of_sharedStateRel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul}
+    {evm : EvmYul.SharedState .EVM}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalRel revertRel gasAvailableRel
+          gasValueRel totalGasRel)
+        yul evm) :
+    CompiledAccountMapRel yul.accountMap evm.accountMap :=
+  hShared.chain.accountMap
+
+theorem dispatcherOutcomeRel_regular_ok_whole_running_compiledAccountMapRel
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {target : EVMState}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok finalShared finalStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.running target)) :
+    CompiledAccountMapRel finalShared.accountMap target.accountMap := by
+  rcases hOutcomeRel with ⟨bodyState, hFinal, hSourceRel⟩
+  cases hSourceRel with
+  | regular hRel =>
+      cases hRel with
+      | ok hShared hVars =>
+          rename_i compiler shared store
+          simp [Program.installContract, EvmYul.Yul.State.reviveJump,
+            EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore] at hFinal
+          rcases hFinal with ⟨hFinalShared, _hFinalStore⟩
+          have hSharedFinal :
+              Reference.SharedStateRel
+                (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                  gasAvailableRel gasValueRel totalGasRel)
+                finalShared compiler.shared := by
+            simpa [hFinalShared.symm] using hShared
+          have hWorld :
+              CompiledAccountMapRel finalShared.accountMap
+                compiler.shared.accountMap :=
+            compiledAccountMapRel_of_sharedStateRel_stateRelConfig
+              hSharedFinal
+          exact
+            wholeProgramOutcomeRel_regular_compiledAccountMapRel hWorld hWhole
+  | brk hRel =>
+      exact False.elim (wholeProgramOutcomeRel_brk_false hWhole)
+  | cont hRel =>
+      exact False.elim (wholeProgramOutcomeRel_cont_false hWhole)
+  | leave hRel =>
+      exact False.elim (wholeProgramOutcomeRel_leave_false hWhole)
+
+theorem dispatcherOutcomeRel_regular_ok_whole_running_childRelations
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {target : EVMState}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok finalShared finalStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.running target))
+    (hGas :
+      gasAvailableRel finalShared.toMachineState.gasAvailable
+        target.gasAvailable) :
+    Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        finalShared target.toSharedState ∧
+      CompiledAccountMapRel finalShared.accountMap target.accountMap := by
+  exact
+    ⟨dispatcherOutcomeRel_regular_ok_whole_running_sharedStateRel
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hOutcomeRel hWhole hGas,
+      dispatcherOutcomeRel_regular_ok_whole_running_compiledAccountMapRel
+        hOutcomeRel hWhole⟩
+
+theorem dispatcherOutcomeRel_regular_ok_whole_childRelations
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok finalShared finalStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hGas :
+      ∀ {target}, targetOutcome = .running target →
+        gasAvailableRel finalShared.toMachineState.gasAvailable
+          target.gasAvailable) :
+    ∃ target,
+      targetOutcome = .running target ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          finalShared target.toSharedState ∧
+        CompiledAccountMapRel finalShared.accountMap target.accountMap := by
+  rcases dispatcherOutcomeRel_regular_whole_running hOutcomeRel hWhole with
+    ⟨bodyState, target, _hFinal, _hSourceRel, hTarget⟩
+  have hWholeTarget :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.running target) := by
+    simpa [hTarget] using hWhole
+  exact
+    ⟨target, hTarget,
+      dispatcherOutcomeRel_regular_ok_whole_running_sharedStateRel
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hOutcomeRel hWholeTarget (hGas hTarget),
+      dispatcherOutcomeRel_regular_ok_whole_running_compiledAccountMapRel
+        hOutcomeRel hWholeTarget⟩
+
 theorem sharedStateRel_of_XResultAgrees_running_success
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul}
@@ -3525,6 +3782,18 @@ theorem XResultAgrees_running_success_output_empty
         (.success evm output)) :
     output = ByteArray.empty :=
   hAgree.2
+
+theorem XResultAgrees_running_success_shape
+    {target : EVMState}
+    {result : EvmYul.EVM.ExecutionResult EVMState}
+    (hAgree : Assembly.GasAware.XResultAgrees (.running target) result) :
+    ∃ evm output,
+      result = .success evm output ∧
+        Assembly.GasAware.XResultAgrees (.running target)
+          (.success evm output) := by
+  cases result with
+  | success evm output => exact ⟨evm, output, rfl, hAgree⟩
+  | revert returnedGas output => cases hAgree
 
 theorem sharedStateRel_of_XResultAgrees_halted_success
     {cfg : Reference.StateRelConfig}
