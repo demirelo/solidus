@@ -613,6 +613,20 @@ def primitiveSharedOpenCall?
               [response.statusWord]) }
   | none => none
 
+def evmOpenCall?
+    {Effect : Type u} (state : EvmYul.EVM.State) (kind : CallKind) :
+    Option (OpenCall Effect EvmYul.EVM.State) :=
+  match kind.evmCallSite? state with
+  | some (rest, site) =>
+      some
+        { site := site
+          resume := fun response =>
+            { state with
+              toSharedState :=
+                site.finishShared state.toSharedState response
+              stack := response.statusWord :: rest } }
+  | none => none
+
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
     {Effect : Type u} (shared : EvmYul.SharedState .EVM)
     (kind : CallKind) (operands : CallOperands) :
@@ -627,6 +641,25 @@ def primitiveSharedOpenCall?
                 (kind.canonicalOperands operands)).finishShared shared
                 response,
               [response.statusWord]) } := by
+  cases kind <;> rfl
+
+@[simp] theorem evmOpenCall?_args
+    {Effect : Type u} (state : EvmYul.EVM.State)
+    (kind : CallKind) (operands : CallOperands) (baseStack : Stack) :
+    evmOpenCall? (Effect := Effect)
+        ({ state with stack := kind.args operands ++ baseStack }
+          : EvmYul.EVM.State) kind =
+      some
+        { site :=
+            (CallContext.ofEVMState state).callSite kind
+              (kind.canonicalOperands operands)
+          resume := fun response =>
+            { state with
+              toSharedState :=
+                ((CallContext.ofEVMState state).callSite kind
+                    (kind.canonicalOperands operands)).finishShared
+                  state.toSharedState response
+              stack := response.statusWord :: baseStack } } := by
   cases kind <;> rfl
 
 end CallKind
@@ -660,7 +693,89 @@ theorem preserves_response
     stateRel (source.resume response) (target.resume response) :=
   hRel.preservesAllResponses response
 
+theorem trans
+    {Effect : Type u} {LeftState : Type v} {MidState : Type w}
+    {RightState : Type}
+    {leftRel : LeftState → MidState → Prop}
+    {rightRel : MidState → RightState → Prop}
+    {left : OpenCall Effect LeftState}
+    {mid : OpenCall Effect MidState}
+    {right : OpenCall Effect RightState}
+    (hLeft : OpenCallRel leftRel left mid)
+    (hRight : OpenCallRel rightRel mid right) :
+    OpenCallRel
+      (fun leftResult rightResult =>
+        ∃ midResult, leftRel leftResult midResult ∧
+          rightRel midResult rightResult)
+      left right where
+  sameSite := hLeft.sameSite.trans hRight.sameSite
+  preservesAllResponses := by
+    intro response
+    exact
+      ⟨mid.resume response, hLeft.preservesAllResponses response,
+        hRight.preservesAllResponses response⟩
+
 end OpenCallRel
+
+/--
+Result relation between the stack-free primitive CALL continuation and the
+EVM-stack continuation at the same primitive boundary.
+
+Only the shared state and caller stack suffix are compared here. Program
+counter, execution length, and gas accounting remain lower-level resource
+concerns; this relation records the open external effect and the local stack
+result needed by expression lowering.
+-/
+def PrimitiveEVMResultRel (baseStack : Stack) :
+    EvmYul.SharedState .EVM × List Word → EvmYul.EVM.State → Prop :=
+  fun primitiveResult evmResult =>
+    evmResult.toSharedState = primitiveResult.1 ∧
+      evmResult.stack = primitiveResult.2.reverse ++ baseStack
+
+namespace CallKind
+
+theorem primitiveSharedOpenCallRel_evmOpenCall_of_args
+    {Effect : Type u} {shared : EvmYul.SharedState .EVM}
+    (state : EvmYul.EVM.State)
+    (hShared : state.toSharedState = shared)
+    (kind : CallKind) (operands : CallOperands) (baseStack : Stack) :
+    ∃ primitiveCall :
+        OpenCall Effect (EvmYul.SharedState .EVM × List Word),
+    ∃ evmCall : OpenCall Effect EvmYul.EVM.State,
+      primitiveSharedOpenCall? (Effect := Effect) shared kind
+          (kind.args operands).reverse =
+        some primitiveCall ∧
+      evmOpenCall? (Effect := Effect)
+          ({ state with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenCallRel (PrimitiveEVMResultRel baseStack)
+        primitiveCall evmCall := by
+  subst shared
+  let site :=
+    (CallContext.ofEVMState state).callSite kind
+      (kind.canonicalOperands operands)
+  let primitiveCall :
+      OpenCall Effect (EvmYul.SharedState .EVM × List Word) :=
+    { site := site
+      resume := fun response =>
+        (site.finishShared state.toSharedState response,
+          [response.statusWord]) }
+  let evmCall : OpenCall Effect EvmYul.EVM.State :=
+    { site := site
+      resume := fun response =>
+        { state with
+          toSharedState := site.finishShared state.toSharedState response
+          stack := response.statusWord :: baseStack } }
+  refine ⟨primitiveCall, evmCall, ?_, ?_, ?_⟩
+  · cases kind <;> rfl
+  · cases kind <;> rfl
+  · constructor
+    · rfl
+    · intro response
+      simp [primitiveCall, evmCall, PrimitiveEVMResultRel]
+
+end CallKind
 
 end OpenExternal
 

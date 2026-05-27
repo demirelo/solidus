@@ -175745,6 +175745,62 @@ theorem openPrimitiveCallSound
       (Effect := Effect) hRel kind operands
 
 /--
+Constructed open-call contract directly against the EVM stack boundary.
+
+This is the same gas-free request/response boundary as
+`OpenPrimitiveCallSound`, composed one step lower: if the EVM shared state
+matches the compiler-side post-argument shared state and the CALL operands sit
+on top of an arbitrary stack suffix, then the imported Yul call and EVM call
+have the same open site and preserve every shared response.
+-/
+def OpenPrimitiveEVMCallSound (cfg : Reference.StateRelConfig) : Prop :=
+  ∀ {Effect : Type} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State},
+    Reference.SourceBridgeFacts.SourceStateRel cfg layout
+      (.Ok sourceShared store) compiler →
+    evmState.toSharedState = compiler.shared →
+    ∀ (kind : OpenExternal.CallKind)
+      (operands : OpenExternal.CallOperands)
+      (baseStack : OpenExternal.Stack),
+      ∃ sourceCall :
+          OpenExternal.OpenCall Effect (Reference.State × List Word),
+      ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
+        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+            (.Ok sourceShared store) kind (kind.args operands) =
+          some sourceCall ∧
+        OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+            ({ evmState with stack := kind.args operands ++ baseStack }
+              : EvmYul.EVM.State) kind =
+          some evmCall ∧
+        OpenExternal.OpenCallRel
+          (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
+            cfg layout baseStack) sourceCall evmCall
+
+theorem openPrimitiveEVMCallSound
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (_hContracts :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store) :
+    OpenPrimitiveEVMCallSound cfg := by
+  intro Effect layout sourceShared sourceStore compiler evmState hRel
+    hEVMShared kind operands baseStack
+  exact
+    Reference.SourceBridgeFacts.SourceStateRel.openExternalPrimitiveEVMOpenCallRel_of_args
+      (Effect := Effect) hRel hEVMShared kind operands baseStack
+
+/--
 Consumes the regular argument-prelude proof at a CALL-family primitive boundary.
 
 After the imported Yul arguments have evaluated to the CALL-family operands and
@@ -175830,6 +175886,95 @@ theorem openPrimitiveCallSound_of_argStackPrelude
     ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
       hPreRun, hArgEval, hRelArgs, sourceCall, compilerCall, hSourceCall,
       hCompilerCall, hCallRel⟩
+
+/--
+EVM-stack version of `openPrimitiveCallSound_of_argStackPrelude`.
+
+The theorem keeps the actual EVM state as a callback over the constructed
+post-argument compiler state. This avoids guessing that state before the
+argument-prelude proof has produced it, while still exposing the exact
+gas-free open CALL boundary that the lower EVM primitive consumer should use.
+-/
+theorem openPrimitiveEVMCallSound_of_argStackPrelude
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContracts :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store)
+    {Effect : Type} {layout : List Name}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerProgram : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {results : Nat}
+    {lower : Locals.ExprSeq results}
+    (hArgsRegular :
+      Reference.SourceBridgeFacts.SourceArgStackPreludeRegularAt cfg layout
+        prim lowerProgram ctx sourceFuel args codeOverride pre lower)
+    (hInitial :
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceShared sourceStore) compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .ok (.Ok sourceSharedAfter sourceStoreAfter,
+          (kind.args operands).reverse)) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim lowerProgram ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, (kind.args operands).reverse) ∧
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∀ {evmState : EvmYul.EVM.State},
+        evmState.toSharedState = compilerAfterArgs.shared →
+        ∀ (baseStack : OpenExternal.Stack),
+          ∃ sourceCall :
+              OpenExternal.OpenCall Effect (Reference.State × List Word),
+          ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
+            OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+                (.Ok sourceSharedAfter sourceStoreAfter) kind
+                  (kind.args operands) =
+              some sourceCall ∧
+            OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+                ({ evmState with
+                    stack := kind.args operands ++ baseStack }
+                  : EvmYul.EVM.State) kind =
+              some evmCall ∧
+            OpenExternal.OpenCallRel
+              (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
+                cfg layout baseStack) sourceCall evmCall := by
+  rcases hArgsRegular hInitial hEvalArgs with
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs⟩
+  have hOpen : OpenPrimitiveEVMCallSound cfg :=
+    openPrimitiveEVMCallSound hContracts
+  exact
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs, by
+        intro evmState hEVMShared baseStack
+        exact
+          hOpen (Effect := Effect) hRelArgs hEVMShared kind operands
+            baseStack⟩
 
 end RecursiveBridgeCALLSemanticContracts
 

@@ -7241,6 +7241,63 @@ def OpenPrimitiveResultRel
     SourceStateRel cfg layout sourceResult.1 compilerResult.1 ∧
       sourceResult.2 = compilerResult.2
 
+def CompilerPrimitiveEVMResultRel (baseStack : OpenExternal.Stack) :
+    Objects.Source.State × List Word → EvmYul.EVM.State → Prop :=
+  fun compilerResult evmResult =>
+    evmResult.toSharedState = compilerResult.1.shared ∧
+      evmResult.stack = compilerResult.2.reverse ++ baseStack
+
+def OpenPrimitiveEVMResultRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (baseStack : OpenExternal.Stack) :
+    State × List Word → EvmYul.EVM.State → Prop :=
+  fun sourceResult evmResult =>
+    ∃ compilerResult,
+      OpenPrimitiveResultRel cfg layout sourceResult compilerResult ∧
+        CompilerPrimitiveEVMResultRel baseStack compilerResult evmResult
+
+theorem compilerPrimitiveOpenCallRel_evmOpenCall_of_args
+    {Effect : Type} {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    (hShared : state.toSharedState = compiler.shared)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (baseStack : OpenExternal.Stack) :
+    ∃ compilerCall :
+        OpenExternal.OpenCall Effect (Objects.Source.State × List Word),
+    ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
+      compilerPrimitiveOpenCall? (Effect := Effect) compiler kind
+          (kind.args operands).reverse =
+        some compilerCall ∧
+      OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+          ({ state with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenExternal.OpenCallRel
+        (CompilerPrimitiveEVMResultRel baseStack) compilerCall evmCall := by
+  rcases
+      OpenExternal.CallKind.primitiveSharedOpenCallRel_evmOpenCall_of_args
+        (Effect := Effect) state hShared kind operands baseStack with
+    ⟨primitiveCall, evmCall, hPrimitiveCall, hEVMCall, hPrimitiveEVM⟩
+  let compilerCall :
+      OpenExternal.OpenCall Effect (Objects.Source.State × List Word) :=
+    { site := primitiveCall.site
+      resume := fun response =>
+        (compiler.withShared (primitiveCall.resume response).1,
+          (primitiveCall.resume response).2) }
+  refine ⟨compilerCall, evmCall, ?_, hEVMCall, ?_⟩
+  · simp [compilerPrimitiveOpenCall?, hPrimitiveCall, compilerCall]
+  · constructor
+    · simpa [compilerCall] using hPrimitiveEVM.sameSite
+    · intro response
+      have hPreserved :=
+        OpenExternal.OpenCallRel.preserves_response hPrimitiveEVM response
+      constructor
+      · simpa [compilerCall, CompilerPrimitiveEVMResultRel] using
+          hPreserved.1
+      · simpa [compilerCall, CompilerPrimitiveEVMResultRel] using
+          hPreserved.2
+
 theorem finishOpenExternalCall
     {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -7313,6 +7370,47 @@ theorem openExternalPrimitiveOpenCallRel_of_args
               (compiler := compiler) (site := site)
               (response := response) hRel)
       · rfl
+
+theorem openExternalPrimitiveEVMOpenCallRel_of_args
+    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (hEVMShared : evmState.toSharedState = compiler.shared)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (baseStack : OpenExternal.Stack) :
+    ∃ sourceCall :
+        OpenExternal.OpenCall Effect (State × List Word),
+    ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
+      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+          (.Ok sourceShared store) kind (kind.args operands) =
+        some sourceCall ∧
+      OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenExternal.OpenCallRel
+        (OpenPrimitiveEVMResultRel cfg layout baseStack)
+        sourceCall evmCall := by
+  rcases
+      openExternalPrimitiveOpenCallRel_of_args
+        (Effect := Effect) hRel kind operands with
+    ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall,
+      hSourceCompiler⟩
+  rcases
+      compilerPrimitiveOpenCallRel_evmOpenCall_of_args
+        (Effect := Effect) (compiler := compiler)
+        (state := evmState) hEVMShared kind operands baseStack with
+    ⟨compilerCall', evmCall, hCompilerCall', hEVMCall, hCompilerEVM⟩
+  rw [hCompilerCall] at hCompilerCall'
+  cases hCompilerCall'
+  exact
+    ⟨sourceCall, evmCall, hSourceCall, hEVMCall,
+      OpenExternal.OpenCallRel.trans hSourceCompiler hCompilerEVM⟩
 
 end SourceStateRel
 
