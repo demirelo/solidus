@@ -2049,6 +2049,123 @@ theorem XResultAgrees_halted_revert
     halt.kind = .revert ∧ output = halt.output := by
   simpa [Assembly.GasAware.XResultAgrees] using hAgree
 
+theorem restoreRevertedContractCallState_of_XResultAgrees_halted_revert
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {returnedGas : EvmYul.UInt256}
+    {output : ByteArray}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hHaltOutput :
+      halt.output = halt.kind.output halt.state)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.revert returnedGas output))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        returnedGas) :
+    halt.kind = .revert ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreRevertedContractCallState
+            (EvmYul.Yul.addAccessedAccount
+              (.Ok yulParent parentStore) addr)
+            (.Ok yulChild childStore)
+            inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize with
+                gasAvailable := returnedGas }
+            substate :=
+              (EvmYul.State.addAccessedAccount
+                evmParent.toState addr).substate } := by
+  rcases XResultAgrees_halted_revert hAgree with
+    ⟨hKind, hResultOutput⟩
+  rcases hTargetChild with ⟨_hChildChain, hChildMachine⟩
+  have hHaltReturn :
+      halt.output = halt.state.toMachineState.H_return := by
+    simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+  have hYulOutput :
+      yulChild.toMachineState.H_return = output := by
+    calc
+      yulChild.toMachineState.H_return =
+          halt.state.toMachineState.H_return := hChildMachine.H_return
+      _ = halt.output := hHaltReturn.symm
+      _ = output := hResultOutput.symm
+  have hGasYul :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall
+          yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize).gasAvailable
+        returnedGas := by
+    simpa [hYulOutput] using hGas
+  rcases
+    restoreRevertedContractCallState_afterAccess_ok_rel
+      hParent parentStore childStore addr
+      (yulChild := yulChild)
+      inOffset inSize outOffset outSize hGasYul with
+    ⟨yulAfter, hRestore, hRel⟩
+  exact ⟨hKind, yulAfter, hRestore, by simpa [hYulOutput] using hRel⟩
+
+theorem restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {returnedGas : EvmYul.UInt256}
+    {output : ByteArray}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        (.halted halt))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.revert returnedGas output))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        returnedGas) :
+    halt.kind = .revert ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreRevertedContractCallState
+            (EvmYul.Yul.addAccessedAccount
+              (.Ok yulParent parentStore) addr)
+            (.Ok yulChild childStore)
+            inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize with
+                gasAvailable := returnedGas }
+            substate :=
+              (EvmYul.State.addAccessedAccount
+                evmParent.toState addr).substate } :=
+  restoreRevertedContractCallState_of_XResultAgrees_halted_revert
+    hParent parentStore childStore addr hTargetChild hTrace.halted_output
+    hAgree inOffset inSize outOffset outSize hGas
+
 theorem restoreSuccessfulContractCallState_childEvm_nonempty_rel
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}

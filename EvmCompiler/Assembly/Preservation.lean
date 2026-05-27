@@ -628,6 +628,88 @@ inductive BlockTraceResult (program : Program) (target : TargetProgram) :
           .ok (.halted halt)) :
       BlockTraceResult program target (fuel + 1) state (.halted halt)
 
+theorem Target.stepInstrResult_halted_output
+    {instr : TargetInstr} {state : EVMState} {halt : Halt}
+    (hStep :
+      Target.stepInstrResult instr state = .ok (.halted halt)) :
+    halt.output = halt.kind.output halt.state := by
+  unfold Target.stepInstrResult at hStep
+  cases hRun : Target.stepInstr instr state with
+  | error err =>
+      rw [hRun] at hStep
+      cases hStep
+  | ok state' =>
+      rw [hRun] at hStep
+      cases hKind : instr.haltKind? with
+      | none =>
+          rw [hKind] at hStep
+          cases hStep
+      | some kind =>
+          rw [hKind] at hStep
+          cases hStep
+          rfl
+
+theorem Target.runListResult_halted_output
+    {code : List TargetInstr} {state : EVMState} {halt : Halt}
+    (hRun :
+      Target.runListResult code state = .ok (.halted halt)) :
+    halt.output = halt.kind.output halt.state := by
+  induction code generalizing state with
+  | nil =>
+      simp [Target.runListResult] at hRun
+  | cons instr rest ih =>
+      cases hStep : Target.stepInstrResult instr state with
+      | error err =>
+          rw [Target.runListResult, hStep] at hRun
+          cases hRun
+      | ok result =>
+          rw [Target.runListResult, hStep] at hRun
+          cases result with
+          | running mid =>
+              exact ih hRun
+          | halted halt' =>
+              cases hRun
+              exact Target.stepInstrResult_halted_output hStep
+
+def StepResultOutputMatchesKind : StepResult → Prop
+  | .running _ => True
+  | .halted halt => halt.output = halt.kind.output halt.state
+
+theorem BlockTraceResult.output_eq_kind
+    {program : Program} {target : TargetProgram}
+    {fuel : Nat} {state : EVMState} {result : StepResult}
+    (hTrace :
+      BlockTraceResult program target fuel state result) :
+    StepResultOutputMatchesKind result := by
+  induction fuel generalizing state result with
+  | zero =>
+      cases hTrace
+      trivial
+  | succ fuel ih =>
+      cases hTrace with
+      | stepRunning hAt hEmit hTargetBlock hRun hRest =>
+          exact ih hRest
+      | stepHalted hAt hEmit hTargetBlock hRun =>
+          exact Target.runListResult_halted_output hRun
+
+theorem BlockTraceResult.halted_output
+    {program : Program} {target : TargetProgram}
+    {fuel : Nat} {state : EVMState} {halt : Halt}
+    (hTrace :
+      BlockTraceResult program target fuel state (.halted halt)) :
+    halt.output = halt.kind.output halt.state := by
+  simpa [StepResultOutputMatchesKind] using hTrace.output_eq_kind
+
+theorem BlockTraceResult.revert_output_eq_H_return
+    {program : Program} {target : TargetProgram}
+    {fuel : Nat} {state : EVMState} {halt : Halt}
+    (hTrace :
+      BlockTraceResult program target fuel state (.halted halt))
+    (hRevert : halt.kind = .revert) :
+    halt.output = halt.state.toMachineState.H_return := by
+  have hOutput := hTrace.halted_output
+  simpa [HaltKind.output, hRevert] using hOutput
+
 theorem assemble_runN_block_trace_sound {program : Program}
     {target : TargetProgram} {fuel : Nat} {state sourceState : EVMState}
     (hAsm : assemble? program = some target)
