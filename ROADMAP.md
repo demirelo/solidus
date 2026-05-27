@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 12:09 PDT.
+Last updated: 2026-05-27 12:21 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -24,6 +24,9 @@ response preservation field is explicitly universal over all shared responses.
 The current checked hook also proves CALL-family argument/stack agreement over
 an arbitrary target stack suffix and derives the needed call-context relation
 from the existing compiler/source state relations.
+Gas is abstracted at the open-call boundary: the request keeps the source
+`requestedGas` operand, but no longer includes the chain-specific forwarded
+`Ccallgas` calculation or a `StateRelConfig.callGasRel` proof obligation.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3286,7 +3289,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Compose the bridge with the existing lowering tower and gas-aware EVM theorem.
    - Current checked composition points: `Yul.Program.compile_source_preserves_checked_of_compileAccepted`, `Yul.Program.compile_preserves_of_reference_source_runs_compileAccepted`, `Yul.Program.compile_whole_program_result_sound_of_reference_source_runs_compileAccepted`, the dispatcher/root-block bridge theorems, and the legacy backend-only `Yul.Program.compile_whole_program_result_sound_of_lowered_bridge_with_result_rel`.
    - Remaining blocker: the active theorem spine now has a direct imported-run/source-run/bytecode composition target, but the fully general imported-Yul bridge still needs per-construct source-tower proofs from `Yul.Program.run`/`Reference.runResult` into `Yul.SourceLowered.runState` without packaging the run as `Reference.SourceBridge`. The separate `Reference.SourceBridge` and `Reference.LoweredBridge` facts remain legacy compatibility routes.
-   - Active external-call checkpoint: the concrete `World` route has been retired in favor of `OpenExternal`. The live gap is to route CALL-family primitive preservation through same-site open requests plus universally quantified shared responses, then discharge the explicit gas/resource premises that remain local to call setup.
+   - Active external-call checkpoint: the concrete `World` route has been retired in favor of `OpenExternal`. The live gap is to route CALL-family primitive preservation through same-site open requests plus universally quantified shared responses. Gas mechanics are abstracted at this boundary: request equality keeps the requested-gas operand but does not require a concrete forwarded-gas calculation.
    - Semantic blockers fixed in the target fork: selected-branch switch execution, omitted default notation, and halting `SELFDESTRUCT` behavior. Argument-lowering now binds each argument before later argument effects. Remaining bridge blockers are proof-side: replacing `Reference.SourceBridge.sourceRun` with recursive per-construct source-tower theorems, proving source-to-direct function-call preservation, proving object/data/code-image relations, generalizing primitive bridges beyond the current checked arithmetic/comparison/bitwise-shift/modular-arithmetic/nullary-environment/state/machine-state/first one-argument read/state-update and `KECCAK256` slice (`ADD`/`MUL`/`SUB`/`DIV`/`SDIV`/`MOD`/`SMOD`/`ADDMOD`/`MULMOD`/`EXP`/`SIGNEXTEND`/`LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`/`KECCAK256`/`ADDRESS`/`ORIGIN`/`CALLER`/`CALLVALUE`/`CALLDATALOAD`/`CALLDATASIZE`/`GASPRICE`/`PREVRANDAO`/`BASEFEE`/`BLOCKHASH`/`BLOBHASH`/`BLOBBASEFEE`/`COINBASE`/`TIMESTAMP`/`NUMBER`/`GASLIMIT`/`CHAINID`/`SELFBALANCE`/`BALANCE`/`MLOAD`/`SLOAD`/`TLOAD`/`RETURNDATASIZE`/`MSIZE`/`GAS`), handling compiler-only temporaries emitted by expression preludes via scoped cleanup or an explicit hidden-local relation, and discharging code-size, remaining account-map-dependent reads, memory-write/storage-write, external-call/create, revert, selfdestruct-result/static-mode, and out-of-gas resource contracts.
 
 ## Layer Standard

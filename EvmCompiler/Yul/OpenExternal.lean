@@ -72,7 +72,6 @@ The request that is visible to the external environment.
 structure CallRequest where
   kind : CallKind
   requestedGas : Word
-  callGas : Word
   caller : Address
   recipient : Address
   codeAddress : Address
@@ -126,14 +125,12 @@ end CallOperands
 /--
 The caller-local state needed to form a CALL-family request.
 
-The account map remains indexed by the source semantics (`.Yul` or `.EVM`);
-the relation below records exactly the cross-semantics facts needed to show
-both computed requests are equal.
+The relation below records exactly the cross-semantics facts needed to show
+both computed requests are equal. Chain-specific gas forwarding and account-map
+resource behavior live outside this request identity.
 -/
 structure CallContext (τ : EvmYul.OperationType) where
-  accountMap : EvmYul.AccountMap τ
   machine : EvmYul.MachineState
-  substate : EvmYul.Substate
   codeOwner : Address
   source : Address
   weiValue : Word
@@ -145,9 +142,7 @@ variable {τ : EvmYul.OperationType}
 
 def ofYulSharedState (state : EvmYul.SharedState .Yul) :
     CallContext .Yul where
-  accountMap := state.accountMap
   machine := state.toMachineState
-  substate := state.substate
   codeOwner := state.executionEnv.codeOwner
   source := state.executionEnv.source
   weiValue := state.executionEnv.weiValue
@@ -155,27 +150,21 @@ def ofYulSharedState (state : EvmYul.SharedState .Yul) :
 
 def ofEVMSharedState (state : EvmYul.SharedState .EVM) :
     CallContext .EVM where
-  accountMap := state.accountMap
   machine := state.toMachineState
-  substate := state.substate
   codeOwner := state.executionEnv.codeOwner
   source := state.executionEnv.source
   weiValue := state.executionEnv.weiValue
   permission := state.executionEnv.perm
 
 def ofYulState (state : EvmYul.Yul.State) : CallContext .Yul where
-  accountMap := state.toState.accountMap
   machine := state.toMachineState
-  substate := state.toState.substate
   codeOwner := state.executionEnv.codeOwner
   source := state.executionEnv.source
   weiValue := state.executionEnv.weiValue
   permission := state.executionEnv.perm
 
 def ofEVMState (state : EvmYul.EVM.State) : CallContext .EVM where
-  accountMap := state.accountMap
   machine := state.toMachineState
-  substate := state.substate
   codeOwner := state.executionEnv.codeOwner
   source := state.executionEnv.source
   weiValue := state.executionEnv.weiValue
@@ -184,12 +173,6 @@ def ofEVMState (state : EvmYul.EVM.State) : CallContext .EVM where
 def calldata (context : CallContext τ) (window : ReturnWindow) : ByteArray :=
   context.machine.memory.readWithPadding
     window.inOffset.toNat window.inSize.toNat
-
-def callGas (context : CallContext τ)
-    (codeAddress recipient : Address) (value requestedGas : Word) : Word :=
-  .ofNat <|
-    EvmYul.EVM.Ccallgas codeAddress recipient value requestedGas
-      context.accountMap context.machine context.substate
 
 def caller (context : CallContext τ) : CallKind → Address
   | .call => context.codeOwner
@@ -231,8 +214,6 @@ def callSite (context : CallContext τ)
   { request :=
       { kind := kind
         requestedGas := operands.requestedGas
-        callGas :=
-          context.callGas target recipient transferValue operands.requestedGas
         caller := context.caller kind
         recipient := recipient
         codeAddress := target
@@ -256,10 +237,6 @@ structure CallContextRel
   sourceAddress : source.source = target.source
   weiValue : source.weiValue = target.weiValue
   permission : source.permission = target.permission
-  callGas :
-    ∀ codeAddress recipient value requestedGas,
-      source.callGas codeAddress recipient value requestedGas =
-        target.callGas codeAddress recipient value requestedGas
 
 namespace CallContextRel
 
@@ -272,8 +249,7 @@ theorem callSite_eq {source : CallContext .Yul}
     simp [CallContext.callSite, CallContext.caller, CallContext.recipient,
       CallContext.transferValue, CallContext.apparentValue,
       CallContext.effectivePermission, CallContext.calldata, hRel.memory,
-      hRel.codeOwner, hRel.sourceAddress, hRel.weiValue, hRel.permission,
-      hRel.callGas]
+      hRel.codeOwner, hRel.sourceAddress, hRel.weiValue, hRel.permission]
 
 end CallContextRel
 

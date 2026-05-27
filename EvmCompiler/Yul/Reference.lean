@@ -5582,10 +5582,10 @@ pure control/stack compiler proof:
 * `varStackRel` relates a Yul varstore to the compiler's stack layout;
 * `terminalRel` and `revertRel` relate imported Yul terminal results
   (`YulHalt`/`Revert`) to compiler halt states; and
-* `gasAvailableRel`, `gasValueRel`, `callGasRel`, and `totalGasRel` make the
-  gas-erasure boundary explicit. `gasValueRel` is the extra oracle agreement
-  needed for the visible Yul `gas()` primitive; `callGasRel` is the matching
-  resource/account-map agreement needed for CALL-family request equality.
+* `gasAvailableRel`, `gasValueRel`, and `totalGasRel` make the gas-erasure
+  boundary explicit. `gasValueRel` is the extra oracle agreement needed for the
+  visible Yul `gas()` primitive; CALL-family open requests keep the requested
+  gas operand but abstract the chain-specific forwarded-gas calculation.
 -/
 structure StateRelConfig where
   accountMapRel : AccountMapRel
@@ -5650,18 +5650,6 @@ structure StateRelConfig where
     ∀ {yul evm : EvmYul.MachineState},
       gasAvailableRel yul.gasAvailable evm.gasAvailable →
         EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm
-  callGasRel :
-    ∀ {yul : EvmYul.SharedState .Yul}
-        {evm : EvmYul.SharedState .EVM}
-        {codeAddress recipient : OpenExternal.Address}
-        {value requestedGas : Word},
-      accountMapRel yul.accountMap evm.accountMap →
-      yul.substate = evm.substate →
-      gasAvailableRel yul.gasAvailable evm.gasAvailable →
-        (OpenExternal.CallContext.ofYulSharedState yul).callGas
-          codeAddress recipient value requestedGas =
-        (OpenExternal.CallContext.ofEVMSharedState evm).callGas
-          codeAddress recipient value requestedGas
   totalGasRel : Nat → Nat → Prop
 
 structure ExecutionEnvRel (cfg : StateRelConfig)
@@ -5960,10 +5948,7 @@ theorem openExternalCallContextRel
       codeOwner := hShared.chain.executionEnv.codeOwner
       sourceAddress := hShared.chain.executionEnv.source
       weiValue := hShared.chain.executionEnv.weiValue
-      permission := hShared.chain.executionEnv.perm
-      callGas := fun _ _ _ _ =>
-        cfg.callGasRel hShared.chain.accountMap hShared.chain.substate
-          hShared.machine.gasAvailable }
+      permission := hShared.chain.executionEnv.perm }
 
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
