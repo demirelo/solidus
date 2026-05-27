@@ -7,19 +7,109 @@ namespace Yul
 namespace World
 
 /--
+Checked compiler/source boundary for external account code.
+
+This deliberately omits `RecursiveBridgeFeatureCoverage`: that checker still
+rejects the CALL-family features whose world semantics are being proved here.
+External compiled accounts should nevertheless carry checked lower resource
+facts and source-static acceptedness/scoping facts, so the recursive CALL proof
+can later unpack them from the world relation instead of asking the caller for
+callee proof evidence.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match Program.compileCheckedAssemblyTargetBytecodeResources? program with
+  | none => none
+  | some (asm, target) =>
+      if Program.RecursiveBridgeSourceStaticFacts.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target)) :
+    Program.compileCheckedAssemblyTargetBytecodeResources? program =
+        some (asm, target) ∧
+      Program.RecursiveBridgeSourceStaticFacts program := by
+  unfold compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?
+    at hCompileTarget
+  cases hBase :
+      Program.compileCheckedAssemblyTargetBytecodeResources? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hFacts :
+          Program.RecursiveBridgeSourceStaticFacts.checked? program <;>
+        simp [hFacts] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simp,
+          Program.RecursiveBridgeSourceStaticFacts.of_checked?
+            (by simpa using hFacts)⟩
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_compileChecked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target)) :
+    Program.compileChecked? program = some asm := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_eq_some
+        hCompileTarget with
+    ⟨hResources, _hStatic⟩
+  rcases Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResources with
+    ⟨hBytecode, _hResources⟩
+  rcases Program.compileCheckedAssemblyTargetBytecode?_eq_some hBytecode with
+    ⟨hTarget, _hDecodeWindow, _hJumpdest⟩
+  exact (Program.compileCheckedAssemblyTarget?_eq_some hTarget).1
+
+theorem sourceCompileAccepted_of_sourceAccepted_resources
+    {program : Program}
+    (hSource : Program.SourceAccepted program)
+    (hResources : Program.RecursiveBridgeCompileResources program) :
+    Program.SourceCompileAccepted program where
+  source := hSource
+  objects := by
+    intro lowerObj hLower
+    rcases hSource with
+      ⟨_hWF, _hSupported, sourceObj, hSourceObj, hObjSourceAccepted⟩
+    have hEq : sourceObj = lowerObj := by
+      rw [hLower] at hSourceObj
+      cases hSourceObj
+      rfl
+    cases hEq
+    exact
+      { source := hObjSourceAccepted
+        functions :=
+          { source := by
+              simpa [Objects.Program.SourceAccepted,
+                Functions.Inline.Program.SourceAccepted] using
+                hObjSourceAccepted.2
+            frameBound := hResources.functionFrameBound lowerObj hLower } }
+
+/--
 Concrete code-image relation for external worlds.
 
 The relation is intentionally below the current feature-coverage checker: an
 external account may contain CALL-family code while we are proving the
 CALL-family bridge.  It still requires checked lowering, frame resources, and
-bytecode bridge facts for the emitted EVM code.
+source-static acceptedness/scoping facts for the emitted EVM code.
 -/
 noncomputable def CompiledCodeRel (contract : AstContract)
     (bytes : ByteArray) : Prop :=
   (∃ (program : Program) (asm : Assembly.Program)
       (target : Assembly.TargetProgram),
     program.contract = contract ∧
-      Program.compileCheckedAssemblyTargetBytecodeResources? program =
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
         some (asm, target) ∧
       bytes = Assembly.Bytecode.encodeTarget target) ∨
     (contract = default ∧ bytes = default)
@@ -28,7 +118,7 @@ theorem CompiledCodeRel.of_checked
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
     (hCompile :
-      Program.compileCheckedAssemblyTargetBytecodeResources? program =
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
         some (asm, target)) :
     CompiledCodeRel program.contract
       (Assembly.Bytecode.encodeTarget target) := by
@@ -41,23 +131,27 @@ theorem CompiledCodeRel.empty :
 theorem CompiledCodeRel.checked_or_empty
     {contract : AstContract} {bytes : ByteArray}
     (hCode : CompiledCodeRel contract bytes) :
-    (∃ (program : Program) (asm : Assembly.Program)
+      (∃ (program : Program) (asm : Assembly.Program)
         (target : Assembly.TargetProgram),
       program.contract = contract ∧
-        Program.compileCheckedAssemblyTargetBytecodeResources? program =
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
           some (asm, target) ∧
         bytes = Assembly.Bytecode.encodeTarget target) ∨
       (contract = default ∧ bytes = default) :=
   hCode
 
-theorem CompiledCodeRel.checkedBytecodeResources_or_empty
+theorem CompiledCodeRel.checkedBytecodeResourcesSourceStatic_or_empty
     {contract : AstContract} {bytes : ByteArray}
     (hCode : CompiledCodeRel contract bytes) :
     (∃ (program : Program) (asm : Assembly.Program)
         (target : Assembly.TargetProgram),
       program.contract = contract ∧
-        Program.compileCheckedAssemblyTargetBytecodeResources? program =
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
           some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
         Program.compileCheckedAssemblyTargetBytecode? program =
           some (asm, target) ∧
         _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
@@ -69,14 +163,28 @@ theorem CompiledCodeRel.checkedBytecodeResources_or_empty
   · rcases hChecked with
       ⟨program, asm, target, hContract, hCompile, hBytes⟩
     rcases
-        Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_eq_some
           hCompile with
+      ⟨hResourcesCompile, hStatic⟩
+    rcases
+        Program.compileCheckedAssemblyTargetBytecodeResources?_eq_some
+          hResourcesCompile with
       ⟨hBytecode, hResources⟩
     rcases Program.compileCheckedAssemblyTargetBytecode?_eq_some
         hBytecode with
       ⟨_hTarget, hDecode, hJumpdest⟩
+    have hSourceAccepted : Program.SourceAccepted program :=
+      Program.sourceAccepted_of_sourceAcceptedCore_supported
+        hStatic.sourceAcceptedCore hStatic.supported
+    have hSourceCompileAccepted : Program.SourceCompileAccepted program :=
+      sourceCompileAccepted_of_sourceAccepted_resources
+        hSourceAccepted hResources
+    have hCompileChecked : Program.compileChecked? program = some asm :=
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic?_compileChecked
+        hCompile
     exact Or.inl
-      ⟨program, asm, target, hContract, hCompile, hBytecode,
+      ⟨program, asm, target, hContract, hCompile, hStatic,
+        hSourceAccepted, hSourceCompileAccepted, hCompileChecked, hBytecode,
         hResources, hDecode, hJumpdest, hBytes⟩
   · exact Or.inr hEmpty
 
