@@ -8,16 +8,17 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 14:07 PDT.
+Last updated: 2026-05-27 15:31 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
 prove that imported Yul and compiled EVM reach the same external call site
 (same call kind, caller/recipient/code address, value, calldata, static
 permission, and local return-copy window), then quantify universally over an
-arbitrary shared response. The response may encode state-altering outside-world
-effects through an abstract effect type; the compiler theorem must not assume
-anything about that effect beyond both sides receiving the same response.
+arbitrary shared response. The response may encode arbitrary reentrant
+account/substate mutation; the compiler theorem must not assume anything about
+that mutation beyond both sides receiving the same response and the mutation
+preserving the relevant source/target shared-state relation.
 `EvmCompiler.Yul.OpenExternal` now contains the checked request-extraction
 boundary for Yul argument lists and EVM stacks plus `OpenCallRel`, whose
 response preservation field is explicitly universal over all shared responses.
@@ -3350,9 +3351,13 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   wrappers now compose CALL-safe lowering facts with that frontier, and
   accepted CALL-bridge wrappers derive the checked argument-prelude package
   from `ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved`.
-  Remaining work is to replace the recursive closed assignment/let consumers
-  with this open sequence frontier, prove the nested-CALL eval-args domain
-  obligation through the open argument/response semantics, and then compose to
-  the EVM stack boundary.
+  The formerly raw nested-CALL argument-domain premise is now named as
+  `EvalArgsReverseOkDomainExactContract`, with checked constructors from the
+  old no-CALL primitive-family theorem and from a generic per-expression domain
+  theorem. Remaining work is to replace the recursive closed assignment/let
+  consumers with this open sequence frontier, construct the CALL-safe
+  `EvalArgsReverseOkDomainExactContract` from an open argument/response
+  semantics that can suspend on nested CALLs, and then compose to the EVM stack
+  boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

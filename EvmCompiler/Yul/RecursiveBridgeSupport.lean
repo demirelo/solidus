@@ -22610,6 +22610,71 @@ theorem evalArgs_reverse_ok_domain_exact_of_eval_ok_domain
       exact hEach (by simpa using hMem) hDom hEv)
     hDomain hEval
 
+/--
+Local-varstore domain preservation for a reversed Yul argument list.
+
+This is the named proof boundary needed by the open external-call route.  For
+old no-CALL arguments it is discharged by the existing primitive-family domain
+theorems.  For CALL-safe arguments with nested external calls, the intended
+constructor is the open argument/response semantics: every nested response may
+mutate account/substate data, but it must not mutate the suspended caller's
+local varstore.
+-/
+structure EvalArgsReverseOkDomainExactContract
+    (layout : List Name) (fuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract) : Prop where
+  evalArgsOk :
+    ∀ {shared store sharedAfter storeAfter values},
+      StoreDomainExact layout store →
+      EvmYul.Yul.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store) =
+        .ok (.Ok sharedAfter storeAfter, values) →
+      StoreDomainExact layout storeAfter
+
+namespace EvalArgsReverseOkDomainExactContract
+
+theorem of_eval_ok_domain
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr}
+        {shared0 : EvmYul.SharedState .Yul}
+        {store0 : EvmYul.Yul.VarStore} {source1 : State}
+        {value : Word},
+        expr ∈ args →
+        StoreDomainExact layout store0 →
+        EvmYul.Yul.eval evalFuel expr codeOverride (.Ok shared0 store0) =
+          .ok (source1, value) →
+        ∃ shared1 store1,
+          source1 = .Ok shared1 store1 ∧ StoreDomainExact layout store1) :
+    EvalArgsReverseOkDomainExactContract layout fuel args codeOverride where
+  evalArgsOk := by
+    intro shared store sharedAfter storeAfter values hDomain hEval
+    exact
+      evalArgs_reverse_ok_domain_exact_of_eval_ok_domain
+        (layout := layout) (fuel := fuel) (args := args)
+        (codeOverride := codeOverride) (shared := shared)
+        (sharedAfter := sharedAfter) (store := store)
+        (storeAfter := storeAfter) (values := values)
+        hEach hDomain hEval
+
+theorem of_safe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    (hSafe : Safe.exprs args) :
+    EvalArgsReverseOkDomainExactContract layout fuel args codeOverride where
+  evalArgsOk := by
+    intro shared store sharedAfter storeAfter values hDomain hEval
+    exact
+      evalArgs_reverse_ok_domain_exact_of_safe_primitiveFamilies
+        (layout := layout) (fuel := fuel) (args := args)
+        (codeOverride := codeOverride) (shared := shared)
+        (sharedAfter := sharedAfter) (store := store)
+        (storeAfter := storeAfter) (values := values)
+        hSafe hDomain hEval
+
+end EvalArgsReverseOkDomainExactContract
+
 theorem sourceAssignTargets_contains_of_checkAssignment_evalArgs_domain
     {cfg : StateRelConfig} {layout : List Name}
     {fuel : Nat} {args : List AstExpr} {codeOverride : Option AstContract}
@@ -31463,12 +31528,8 @@ theorem openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
         sourceFuel yulPrim op kind args codeOverride pre lowerArgs)
     (hTargetMem : identName name ∈ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        codeOverride) :
     OpenPrimitiveCallAssignStmtPreludeSoundAt cfg layout prim program ctx
       sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
   intro sourceShared sourceSharedAfter sourceStore sourceStoreAfter
@@ -31481,7 +31542,8 @@ theorem openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
       hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
       compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
   have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
-    hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
+    hEvalArgsDomain.evalArgsOk
+      (SourceStateExactRel.domain hInitialExact) hEvalArgs
   have hStmtRel :
       OpenExternal.OpenCallRel
         (Reference.SharedStateRel.OpenExternalResponseRel
@@ -31582,12 +31644,8 @@ theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
         sourceFuel yulPrim op kind args codeOverride pre lowerArgs)
     (hFresh : identName name ∉ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        codeOverride) :
     OpenPrimitiveCallLetStmtPreludeSoundAt cfg layout prim program ctx
       sourceFuel yulPrim op kind args codeOverride pre lowerArgs name := by
   intro sourceShared sourceSharedAfter sourceStore sourceStoreAfter
@@ -31600,7 +31658,8 @@ theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
       hPreRun, hArgEval, hRelArgs, sourcePrimitiveCall,
       compilerPrimitiveCall, hSourceCall, hCompilerCall, hCallRel⟩
   have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
-    hEvalArgsDomain (SourceStateExactRel.domain hInitialExact) hEvalArgs
+    hEvalArgsDomain.evalArgsOk
+      (SourceStateExactRel.domain hInitialExact) hEvalArgs
   have hStmtRel :
       OpenExternal.OpenCallRel
         (Reference.SharedStateRel.OpenExternalResponseRel
@@ -31660,12 +31719,8 @@ theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallStmtPreludeSoundAt_of_
         codeOverride pre seq)
     (hTargetMem : identName name ∈ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        codeOverride) :
     Stmt.toFunctionsListFuel? lowerFuel.succ freshState
         (.Assign [name] (.Call (.inl yulPrim) args)) =
       some
@@ -31730,12 +31785,8 @@ theorem toFunctionsListFuel?_let_prim_openPrimitiveCallStmtPreludeSoundAt_of_low
         codeOverride pre seq)
     (hFresh : identName name ∉ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        codeOverride) :
     Stmt.toFunctionsListFuel? lowerFuel.succ freshState
         (.Let [name] (some (.Call (.inl yulPrim) args))) =
       some
@@ -135569,12 +135620,8 @@ theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallStmtPreludeSoundAt_of_
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hTargetMem : identName name ∈ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some contract)) :
     Stmt.toFunctionsListFuel? lowerFuel.succ freshState
         (.Assign [name] (.Call (.inl yulPrim) args)) =
       some
@@ -135638,12 +135685,8 @@ theorem toFunctionsListFuel?_let_prim_openPrimitiveCallStmtPreludeSoundAt_of_cal
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hFresh : identName name ∉ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter) :
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some contract)) :
     Stmt.toFunctionsListFuel? lowerFuel.succ freshState
         (.Let [name] (some (.Call (.inl yulPrim) args))) =
       some
@@ -135720,12 +135763,8 @@ theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallSeqPreludeSoundAt_of_c
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hTargetMem : identName name ∈ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter)
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some contract))
     (hTail :
       ∀ {ctxMid : Functions.Source.Ctx},
         SourceResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
@@ -135809,12 +135848,8 @@ theorem toFunctionsListFuel?_let_prim_openPrimitiveCallSeqPreludeSoundAt_of_call
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hFresh : identName name ∉ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse (some contract)
-            (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter)
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some contract))
     (hTail :
       ∀ {ctxMid : Functions.Source.Ctx},
         SourceResultSeqSoundWhenAtExactHiddenCtx cfg (identName name :: layout)
@@ -135904,12 +135939,8 @@ theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallSeqPreludeSoundAt_of_p
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hTargetMem : identName name ∈ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse
-            (some yulProgram.contract) (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter)
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some yulProgram.contract))
     (hTail :
       ∀ {ctxMid : Functions.Source.Ctx},
         SourceResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
@@ -135990,12 +136021,8 @@ theorem toFunctionsListFuel?_let_prim_openPrimitiveCallSeqPreludeSoundAt_of_prog
     (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
     (hFresh : identName name ∉ layout)
     (hEvalArgsDomain :
-      ∀ {shared store sharedAfter storeAfter values},
-        StoreDomainExact layout store →
-        EvmYul.Yul.evalArgs sourceFuel args.reverse
-            (some yulProgram.contract) (.Ok shared store) =
-          .ok (.Ok sharedAfter storeAfter, values) →
-        StoreDomainExact layout storeAfter)
+      EvalArgsReverseOkDomainExactContract layout sourceFuel args
+        (some yulProgram.contract))
     (hTail :
       ∀ {ctxMid : Functions.Source.Ctx},
         SourceResultSeqSoundWhenAtExactHiddenCtx cfg (identName name :: layout)
