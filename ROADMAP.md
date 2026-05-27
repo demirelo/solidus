@@ -27,10 +27,9 @@ from the existing compiler/source state relations. The CALL-safe semantic
 contract boundary now exposes constructed `OpenPrimitiveCallSound` and
 `OpenPrimitiveEVMCallSound` hooks from `SourceStateRel`; these are not new
 caller-supplied assumptions.
-Gas is abstracted at the open-call boundary: the request is gas-free, while
-the operand parser still records `requestedGas` only as syntax/arity data. The
-chain-specific forwarded `Ccallgas` calculation and `StateRelConfig.callGasRel`
-proof obligation have been removed.
+Gas mechanics are abstracted at the open-call boundary: request equality keeps
+the opaque requested-gas operand, but the chain-specific forwarded `Ccallgas`
+calculation and `StateRelConfig.callGasRel` proof obligation have been removed.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3335,9 +3334,10 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 
 - [ ] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
 - [ ] Complete the CALL-family open external semantics spine: requests are
-  gas-free at the outside-world boundary, and the argument-prelude/EVM-stack
-  adapters now expose the open primitive request/response relation; remaining
-  work is to replace the closed primitive execution consumer with an open
-  primitive/expression proof.
+  forwarded-gas-free at the outside-world boundary while preserving the
+  requested-gas operand, and the argument-prelude/EVM-stack adapters now expose
+  the open primitive request/response relation; remaining work is to replace
+  the closed primitive execution consumer with an open primitive/expression
+  proof.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

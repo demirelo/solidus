@@ -69,13 +69,14 @@ The request that is visible to the external environment.
 `codeAddress` is the account whose code is executed. These differ for
 `CALLCODE` and `DELEGATECALL`.
 
-Gas is intentionally not part of this request identity. The CALL-family gas
-operand is still parsed by `CallOperands` so the compiler must line up the
-source/target operand boundary, but chain-specific gas feasibility and
-forwarding are abstracted into the response/resource side of the theorem.
+Gas mechanics are intentionally abstracted here, but the requested-gas operand
+is still part of the request identity. The theorem proves that the source and
+target computed the same requested gas, without proving any chain-specific
+forwarded-gas formula or feasibility condition at this boundary.
 -/
 structure CallRequest where
   kind : CallKind
+  requestedGas : Word
   caller : Address
   recipient : Address
   codeAddress : Address
@@ -105,8 +106,8 @@ structure CallSite where
 The syntactic operand bundle shared by Yul call arguments and EVM stack
 operands. `valueArg` is meaningful for `CALL`/`CALLCODE`; for
 `DELEGATECALL`/`STATICCALL` the semantic transfer and apparent value are
-derived from the current context instead. `requestedGas` is syntactic operand
-data only for the open external boundary.
+derived from the current context instead. `requestedGas` is opaque request data
+at the open external boundary; forwarded gas is deliberately not computed here.
 -/
 structure CallOperands where
   requestedGas : Word
@@ -218,6 +219,7 @@ def callSite (context : CallContext τ)
   let transferValue := context.transferValue operands kind
   { request :=
       { kind := kind
+        requestedGas := operands.requestedGas
         caller := context.caller kind
         recipient := recipient
         codeAddress := target
@@ -278,6 +280,14 @@ def toBasicOp : CallKind → Structured.BasicOp
 
 @[simp] theorem outputs_toBasicOp (kind : CallKind) :
     Expressions.Structured.BasicOp.outputs kind.toBasicOp = 1 := by
+  cases kind <;> rfl
+
+@[simp] theorem toBasicOp?_toYulOperation (kind : CallKind) :
+    Prim.toBasicOp? kind.toYulOperation = some kind.toBasicOp := by
+  cases kind <;> rfl
+
+@[simp] theorem terminal?_toYulOperation (kind : CallKind) :
+    Prim.terminal? kind.toYulOperation = none := by
   cases kind <;> rfl
 
 def canonicalOperands : CallKind → CallOperands → CallOperands

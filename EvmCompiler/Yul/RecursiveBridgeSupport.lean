@@ -175747,7 +175747,7 @@ theorem openPrimitiveCallSound
 /--
 Constructed open-call contract directly against the EVM stack boundary.
 
-This is the same gas-free request/response boundary as
+This is the same forwarded-gas-free request/response boundary as
 `OpenPrimitiveCallSound`, composed one step lower: if the EVM shared state
 matches the compiler-side post-argument shared state and the CALL operands sit
 on top of an arbitrary stack suffix, then the imported Yul call and EVM call
@@ -175805,9 +175805,10 @@ Consumes the regular argument-prelude proof at a CALL-family primitive boundary.
 
 After the imported Yul arguments have evaluated to the CALL-family operands and
 the structured backend has replayed the generated argument prelude, the
-gas-free open request/response relation follows from the post-argument state
-relation.  Gas and source/target fuel remain internal resource obligations of
-the prelude proof; the outside-world request identity starts here.
+forwarded-gas-free open request/response relation follows from the
+post-argument state relation. Requested gas is preserved as an opaque operand;
+forwarded gas and source/target fuel remain internal resource obligations, not
+concrete world-model facts.
 -/
 theorem openPrimitiveCallSound_of_argStackPrelude
     {cfg : Reference.StateRelConfig}
@@ -175893,7 +175894,8 @@ EVM-stack version of `openPrimitiveCallSound_of_argStackPrelude`.
 The theorem keeps the actual EVM state as a callback over the constructed
 post-argument compiler state. This avoids guessing that state before the
 argument-prelude proof has produced it, while still exposing the exact
-gas-free open CALL boundary that the lower EVM primitive consumer should use.
+forwarded-gas-free open CALL boundary that the lower EVM primitive consumer
+should use.
 -/
 theorem openPrimitiveEVMCallSound_of_argStackPrelude
     {cfg : Reference.StateRelConfig}
