@@ -9745,9 +9745,9 @@ historical imported-Yul resource states such as `.OutOfFuel` are harmless for
 checkpoint freedom because restoration turns them into errors rather than
 successful checkpoint states.
 
-The remaining whole-world proof should construct this invariant from the child
-world relation / recursive child evidence for compiled callees, or from a
-fuel-inductive imported-Yul semantic invariant over accepted worlds.
+The open external-call proof should either avoid this child-dispatcher path by
+stopping at the call request/response boundary, or construct this invariant
+from the recursive child evidence for internal compiled callees.
 -/
 def CallDispatcherYulHaltStateCheckpointAllowedForOkState : Prop :=
   ∀ {canBreak canContinue canLeave : Bool}
@@ -139266,8 +139266,9 @@ All-bounds CALL-admitting recursive bridge from checked CALL-safe frontiers.
 
 This closes the source-fuel induction once the two CALL-safe all-head frontiers
 are supplied.  The theorem deliberately keeps those frontiers as internal proof
-obligations; the public whole-world proof should construct them from primitive
-CALL/world evidence rather than expose them at the top theorem boundary.
+obligations; the public open-call proof should construct them from primitive
+CALL request/response evidence rather than expose them at the top theorem
+boundary.
 -/
 theorem programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_allBounds_of_sequence_kont_frontiers_supported
     {cfg : StateRelConfig}
@@ -173404,7 +173405,7 @@ This is weaker than `RecursiveBridgeFeatureCoverage`: it admits ordinary
 `CALL` while still checking out external account-code inspection, contract
 creation, and the remaining external-call family members.  It is not enough to
 reuse the old recursive bridge directly; it names the next semantic bridge
-surface that the whole-world CALL proof should consume.
+surface that the open external-call proof should consume.
 -/
 structure RecursiveBridgeCALLFeatureCoverage (program : Program) : Prop where
   localCodeImage :
@@ -176406,13 +176407,13 @@ structure RecursiveBridgeTopAssumptions
   targetRuntime : RecursiveBridgeTargetRuntime asm target initial
 
 /--
-CALL-capable child-top assumption package for the whole-world external bridge.
+CALL-capable child-top assumption package for the open external-call bridge.
 
 Unlike `RecursiveBridgeTopAssumptions`, this does not reconstruct old
 `Reference.Accepted` through the no-external-call feature package.  It keeps
 source validity (`RecursiveBridgeFullSourceAccepted`) separate from the
 CALL-admitting feature coverage that still excludes the external families not
-yet handled by the whole-world proof.
+yet handled by the open external-call proof.
 -/
 structure RecursiveBridgeCALLTopAssumptions
     (cfg : Reference.StateRelConfig)

@@ -279,6 +279,55 @@ end CallContextRel
 
 namespace CallKind
 
+def inputArity : CallKind → Nat
+  | .call => 7
+  | .callcode => 7
+  | .delegatecall => 6
+  | .staticcall => 6
+
+def toBasicOp : CallKind → Structured.BasicOp
+  | .call => .call
+  | .callcode => .callcode
+  | .delegatecall => .delegatecall
+  | .staticcall => .staticcall
+
+@[simp] theorem inputs_toBasicOp (kind : CallKind) :
+    Expressions.Structured.BasicOp.inputs kind.toBasicOp =
+      kind.inputArity := by
+  cases kind <;> rfl
+
+@[simp] theorem outputs_toBasicOp (kind : CallKind) :
+    Expressions.Structured.BasicOp.outputs kind.toBasicOp = 1 := by
+  cases kind <;> rfl
+
+def canonicalOperands : CallKind → CallOperands → CallOperands
+  | .call, operands => operands
+  | .callcode, operands => operands
+  | .delegatecall, operands =>
+      { operands with valueArg := EvmYul.UInt256.ofNat 0 }
+  | .staticcall, operands =>
+      { operands with valueArg := EvmYul.UInt256.ofNat 0 }
+
+def args : CallKind → CallOperands → List Word
+  | .call, operands =>
+      [operands.requestedGas, operands.address, operands.valueArg,
+        operands.inOffset, operands.inSize, operands.outOffset,
+        operands.outSize]
+  | .callcode, operands =>
+      [operands.requestedGas, operands.address, operands.valueArg,
+        operands.inOffset, operands.inSize, operands.outOffset,
+        operands.outSize]
+  | .delegatecall, operands =>
+      [operands.requestedGas, operands.address, operands.inOffset,
+        operands.inSize, operands.outOffset, operands.outSize]
+  | .staticcall, operands =>
+      [operands.requestedGas, operands.address, operands.inOffset,
+        operands.inSize, operands.outOffset, operands.outSize]
+
+@[simp] theorem args_length (kind : CallKind) (operands : CallOperands) :
+    (kind.args operands).length = kind.inputArity := by
+  cases kind <;> rfl
+
 def yulOperands? : CallKind → List Word → Option CallOperands
   | .call, gas :: address :: value :: inOffset :: inSize ::
       outOffset :: outSize :: _ =>
@@ -376,6 +425,24 @@ def evmOperands? : CallKind → Stack → Option (Stack × CallOperands)
                 outSize := outSize })
       | none => none
 
+@[simp] theorem yulOperands?_args
+    (kind : CallKind) (operands : CallOperands) (suffix : List Word) :
+    kind.yulOperands? (kind.args operands ++ suffix) =
+      some (kind.canonicalOperands operands) := by
+  cases kind <;> rfl
+
+@[simp] theorem yulOperands?_exact_args
+    (kind : CallKind) (operands : CallOperands) :
+    kind.yulOperands? (kind.args operands) =
+      some (kind.canonicalOperands operands) := by
+  simpa using yulOperands?_args kind operands []
+
+@[simp] theorem evmOperands?_args
+    (kind : CallKind) (operands : CallOperands) (stackRest : Stack) :
+    kind.evmOperands? (kind.args operands ++ stackRest) =
+      some (stackRest, kind.canonicalOperands operands) := by
+  cases kind <;> rfl
+
 def yulCallSite?
     (state : EvmYul.Yul.State) (kind : CallKind) (args : List Word) :
     Option CallSite :=
@@ -411,6 +478,44 @@ theorem callSite_eq_of_yul_evm_operands
   · simp [yulCallSite?, hYul,
       CallContextRel.callSite_eq hRel kind operands]
   · simp [evmCallSite?, hEVM]
+
+theorem callSite_eq_of_args
+    {yulState : EvmYul.Yul.State} {evmState : EvmYul.EVM.State}
+    (hRel :
+      CallContextRel
+        (CallContext.ofYulState yulState)
+        (CallContext.ofEVMState evmState))
+    (kind : CallKind) (operands : CallOperands) (stackRest : Stack) :
+    kind.yulCallSite? yulState (kind.args operands) =
+      some
+        ((CallContext.ofEVMState evmState).callSite kind
+          (kind.canonicalOperands operands)) ∧
+    kind.evmCallSite?
+        ({ evmState with stack := kind.args operands ++ stackRest }
+          : EvmYul.EVM.State) =
+      some
+        (stackRest,
+          (CallContext.ofEVMState evmState).callSite kind
+            (kind.canonicalOperands operands)) := by
+  have hRel' :
+      CallContextRel
+        (CallContext.ofYulState yulState)
+        (CallContext.ofEVMState
+          ({ evmState with stack := kind.args operands ++ stackRest }
+            : EvmYul.EVM.State)) := by
+    simpa [CallContext.ofEVMState] using hRel
+  have hSites :=
+    callSite_eq_of_yul_evm_operands
+      (yulState := yulState)
+      (evmState :=
+        ({ evmState with stack := kind.args operands ++ stackRest }
+          : EvmYul.EVM.State))
+      (kind := kind)
+      (args := kind.args operands)
+      (stackRest := stackRest)
+      (operands := kind.canonicalOperands operands)
+      hRel' (by simp) (by simp)
+  simpa [CallContext.ofEVMState] using hSites
 
 end CallKind
 

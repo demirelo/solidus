@@ -6463,6 +6463,19 @@ inductive CompilerStateRelWithTempsAndLayoutSlots (cfg : StateRelConfig)
 
 namespace CompilerStateRel
 
+theorem openExternalCallContextRel
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : EVMState}
+    (hRel : CompilerStateRel cfg layout source compiler) :
+    OpenExternal.CallContextRel
+      (OpenExternal.CallContext.ofYulState source)
+      (OpenExternal.CallContext.ofEVMState compiler) := by
+  cases hRel with
+  | ok hShared _hVars =>
+      simpa [OpenExternal.CallContext.ofYulState,
+        OpenExternal.CallContext.ofEVMState]
+        using hShared.openExternalCallContextRel
+
 theorem withTemps_nil {cfg : StateRelConfig} {layout : List Name}
     {state : State} {compiler : EVMState}
     (hRel : CompilerStateRel cfg layout state compiler) :
@@ -6483,6 +6496,23 @@ theorem withHidden_nil {cfg : StateRelConfig} {layout : List Name}
           hShared hVars rfl (by simp)
 
 end CompilerStateRel
+
+namespace CompilerStateRelWithTemps
+
+theorem openExternalCallContextRel
+    {cfg : StateRelConfig} {layout : List Name} {temps : EvmYul.Stack Word}
+    {source : State} {compiler : EVMState}
+    (hRel : CompilerStateRelWithTemps cfg layout temps source compiler) :
+    OpenExternal.CallContextRel
+      (OpenExternal.CallContext.ofYulState source)
+      (OpenExternal.CallContext.ofEVMState compiler) := by
+  cases hRel with
+  | ok hShared _hVars _hStack =>
+      simpa [OpenExternal.CallContext.ofYulState,
+        OpenExternal.CallContext.ofEVMState]
+        using hShared.openExternalCallContextRel
+
+end CompilerStateRelWithTemps
 
 namespace CompilerStateRelWithHiddenLocals
 
@@ -7142,6 +7172,22 @@ inductive SourceStateExactRel (cfg : StateRelConfig) (layout : List Name) :
       (hVars : SourceStoreRel layout store source.vars)
       (hDomain : StoreDomainExact layout store) :
       SourceStateExactRel cfg layout (.Ok shared store) source
+
+namespace SourceStateRel
+
+theorem openExternalCallContextRel
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateRel cfg layout source compiler) :
+    OpenExternal.CallContextRel
+      (OpenExternal.CallContext.ofYulState source)
+      (OpenExternal.CallContext.ofEVMSharedState compiler.shared) := by
+  cases hRel with
+  | ok hShared _hVars =>
+      simpa [OpenExternal.CallContext.ofYulState]
+        using hShared.openExternalCallContextRel
+
+end SourceStateRel
 
 theorem SourceStateExactRel.toRel
     {cfg : StateRelConfig} {layout : List Name}

@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 11:41 PDT.
+Last updated: 2026-05-27 12:09 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -21,6 +21,9 @@ anything about that effect beyond both sides receiving the same response.
 `EvmCompiler.Yul.OpenExternal` now contains the checked request-extraction
 boundary for Yul argument lists and EVM stacks plus `OpenCallRel`, whose
 response preservation field is explicitly universal over all shared responses.
+The current checked hook also proves CALL-family argument/stack agreement over
+an arbitrary target stack suffix and derives the needed call-context relation
+from the existing compiler/source state relations.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -210,22 +213,10 @@ actual modules rather than preserved through audit aliases.
        `Program.compile_whole_program_result_sound_with_source_run_of_checked_recursive_dispatcher_run_bridge_compileAccepted`
        expose the `SourceLowered.run` equality that the recursive dispatcher
        proof already constructs internally.
-     - [x] Derive the compiler-generated pieces of the ordinary child top
-       package from branch facts:
-       `World.OrdinaryCALLChildTopAssumptions.of_branchFacts_stateRelConfig`
-       constructs child compile resources, checked target, initial child
-       `SharedStateRel`, canonical PC, and empty stack from
-       `OrdinaryCALLBranchFacts`, and now derives the child
-       `RecursiveBridgeSourceAccepted` input from branch-proven full source
-       acceptedness plus an explicit remaining feature-coverage premise.
-     - [x] Add branch-fact constructors for the three ordinary child-top
-       evidence cases:
-       `World.OrdinaryCALLChildTopEvidence.running_of_branchFacts_stateRelConfig`,
-       `.haltedSuccess_of_branchFacts_stateRelConfig`, and
-       `.reverted_of_branchFacts_stateRelConfig` now package running,
-       terminal-success, and revert evidence directly from branch facts while
-       keeping the remaining child semantic/runtime/gas premises and the old
-       recursive bridge's feature-coverage premise explicit.
+     - [x] Retire the concrete child-top evidence route with the deleted
+       `World` module. The replacement route is the open CALL-family
+       request/response boundary in `EvmCompiler.Yul.OpenExternal`, plus
+       source/target call-site extraction from the existing state relations.
      - [x] Construct ordinary child full source acceptedness from branch
        facts: `World.OrdinaryCALLBranchFacts.fullSourceAccepted` combines the
        checked source-static facts with `Program.SourceAccepted` and
@@ -3194,14 +3185,14 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 		           - [x] Bundle branch-condition construction and the `World.CALLPrimitiveRel` branch adapters into the public `CALL` theorem shape: `World.CALLPrimitiveRel.of_stateRelConfig_withOrdinaryChildTopEvidence` derives `World.CALLBranchFacts` from `SharedStateRel` and dispatches through the checked non-ordinary/default-code branches plus recursive ordinary child-top evidence.
 		           - [x] Expose the exact ordinary child entry relation from branch facts: `World.ordinaryCALLCallGas_eq_of_compiledAccountMapRel`, `World.ordinaryCALLCallGas_eq_stateRelConfig`, and `World.OrdinaryCALLBranchFacts.initialSharedRel_stateRelConfig` now derive call-gas equality and the named source/target child `SharedStateRel` from the parent world relation plus explicit gas/gas-price resource premises.
 		           - [x] Add direct source-static evidence constructors from the bundled recursive child proof: `World.OrdinaryCALLChildTopAssumptions` names the exact child top package, and `World.OrdinaryCALLSourceStaticEvidence.*_of_childTopAssumptions` derives the running, terminal-success, and revert evidence facts from the recursive bridge theorem while leaving only the gas-aware `X` and returned-gas premises explicit.
-		           - [x] Replace the exposed source-static ordinary callback with recursive child-top evidence: `World.OrdinaryCALLChildTopEvidence`, `World.OrdinaryCALLSourceStaticEvidence.of_childTopEvidence`, `World.CALLPrimitiveRel.ordinaryChildTopEvidence_stateRelConfig`, `World.CALLPrimitiveRel.of_branchFacts_withOrdinaryChildTopEvidence_stateRelConfig`, and `World.CALLPrimitiveRel.of_stateRelConfig_withOrdinaryChildTopEvidence` are now the live state-level route; the old source-static state-level wrapper names are gone from `World`.
+		           - [x] Replace the exposed source-static ordinary callback with recursive child-top evidence. This was the concrete-world route before the open external-call pivot; it has now been superseded by `OpenExternal`.
 		           - [x] Expose the child compiler-source run constructed by the recursive dispatcher proof: the new `Program.*with_source_run*` bridge theorems return the exact `SourceLowered.run` equality alongside the existing `Reference.runResult`, `outcomeRel`, whole-program relation, and target trace outputs.
 		           - [x] Lift the source-run witness through the bundled recursive bridge top boundary with `Program.compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top`, and add inverse installed-dispatcher lemmas in `World` so ordinary `CALL` evidence can derive running, terminal, and revert child dispatcher branches from `Reference.runResult` instead of taking `hCall` directly.
 		           - [x] Add and then remove the temporary recursive-top constructors for `World.OrdinaryCALLPrimitiveEvidence` after they proved the child result-shape facts needed by the ordinary branch. The checked inverse dispatcher lemmas remain available, but the live ordinary `CALL` path no longer depends on the older recursive-top package.
 		           - [x] Thread account-level source code bytes into external-call child frames: Yul accounts now carry `codeBytes`, CALL-family child environments install the callee account byte image, `CompiledAccountRel` relates source account bytes to EVM bytecode, and `OrdinaryCALLBranchFacts.sourceCodeBytes_eq_target` exposes the exact byte image for recursive child bridges.
 		           - [x] Derive ordinary child dispatcher branches from recursive child bridge results using inverse installed-dispatcher lemmas, while keeping the long-term public path on source-static child evidence rather than the older accepted-recursive bridge route.
 		           - [x] Derive ordinary terminal-success side conditions from canonical observations: nonreversion, `H_return`, and the child world merge now come from the canonical terminal relation, with `SELFDESTRUCT` account-map/substate effects handled by shared selfdestruct semantics lemmas.
-		           - [x] Remove the temporary recursive-top ordinary `CALL` route (`World.OrdinaryCALLRecursiveTopEvidence`, its conversion wrapper, and the state-level recursive-top theorem). The remaining ordinary hook is `World.OrdinaryCALLChildTopEvidence`, to be constructed from the world-level recursive child proof plus explicit gas/resource facts.
+		           - [x] Remove the temporary recursive-top ordinary `CALL` route. This checkpoint is now historical; the active path is the open call-site/response theorem rather than concrete child-world evidence.
 		           - [x] Split `Reference.Safe.NoShadowing` back to a lexical-only predicate and add `Program.RecursiveBridgeCALLTopAssumptions` / `World.OrdinaryCALLChildCALLTopAssumptions`, so the next recursive child route can use CALL-admitting feature coverage instead of reconstructing the old no-external-call `Reference.Accepted` package.
 		           - [x] Add the CALL-admitting recursive bridge context surface: `Reference.Safe.CallSafe` proves the checked source surface is old-safe plus ordinary `CALL`, `ProgramCALLBridgeContext` is constructible from full source acceptedness plus `RecursiveBridgeCALLFeatureCoverage` and `compileChecked?`, and `Program.checkedRecursiveDispatcherRunBridge_of_programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_actual` avoids old `Safe.program` while leaving checkpoint freedom as the next explicit semantic obligation.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
@@ -3295,7 +3286,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Compose the bridge with the existing lowering tower and gas-aware EVM theorem.
    - Current checked composition points: `Yul.Program.compile_source_preserves_checked_of_compileAccepted`, `Yul.Program.compile_preserves_of_reference_source_runs_compileAccepted`, `Yul.Program.compile_whole_program_result_sound_of_reference_source_runs_compileAccepted`, the dispatcher/root-block bridge theorems, and the legacy backend-only `Yul.Program.compile_whole_program_result_sound_of_lowered_bridge_with_result_rel`.
    - Remaining blocker: the active theorem spine now has a direct imported-run/source-run/bytecode composition target, but the fully general imported-Yul bridge still needs per-construct source-tower proofs from `Yul.Program.run`/`Reference.runResult` into `Yul.SourceLowered.runState` without packaging the run as `Reference.SourceBridge`. The separate `Reference.SourceBridge` and `Reference.LoweredBridge` facts remain legacy compatibility routes.
-   - Active external-call checkpoint: ordinary `CALL` terminal-success now derives nonreversion, `H_return`, and child world merge from canonical terminal observations, the stale recursive-top ordinary route has been removed, and the public-ish `CALL` wrapper now consumes `World.OrdinaryCALLChildTopEvidence`. The remaining live gap is to construct that child-top evidence from the whole-world recursive proof/semantic induction and discharge the explicit gas-aware `X`/returned-gas resource premises rather than asking for them as a callback.
+   - Active external-call checkpoint: the concrete `World` route has been retired in favor of `OpenExternal`. The live gap is to route CALL-family primitive preservation through same-site open requests plus universally quantified shared responses, then discharge the explicit gas/resource premises that remain local to call setup.
    - Semantic blockers fixed in the target fork: selected-branch switch execution, omitted default notation, and halting `SELFDESTRUCT` behavior. Argument-lowering now binds each argument before later argument effects. Remaining bridge blockers are proof-side: replacing `Reference.SourceBridge.sourceRun` with recursive per-construct source-tower theorems, proving source-to-direct function-call preservation, proving object/data/code-image relations, generalizing primitive bridges beyond the current checked arithmetic/comparison/bitwise-shift/modular-arithmetic/nullary-environment/state/machine-state/first one-argument read/state-update and `KECCAK256` slice (`ADD`/`MUL`/`SUB`/`DIV`/`SDIV`/`MOD`/`SMOD`/`ADDMOD`/`MULMOD`/`EXP`/`SIGNEXTEND`/`LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`/`KECCAK256`/`ADDRESS`/`ORIGIN`/`CALLER`/`CALLVALUE`/`CALLDATALOAD`/`CALLDATASIZE`/`GASPRICE`/`PREVRANDAO`/`BASEFEE`/`BLOCKHASH`/`BLOBHASH`/`BLOBBASEFEE`/`COINBASE`/`TIMESTAMP`/`NUMBER`/`GASLIMIT`/`CHAINID`/`SELFBALANCE`/`BALANCE`/`MLOAD`/`SLOAD`/`TLOAD`/`RETURNDATASIZE`/`MSIZE`/`GAS`), handling compiler-only temporaries emitted by expression preludes via scoped cleanup or an explicit hidden-local relation, and discharging code-size, remaining account-map-dependent reads, memory-write/storage-write, external-call/create, revert, selfdestruct-result/static-mode, and out-of-gas resource contracts.
 
 ## Layer Standard
