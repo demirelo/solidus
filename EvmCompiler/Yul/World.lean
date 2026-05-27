@@ -1817,13 +1817,20 @@ theorem restoreSuccessfulContractCallState_ok_rel
     {evmChildCreated : Batteries.RBSet EvmYul.AccountAddress compare}
     {targetGas : EvmYul.UInt256}
     (hAccountMap :
-      cfg.accountMapRel yulChild.accountMap
+      cfg.accountMapRel
+        (if yulChild.accountMap.isEmpty then
+          yulParent.accountMap
+        else
+          yulChild.accountMap)
         (if evmChildAccountMap.isEmpty then
           evmParent.accountMap
         else
           evmChildAccountMap))
     (hSubstate :
-      yulChild.substate =
+      (if yulChild.accountMap.isEmpty then
+        yulParent.substate
+      else
+        yulChild.substate) =
         if evmChildAccountMap.isEmpty then
           evmParent.substate
         else
@@ -1864,8 +1871,16 @@ theorem restoreSuccessfulContractCallState_ok_rel
         toMachineState :=
           yulParent.toMachineState.finishExternalCall returnData
             inOffset inSize outOffset outSize
-        accountMap := yulChild.accountMap
-        substate := yulChild.substate
+        accountMap :=
+          if yulChild.accountMap.isEmpty then
+            yulParent.accountMap
+          else
+            yulChild.accountMap
+        substate :=
+          if yulChild.accountMap.isEmpty then
+            yulParent.substate
+          else
+            yulChild.substate
         createdAccounts := yulChild.createdAccounts },
       ?_, ?_⟩
   · simp [EvmYul.Yul.restoreSuccessfulContractCallState,
@@ -2166,17 +2181,36 @@ theorem restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace
     hParent parentStore childStore addr hTargetChild hTrace.halted_output
     hAgree inOffset inSize outOffset outSize hGas
 
-theorem restoreSuccessfulContractCallState_childEvm_nonempty_rel
+theorem CompiledAccountMapRel.of_eraseGas_eq
+    {yul : EvmYul.AccountMap .Yul} {target evm : EVMState}
+    (hWorld : CompiledAccountMapRel yul target.accountMap)
+    (hErase : Assembly.eraseGas evm = Assembly.eraseGas target) :
+    CompiledAccountMapRel yul evm.accountMap := by
+  have hAccountMap : evm.accountMap = target.accountMap := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.accountMap) hErase
+  rw [hAccountMap]
+  exact hWorld
+
+theorem restoreSuccessfulContractCallState_childEvm_rel
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}
     {evmParent : EvmYul.SharedState .EVM}
     (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
     (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
     {yulChild : EvmYul.SharedState .Yul}
     {evmChild : EVMState}
     (hChild :
       Reference.SharedStateRel cfg yulChild evmChild.toSharedState)
-    (hNonempty : evmChild.accountMap.isEmpty = false)
+    (hChildWorld :
+      CompiledAccountMapRel yulChild.accountMap evmChild.accountMap)
     (returnData : ByteArray)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
@@ -2208,38 +2242,74 @@ theorem restoreSuccessfulContractCallState_childEvm_nonempty_rel
             else
               evmChild.substate
           createdAccounts := evmChild.createdAccounts } := by
+  rcases hParent with ⟨hParentChain, hParentMachine⟩
   rcases hChild with ⟨hChildChain, _hChildMachine⟩
+  have hAccountMap :
+      cfg.accountMapRel
+        (if yulChild.accountMap.isEmpty then
+          yulParent.accountMap
+        else
+          yulChild.accountMap)
+        (if evmChild.accountMap.isEmpty then
+          evmParent.accountMap
+        else
+          evmChild.accountMap) :=
+    hCfgAccountMap <|
+      CompiledAccountMapRel.if_empty_parent
+        hParentWorld hChildWorld hChildWorld.isEmpty_eq
+  have hSubstate :
+      (if yulChild.accountMap.isEmpty then
+        yulParent.substate
+      else
+        yulChild.substate) =
+        if evmChild.accountMap.isEmpty then
+          evmParent.substate
+        else
+          evmChild.substate := by
+    cases hEvm : evmChild.accountMap.isEmpty
+    · have hYul : yulChild.accountMap.isEmpty = false := by
+        simpa [hEvm] using hChildWorld.isEmpty_eq
+      simp [hYul, hChildChain.substate]
+    · have hYul : yulChild.accountMap.isEmpty = true := by
+        simpa [hEvm] using hChildWorld.isEmpty_eq
+      simp [hYul, hParentChain.substate]
   exact
     restoreSuccessfulContractCallState_ok_rel
-      hParent parentStore childStore restoreStore
+      ⟨hParentChain, hParentMachine⟩ parentStore childStore restoreStore
       (yulChild := yulChild)
       (evmChildAccountMap := evmChild.accountMap)
       (evmChildSubstate := evmChild.substate)
       (evmChildCreated := evmChild.createdAccounts)
       (targetGas := targetGas)
-      (by simpa [hNonempty] using hChildChain.accountMap)
-      (by simpa [hNonempty] using hChildChain.substate)
-      hChildChain.createdAccounts
+      hAccountMap hSubstate hChildChain.createdAccounts
       returnData inOffset inSize outOffset outSize hGas
 
-theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success_nonempty
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}
     {evmParent : EvmYul.SharedState .EVM}
     (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
     (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
     {yulChild : EvmYul.SharedState .Yul}
     {targetChild evmChild : EVMState}
     {returnData : ByteArray}
     (hTargetChild :
       Reference.SharedStateRel cfg yulChild targetChild.toSharedState)
+    (hTargetChildWorld :
+      CompiledAccountMapRel yulChild.accountMap targetChild.accountMap)
     (hAgree :
       Assembly.GasAware.XResultAgrees (.running targetChild)
         (.success evmChild returnData))
     (hChildGas :
       cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
         evmChild.gasAvailable)
-    (hNonempty : evmChild.accountMap.isEmpty = false)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
     (hGas :
@@ -2270,18 +2340,29 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success_none
             else
               evmChild.substate
           createdAccounts := evmChild.createdAccounts } := by
+  have hErase : Assembly.eraseGas evmChild = Assembly.eraseGas targetChild := by
+    simpa [Assembly.GasAware.XResultAgrees] using hAgree
   exact
-    restoreSuccessfulContractCallState_childEvm_nonempty_rel
-      hParent parentStore childStore restoreStore
+    restoreSuccessfulContractCallState_childEvm_rel
+      hParent hParentWorld hCfgAccountMap
+      parentStore childStore restoreStore
       (sharedStateRel_of_XResultAgrees_running_success
         hTargetChild hAgree hChildGas)
-      hNonempty returnData inOffset inSize outOffset outSize hGas
+      (hTargetChildWorld.of_eraseGas_eq hErase)
+      returnData inOffset inSize outOffset outSize hGas
 
-theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_nonempty
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}
     {evmParent : EvmYul.SharedState .EVM}
     (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
     (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
     {yulChild : EvmYul.SharedState .Yul}
     {halt : Assembly.Halt}
@@ -2289,13 +2370,14 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_nonem
     {returnData : ByteArray}
     (hTargetChild :
       Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hTargetChildWorld :
+      CompiledAccountMapRel yulChild.accountMap halt.state.accountMap)
     (hAgree :
       Assembly.GasAware.XResultAgrees (.halted halt)
         (.success evmChild returnData))
     (hChildGas :
       cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
         evmChild.gasAvailable)
-    (hNonempty : evmChild.accountMap.isEmpty = false)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
     (hGas :
@@ -2327,14 +2409,14 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_nonem
               else
                 evmChild.substate
             createdAccounts := evmChild.createdAccounts } := by
-  rcases
-    sharedStateRel_of_XResultAgrees_halted_success
-      hTargetChild hAgree hChildGas with
-    ⟨hNotRevert, hChild, _hOutput⟩
+  rcases hAgree with ⟨hNotRevert, hErase, _hOutput⟩
   exact
     ⟨hNotRevert,
-      restoreSuccessfulContractCallState_childEvm_nonempty_rel
-        hParent parentStore childStore restoreStore hChild hNonempty
+      restoreSuccessfulContractCallState_childEvm_rel
+        hParent hParentWorld hCfgAccountMap
+        parentStore childStore restoreStore
+        (sharedStateRel_of_eraseGas_eq hTargetChild hErase hChildGas)
+        (hTargetChildWorld.of_eraseGas_eq hErase)
         returnData inOffset inSize outOffset outSize hGas⟩
 
 theorem sharedStateRel_freshExternalCallWithWorld
