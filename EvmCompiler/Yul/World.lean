@@ -188,6 +188,114 @@ theorem CompiledCodeRel.checkedBytecodeResourcesSourceStatic_or_empty
         hResources, hDecode, hJumpdest, hBytes⟩
   · exact Or.inr hEmpty
 
+theorem installContract_ok_eq_self_of_code
+    {program : Program} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hCode : shared.executionEnv.code = program.contract) :
+    Program.installContract program (.Ok shared store) = .Ok shared store := by
+  cases shared with
+  | mk state machine =>
+      cases state with
+      | mk accountMap sigma0 totalGasUsedInBlock transactionReceipts substate
+          executionEnv blocks genesisBlockHeader createdAccounts =>
+          cases executionEnv with
+          | mk codeOwner sender source weiValue calldata code gasPrice header
+              depth perm blobVersionedHashes =>
+              simp [Program.installContract] at hCode ⊢
+              exact hCode.symm
+
+theorem runResult_eq_callDispatcher_of_installed_contract
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hCode : shared.executionEnv.code = program.contract) :
+    Reference.runResult fuel program (.Ok shared store) =
+      match
+        EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store)
+      with
+      | .ok (state', _rets) => .ok (.regular state')
+      | .error (.YulHalt state' value) => .ok (.yulHalt state' value)
+      | .error (.Revert stateBeforeRevert) =>
+          .ok (.revert stateBeforeRevert)
+      | .error exception => .error exception := by
+  rw [Reference.runResult, Program.run]
+  rw [installContract_ok_eq_self_of_code hCode]
+  rfl
+
+theorem runResult_regular_of_installed_callDispatcher
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state' : EvmYul.Yul.State} {rets : List EvmYul.UInt256}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store) =
+        .ok (state', rets)) :
+    Reference.runResult fuel program (.Ok shared store) =
+      .ok (.regular state') := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
+
+theorem runResult_yulHalt_of_installed_callDispatcher
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {haltState : EvmYul.Yul.State} {value : EvmYul.UInt256}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store) =
+        .error (.YulHalt haltState value)) :
+    Reference.runResult fuel program (.Ok shared store) =
+      .ok (.yulHalt haltState value) := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
+
+theorem runResult_revert_of_installed_callDispatcher
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {revertState : EvmYul.Yul.State}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store) =
+        .error (.Revert revertState)) :
+    Reference.runResult fuel program (.Ok shared store) =
+      .ok (.revert revertState) := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
+
+theorem runResult_error_of_installed_callDispatcher
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {err : EvmYul.Yul.Exception}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store) =
+        .error err)
+    (hNotYulHalt : ∀ haltState value, err ≠ .YulHalt haltState value)
+    (hNotRevert : ∀ revertState, err ≠ .Revert revertState) :
+    Reference.runResult fuel program (.Ok shared store) = .error err := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
+  cases err with
+  | YulHalt haltState value =>
+      exact (False.elim (hNotYulHalt haltState value rfl))
+  | Revert revertState =>
+      exact (False.elim (hNotRevert revertState rfl))
+  | InvalidArguments => rfl
+  | NotEncodableRLP => rfl
+  | InvalidInstruction => rfl
+  | OutOfFuel => rfl
+  | StaticModeViolation => rfl
+  | MissingContract msg => rfl
+  | MissingContractFunction msg => rfl
+  | InvalidExpression => rfl
+  | UnknownIdentifier name => rfl
+  | DuplicateDeclaration name => rfl
+  | YulEXTCODESIZENotImplemented => rfl
+
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
 
