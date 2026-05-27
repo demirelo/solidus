@@ -688,9 +688,13 @@ def validate_backend_compatibility(summary: Any, label: str) -> None:
             f"{label} summary has inconsistent "
             "backendCompatibility.dialectBuiltinNames"
         )
+    expected_linker_object_builtins = (
+        set(expected_object_builtins)
+        & bridge.BACKEND_OBJECT_BUILTINS_REQUIRING_LINKER
+    )
     if expected_unsupported or expected_dialect_builtins:
         expected_status = "blocked"
-    elif expected_object_builtins:
+    elif expected_linker_object_builtins:
         expected_status = "needs-resolution"
     else:
         expected_status = "ready"
@@ -768,9 +772,13 @@ def validate_manifest_backend_compatibility(
             f"{label} summary has inconsistent aggregate "
             "backendCompatibility.dialectBuiltinNames"
         )
+    expected_linker_object_builtins = (
+        set(expected_object_builtins)
+        & bridge.BACKEND_OBJECT_BUILTINS_REQUIRING_LINKER
+    )
     if expected_unsupported or expected_dialect_builtins:
         expected_status = "blocked"
-    elif expected_object_builtins:
+    elif expected_linker_object_builtins:
         expected_status = "needs-resolution"
     else:
         expected_status = "ready"

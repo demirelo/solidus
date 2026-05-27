@@ -136,20 +136,16 @@ if missing_primitives:
     raise SystemExit(f"ErrorPanicBox summary missing primitives: {missing_primitives!r}")
 
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected ErrorPanicBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"log2", "sstore"} - unsupported)
-if missing_blockers:
+unexpected_blockers = sorted({"log2", "sstore"} & unsupported)
+if unexpected_blockers:
     raise SystemExit(
-        f"ErrorPanicBox summary missing backend blockers: {missing_blockers!r}"
-    )
-notes = compatibility.get("notes", [])
-if not any("storage writes and logs" in note for note in notes):
-    raise SystemExit(
-        f"ErrorPanicBox summary missing storage/log blocker note: {compatibility!r}"
+        f"ErrorPanicBox summary still marks supported primitives unsupported: "
+        f"{unexpected_blockers!r}"
     )
 
 check = json.loads(check_path.read_text())
@@ -221,5 +217,5 @@ print(f"error_panic_decode_runtime_functions={len(functions)}")
 print(f"error_panic_decode_summary_calls={runtime_summary['counts']['calls']}")
 print("error_panic_decode_frontend_metadata=yes")
 print("error_panic_decode_primitives=yes")
-print("error_panic_decode_backend_compatibility=blocked")
+print("error_panic_decode_backend_compatibility=ready")
 PY

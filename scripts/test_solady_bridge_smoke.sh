@@ -230,14 +230,14 @@ if summary_count != manifest_count:
 compatibility = bridge_summary.get("backendCompatibility", {})
 object_builtins = set(compatibility.get("objectBuiltinNames", []))
 missing_builtins = sorted({"dataoffset", "datasize", "linkersymbol"} - object_builtins)
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "needs-resolution":
     raise SystemExit(f"unexpected Solady backend compatibility: {compatibility!r}")
 if missing_builtins:
     raise SystemExit(f"Solady summary missing object builtins: {missing_builtins!r}")
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-if "codecopy" not in unsupported:
+if "codecopy" in unsupported:
     raise SystemExit(
-        f"Solady package summary missing codecopy blocker: {compatibility!r}"
+        f"Solady package summary still marks codecopy unsupported: {compatibility!r}"
     )
 
 runtime_summaries = [

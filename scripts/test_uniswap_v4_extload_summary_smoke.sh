@@ -170,12 +170,15 @@ if missing_primitives:
     raise SystemExit(f"extload summary missing primitives: {missing_primitives!r}")
 
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(f"unexpected extload backend compatibility: {compatibility!r}")
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"log2", "sstore", "tstore"} - unsupported)
-if missing_blockers:
-    raise SystemExit(f"extload summary missing backend blockers: {missing_blockers!r}")
+unexpected_blockers = sorted({"log2", "sstore", "tstore"} & unsupported)
+if unexpected_blockers:
+    raise SystemExit(
+        f"extload summary still marks supported primitives unsupported: "
+        f"{unexpected_blockers!r}"
+    )
 
 print(f"uniswap_v4_extload_manifest_entries={counts['entries']}")
 print(f"uniswap_v4_extload_summary_calls={runtime_summary['counts']['calls']}")

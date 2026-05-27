@@ -280,7 +280,7 @@ manifest_check = json.load(open(sys.argv[5]))
 compatibility = summary.get("backendCompatibility", {})
 object_builtins = set(compatibility.get("objectBuiltinNames", []))
 missing_builtins = sorted({"dataoffset", "datasize"} - object_builtins)
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected Universal Router package compatibility: {compatibility!r}"
     )
@@ -289,9 +289,9 @@ if missing_builtins:
         f"Universal Router summary missing object builtins: {missing_builtins!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-if "codecopy" not in unsupported:
+if "codecopy" in unsupported:
     raise SystemExit(
-        f"Universal Router package summary missing codecopy blocker: "
+        f"Universal Router package summary still marks codecopy unsupported: "
         f"{compatibility!r}"
     )
 

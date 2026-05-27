@@ -98,6 +98,8 @@ mutual
             .ok (.lit (← decodeWordField json "value"))
         | "stringLiteral" =>
             .ok (.stringLit (← stringField json "value"))
+        | "bytesLiteral" =>
+            .ok (.bytesLit (← decodeByteArrayField json "bytes"))
         | "var" =>
             .ok (.var (← stringField json "name"))
         | "call" =>

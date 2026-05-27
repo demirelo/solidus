@@ -143,19 +143,19 @@ if compatibility.get("status") != "blocked":
         f"unexpected TryCatchBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"call", "log2"} - unsupported)
+missing_blockers = sorted({"call"} - unsupported)
 if missing_blockers:
     raise SystemExit(
         f"TryCatchBox summary missing backend blockers: {missing_blockers!r}"
+    )
+if "log2" in unsupported:
+    raise SystemExit(
+        f"TryCatchBox incorrectly marked log2 unsupported: {compatibility!r}"
     )
 notes = compatibility.get("notes", [])
 if not any("external call/create primitives" in note for note in notes):
     raise SystemExit(
         f"TryCatchBox summary missing external-call blocker note: {compatibility!r}"
-    )
-if not any("storage writes and logs" in note for note in notes):
-    raise SystemExit(
-        f"TryCatchBox summary missing log blocker note: {compatibility!r}"
     )
 
 check = json.loads(check_path.read_text())

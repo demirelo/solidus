@@ -1,5 +1,6 @@
 import EvmCompiler.Yul.Syntax
 import EvmCompiler.Yul.Compiler
+import EvmCompiler.Yul.SolcValidation
 import EvmCompiler.Yul.ArgSlots
 import EvmCompiler.Yul.PrimSemantics
 import EvmCompiler.Yul.Semantics

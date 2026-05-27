@@ -51,8 +51,6 @@ def createBoundaryPrimitive : EvmYul.Operation .Yul → Prop
 
 def yulImportedSemanticsIncompletePrimitive :
     EvmYul.Operation .Yul → Prop
-  | .Env .CODESIZE => True
-  | .Env .CODECOPY => True
   | .Env .EXTCODESIZE => True
   | .Env .EXTCODECOPY => True
   | .Env .EXTCODEHASH => True
@@ -69,14 +67,14 @@ def externalCallBoundaryPrimitive : EvmYul.Operation .Yul → Prop
 
 /--
 Primitives whose imported Yul semantics can be related directly to the
-compiler-facing EVM-state semantics without an additional bytecode/account-code
+compiler-facing EVM-state semantics without an additional external account-code
 image relation.
 
-The code-inspection family is deliberately excluded here. Nethermind's generic
-step relation gives the concrete `CODESIZE`/`CODECOPY` behavior on the EVM
-side, while the imported Yul source state carries `ExecutionEnv .Yul.code :
-YulContract`. Those operations need an explicit Yul-level code-image semantics
-and compiler byte-image theorem before they belong in the bridge.
+External account-code inspection is deliberately excluded here until the world
+relation states how account bytecode images line up. Local `CODESIZE` and
+`CODECOPY` are admitted: imported Yul reads `ExecutionEnv.codeBytes`, and the
+compiler relation carries the equality between that source byte image and the
+EVM executable byte array.
 
 The remaining external call/create family is excluded from the current
 regular-success bridge. Static-mode-sensitive local effects such as storage
@@ -84,8 +82,6 @@ writes and logs are admitted because their static-mode precheck and shared-state
 update are handled by the primitive semantics bridge.
 -/
 def primitive : EvmYul.Operation .Yul → Prop
-  | .Env .CODESIZE => False
-  | .Env .CODECOPY => False
   | .Env .EXTCODESIZE => False
   | .Env .EXTCODECOPY => False
   | .Env .EXTCODEHASH => False
@@ -100,11 +96,11 @@ def primitive : EvmYul.Operation .Yul → Prop
 theorem primitive_iff_not_codeImage_not_external
     (op : EvmYul.Operation .Yul) :
     primitive op ↔
-      codeImagePrimitive op = False ∧
+      externalCodeImagePrimitive op = False ∧
         externalCallCreatePrimitive op = False := by
-  cases op <;> simp [primitive, codeImagePrimitive,
+  cases op <;> simp [primitive, externalCodeImagePrimitive,
     externalCallCreatePrimitive] <;> try rename_i subop <;> cases subop <;>
-    simp [primitive, codeImagePrimitive, externalCallCreatePrimitive]
+    simp [primitive, externalCodeImagePrimitive, externalCallCreatePrimitive]
 
 theorem codeImagePrimitive_iff_local_or_external
     (op : EvmYul.Operation .Yul) :
@@ -137,9 +133,8 @@ theorem primitive_iff_not_importedIncomplete_not_externalBoundary
 theorem importedIncompletePrimitive_iff_local_external_create
     (op : EvmYul.Operation .Yul) :
     yulImportedSemanticsIncompletePrimitive op = False ↔
-      localCodeImagePrimitive op = False ∧
-        externalCodeImagePrimitive op = False ∧
-          createBoundaryPrimitive op = False := by
+      externalCodeImagePrimitive op = False ∧
+        createBoundaryPrimitive op = False := by
   cases op <;> simp [yulImportedSemanticsIncompletePrimitive,
     localCodeImagePrimitive, externalCodeImagePrimitive,
     createBoundaryPrimitive] <;> try rename_i subop <;> cases subop <;>
@@ -878,7 +873,7 @@ def importedIncompletePrimitive (op : EvmYul.Operation .Yul) : Prop :=
   Safe.yulImportedSemanticsIncompletePrimitive op = False
 
 def localCodeImagePrimitive (op : EvmYul.Operation .Yul) : Prop :=
-  Safe.localCodeImagePrimitive op = False
+  True
 
 def externalCodeImagePrimitive (op : EvmYul.Operation .Yul) : Prop :=
   Safe.externalCodeImagePrimitive op = False
@@ -889,6 +884,11 @@ def createBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
 def externalBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
   Safe.externalCallBoundaryPrimitive op = False
 
+def externalBoundaryExceptCALLPrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  match op with
+  | .System .CALL => True
+  | _ => externalBoundaryPrimitive op
+
 def objectBuiltinUserCall (functionName : Name) : Prop :=
   ObjectBuiltin.unsupported? functionName = false
 
@@ -897,6 +897,9 @@ def importedIncompleteExpr : AstExpr → Prop :=
 
 def externalBoundaryExpr : AstExpr → Prop :=
   Family.expr externalBoundaryPrimitive Family.anyUserCall
+
+def externalBoundaryExceptCALLExpr : AstExpr → Prop :=
+  Family.expr externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
 def objectBuiltinExpr : AstExpr → Prop :=
   Family.expr Family.anyPrimitive objectBuiltinUserCall
@@ -907,6 +910,9 @@ def importedIncompleteExprs : List AstExpr → Prop :=
 def externalBoundaryExprs : List AstExpr → Prop :=
   Family.exprs externalBoundaryPrimitive Family.anyUserCall
 
+def externalBoundaryExceptCALLExprs : List AstExpr → Prop :=
+  Family.exprs externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
 def objectBuiltinExprs : List AstExpr → Prop :=
   Family.exprs Family.anyPrimitive objectBuiltinUserCall
 
@@ -915,6 +921,9 @@ def importedIncompleteStmt : AstStmt → Prop :=
 
 def externalBoundaryStmt : AstStmt → Prop :=
   Family.stmt externalBoundaryPrimitive Family.anyUserCall
+
+def externalBoundaryExceptCALLStmt : AstStmt → Prop :=
+  Family.stmt externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
 def objectBuiltinStmt : AstStmt → Prop :=
   Family.stmt Family.anyPrimitive objectBuiltinUserCall
@@ -925,6 +934,9 @@ def importedIncompleteStmts : List AstStmt → Prop :=
 def externalBoundaryStmts : List AstStmt → Prop :=
   Family.stmts externalBoundaryPrimitive Family.anyUserCall
 
+def externalBoundaryExceptCALLStmts : List AstStmt → Prop :=
+  Family.stmts externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
 def objectBuiltinStmts : List AstStmt → Prop :=
   Family.stmts Family.anyPrimitive objectBuiltinUserCall
 
@@ -933,6 +945,9 @@ def importedIncompleteCases : List (Word × List AstStmt) → Prop :=
 
 def externalBoundaryCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe externalBoundaryPrimitive Family.anyUserCall
+
+def externalBoundaryExceptCALLCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
 def objectBuiltinCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe Family.anyPrimitive objectBuiltinUserCall
@@ -944,6 +959,11 @@ def importedIncompleteFunctionDefinition :
 def externalBoundaryFunctionDefinition :
     AstFunctionDefinition → Prop :=
   Family.functionDefinition externalBoundaryPrimitive Family.anyUserCall
+
+def externalBoundaryExceptCALLFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition externalBoundaryExceptCALLPrimitive
+    Family.anyUserCall
 
 def objectBuiltinFunctionDefinition :
     AstFunctionDefinition → Prop :=
@@ -957,6 +977,10 @@ def externalBoundaryFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries externalBoundaryPrimitive Family.anyUserCall
 
+def externalBoundaryExceptCALLFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
 def objectBuiltinFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries Family.anyPrimitive objectBuiltinUserCall
@@ -968,6 +992,10 @@ noncomputable def importedIncompleteContract :
 noncomputable def externalBoundaryContract :
     AstContract → Prop :=
   Family.contract externalBoundaryPrimitive Family.anyUserCall
+
+noncomputable def externalBoundaryExceptCALLContract :
+    AstContract → Prop :=
+  Family.contract externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
 noncomputable def objectBuiltinContract :
     AstContract → Prop :=
@@ -993,13 +1021,15 @@ noncomputable def externalBoundaryProgram :
     Program → Prop :=
   Family.program externalBoundaryPrimitive Family.anyUserCall
 
+noncomputable def externalBoundaryExceptCALLProgram :
+    Program → Prop :=
+  Family.program externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
 noncomputable def objectBuiltinProgram :
     Program → Prop :=
   Family.program Family.anyPrimitive objectBuiltinUserCall
 
 def localCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
-  | .Env .CODESIZE => false
-  | .Env .CODECOPY => false
   | _ => true
 
 def externalCodeImagePrimitive? : EvmYul.Operation .Yul → Bool
@@ -1020,14 +1050,17 @@ def externalBoundaryPrimitive? : EvmYul.Operation .Yul → Bool
   | .System .STATICCALL => false
   | _ => true
 
+def externalBoundaryExceptCALLPrimitive? : EvmYul.Operation .Yul → Bool
+  | .System .CALL => true
+  | .System .CALLCODE => false
+  | .System .DELEGATECALL => false
+  | .System .STATICCALL => false
+  | _ => true
+
 theorem localCodeImagePrimitive_of_check {op : EvmYul.Operation .Yul}
     (hCheck : localCodeImagePrimitive? op = true) :
     localCodeImagePrimitive op := by
-  cases op <;> simp [localCodeImagePrimitive?,
-    localCodeImagePrimitive, Safe.localCodeImagePrimitive] at hCheck ⊢ <;>
-    try rename_i subop <;> cases subop <;>
-    simp [localCodeImagePrimitive?, localCodeImagePrimitive,
-      Safe.localCodeImagePrimitive] at hCheck ⊢
+  trivial
 
 theorem externalCodeImagePrimitive_of_check {op : EvmYul.Operation .Yul}
     (hCheck : externalCodeImagePrimitive? op = true) :
@@ -1054,6 +1087,18 @@ theorem externalBoundaryPrimitive_of_check {op : EvmYul.Operation .Yul}
     externalBoundaryPrimitive, Safe.externalCallBoundaryPrimitive] at hCheck ⊢ <;>
     try rename_i subop <;> cases subop <;>
     simp [externalBoundaryPrimitive?, externalBoundaryPrimitive,
+      Safe.externalCallBoundaryPrimitive] at hCheck ⊢
+
+theorem externalBoundaryExceptCALLPrimitive_of_check
+    {op : EvmYul.Operation .Yul}
+    (hCheck : externalBoundaryExceptCALLPrimitive? op = true) :
+    externalBoundaryExceptCALLPrimitive op := by
+  cases op <;> simp [externalBoundaryExceptCALLPrimitive?,
+    externalBoundaryExceptCALLPrimitive, externalBoundaryPrimitive,
+    Safe.externalCallBoundaryPrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [externalBoundaryExceptCALLPrimitive?,
+      externalBoundaryExceptCALLPrimitive, externalBoundaryPrimitive,
       Safe.externalCallBoundaryPrimitive] at hCheck ⊢
 
 namespace Family
@@ -1436,6 +1481,11 @@ noncomputable def createBoundaryProgram? (program : Program) : Bool :=
 noncomputable def externalBoundaryProgram? (program : Program) : Bool :=
   Family.program? externalBoundaryPrimitive? Family.anyUserCall? program
 
+noncomputable def externalBoundaryExceptCALLProgram? (program : Program) :
+    Bool :=
+  Family.program? externalBoundaryExceptCALLPrimitive? Family.anyUserCall?
+    program
+
 noncomputable def checked? (program : Program) : Bool :=
   localCodeImageProgram? program &&
     (externalCodeImageProgram? program &&
@@ -1470,6 +1520,13 @@ theorem externalBoundaryProgram_of_check {program : Program}
     (fun _op hOp => externalBoundaryPrimitive_of_check hOp)
     (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
 
+theorem externalBoundaryExceptCALLProgram_of_check {program : Program}
+    (hCheck : externalBoundaryExceptCALLProgram? program = true) :
+    externalBoundaryExceptCALLProgram program :=
+  Family.program_of_check
+    (fun _op hOp => externalBoundaryExceptCALLPrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
 theorem checked?_sound {program : Program}
     (hCheck : checked? program = true) :
     localCodeImageProgram program ∧
@@ -1502,7 +1559,15 @@ theorem importedIncompletePrimitive_iff_precise
     importedIncompletePrimitive op ↔
       localCodeImagePrimitive op ∧
         externalCodeImagePrimitive op ∧ createBoundaryPrimitive op := by
-  exact Safe.importedIncompletePrimitive_iff_local_external_create op
+  cases op <;> simp [importedIncompletePrimitive, localCodeImagePrimitive,
+    externalCodeImagePrimitive, createBoundaryPrimitive,
+    Safe.yulImportedSemanticsIncompletePrimitive,
+    Safe.externalCodeImagePrimitive, Safe.createBoundaryPrimitive] <;>
+    try rename_i subop <;> cases subop <;>
+    simp [importedIncompletePrimitive, localCodeImagePrimitive,
+      externalCodeImagePrimitive, createBoundaryPrimitive,
+      Safe.yulImportedSemanticsIncompletePrimitive,
+      Safe.externalCodeImagePrimitive, Safe.createBoundaryPrimitive]
 
 theorem importedIncompleteProgram_iff_precise
     (program : Program) :
@@ -3015,6 +3080,253 @@ theorem objectBuiltinProgram_of_compileChecked?_some
 
 end FeatureCoverage
 
+/-
+CALL-capable source-safety surface.
+
+This is the first widening beyond the old `Safe.program` predicate.  It admits
+ordinary `CALL`, while still rejecting account-code inspection, contract
+creation, and the other external-call family members until their world
+semantics are proved.  Object/data builtin user calls remain compiler-derived
+coverage rather than hidden inside full source acceptedness.
+-/
+namespace CallSafe
+
+def primitive (op : EvmYul.Operation .Yul) : Prop :=
+  FeatureCoverage.importedIncompletePrimitive op ∧
+    FeatureCoverage.externalBoundaryExceptCALLPrimitive op
+
+def userCall (functionName : Name) : Prop :=
+  FeatureCoverage.objectBuiltinUserCall functionName
+
+def expr : AstExpr → Prop :=
+  FeatureCoverage.Family.expr primitive userCall
+
+def exprs : List AstExpr → Prop :=
+  FeatureCoverage.Family.exprs primitive userCall
+
+def stmt : AstStmt → Prop :=
+  FeatureCoverage.Family.stmt primitive userCall
+
+def stmts : List AstStmt → Prop :=
+  FeatureCoverage.Family.stmts primitive userCall
+
+def casesSafe : List (Word × List AstStmt) → Prop :=
+  FeatureCoverage.Family.casesSafe primitive userCall
+
+def functionDefinition : AstFunctionDefinition → Prop :=
+  FeatureCoverage.Family.functionDefinition primitive userCall
+
+def functionEntries : List (Name × AstFunctionDefinition) → Prop :=
+  FeatureCoverage.Family.functionEntries primitive userCall
+
+noncomputable def contract : AstContract → Prop :=
+  FeatureCoverage.Family.contract primitive userCall
+
+noncomputable def program : Program → Prop :=
+  FeatureCoverage.Family.program primitive userCall
+
+theorem primitive_iff_safe_or_call (op : EvmYul.Operation .Yul) :
+    primitive op ↔ Safe.primitive op ∨ op = .System .CALL := by
+  cases op <;> simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+    FeatureCoverage.externalBoundaryExceptCALLPrimitive,
+    FeatureCoverage.externalBoundaryPrimitive,
+    Safe.primitive, Safe.yulImportedSemanticsIncompletePrimitive,
+    Safe.externalCallBoundaryPrimitive] <;>
+    try rename_i subop <;> cases subop <;>
+    simp [primitive, FeatureCoverage.importedIncompletePrimitive,
+      FeatureCoverage.externalBoundaryExceptCALLPrimitive,
+      FeatureCoverage.externalBoundaryPrimitive,
+      Safe.primitive, Safe.yulImportedSemanticsIncompletePrimitive,
+      Safe.externalCallBoundaryPrimitive]
+
+theorem primitive_of_safe {op : EvmYul.Operation .Yul}
+    (hSafe : Safe.primitive op) :
+    primitive op :=
+  (primitive_iff_safe_or_call op).mpr (Or.inl hSafe)
+
+theorem accepts_call :
+    primitive (.System .CALL) :=
+  (primitive_iff_safe_or_call (.System .CALL)).mpr (Or.inr rfl)
+
+mutual
+  theorem expr_of_coverage (sourceExpr : AstExpr)
+      (hImported :
+        FeatureCoverage.importedIncompleteExpr sourceExpr)
+      (hExternal :
+        FeatureCoverage.externalBoundaryExceptCALLExpr sourceExpr)
+      (hObject :
+        FeatureCoverage.objectBuiltinExpr sourceExpr) :
+      expr sourceExpr := by
+    cases sourceExpr with
+    | Lit value =>
+        trivial
+    | Var name =>
+        trivial
+    | Call callee args =>
+        cases callee with
+        | inl prim =>
+            exact
+              ⟨⟨hImported.1, hExternal.1⟩,
+                exprs_of_coverage args hImported.2 hExternal.2 hObject.2⟩
+        | inr functionName =>
+            exact
+              ⟨hObject.1,
+                exprs_of_coverage args hImported.2 hExternal.2 hObject.2⟩
+
+  theorem exprs_of_coverage (sourceExprs : List AstExpr)
+      (hImported :
+        FeatureCoverage.importedIncompleteExprs sourceExprs)
+      (hExternal :
+        FeatureCoverage.externalBoundaryExceptCALLExprs sourceExprs)
+      (hObject :
+        FeatureCoverage.objectBuiltinExprs sourceExprs) :
+      exprs sourceExprs := by
+    cases sourceExprs with
+    | nil =>
+        trivial
+    | cons head rest =>
+        exact
+          ⟨expr_of_coverage head hImported.1 hExternal.1 hObject.1,
+            exprs_of_coverage rest hImported.2 hExternal.2 hObject.2⟩
+
+  theorem stmt_of_coverage (sourceStmt : AstStmt)
+      (hImported :
+        FeatureCoverage.importedIncompleteStmt sourceStmt)
+      (hExternal :
+        FeatureCoverage.externalBoundaryExceptCALLStmt sourceStmt)
+      (hObject :
+        FeatureCoverage.objectBuiltinStmt sourceStmt) :
+      stmt sourceStmt := by
+    cases sourceStmt with
+    | Block body =>
+        exact stmts_of_coverage body hImported hExternal hObject
+    | Let names value =>
+        cases value with
+        | none =>
+            trivial
+        | some value =>
+            exact expr_of_coverage value hImported hExternal hObject
+    | Assign names value =>
+        exact expr_of_coverage value hImported hExternal hObject
+    | ExprStmtCall value =>
+        exact expr_of_coverage value hImported hExternal hObject
+    | Switch scrutinee cases defaultBody =>
+        exact
+          ⟨expr_of_coverage scrutinee hImported.1 hExternal.1 hObject.1,
+            cases_of_coverage cases hImported.2.1 hExternal.2.1
+              hObject.2.1,
+            stmts_of_coverage defaultBody hImported.2.2 hExternal.2.2
+              hObject.2.2⟩
+    | For cond post body =>
+        exact
+          ⟨expr_of_coverage cond hImported.1 hExternal.1 hObject.1,
+            stmts_of_coverage post hImported.2.1 hExternal.2.1
+              hObject.2.1,
+            stmts_of_coverage body hImported.2.2 hExternal.2.2
+              hObject.2.2⟩
+    | If cond body =>
+        exact
+          ⟨expr_of_coverage cond hImported.1 hExternal.1 hObject.1,
+            stmts_of_coverage body hImported.2 hExternal.2 hObject.2⟩
+    | Continue =>
+        trivial
+    | Break =>
+        trivial
+    | Leave =>
+        trivial
+
+  theorem stmts_of_coverage (sourceStmts : List AstStmt)
+      (hImported :
+        FeatureCoverage.importedIncompleteStmts sourceStmts)
+      (hExternal :
+        FeatureCoverage.externalBoundaryExceptCALLStmts sourceStmts)
+      (hObject :
+        FeatureCoverage.objectBuiltinStmts sourceStmts) :
+      stmts sourceStmts := by
+    cases sourceStmts with
+    | nil =>
+        trivial
+    | cons head rest =>
+        exact
+          ⟨stmt_of_coverage head hImported.1 hExternal.1 hObject.1,
+            stmts_of_coverage rest hImported.2 hExternal.2 hObject.2⟩
+
+  theorem cases_of_coverage (sourceCases : List (Word × List AstStmt))
+      (hImported :
+        FeatureCoverage.importedIncompleteCases sourceCases)
+      (hExternal :
+        FeatureCoverage.externalBoundaryExceptCALLCases sourceCases)
+      (hObject :
+        FeatureCoverage.objectBuiltinCases sourceCases) :
+      casesSafe sourceCases := by
+    cases sourceCases with
+    | nil =>
+        trivial
+    | cons head rest =>
+        rcases head with ⟨value, body⟩
+        exact
+          ⟨stmts_of_coverage body hImported.1 hExternal.1 hObject.1,
+            cases_of_coverage rest hImported.2 hExternal.2 hObject.2⟩
+end
+
+theorem functionDefinition_of_coverage
+    (fn : AstFunctionDefinition)
+    (hImported :
+      FeatureCoverage.importedIncompleteFunctionDefinition fn)
+    (hExternal :
+      FeatureCoverage.externalBoundaryExceptCALLFunctionDefinition fn)
+    (hObject :
+      FeatureCoverage.objectBuiltinFunctionDefinition fn) :
+    functionDefinition fn := by
+  cases fn with
+  | Def params returns body =>
+      exact stmts_of_coverage body hImported hExternal hObject
+
+theorem functionEntries_of_coverage
+    (entries : List (Name × AstFunctionDefinition))
+    (hImported :
+      FeatureCoverage.importedIncompleteFunctionEntries entries)
+    (hExternal :
+      FeatureCoverage.externalBoundaryExceptCALLFunctionEntries entries)
+    (hObject :
+      FeatureCoverage.objectBuiltinFunctionEntries entries) :
+    functionEntries entries := by
+  induction entries with
+  | nil =>
+      trivial
+  | cons entry rest ih =>
+      rcases entry with ⟨name, fn⟩
+      exact
+        ⟨functionDefinition_of_coverage fn hImported.1 hExternal.1
+            hObject.1,
+          ih hImported.2 hExternal.2 hObject.2⟩
+
+theorem contract_of_coverage (contract' : AstContract)
+    (hImported :
+      FeatureCoverage.importedIncompleteContract contract')
+    (hExternal :
+      FeatureCoverage.externalBoundaryExceptCALLContract contract')
+    (hObject :
+      FeatureCoverage.objectBuiltinContract contract') :
+    contract contract' := by
+  exact
+    ⟨stmt_of_coverage contract'.dispatcher hImported.1 hExternal.1
+        hObject.1,
+      functionEntries_of_coverage (Contract.functionEntries contract')
+        hImported.2 hExternal.2 hObject.2⟩
+
+theorem program_of_coverage (yulProgram : Program)
+    (hImported :
+      FeatureCoverage.importedIncompleteProgram yulProgram)
+    (hExternal :
+      FeatureCoverage.externalBoundaryExceptCALLProgram yulProgram)
+    (hObject :
+      FeatureCoverage.objectBuiltinProgram yulProgram) :
+    program yulProgram := by
+  exact contract_of_coverage yulProgram.contract hImported hExternal hObject
+
+end CallSafe
+
 theorem switch_default_safe_of_stmt {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody : List AstStmt}
     (hSafe : stmt (.Switch scrutinee cases defaultBody)) :
@@ -3057,13 +3369,13 @@ theorem rejects_staticcall :
     primitive (.System .STATICCALL) = False :=
   rfl
 
-theorem rejects_codesize :
-    primitive (.Env .CODESIZE) = False :=
-  rfl
+theorem accepts_codesize :
+    primitive (.Env .CODESIZE) :=
+  trivial
 
-theorem rejects_codecopy :
-    primitive (.Env .CODECOPY) = False :=
-  rfl
+theorem accepts_codecopy :
+    primitive (.Env .CODECOPY) :=
+  trivial
 
 theorem rejects_extcodesize :
     primitive (.Env .EXTCODESIZE) = False :=
@@ -3122,27 +3434,6 @@ def namesFresh? (env names : List Name) : Bool :=
 def freshIn? (env names : List Name) : Bool :=
   namesNodup? names && namesFresh? env names
 
-def primitive? (op : EvmYul.Operation .Yul) : Bool :=
-  FeatureCoverage.localCodeImagePrimitive? op &&
-    (FeatureCoverage.externalCodeImagePrimitive? op &&
-      (FeatureCoverage.createBoundaryPrimitive? op &&
-        FeatureCoverage.externalBoundaryPrimitive? op))
-
-def userCall? (functionName : Name) : Bool :=
-  !ObjectBuiltin.unsupported? functionName
-
-mutual
-  def expr? : AstExpr → Bool
-    | .Lit _value => true
-    | .Var _name => true
-    | .Call (.inl prim) args => primitive? prim && exprs? args
-    | .Call (.inr functionName) args => userCall? functionName && exprs? args
-
-  def exprs? : List AstExpr → Bool
-    | [] => true
-    | head :: rest => expr? head && exprs? rest
-end
-
 theorem namesNodup_of_check {names : List Name}
     (hCheck : namesNodup? names = true) :
     names.Nodup :=
@@ -3165,98 +3456,18 @@ theorem freshIn_of_check {env names : List Name}
   exact
     ⟨namesNodup_of_check hAnd.1, namesFresh_of_check hAnd.2⟩
 
-theorem primitive_of_check {op : EvmYul.Operation .Yul}
-    (hCheck : primitive? op = true) :
-    primitive op := by
-  have hAnd :
-      FeatureCoverage.localCodeImagePrimitive? op = true ∧
-        (FeatureCoverage.externalCodeImagePrimitive? op &&
-          (FeatureCoverage.createBoundaryPrimitive? op &&
-            FeatureCoverage.externalBoundaryPrimitive? op)) = true :=
-    by simpa [primitive?] using hCheck
-  have hTail :
-      FeatureCoverage.externalCodeImagePrimitive? op = true ∧
-        (FeatureCoverage.createBoundaryPrimitive? op &&
-          FeatureCoverage.externalBoundaryPrimitive? op) = true :=
-    by simpa using hAnd.2
-  have hLast :
-      FeatureCoverage.createBoundaryPrimitive? op = true ∧
-        FeatureCoverage.externalBoundaryPrimitive? op = true :=
-    by simpa using hTail.2
-  have hImported :
-      yulImportedSemanticsIncompletePrimitive op = False :=
-    (importedIncompletePrimitive_iff_local_external_create op).mpr
-      ⟨FeatureCoverage.localCodeImagePrimitive_of_check hAnd.1,
-        FeatureCoverage.externalCodeImagePrimitive_of_check hTail.1,
-        FeatureCoverage.createBoundaryPrimitive_of_check hLast.1⟩
-  have hExternal :
-      externalCallBoundaryPrimitive op = False :=
-    FeatureCoverage.externalBoundaryPrimitive_of_check hLast.2
-  exact
-    (primitive_iff_not_importedIncomplete_not_externalBoundary op).mpr
-      ⟨hImported, hExternal⟩
-
-theorem userCall_of_check {functionName : Name}
-    (hCheck : userCall? functionName = true) :
-    FeatureCoverage.objectBuiltinUserCall functionName := by
-  unfold userCall? at hCheck
-  unfold FeatureCoverage.objectBuiltinUserCall
-  cases hUnsupported : ObjectBuiltin.unsupported? functionName <;>
-    simp [hUnsupported] at hCheck ⊢
-
-mutual
-  theorem expr_of_check {expr' : AstExpr}
-      (hCheck : expr? expr' = true) :
-      expr expr' := by
-    cases expr' with
-    | Lit value =>
-        trivial
-    | Var name =>
-        trivial
-    | Call callee args =>
-        cases callee with
-        | inl prim =>
-            have hAnd :
-                primitive? prim = true ∧ exprs? args = true :=
-              by simpa [expr?] using hCheck
-            exact ⟨primitive_of_check hAnd.1, exprs_of_check hAnd.2⟩
-        | inr functionName =>
-            have hAnd :
-                userCall? functionName = true ∧ exprs? args = true :=
-              by simpa [expr?] using hCheck
-            exact
-              ⟨by
-                  simpa [FeatureCoverage.objectBuiltinUserCall] using
-                    userCall_of_check hAnd.1,
-                exprs_of_check hAnd.2⟩
-
-  theorem exprs_of_check {exprs' : List AstExpr}
-      (hCheck : exprs? exprs' = true) :
-      exprs exprs' := by
-    cases exprs' with
-    | nil =>
-        trivial
-    | cons head rest =>
-        have hAnd :
-            expr? head = true ∧ exprs? rest = true :=
-          by simpa [exprs?] using hCheck
-        exact ⟨expr_of_check hAnd.1, exprs_of_check hAnd.2⟩
-end
-
 mutual
   def stmt : List Name → AstStmt → Prop
     | env, .Block body => stmts env body
     | env, .Let names none => freshIn env (identNames names)
-    | env, .Let names (some value) =>
-        freshIn env (identNames names) ∧ Safe.expr value
-    | _env, .Assign _names value => Safe.expr value
-    | _env, .ExprStmtCall value => Safe.expr value
-    | env, .Switch scrutinee cases defaultBody =>
-        Safe.expr scrutinee ∧ casesSafe env cases ∧ stmts env defaultBody
-    | env, .For cond post body =>
-        Safe.expr cond ∧ stmts env post ∧ stmts env body
-    | env, .If cond body =>
-        Safe.expr cond ∧ stmts env body
+    | env, .Let names (some _value) => freshIn env (identNames names)
+    | _env, .Assign _names _value => True
+    | _env, .ExprStmtCall _value => True
+    | env, .Switch _scrutinee cases defaultBody =>
+        casesSafe env cases ∧ stmts env defaultBody
+    | env, .For _cond post body =>
+        stmts env post ∧ stmts env body
+    | env, .If _cond body => stmts env body
     | _env, .Continue | _env, .Break | _env, .Leave => True
 
   def stmts : List Name → List AstStmt → Prop
@@ -3278,16 +3489,13 @@ mutual
   def stmt? (env : List Name) : AstStmt → Bool
     | .Block body => stmts? env body
     | .Let names none => freshIn? env (identNames names)
-    | .Let names (some value) =>
-        freshIn? env (identNames names) && expr? value
-    | .Assign _names value => expr? value
-    | .ExprStmtCall value => expr? value
-    | .Switch scrutinee cases defaultBody =>
-        expr? scrutinee && (casesSafe? env cases && stmts? env defaultBody)
-    | .For cond post body =>
-        expr? cond && (stmts? env post && stmts? env body)
-    | .If cond body =>
-        expr? cond && stmts? env body
+    | .Let names (some _value) => freshIn? env (identNames names)
+    | .Assign _names _value => true
+    | .ExprStmtCall _value => true
+    | .Switch _scrutinee cases defaultBody =>
+        casesSafe? env cases && stmts? env defaultBody
+    | .For _cond post body => stmts? env post && stmts? env body
+    | .If _cond body => stmts? env body
     | .Continue | .Break | .Leave => true
 
   def stmts? (env : List Name) : List AstStmt → Bool
@@ -3313,44 +3521,25 @@ mutual
         cases value with
         | none =>
             exact freshIn_of_check hCheck
-        | some value =>
-            have hAnd :
-                freshIn? env (identNames names) = true ∧
-                  expr? value = true :=
-              by simpa [stmt?] using hCheck
-            exact ⟨freshIn_of_check hAnd.1, expr_of_check hAnd.2⟩
-    | Assign names value =>
-        exact expr_of_check hCheck
-    | ExprStmtCall value =>
-        exact expr_of_check hCheck
-    | Switch scrutinee cases defaultBody =>
+        | some _value =>
+            exact freshIn_of_check hCheck
+    | Assign _names _value =>
+        trivial
+    | ExprStmtCall _value =>
+        trivial
+    | Switch _scrutinee cases defaultBody =>
         have hAnd :
-            expr? scrutinee = true ∧
-              (casesSafe? env cases && stmts? env defaultBody) = true :=
-          by simpa [stmt?] using hCheck
-        have hTail :
             casesSafe? env cases = true ∧
               stmts? env defaultBody = true :=
-          by simpa using hAnd.2
-        exact
-          ⟨expr_of_check hAnd.1, casesSafe_of_check hTail.1,
-            stmts_of_check hTail.2⟩
-    | For cond post body =>
-        have hAnd :
-            expr? cond = true ∧
-              (stmts? env post && stmts? env body) = true :=
           by simpa [stmt?] using hCheck
-        have hTail :
+        exact ⟨casesSafe_of_check hAnd.1, stmts_of_check hAnd.2⟩
+    | For _cond post body =>
+        have hAnd :
             stmts? env post = true ∧ stmts? env body = true :=
-          by simpa using hAnd.2
-        exact
-          ⟨expr_of_check hAnd.1, stmts_of_check hTail.1,
-            stmts_of_check hTail.2⟩
-    | If cond body =>
-        have hAnd :
-            expr? cond = true ∧ stmts? env body = true :=
           by simpa [stmt?] using hCheck
-        exact ⟨expr_of_check hAnd.1, stmts_of_check hAnd.2⟩
+        exact ⟨stmts_of_check hAnd.1, stmts_of_check hAnd.2⟩
+    | If _cond body =>
+        exact stmts_of_check hCheck
     | Continue =>
         trivial
     | Break =>
@@ -3498,7 +3687,7 @@ theorem let_names_fresh_of_stmt {env : List Name}
   | none =>
       simpa [stmt] using hNoShadow
   | some value =>
-      simpa [stmt] using hNoShadow.1
+      simpa [stmt] using hNoShadow
 
 theorem nodup_of_freshIn {env names : List Name}
     (hFresh : freshIn env names) :
@@ -3591,9 +3780,20 @@ def runResult (fuel : Nat) (program : Program) (state : State) :
     Except Exception Result :=
   Program.run fuel program state
 
+def runResultWithCodeImage (fuel : Nat) (program : Program)
+    (codeImage : ByteArray) (state : State) :
+    Except Exception Result :=
+  Program.runWithCodeImage fuel program codeImage state
+
 theorem runResult_eq_program_run
     (fuel : Nat) (program : Program) (state : State) :
     runResult fuel program state = Program.run fuel program state :=
+  rfl
+
+theorem runResultWithCodeImage_eq_program_runWithCodeImage
+    (fuel : Nat) (program : Program) (codeImage : ByteArray) (state : State) :
+    runResultWithCodeImage fuel program codeImage state =
+      Program.runWithCodeImage fuel program codeImage state :=
   rfl
 
 theorem run_of_runResult_regular {fuel : Nat} {program : Program}
@@ -4227,6 +4427,14 @@ theorem exec_expr_prim_call_succ (fuel : Nat)
           (EvmYul.Yul.evalArgs fuel args.reverse codeOverride state)) := by
   simp [EvmYul.Yul.exec]
 
+def stopTerminalSourceState (source : State) : State :=
+  source.setMachineState (source.toMachineState.setHReturn .empty)
+
+def stopTerminalTargetState (state : EVMState) : EVMState :=
+  { state with
+    toMachineState :=
+      (state.toMachineState.setReturnData .empty).setHReturn .empty }
+
 theorem exec_expr_stop_succ_succ (fuel : Nat)
     (codeOverride : Option AstContract)
     (shared : EvmYul.SharedState .Yul)
@@ -4235,10 +4443,11 @@ theorem exec_expr_stop_succ_succ (fuel : Nat)
         (.ExprStmtCall
           (.Call (.inl ((.StopArith .STOP : EvmYul.Operation .Yul))) []))
         codeOverride (.Ok shared store) =
-      .error (.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0)) := by
+      .error (.YulHalt (stopTerminalSourceState (.Ok shared store))
+        (EvmYul.UInt256.ofNat 0)) := by
   simp [exec_expr_prim_call_succ, EvmYul.Yul.evalArgs,
     EvmYul.Yul.execPrimCall, EvmYul.Yul.reverse',
-    EvmYul.Yul.multifill', EvmYul.Yul.primCall]
+    EvmYul.Yul.multifill', EvmYul.Yul.primCall, stopTerminalSourceState]
   rfl
 
 theorem exec_block_stop_succ_succ_succ_succ (fuel : Nat)
@@ -4250,7 +4459,8 @@ theorem exec_block_stop_succ_succ_succ_succ (fuel : Nat)
           [.ExprStmtCall
             (.Call (.inl ((.StopArith .STOP : EvmYul.Operation .Yul))) [])])
         codeOverride (.Ok shared store) =
-      .error (.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0)) := by
+      .error (.YulHalt (stopTerminalSourceState (.Ok shared store))
+        (EvmYul.UInt256.ofNat 0)) := by
   simp [EvmYul.Yul.exec, EvmYul.Yul.execSeq,
     exec_expr_stop_succ_succ]
 
@@ -4390,77 +4600,13 @@ has a separate EVM `SELFDESTRUCT` branch and is related through
 -/
 def selfdestructZeroSourceState (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore) : State :=
-  let owner := shared.executionEnv.codeOwner
-  let recipient : EvmYul.AccountAddress :=
-    EvmYul.AccountAddress.ofUInt256 (EvmYul.UInt256.ofNat 0)
-  let substate' : EvmYul.Substate :=
-    { shared.toState.substate with
-      selfDestructSet := shared.toState.substate.selfDestructSet.insert owner
-      accessedAccounts := shared.toState.substate.accessedAccounts.insert recipient }
-  let accountMap' :=
-    match shared.toState.lookupAccount owner with
-    | none =>
-        shared.toState.accountMap
-    | some selfAccount =>
-        match shared.toState.lookupAccount recipient with
-        | none =>
-            if selfAccount.balance == (EvmYul.UInt256.ofNat 0) then
-              shared.toState.accountMap
-            else
-              (shared.toState.accountMap.insert recipient
-                { (default : EvmYul.Account .Yul) with
-                  balance := selfAccount.balance }).insert owner
-                { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-        | some recipientAccount =>
-            if recipient ≠ owner then
-              (shared.toState.accountMap.insert recipient
-                { recipientAccount with
-                  balance := recipientAccount.balance + selfAccount.balance }).insert
-                owner { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-            else
-              (shared.toState.accountMap.insert recipient
-                { recipientAccount with
-                  balance := EvmYul.UInt256.ofNat 0 }).insert owner
-                { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-  (.Ok shared store : State).setState
-    { shared.toState with accountMap := accountMap', substate := substate' }
+  EvmYul.Yul.selfdestructState (.Ok shared store)
+    (EvmYul.UInt256.ofNat 0)
 
 def selfdestructLitSourceState (recipientValue : Word)
     (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore) : State :=
-  let owner := shared.executionEnv.codeOwner
-  let recipient : EvmYul.AccountAddress :=
-    EvmYul.AccountAddress.ofUInt256 recipientValue
-  let substate' : EvmYul.Substate :=
-    { shared.toState.substate with
-      selfDestructSet := shared.toState.substate.selfDestructSet.insert owner
-      accessedAccounts := shared.toState.substate.accessedAccounts.insert recipient }
-  let accountMap' :=
-    match shared.toState.lookupAccount owner with
-    | none =>
-        shared.toState.accountMap
-    | some selfAccount =>
-        match shared.toState.lookupAccount recipient with
-        | none =>
-            if selfAccount.balance == (EvmYul.UInt256.ofNat 0) then
-              shared.toState.accountMap
-            else
-              (shared.toState.accountMap.insert recipient
-                { (default : EvmYul.Account .Yul) with
-                  balance := selfAccount.balance }).insert owner
-                { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-        | some recipientAccount =>
-            if recipient ≠ owner then
-              (shared.toState.accountMap.insert recipient
-                { recipientAccount with
-                  balance := recipientAccount.balance + selfAccount.balance }).insert
-                owner { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-            else
-              (shared.toState.accountMap.insert recipient
-                { recipientAccount with balance := EvmYul.UInt256.ofNat 0 }).insert
-                owner { selfAccount with balance := EvmYul.UInt256.ofNat 0 }
-  (.Ok shared store : State).setState
-    { shared.toState with accountMap := accountMap', substate := substate' }
+  EvmYul.Yul.selfdestructState (.Ok shared store) recipientValue
 
 theorem yul_step_selfdestruct_zero_eq
     (shared : EvmYul.SharedState .Yul) (store : EvmYul.Yul.VarStore) :
@@ -5430,8 +5576,8 @@ pure control/stack compiler proof:
 * `tloadRel` is the account-map/current-contract-transient-storage contract
   needed by `TLOAD` reads;
 * `codeRel` relates the current Yul contract to the bytecode in the EVM
-  execution environment, and is the place where code-inspection builtins must
-  eventually be justified;
+  execution environment; `ExecutionEnvRel.codeBytes` separately records the
+  concrete byte image used by local Yul `codesize`/`codecopy`;
 * `varStackRel` relates a Yul varstore to the compiler's stack layout;
 * `terminalRel` and `revertRel` relate imported Yul terminal results
   (`YulHalt`/`Revert`) to compiler halt states; and
@@ -5513,6 +5659,7 @@ structure ExecutionEnvRel (cfg : StateRelConfig)
   weiValue : yul.weiValue = evm.weiValue
   calldata : yul.calldata = evm.calldata
   code : cfg.codeRel yul.code evm.code
+  codeBytes : yul.codeBytes = evm.code
   gasPrice : yul.gasPrice = evm.gasPrice
   header : yul.header = evm.header
   depth : yul.depth = evm.depth
@@ -5785,6 +5932,14 @@ structure SharedStateRel (cfg : StateRelConfig)
   machine : MachineStateRel cfg yul.toMachineState evm.toMachineState
 
 namespace SharedStateRel
+
+theorem codeBytes {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    sourceShared.executionEnv.codeBytes =
+      targetShared.executionEnv.code :=
+  hShared.chain.executionEnv.codeBytes
 
 theorem balance {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
@@ -6088,6 +6243,36 @@ theorem calldatacopy {cfg : StateRelConfig}
         hChain.executionEnv.calldata]
     · simpa [EvmYul.SharedState.calldatacopy] using hReturn
     · simpa [EvmYul.SharedState.calldatacopy] using hHReturn
+
+theorem codecopy_of_codeBytes {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
+    {memStart codeStart size : Word}
+    (hShared : SharedStateRel cfg sourceShared target.toSharedState)
+    (hCodeBytes : sourceShared.executionEnv.codeBytes =
+      target.executionEnv.code) :
+    SharedStateRel cfg
+      (EvmYul.SharedState.codeBytesCopy sourceShared memStart codeStart size)
+      ({ target with
+        toSharedState :=
+          EvmYul.SharedState.codeCopy target.toSharedState
+            memStart codeStart size }
+        : EVMState).toSharedState := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  constructor
+  · simpa [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy]
+      using hChain
+  · rcases hMachine with ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
+    constructor
+    · simpa [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy]
+        using hGas
+    · simp [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy,
+        hActive]
+    · simpa [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy,
+        hMemory, hCodeBytes]
+    · simpa [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy]
+        using hReturn
+    · simpa [EvmYul.SharedState.codeBytesCopy, EvmYul.SharedState.codeCopy]
+        using hHReturn
 
 theorem keccak256 {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul} {target : EVMState}
@@ -8491,6 +8676,18 @@ theorem yul_primCall_succ_calldatacopy_eq
   unfold EvmYul.step
   rfl
 
+theorem yul_primCall_succ_codecopy_eq
+    (fuel : Nat) (source : State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ source
+        (EvmYul.Operation.CODECOPY : EvmYul.Operation .Yul) args =
+      (match EvmYul.Yul.ternaryCopyOp
+          EvmYul.SharedState.codeBytesCopy source args with
+      | .ok (state, value?) => .ok (state, value?.toList)
+      | .error err => .error err) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  rfl
+
 theorem yul_primCall_succ_returndatacopy_eq
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore) (args : List Word) :
@@ -9054,6 +9251,15 @@ theorem yulPrimitiveTernaryZeroSound_calldatacopy
         EvmYul.SharedState.calldatacopy shared memStart dataStart size) :=
   yulPrimitiveTernaryZeroSound_of_ternaryCopyOp
     EvmYul.SharedState.calldatacopy yul_primCall_succ_calldatacopy_eq
+
+theorem yulPrimitiveTernaryZeroSound_codecopy
+    {sourceFuel : Nat} :
+    YulPrimitiveTernaryZeroSound sourceFuel
+      ((.Env .CODECOPY : EvmYul.Operation .Yul))
+      (fun shared memStart codeStart size =>
+        EvmYul.SharedState.codeBytesCopy shared memStart codeStart size) :=
+  yulPrimitiveTernaryZeroSound_of_ternaryCopyOp
+    EvmYul.SharedState.codeBytesCopy yul_primCall_succ_codecopy_eq
 
 theorem yulPrimitiveTernaryZeroSound_returndatacopy
     {sourceFuel : Nat} :
@@ -9681,6 +9887,14 @@ theorem sourcePrimitiveTernaryZeroSound_structured_calldatacopy :
         EvmYul.SharedState.calldatacopy shared memStart dataStart size) :=
   sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
     EvmYul.SharedState.calldatacopy (by rfl)
+
+theorem sourcePrimitiveTernaryZeroSound_structured_codecopy :
+    SourcePrimitiveTernaryZeroSound
+      Locals.Source.PrimitiveSemantics.structured .codecopy
+      (fun shared memStart codeStart size =>
+        EvmYul.SharedState.codeCopy shared memStart codeStart size) :=
+  sourcePrimitiveTernaryZeroSound_structured_of_ternaryCopy
+    EvmYul.SharedState.codeCopy (by rfl)
 
 theorem sourcePrimitiveTernaryZeroSound_structured_returndatacopy :
     SourcePrimitiveTernaryZeroSound
@@ -10460,6 +10674,71 @@ theorem primitiveStackSoundAt_structured_calldatacopy
     yulPrimitiveTernaryZeroSound_calldatacopy
     sourcePrimitiveTernaryZeroSound_structured_calldatacopy
 
+theorem primitiveStackSoundAt_codecopy_of_codeBytes
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    (hCodeBytes :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceShared.executionEnv.codeBytes =
+            targetShared.executionEnv.code)
+    (hYul :
+      YulPrimitiveTernaryZeroSound sourceFuel
+        ((.Env .CODECOPY : EvmYul.Operation .Yul))
+        (fun shared memStart codeStart size =>
+          EvmYul.SharedState.codeBytesCopy shared memStart codeStart size))
+    (hEval :
+      SourcePrimitiveTernaryZeroSound prim .codecopy
+        (fun shared memStart codeStart size =>
+          EvmYul.SharedState.codeCopy shared memStart codeStart size)) :
+    PrimitiveStackSoundAt cfg layout prim sourceFuel
+      ((.Env .CODECOPY : EvmYul.Operation .Yul)) .codecopy := by
+  exact
+    primitiveStackSoundAt_of_ternary_zero
+      (cfg := cfg) (layout := layout) (prim := prim)
+      (sourceFuel := sourceFuel)
+      (yulPrim := ((.Env .CODECOPY : EvmYul.Operation .Yul)))
+      (op := .codecopy)
+      (fun shared memStart codeStart size =>
+        EvmYul.SharedState.codeBytesCopy shared memStart codeStart size)
+      (fun shared memStart codeStart size =>
+        EvmYul.SharedState.codeCopy shared memStart codeStart size)
+      hYul hEval
+      (by
+        intro sourceShared targetShared memStart codeStart size hShared
+        exact
+          SharedStateRel.codecopy_of_codeBytes
+            (target :=
+              { toSharedState := targetShared,
+                pc := EvmYul.UInt256.ofNat 0,
+                stack := [],
+                execLength := 0 })
+            hShared (hCodeBytes hShared))
+
+theorem primitiveStackSoundAt_structured_codecopy_of_codeBytes
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    (hCodeBytes :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceShared.executionEnv.codeBytes =
+            targetShared.executionEnv.code) :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CODECOPY : EvmYul.Operation .Yul)) .codecopy :=
+  primitiveStackSoundAt_codecopy_of_codeBytes hCodeBytes
+    yulPrimitiveTernaryZeroSound_codecopy
+    sourcePrimitiveTernaryZeroSound_structured_codecopy
+
+theorem primitiveStackSoundAt_structured_codecopy
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAt cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CODECOPY : EvmYul.Operation .Yul)) .codecopy :=
+  primitiveStackSoundAt_structured_codecopy_of_codeBytes
+    (fun hShared => SharedStateRel.codeBytes hShared)
+
 theorem primitiveStackSoundAt_returndatacopy
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
@@ -10801,6 +11080,41 @@ theorem primitiveStackSoundAtArity_structured_calldatasize
         congrArg
           (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
           hShared.chain.executionEnv.calldata)
+
+theorem primitiveStackSoundAtArity_structured_codesize_of_codeBytes
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat}
+    (hCodeBytes :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {targetShared : EvmYul.SharedState .EVM},
+        SharedStateRel cfg sourceShared targetShared →
+          sourceShared.executionEnv.codeBytes =
+            targetShared.executionEnv.code) :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CODESIZE : EvmYul.Operation .Yul)) .codesize :=
+  primitiveStackSoundAtArity_structured_of_nullary_executionEnv
+    ((.Env .CODESIZE : EvmYul.Operation .Yul)) .codesize
+    (fun shared =>
+      ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.codeBytes)
+        shared.executionEnv))
+    ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.code))
+    (by rfl) (by rfl)
+    (by intro fuel shared store; exact
+      PrimSemantics.primCall_codesize_ok fuel shared store)
+    (by
+      intro sourceShared targetShared hShared
+      simpa using
+        congrArg
+          (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
+          (hCodeBytes hShared))
+
+theorem primitiveStackSoundAtArity_structured_codesize
+    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
+    PrimitiveStackSoundAtArity cfg layout
+      Locals.Source.PrimitiveSemantics.structured sourceFuel
+      ((.Env .CODESIZE : EvmYul.Operation .Yul)) .codesize :=
+  primitiveStackSoundAtArity_structured_codesize_of_codeBytes
+    (fun hShared => SharedStateRel.codeBytes hShared)
 
 theorem primitiveStackSoundAtArity_structured_gasprice
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -11992,6 +12306,11 @@ theorem primitiveStackSoundAtArity_structured_of_safe_toBasicOp
           primitiveStackSoundAt_structured_calldatacopy
       · cases hBasic
         exact primitiveStackSoundAtArity_structured_gasprice
+      · cases hBasic
+        exact primitiveStackSoundAtArity_structured_codesize
+      · cases hBasic
+        exact primitiveStackSoundAtArity_of_stackSoundAt
+          primitiveStackSoundAt_structured_codecopy
       · cases hBasic
         exact primitiveStackSoundAtArity_structured_returndatasize
       · cases hBasic
@@ -23589,7 +23908,9 @@ theorem sourceBlockRunBridge_stop_call
   exact
     sourceBlockRunBridge_stop_of_exec
       (sourceResult :=
-        .error (.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0)))
+        .error (.YulHalt
+          (Imported.stopTerminalSourceState (.Ok shared store))
+          (EvmYul.UInt256.ofNat 0)))
       (sharedAfter := sharedAfter)
       (Imported.exec_block_stop_succ_succ_succ_succ sourceFuel codeOverride
         shared store)
@@ -23609,7 +23930,8 @@ theorem sourceResultBlockRunBridge_stop_call
     (hTerminal :
       prim.terminal .stop compiler.shared [] = .ok sharedAfter)
     (hRel :
-      terminalRel .stop (EvmYul.UInt256.ofNat 0) (.Ok shared store)
+      terminalRel .stop (EvmYul.UInt256.ofNat 0)
+        (Imported.stopTerminalSourceState (.Ok shared store))
         (compiler.withShared sharedAfter)) :
     SourceResultBlockRunBridge cfg layout terminalRel revertRel prim program
       ctx sourceFuel.succ.succ.succ.succ
@@ -23620,7 +23942,9 @@ theorem sourceResultBlockRunBridge_stop_call
   exact
     sourceResultBlockRunBridge_stop_of_exec
       (sourceResult :=
-        .error (.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0)))
+        .error (.YulHalt
+          (Imported.stopTerminalSourceState (.Ok shared store))
+          (EvmYul.UInt256.ofNat 0)))
       (sharedAfter := sharedAfter)
       (Imported.exec_block_stop_succ_succ_succ_succ sourceFuel codeOverride
         shared store)
@@ -23641,7 +23965,8 @@ theorem sourceResultBlockSound_stop_call
         SourceStateRel cfg layout source compiler →
         ∃ sharedAfter : EvmYul.SharedState .EVM,
           prim.terminal .stop compiler.shared [] = .ok sharedAfter ∧
-          terminalRel .stop (EvmYul.UInt256.ofNat 0) source
+          terminalRel .stop (EvmYul.UInt256.ofNat 0)
+            (Imported.stopTerminalSourceState source)
             (compiler.withShared sharedAfter)) :
     SourceResultBlockSound cfg layout terminalRel revertRel prim program ctx
       sourceFuel.succ.succ.succ.succ
@@ -23683,7 +24008,8 @@ theorem checkedStmtBlockLoweringSound_stop_call
         SourceStateRel cfg layout source compiler →
         ∃ sharedAfter : EvmYul.SharedState .EVM,
           prim.terminal .stop compiler.shared [] = .ok sharedAfter ∧
-          terminalRel .stop (EvmYul.UInt256.ofNat 0) source
+          terminalRel .stop (EvmYul.UInt256.ofNat 0)
+            (Imported.stopTerminalSourceState source)
             (compiler.withShared sharedAfter)) :
     CheckedStmtBlockLoweringSound cfg layout terminalRel revertRel prim
       program ctx sourceFuel.succ.succ.succ.succ
@@ -29506,25 +29832,27 @@ theorem errorPrefix_stop_bridge {cfg : StateRelConfig}
     (returns : List Name) (ctx : Locals.Ctx)
     (codeOverride : Option AstContract)
     (hTerminalRel :
-      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0) (.Ok shared store)
-        { compiler.evm with
-          toMachineState := compiler.evm.toMachineState.setReturnData .empty }) :
+      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0)
+        (Imported.stopTerminalSourceState (.Ok shared store))
+        (Imported.stopTerminalTargetState compiler.evm)) :
     ErrorStmtPrefixBridge (cfg := cfg) layout program returns ctx
       sourceFuel.succ.succ
       (.ExprStmtCall
         (.Call (.inl ((.StopArith .STOP : EvmYul.Operation .Yul))) []))
       codeOverride (.Ok shared store) compiler
       [Functions.Stmt.terminalArgs .stop Locals.ExprSeq.nil] := by
+  let sourceAfterStop : State :=
+    Imported.stopTerminalSourceState (.Ok shared store)
   let evmAfterStop : EVMState :=
-    { compiler.evm with
-      toMachineState := compiler.evm.toMachineState.setReturnData .empty }
+    Imported.stopTerminalTargetState compiler.evm
   refine
-    ⟨.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0),
+    ⟨.YulHalt sourceAfterStop (EvmYul.UInt256.ofNat 0),
       Structured.Outcome.halt .stop (compiler.withEVM evmAfterStop),
       ctx, ?source, ?target, ?rel, ?returns, ?mode⟩
   · simp [Imported.exec_expr_prim_call_succ, EvmYul.Yul.evalArgs,
       EvmYul.Yul.execPrimCall, EvmYul.Yul.reverse',
-      EvmYul.Yul.multifill', EvmYul.Yul.primCall]
+      EvmYul.Yul.multifill', EvmYul.Yul.primCall,
+      Imported.stopTerminalSourceState]
     rfl
   · intro tail
     refine ⟨1, ?_⟩
@@ -29535,7 +29863,7 @@ theorem errorPrefix_stop_bridge {cfg : StateRelConfig}
       Assembly.PrimOp.toEVM, evmAfterStop]
     rfl
   · exact CompilerResultOutcomeRel.yulHalt (by
-      simpa [evmAfterStop] using hTerminalRel)
+      simpa [sourceAfterStop, evmAfterStop] using hTerminalRel)
   · simp [evmAfterStop]
   · simp [Structured.Outcome.halt]
 
@@ -29547,9 +29875,9 @@ theorem resultSeqRunBridge_cons_stop_bridge {cfg : StateRelConfig}
     (returns : List Name) (ctx : Locals.Ctx)
     (codeOverride : Option AstContract)
     (hTerminalRel :
-      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0) (.Ok shared store)
-        { compiler.evm with
-          toMachineState := compiler.evm.toMachineState.setReturnData .empty }) :
+      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0)
+        (Imported.stopTerminalSourceState (.Ok shared store))
+        (Imported.stopTerminalTargetState compiler.evm)) :
     ResultSeqRunBridge (cfg := cfg) layout program returns ctx
       sourceFuel.succ.succ.succ
       (.ExprStmtCall
@@ -29583,9 +29911,9 @@ theorem someResultSeqRunBridge_cons_stop_bridge {cfg : StateRelConfig}
     (returns : List Name) (ctx : Locals.Ctx)
     (codeOverride : Option AstContract)
     (hTerminalRel :
-      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0) (.Ok shared store)
-        { compiler.evm with
-          toMachineState := compiler.evm.toMachineState.setReturnData .empty }) :
+      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0)
+        (Imported.stopTerminalSourceState (.Ok shared store))
+        (Imported.stopTerminalTargetState compiler.evm)) :
     SomeResultSeqRunBridge (cfg := cfg) program returns ctx
       sourceFuel.succ.succ.succ
       (.ExprStmtCall
@@ -29614,9 +29942,9 @@ theorem resultSeqRunBridgeWithLayoutSlots_cons_stop_bridge
     (codeOverride : Option AstContract)
     (hCtxLayout : ctx.layout = fullLayout)
     (hTerminalRel :
-      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0) (.Ok shared store)
-        { compiler.evm with
-          toMachineState := compiler.evm.toMachineState.setReturnData .empty }) :
+      cfg.terminalRel .stop (EvmYul.UInt256.ofNat 0)
+        (Imported.stopTerminalSourceState (.Ok shared store))
+        (Imported.stopTerminalTargetState compiler.evm)) :
     ResultSeqRunBridgeWithLayoutSlots (cfg := cfg) sourceLayout fullLayout
       fullLayout outcomeSourceLayout outcomeFullLayout program returns ctx
       sourceFuel.succ.succ.succ
@@ -29627,18 +29955,20 @@ theorem resultSeqRunBridgeWithLayoutSlots_cons_stop_bridge
       { stmts :=
           [Functions.Stmt.terminalArgs .stop Locals.ExprSeq.nil] ++
             lowerTail.stmts } := by
+  let sourceAfterStop : State :=
+    Imported.stopTerminalSourceState (.Ok shared store)
   let evmAfterStop : EVMState :=
-    { compiler.evm with
-      toMachineState := compiler.evm.toMachineState.setReturnData .empty }
+    Imported.stopTerminalTargetState compiler.evm
   have hSource :
       EvmYul.Yul.exec sourceFuel.succ.succ
           (.ExprStmtCall
             (.Call (.inl ((.StopArith .STOP : EvmYul.Operation .Yul))) []))
           codeOverride (.Ok shared store) =
-        .error (.YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0)) := by
+        .error (.YulHalt sourceAfterStop (EvmYul.UInt256.ofNat 0)) := by
     simp [Imported.exec_expr_prim_call_succ, EvmYul.Yul.evalArgs,
       EvmYul.Yul.execPrimCall, EvmYul.Yul.reverse',
-      EvmYul.Yul.multifill', EvmYul.Yul.primCall]
+      EvmYul.Yul.multifill', EvmYul.Yul.primCall,
+      Imported.stopTerminalSourceState]
     rfl
   have hArgs :
       Locals.Direct.Expr.ExprSeq.runCode ctx 0 Locals.ExprSeq.nil
@@ -29668,10 +29998,10 @@ theorem resultSeqRunBridgeWithLayoutSlots_cons_stop_bridge
       (kind := .stop) (args := Locals.ExprSeq.nil)
       (evmAfterArgs := compiler.evm)
       (evmAfterTerminal := evmAfterStop)
-      (err := .YulHalt (.Ok shared store) (EvmYul.UInt256.ofNat 0))
+      (err := .YulHalt sourceAfterStop (EvmYul.UInt256.ofNat 0))
       (lowerTail := lowerTail) hCtxLayout hSource hArgs hTerminal
       (CompilerResultOutcomeRelWithLayoutSlots.yulHalt
-        (by simpa [evmAfterStop] using hTerminalRel))
+        (by simpa [sourceAfterStop, evmAfterStop] using hTerminalRel))
 
 def zeroZeroReturnArgs : Locals.ExprSeq Assembly.HaltKind.return.argCount :=
   Locals.ExprSeq.cons (Locals.Expr.lit (EvmYul.UInt256.ofNat 0))
@@ -37898,6 +38228,31 @@ theorem yul_primCall_calldatacopy_ok
   PrimSemantics.primCall_calldatacopy_ok fuel shared store
     memStart dataStart size
 
+theorem yul_primCall_codesize_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .CODESIZE : EvmYul.Operation .Yul)) [] =
+      .ok (.Ok shared store,
+        [((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.codeBytes)
+          shared.executionEnv)]) :=
+  PrimSemantics.primCall_codesize_ok fuel shared store
+
+theorem yul_primCall_codecopy_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (memStart codeStart size : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .CODECOPY : EvmYul.Operation .Yul))
+          [memStart, codeStart, size] =
+      .ok
+        (.Ok
+          (EvmYul.SharedState.codeBytesCopy shared memStart codeStart size)
+          store,
+        []) :=
+  PrimSemantics.primCall_codecopy_ok fuel shared store
+    memStart codeStart size
+
 theorem yul_primCall_returndatacopy_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore)
@@ -43387,6 +43742,91 @@ theorem regularPrefixWithLayoutSlots_calldatacopy_of_bound_args_ternary
         rfl)
       hArgs
 
+theorem regularPrefixWithLayoutSlots_codecopy_of_bound_args_ternary
+    {cfg : StateRelConfig}
+    {sourceLayout fullLayout fullLayoutAfter : List Name}
+    {program : Functions.Program} {returns : List Name}
+    {ctx : Locals.Ctx} {argFuel : Nat}
+    {memStart codeStart size : AstExpr}
+    {codeOverride : Option AstContract} {source : State}
+    {compiler : RunState} {pre : List Functions.Stmt}
+    {memStartTmp codeStartTmp sizeTmp : Name}
+    {stackSeq : Locals.ExprSeq 3}
+    (hCodeBytes :
+      ∀ {sourceShared : EvmYul.SharedState .Yul} {targetState : EVMState},
+        SharedStateRel cfg sourceShared targetState.toSharedState →
+          sourceShared.executionEnv.codeBytes =
+            targetState.executionEnv.code)
+    (hNoDupFull : fullLayoutAfter.Nodup)
+    (hMemStartBound :
+      ∀ {memStartIdx : Nat},
+        fullLayoutAfter[memStartIdx]? = some memStartTmp →
+          2 + memStartIdx + 1 ≤ 16)
+    (hCodeStartBound :
+      ∀ {codeStartIdx : Nat},
+        fullLayoutAfter[codeStartIdx]? = some codeStartTmp →
+          1 + codeStartIdx + 1 ≤ 16)
+    (hSizeBound :
+      ∀ {sizeIdx : Nat},
+        fullLayoutAfter[sizeIdx]? = some sizeTmp →
+          sizeIdx + 1 ≤ 16)
+    (hStackSeq :
+      Expr.List.toStackSeq?
+          [.var memStartTmp, .var codeStartTmp, .var sizeTmp] 3 =
+        some stackSeq)
+    (hArgs :
+      BoundArgsBridgeWithLayoutSlotValues (cfg := cfg) sourceLayout
+        fullLayout fullLayoutAfter program returns ctx argFuel
+        [memStart, codeStart, size] codeOverride source compiler pre
+        [.var memStartTmp, .var codeStartTmp, .var sizeTmp]) :
+    RegularStmtPrefixBridgeWithLayoutSlots (cfg := cfg) sourceLayout
+      fullLayout sourceLayout fullLayoutAfter program returns ctx
+      argFuel.succ
+      (.ExprStmtCall
+        (.Call (.inl ((.Env .CODECOPY : EvmYul.Operation .Yul)))
+          [memStart, codeStart, size]))
+      codeOverride source compiler
+      (pre ++ [Functions.Stmt.expr (.prim .codecopy stackSeq)]) := by
+  exact
+    regularPrefixWithLayoutSlots_ternary_zero_prim_of_bound_args_target
+      (cfg := cfg) (sourceLayout := sourceLayout)
+      (fullLayout := fullLayout) (fullLayoutAfter := fullLayoutAfter)
+      (program := program) (returns := returns) (ctx := ctx)
+      (argFuel := argFuel) (left := memStart) (middle := codeStart)
+      (right := size) (codeOverride := codeOverride) (source := source)
+      (compiler := compiler) (pre := pre) (leftTmp := memStartTmp)
+      (middleTmp := codeStartTmp) (rightTmp := sizeTmp)
+      ((.Env .CODECOPY : EvmYul.Operation .Yul))
+      (.prim .codecopy stackSeq) stackSeq .codecopy
+      (fun shared memStart codeStart size =>
+        EvmYul.SharedState.codeBytesCopy shared memStart codeStart size)
+      (fun state memStart codeStart size =>
+        { state with
+          toSharedState :=
+            EvmYul.SharedState.codeCopy state.toSharedState
+              memStart codeStart size })
+      hNoDupFull hMemStartBound hCodeStartBound hSizeBound
+      (fun fuel shared store _compilerEVM memStart codeStart size _hRel =>
+        yul_primCall_codecopy_ok fuel shared store
+          memStart codeStart size)
+      (by
+        intro shared state memStart codeStart size hShared
+        exact
+          SharedStateRel.codecopy_of_codeBytes
+            (target := state)
+            hShared (hCodeBytes hShared))
+      hStackSeq
+      (fun state memStart codeStart size stack hStack =>
+        PrimSemantics.basicOp_step_ternaryCopy_of_stack
+          .codecopy EvmYul.SharedState.codeCopy
+          (by simp [Structured.BasicOp.toPrimOp,
+            Assembly.PrimOp.continuingStep?])
+          state memStart codeStart size stack hStack)
+      (by
+        intro ctxAfter base
+        rfl)
+      hArgs
+
 theorem regularPrefixWithLayoutSlots_returndatacopy_of_bound_args_ternary
     {cfg : StateRelConfig}
     {sourceLayout fullLayout fullLayoutAfter : List Name}
@@ -44776,6 +45216,55 @@ theorem exprValueBridgeWithLayoutSlots_calldatasize
           congrArg
             (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
             hShared.chain.executionEnv.calldata)
+      hRel
+
+theorem exprValueBridgeWithLayoutSlots_codesize_of_codeBytes
+    {cfg : StateRelConfig}
+    {sourceLayout fullLayout : List Name}
+    {program : Functions.Program} {returns : List Name}
+    {ctx : Locals.Ctx} {sourceFuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {codeOverride : Option AstContract} {compiler : RunState}
+    (hCodeBytes :
+      ∀ {sourceShared : EvmYul.SharedState .Yul} {targetState : EVMState},
+        SharedStateRel cfg sourceShared targetState.toSharedState →
+          sourceShared.executionEnv.codeBytes =
+            targetState.executionEnv.code)
+    (hCtxLayout : ctx.layout = fullLayout)
+    (hRel :
+      CompilerStateRelWithLayoutSlots cfg sourceLayout fullLayout
+        (.Ok shared store) compiler.evm) :
+      ExprValueBridgeWithLayoutSlots (cfg := cfg) sourceLayout fullLayout
+        fullLayout program returns ctx sourceFuel.succ.succ
+        (.Call (.inl ((.Env .CODESIZE : EvmYul.Operation .Yul))) [])
+        codeOverride (.Ok shared store) compiler []
+        (.prim .codesize .nil) := by
+  exact
+    exprValueBridgeWithLayoutSlots_nullary_executionEnv
+      ((.Env .CODESIZE : EvmYul.Operation .Yul))
+      (.prim .codesize .nil)
+      .codesize
+      (fun shared =>
+        ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.codeBytes)
+          shared.executionEnv))
+      (fun state =>
+        ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.code)
+          state.executionEnv))
+      ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.code))
+      hCtxLayout
+      (by intro fuel shared store; exact
+        PrimSemantics.primCall_codesize_ok fuel shared store)
+      (by simp [Structured.BasicOp.toPrimOp,
+        Assembly.PrimOp.continuingStep?])
+      (by intro state; rfl)
+      (by intro ctxAfter base; rfl)
+      (by
+        intro sourceShared targetState hShared
+        simpa using
+          congrArg
+            (fun data : ByteArray => EvmYul.UInt256.ofNat data.size)
+            (hCodeBytes hShared))
       hRel
 
 theorem exprValueBridgeWithLayoutSlots_gasprice
@@ -68852,11 +69341,12 @@ theorem sourceBridge_of_dispatcher_stop_call
     (hOutcomeRel :
       outcomeRel
         (.yulHalt
-          (.Ok
-            { shared with
-              executionEnv :=
-                { shared.executionEnv with code := program.contract } }
-            (default : EvmYul.Yul.VarStore))
+          (Reference.Imported.stopTerminalSourceState
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)))
           (EvmYul.UInt256.ofNat 0))
         (Functions.Source.Outcome.halt .stop
           (sourceInitial.withShared sharedAfter))) :
@@ -68865,11 +69355,12 @@ theorem sourceBridge_of_dispatcher_stop_call
           Reference.SourceBridge prim stateRel outcomeRel program
             sourceFuel.succ.succ.succ.succ.succ (.Ok shared store)
             (.yulHalt
-              (.Ok
-                { shared with
-                  executionEnv :=
-                    { shared.executionEnv with code := program.contract } }
-                (default : EvmYul.Yul.VarStore))
+              (Reference.Imported.stopTerminalSourceState
+                (.Ok
+                  { shared with
+                    executionEnv :=
+                      { shared.executionEnv with code := program.contract } }
+                  (default : EvmYul.Yul.VarStore)))
               (EvmYul.UInt256.ofNat 0)) //
         bridge.sourceInitial = sourceInitial ∧
           bridge.sourceOutcome =
@@ -68880,7 +69371,8 @@ theorem sourceBridge_of_dispatcher_stop_call
       executionEnv :=
         { shared.executionEnv with code := program.contract } }
   let callState : Reference.State :=
-    .Ok callShared (default : EvmYul.Yul.VarStore)
+    Reference.Imported.stopTerminalSourceState
+      (.Ok callShared (default : EvmYul.Yul.VarStore))
   let sourceOutcome : Objects.Source.Outcome :=
     Functions.Source.Outcome.halt .stop
       (sourceInitial.withShared sharedAfter)
@@ -71790,11 +72282,12 @@ theorem compile_preserves_of_dispatcher_stop_call_compileAccepted
     (hOutcomeRel :
       outcomeRel
         (.yulHalt
-          (.Ok
-            { shared with
-              executionEnv :=
-                { shared.executionEnv with code := program.contract } }
-            (default : EvmYul.Yul.VarStore))
+          (Reference.Imported.stopTerminalSourceState
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)))
           (EvmYul.UInt256.ofNat 0))
         (Functions.Source.Outcome.halt .stop
           (sourceInitial.withShared sharedAfter)))
@@ -71810,21 +72303,23 @@ theorem compile_preserves_of_dispatcher_stop_call_compileAccepted
           (.Ok shared store) =
         .ok
           (.yulHalt
-            (.Ok
-              { shared with
-                executionEnv :=
-                  { shared.executionEnv with code := program.contract } }
-              (default : EvmYul.Yul.VarStore))
+            (Reference.Imported.stopTerminalSourceState
+              (.Ok
+                { shared with
+                  executionEnv :=
+                    { shared.executionEnv with code := program.contract } }
+                (default : EvmYul.Yul.VarStore)))
             (EvmYul.UInt256.ofNat 0)) ∧
       Assembly.Source.runNResult asm targetFuel initial =
         .ok targetOutcome ∧
       outcomeRel
         (.yulHalt
-          (.Ok
-            { shared with
-              executionEnv :=
-                { shared.executionEnv with code := program.contract } }
-            (default : EvmYul.Yul.VarStore))
+          (Reference.Imported.stopTerminalSourceState
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)))
           (EvmYul.UInt256.ofNat 0))
         (Functions.Source.Outcome.halt .stop
           (sourceInitial.withShared sharedAfter)) ∧
@@ -71837,7 +72332,8 @@ theorem compile_preserves_of_dispatcher_stop_call_compileAccepted
       executionEnv :=
         { shared.executionEnv with code := program.contract } }
   let callState : Reference.State :=
-    .Ok callShared (default : EvmYul.Yul.VarStore)
+    Reference.Imported.stopTerminalSourceState
+      (.Ok callShared (default : EvmYul.Yul.VarStore))
   let sourceOutcome : Objects.Source.Outcome :=
     Functions.Source.Outcome.halt .stop
       (sourceInitial.withShared sharedAfter)
@@ -71928,11 +72424,12 @@ theorem compile_whole_program_result_sound_of_dispatcher_stop_call_compileAccept
     (hOutcomeRel :
       outcomeRel
         (.yulHalt
-          (.Ok
-            { shared with
-              executionEnv :=
-                { shared.executionEnv with code := program.contract } }
-            (default : EvmYul.Yul.VarStore))
+          (Reference.Imported.stopTerminalSourceState
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)))
           (EvmYul.UInt256.ofNat 0))
         (Functions.Source.Outcome.halt .stop
           (sourceInitial.withShared sharedAfter)))
@@ -71950,19 +72447,21 @@ theorem compile_whole_program_result_sound_of_dispatcher_stop_call_compileAccept
           (.Ok shared store) =
         .ok
           (.yulHalt
+            (Reference.Imported.stopTerminalSourceState
+              (.Ok
+                { shared with
+                  executionEnv :=
+                    { shared.executionEnv with code := program.contract } }
+                (default : EvmYul.Yul.VarStore)))
+            (EvmYul.UInt256.ofNat 0)) ∧
+      outcomeRel
+        (.yulHalt
+          (Reference.Imported.stopTerminalSourceState
             (.Ok
               { shared with
                 executionEnv :=
                   { shared.executionEnv with code := program.contract } }
-              (default : EvmYul.Yul.VarStore))
-            (EvmYul.UInt256.ofNat 0)) ∧
-      outcomeRel
-        (.yulHalt
-          (.Ok
-            { shared with
-              executionEnv :=
-                { shared.executionEnv with code := program.contract } }
-            (default : EvmYul.Yul.VarStore))
+              (default : EvmYul.Yul.VarStore)))
           (EvmYul.UInt256.ofNat 0))
         (Functions.Source.Outcome.halt .stop
           (sourceInitial.withShared sharedAfter)) ∧
@@ -75967,6 +76466,134 @@ theorem compile_preserves_of_dispatcher_source_result_block_bridge_compileAccept
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hReferenceRunBody.2, hWholeRel⟩
 
+theorem compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {stateRel : Reference.StateRel}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {asm : Assembly.Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hAccepted : Reference.Accepted program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hInitialRel :
+      stateRel (Program.installContract program (.Ok shared store))
+        sourceInitial)
+    (hBridge :
+      Reference.SourceBridgeFacts.SourceResultBlockRunBridge (cfg := cfg)
+        layout terminalRel revertRel prim functionProgram
+        Functions.Source.Ctx.initial sourceFuel [program.contract.dispatcher]
+        (some program.contract)
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial functionProgram.body)
+    (hReferenceOk :
+      ∀ sourceResult sourceOutcome targetFuel,
+        EvmYul.Yul.exec sourceFuel (.Block [program.contract.dispatcher])
+            (some program.contract)
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)) =
+          sourceResult →
+        SourceLowered.runState prim targetFuel program sourceInitial =
+          .ok sourceOutcome →
+        Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg layout
+          terminalRel revertRel sourceResult sourceOutcome →
+        Reference.Imported.dispatcherRunResultOfBody program
+            (.Ok shared store) sourceResult = .ok referenceResult ∧
+          outcomeRel referenceResult sourceOutcome)
+    (hCompile : compileChecked? program = some asm)
+    (hCompileAccepted : SourceCompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome := by
+  rcases
+      sourceLowered_runState_of_root_source_result_block_bridge
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (functionProgram := functionProgram) (sourceFuel := sourceFuel)
+        (sourceStmts := [program.contract.dispatcher])
+        (codeOverride := some program.contract)
+        (source :=
+          .Ok
+            { shared with
+              executionEnv :=
+                { shared.executionEnv with code := program.contract } }
+            (default : EvmYul.Yul.VarStore))
+        (sourceInitial := sourceInitial) hToObjects hBridge with
+    ⟨sourceResult, sourceOutcome, sourceTargetFuel, hSource, hSourceRun,
+      hRel⟩
+  have hDispatcherExec :
+      EvmYul.Yul.exec sourceFuel
+          (.Block
+            (Reference.Imported.dispatcherBody
+              (Program.installContract program (.Ok shared store))))
+          (some program.contract)
+          (Reference.Imported.dispatcherCallState
+            (Program.installContract program (.Ok shared store))) =
+        sourceResult := by
+    simpa [Reference.Imported.dispatcherBody_installContract_ok,
+      Reference.Imported.dispatcherCallState_installContract_ok] using hSource
+  have hReferenceRunBody :
+      Reference.Imported.dispatcherRunResultOfBody program
+          (.Ok shared store) sourceResult = .ok referenceResult ∧
+        outcomeRel referenceResult sourceOutcome := by
+    exact hReferenceOk sourceResult sourceOutcome sourceTargetFuel hSource
+      hSourceRun hRel
+  have hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult := by
+    rw [Reference.Imported.runResult_succ_of_exec_dispatcher
+      sourceFuel program (.Ok shared store) hDispatcherExec]
+    exact hReferenceRunBody.1
+  have hSourceRunForInitial :
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, SourceLowered.runState, hToObjects,
+      Objects.Source.Program.run, Objects.Source.Program.runState,
+      Objects.Source.Object.run, Objects.Source.Object.runState,
+      Objects.Program.toFunctions, Objects.Object.toFunctions,
+      Functions.Source.Program.run, hSourceInitial] using hSourceRun
+  rcases
+      compile_source_preserves_checked_of_compileAccepted
+        (prim := prim) hPrim (program := program) (asm := asm)
+        (fuel := sourceTargetFuel) (initial := initial)
+        (sourceOutcome := sourceOutcome) hCompile hCompileAccepted hInitialPc
+        hInitialStack hSourceRunForInitial with
+    ⟨targetFuel, targetOutcome, hTargetRun, hWholeRel⟩
+  exact
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRunForInitial, hTargetRun, hReferenceRunBody.2,
+      hWholeRel⟩
+
 theorem compile_preserves_of_dispatcher_source_result_block_sound_compileAccepted
     {cfg : Reference.StateRelConfig} {layout : List Name}
     {terminalRel :
@@ -79367,6 +79994,110 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bri
       hWholeRel, hAsmAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle,
       hOutOfGas, hProjection, hTrace⟩
 
+theorem compile_whole_program_result_sound_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {stateRel : Reference.StateRel}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hAccepted : Reference.Accepted program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hInitialRel :
+      stateRel (Program.installContract program (.Ok shared store))
+        sourceInitial)
+    (hBridge :
+      Reference.SourceBridgeFacts.SourceResultBlockRunBridge (cfg := cfg)
+        layout terminalRel revertRel prim functionProgram
+        Functions.Source.Ctx.initial sourceFuel [program.contract.dispatcher]
+        (some program.contract)
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial functionProgram.body)
+    (hReferenceOk :
+      ∀ sourceResult sourceOutcome targetFuel,
+        EvmYul.Yul.exec sourceFuel (.Block [program.contract.dispatcher])
+            (some program.contract)
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)) =
+          sourceResult →
+        SourceLowered.runState prim targetFuel program sourceInitial =
+          .ok sourceOutcome →
+        Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg layout
+          terminalRel revertRel sourceResult sourceOutcome →
+        Reference.Imported.dispatcherRunResultOfBody program
+            (.Ok shared store) sourceResult = .ok referenceResult ∧
+          outcomeRel referenceResult sourceOutcome)
+    (hCompile : compileChecked? program = some asm)
+    (hAssemble : Assembly.compile? asm = some target)
+    (hRuntime : Assembly.RuntimeAssumptions asm target initial)
+    (hCompileAccepted : SourceCompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+            target.GasOpcodeBoundary ∧
+              Assembly.GasOracleAssumption asm initial ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome := by
+  rcases
+      compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) hPrim
+        (stateRel := stateRel) (outcomeRel := outcomeRel)
+        (program := program) (functionProgram := functionProgram)
+        (asm := asm) (shared := shared) (store := store)
+        (sourceInitial := sourceInitial) (sourceFuel := sourceFuel)
+        (initial := initial) (referenceResult := referenceResult)
+        hAccepted hToObjects hInitialRel hBridge hReferenceOk hCompile
+        hCompileAccepted hInitialPc hInitialStack hSourceInitial with
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRun, hTargetRun, hOutcomeRel, hWholeRel⟩
+  obtain
+    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
+      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    Assembly.compile_whole_program_result_sound
+      hAssemble hRuntime hTargetRun
+  exact
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRun, hOutcomeRel, hWholeRel, hAsmAccepted,
+      hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas, hProjection,
+      hTrace⟩
+
 theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_run_bridge_compileAccepted
     {cfg : Reference.StateRelConfig} {layout : List Name}
     {terminalRel :
@@ -79425,6 +80156,112 @@ theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_run_b
                     Assembly.Preservation.BlockTraceResult
                       asm target targetFuel initial targetOutcome :=
   compile_whole_program_result_sound_of_dispatcher_source_result_block_bridge_compileAccepted
+    (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) hPrim
+    (stateRel := stateRel) (outcomeRel := outcomeRel)
+    (program := program) (functionProgram := functionProgram)
+    (asm := asm) (target := target) (shared := shared) (store := store)
+    (sourceInitial := sourceInitial) (sourceFuel := sourceFuel)
+    (initial := initial) (referenceResult := referenceResult)
+    hAccepted hToObjects hInitialRel hBridge.runBridge
+    (fun sourceResult sourceOutcome targetFuel hSource hSourceRun hRel => by
+      rcases
+          Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok
+            sourceFuel program (.Ok shared store) hReferenceRun with
+        ⟨sourceResultFromRun, hSourceRaw, hBodyResult⟩
+      have hSourceFromRun :
+          EvmYul.Yul.exec sourceFuel
+              (.Block [program.contract.dispatcher])
+              (some program.contract)
+              (.Ok
+                { shared with
+                  executionEnv :=
+                    { shared.executionEnv with code := program.contract } }
+                (default : EvmYul.Yul.VarStore)) =
+            sourceResultFromRun := by
+        simpa [Reference.Imported.dispatcherBody_installContract_ok,
+          Reference.Imported.dispatcherCallState_installContract_ok] using
+          hSourceRaw
+      have hEq : sourceResult = sourceResultFromRun := by
+        rw [hSource] at hSourceFromRun
+        exact hSourceFromRun
+      have hBodyResult' :
+          Reference.Imported.dispatcherRunResultOfBody program
+              (.Ok shared store) sourceResult =
+            .ok referenceResult := by
+        simpa [hEq] using hBodyResult
+      exact
+        (dispatcherRunResultSound_of_observation
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim)
+          (outcomeRel := outcomeRel) (program := program)
+          (referenceInitial := .Ok shared store)
+          (sourceInitial := sourceInitial)
+          (referenceResult := referenceResult) hBridge.observation)
+          sourceResult hBodyResult' sourceOutcome targetFuel hSourceRun hRel)
+    hCompile hAssemble hRuntime hCompileAccepted hInitialPc hInitialStack
+    hSourceInitial
+
+theorem compile_whole_program_result_sound_with_source_run_of_checked_recursive_dispatcher_run_bridge_compileAccepted
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {stateRel : Reference.StateRel}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hAccepted : Reference.Accepted program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hInitialRel :
+      stateRel (Program.installContract program (.Ok shared store))
+        sourceInitial)
+    (hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult)
+    (hBridge :
+      CheckedRecursiveDispatcherRunBridge cfg layout terminalRel revertRel
+        prim outcomeRel program functionProgram shared store sourceInitial
+        sourceFuel)
+    (hCompile : compileChecked? program = some asm)
+    (hAssemble : Assembly.compile? asm = some target)
+    (hRuntime : Assembly.RuntimeAssumptions asm target initial)
+    (hCompileAccepted : SourceCompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+            target.GasOpcodeBoundary ∧
+              Assembly.GasOracleAssumption asm initial ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome :=
+  compile_whole_program_result_sound_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted
     (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
     (revertRel := revertRel) (prim := prim) hPrim
     (stateRel := stateRel) (outcomeRel := outcomeRel)

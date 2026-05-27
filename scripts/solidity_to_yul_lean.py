@@ -22,7 +22,7 @@ import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 
 Json = Dict[str, Any]
@@ -359,7 +359,7 @@ def concrete_hex_bytes(value: str, what: str) -> str:
     if value.startswith(("0x", "0X")):
         value = value[2:]
     if len(value) % 2 != 0 or not re.fullmatch(r"[0-9a-fA-F]*", value):
-        fail(f"{what} must be concrete even-length hex bytes for object layout")
+        fail(f"{what} must be concrete even-length hex bytes")
     return value.lower()
 
 
@@ -369,13 +369,17 @@ def parse_hex_bytes(value: str, what: str) -> List[int]:
 
 
 def yul_string_literal_word(value: str) -> int:
-    data = value.encode("utf-8")
-    if len(data) > 32:
+    return yul_bytes_literal_word(value.encode("utf-8"))
+
+
+def yul_bytes_literal_word(data: Sequence[int]) -> int:
+    data_bytes = bytes(data)
+    if len(data_bytes) > 32:
         fail(
-            "Yul string literals used as values must fit in one word; "
-            f"got {len(data)} bytes"
+            "Yul string/hex literals used as values must fit in one word; "
+            f"got {len(data_bytes)} bytes"
         )
-    return int.from_bytes(data.ljust(32, b"\x00"), "big")
+    return int.from_bytes(data_bytes.ljust(32, b"\x00"), "big")
 
 
 PRIMITIVE_OPS: Dict[str, str] = {
@@ -472,6 +476,35 @@ OBJECT_BUILTINS = {
     "linkersymbol",
 }
 
+UNSUPPORTED_DIALECT_BUILTINS = {
+    "dataloadn",
+    "auxdataloadn",
+    "eofcreate",
+    "returncontract",
+    "rjump",
+    "rjumpi",
+    "callf",
+    "retf",
+    "jumpf",
+}
+
+RESERVED_BINDING_NAMES = (
+    set(PRIMITIVE_OPS)
+    | OBJECT_BUILTINS
+    | UNSUPPORTED_DIALECT_BUILTINS
+    | {
+        "memoryguard",
+        "clz",
+        "jump",
+        "jumpi",
+        "jumpdest",
+        "pc",
+    }
+    | {f"push{i}" for i in range(33)}
+    | {f"dup{i}" for i in range(1, 17)}
+    | {f"swap{i}" for i in range(1, 17)}
+)
+
 LEAN_EXPR = "EvmYul.Yul.Ast.Expr"
 LEAN_STMT = "EvmYul.Yul.Ast.Stmt"
 LEAN_FUNCTION = "EvmYul.Yul.Ast.FunctionDefinition"
@@ -498,26 +531,24 @@ BACKEND_EXTERNAL_EFFECT_PRIMITIVES = {
     "create",
     "create2",
 }
-BACKEND_STATIC_MODE_PRIMITIVES = {
-    "sstore",
-    "tstore",
-    "log0",
-    "log1",
-    "log2",
-    "log3",
-    "log4",
-}
-BACKEND_CODE_IMAGE_PRIMITIVES = {
-    "codesize",
-    "codecopy",
+BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES = {
     "extcodesize",
     "extcodecopy",
     "extcodehash",
 }
+BACKEND_OBJECT_BUILTINS_REQUIRING_LINKER = {
+    "linkersymbol",
+}
+BACKEND_OBJECT_BUILTINS_COMPUTED = {
+    "datasize",
+    "dataoffset",
+    "datacopy",
+    "loadimmutable",
+    "setimmutable",
+}
 BACKEND_BLOCKING_PRIMITIVES = (
     BACKEND_EXTERNAL_EFFECT_PRIMITIVES
-    | BACKEND_STATIC_MODE_PRIMITIVES
-    | BACKEND_CODE_IMAGE_PRIMITIVES
+    | BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES
 )
 
 BRIDGE_JSON_SCHEMA = "evm-compiler.solc-yul-bridge.v3"
@@ -671,6 +702,24 @@ class StringLit(Expr):
 
     def bridge_json(self) -> Json:
         return {"node": "stringLiteral", "value": self.value}
+
+
+@dataclass(frozen=True)
+class BytesLit(Expr):
+    bytes: List[int]
+
+    def lean(self) -> str:
+        return (
+            f"{LEAN_EXPR}.Lit "
+            f"(EvmYul.UInt256.ofNat {yul_bytes_literal_word(self.bytes)})"
+        )
+
+    def lean_ir(self) -> str:
+        bytes_ = lean_list([f"UInt8.ofNat {byte}" for byte in self.bytes], 1)
+        return f"{LEAN_FRONTEND}.Expr.bytesLit {bytes_}"
+
+    def bridge_json(self) -> Json:
+        return {"node": "bytesLiteral", "bytes": list(self.bytes)}
 
 
 @dataclass(frozen=True)
@@ -1058,17 +1107,205 @@ def typed_names(nodes: Sequence[Json], field: str) -> List[str]:
     return names
 
 
+def generated_identifier_part(name: str) -> str:
+    chars = []
+    for ch in name:
+        if ch.isascii() and (ch.isalnum() or ch in {"_", "$"}):
+            chars.append(ch)
+        elif ch == ".":
+            chars.append("_")
+    result = "".join(chars).strip("_")
+    return result or "fn"
+
+
+def valid_yul_identifier(name: str) -> bool:
+    if not name:
+        return False
+    first = name[0]
+    if not (first.isascii() and (first.isalpha() or first in {"_", "$"})):
+        return False
+    previous_dot = False
+    for ch in name[1:]:
+        if ch == ".":
+            if previous_dot:
+                return False
+            previous_dot = True
+            continue
+        previous_dot = False
+        if not (ch.isascii() and (ch.isalnum() or ch in {"_", "$"})):
+            return False
+    return not name.endswith(".")
+
+
+def binding_name_ok(name: str) -> bool:
+    return (
+        valid_yul_identifier(name)
+        and name not in RESERVED_BINDING_NAMES
+        and not name.startswith("verbatim")
+    )
+
+
+@dataclass
+class ParseContext:
+    function_scopes: List[Dict[str, str]] = field(default_factory=list)
+    identifier_scopes: List[Set[str]] = field(default_factory=list)
+    hoisted_functions: List[Tuple[str, FunctionDef]] = field(default_factory=list)
+    used_function_names: Set[str] = field(default_factory=set)
+    next_generated_function_id: int = 0
+    clz_helper_name: Optional[str] = None
+    clz_arg_name: Optional[str] = None
+    clz_return_name: Optional[str] = None
+
+    def push_function_scope(self, names: Dict[str, str]) -> None:
+        self.function_scopes.append(names)
+
+    def pop_function_scope(self) -> None:
+        self.function_scopes.pop()
+
+    def push_identifier_scope(self) -> None:
+        self.identifier_scopes.append(set())
+
+    def pop_identifier_scope(self) -> None:
+        self.identifier_scopes.pop()
+
+    def identifier_visible(self, name: str) -> bool:
+        return any(name in scope for scope in self.identifier_scopes)
+
+    def declare_identifiers(
+        self, names: Sequence[str], description: str, node: Json
+    ) -> None:
+        if not self.identifier_scopes:
+            self.push_identifier_scope()
+        seen: Set[str] = set()
+        for name in names:
+            if not binding_name_ok(name):
+                fail(
+                    f"Invalid Yul {description} name {name!r} at "
+                    f"{node_src(node)}"
+                )
+            if name in seen:
+                fail(
+                    f"Duplicate Yul {description} name {name!r} at "
+                    f"{node_src(node)}"
+                )
+            if self.identifier_visible(name):
+                fail(
+                    f"Yul {description} name {name!r} already taken in this "
+                    f"scope at {node_src(node)}"
+                )
+            seen.add(name)
+        self.identifier_scopes[-1].update(seen)
+
+    def resolve_function(self, name: str) -> str:
+        for scope in reversed(self.function_scopes):
+            resolved = scope.get(name)
+            if resolved is not None:
+                return resolved
+        return name
+
+    def fresh_generated_function_name(self, base: str) -> str:
+        stem = generated_identifier_part(base)
+        while True:
+            candidate = f"__yul_gen_{self.next_generated_function_id}_{stem}"
+            self.next_generated_function_id += 1
+            if candidate not in self.used_function_names:
+                self.used_function_names.add(candidate)
+                return candidate
+
+    def fresh_non_function_binding_name(self, base: str) -> str:
+        stem = generated_identifier_part(base)
+        index = 0
+        while True:
+            candidate = f"__yul_{stem}" if index == 0 else f"__yul_{stem}_{index}"
+            index += 1
+            if candidate not in self.used_function_names:
+                self.used_function_names.add(candidate)
+                return candidate
+
+    def ensure_clz_helper(self) -> str:
+        if self.clz_helper_name is None:
+            self.clz_helper_name = self.fresh_generated_function_name("clz")
+            self.clz_arg_name = self.fresh_non_function_binding_name("clz_arg")
+            self.clz_return_name = self.fresh_non_function_binding_name("clz_ret")
+        return self.clz_helper_name
+
+
+def clz_helper_function_def(arg_name: str, return_name: str) -> FunctionDef:
+    def prim(name: str, args: List[Expr]) -> Call:
+        return Call(name, args, CALL_PRIMITIVE)
+
+    def value(name: str) -> Var:
+        return Var(name)
+
+    def word(value: int) -> Lit:
+        return Lit(value)
+
+    nonzero_body: List[Stmt] = [Assign([return_name], word(0))]
+    for check_shift, addend in [
+        (128, 128),
+        (192, 64),
+        (224, 32),
+        (240, 16),
+        (248, 8),
+        (252, 4),
+        (254, 2),
+        (255, 1),
+    ]:
+        step: List[Stmt] = [
+            Assign(
+                [return_name],
+                prim("add", [value(return_name), word(addend)]),
+            )
+        ]
+        if addend != 1:
+            step.append(
+                Assign([arg_name], prim("shl", [word(addend), value(arg_name)]))
+            )
+        nonzero_body.append(
+            If(
+                prim("iszero", [prim("shr", [word(check_shift), value(arg_name)])]),
+                step,
+            )
+        )
+
+    return FunctionDef(
+        [arg_name],
+        [return_name],
+        [
+            Assign([return_name], word(256)),
+            If(value(arg_name), nonzero_body),
+        ],
+    )
+
+
+def yul_function_name(node: Json) -> str:
+    name = node.get("name")
+    if not isinstance(name, str):
+        fail(f"Expected Yul function name at {node_src(node)}")
+    return name
+
+
 def classify_call(name: str) -> str:
     if name in PRIMITIVE_OPS:
         return CALL_PRIMITIVE
     if name in OBJECT_BUILTINS:
         return CALL_OBJECT_BUILTIN
-    if name.startswith("verbatim"):
+    if name in UNSUPPORTED_DIALECT_BUILTINS or name.startswith("verbatim"):
         return CALL_DIALECT_BUILTIN
     return CALL_USER
 
 
-def parse_expr(node: Any) -> Expr:
+def yul_literal_word(expr: Expr, what: str) -> int:
+    if isinstance(expr, Lit):
+        return expr.value
+    if isinstance(expr, StringLit):
+        return yul_string_literal_word(expr.value)
+    if isinstance(expr, BytesLit):
+        return yul_bytes_literal_word(expr.bytes)
+    fail(f"{what} must be a literal")
+
+
+def parse_expr(node: Any, ctx: Optional[ParseContext] = None) -> Expr:
     if not isinstance(node, dict):
         fail(f"Expected Yul expression object, got {node!r}")
     node_type = node.get("nodeType")
@@ -1079,6 +1316,11 @@ def parse_expr(node: Any) -> Expr:
             return Lit(parse_uint256(value))
         if kind == "bool" and isinstance(value, str):
             return Lit(1 if value == "true" else 0)
+        hex_value = node.get("hexValue")
+        if kind == "string" and isinstance(hex_value, str):
+            return BytesLit(
+                parse_hex_bytes(hex_value, f"Yul hex string literal at {node_src(node)}")
+            )
         if kind == "string" and isinstance(value, str):
             return StringLit(value)
         fail(
@@ -1100,45 +1342,122 @@ def parse_expr(node: Any) -> Expr:
         if function_name == "memoryguard":
             if len(raw_args) != 1:
                 fail(f"memoryguard expects one argument at {node_src(node)}")
-            return parse_expr(raw_args[0])
-        args = [parse_expr(arg) for arg in raw_args]
-        return Call(function_name, args, classify_call(function_name))
+            return parse_expr(raw_args[0], ctx)
+        args = [parse_expr(arg, ctx) for arg in raw_args]
+        if function_name == "clz":
+            if len(args) != 1:
+                fail(f"clz expects one argument at {node_src(node)}")
+            if ctx is None:
+                fail("clz lowering requires a Yul object parse context")
+            return Call(ctx.ensure_clz_helper(), args, CALL_USER)
+        callee_kind = classify_call(function_name)
+        callee = (
+            ctx.resolve_function(function_name)
+            if ctx is not None and callee_kind == CALL_USER
+            else function_name
+        )
+        return Call(callee, args, callee_kind)
     fail(f"Unsupported Yul expression nodeType {node_type!r} at {node_src(node)}")
 
 
-def parse_block(node: Json) -> List[Stmt]:
+def parse_block(
+    node: Json,
+    ctx: Optional[ParseContext] = None,
+    *,
+    creates_scope: bool = True,
+) -> List[Stmt]:
     if node.get("nodeType") != "YulBlock":
         fail(f"Expected YulBlock, got {node.get('nodeType')!r} at {node_src(node)}")
     statements = node.get("statements", [])
     if not isinstance(statements, list):
         fail(f"Expected statements list in YulBlock at {node_src(node)}")
-    return [parse_stmt(stmt) for stmt in statements]
+    if ctx is None:
+        return [parse_stmt(stmt) for stmt in statements]
+
+    if creates_scope:
+        ctx.push_identifier_scope()
+    try:
+        local_functions: Dict[str, str] = {}
+        for stmt in statements:
+            if isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition":
+                source_name = yul_function_name(stmt)
+                if source_name in local_functions:
+                    fail(
+                        f"Duplicate Yul function {source_name!r} in block at "
+                        f"{node_src(stmt)}"
+                    )
+                ctx.declare_identifiers([source_name], "function", stmt)
+                local_functions[source_name] = ctx.fresh_generated_function_name(
+                    source_name
+                )
+
+        ctx.push_function_scope(local_functions)
+        try:
+            for stmt in statements:
+                if (
+                    isinstance(stmt, dict)
+                    and stmt.get("nodeType") == "YulFunctionDefinition"
+                ):
+                    source_name = yul_function_name(stmt)
+                    ctx.hoisted_functions.append(
+                        (local_functions[source_name], parse_function_def(stmt, ctx))
+                    )
+            return [
+                parse_stmt(stmt, ctx)
+                for stmt in statements
+                if not (
+                    isinstance(stmt, dict)
+                    and stmt.get("nodeType") == "YulFunctionDefinition"
+                )
+            ]
+        finally:
+            ctx.pop_function_scope()
+    finally:
+        if creates_scope:
+            ctx.pop_identifier_scope()
 
 
-def parse_stmt(node: Any) -> Stmt:
+def block_has_immediate_function_definition(node: Json) -> bool:
+    if node.get("nodeType") != "YulBlock":
+        return False
+    statements = node.get("statements", [])
+    return isinstance(statements, list) and any(
+        isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition"
+        for stmt in statements
+    )
+
+
+def parse_stmt(node: Any, ctx: Optional[ParseContext] = None) -> Stmt:
     if not isinstance(node, dict):
         fail(f"Expected Yul statement object, got {node!r}")
     node_type = node.get("nodeType")
     if node_type == "YulBlock":
-        return Block(parse_block(node))
+        return Block(parse_block(node, ctx))
     if node_type == "YulVariableDeclaration":
         variables = node.get("variables", [])
         if not isinstance(variables, list):
             fail(f"Expected variables list at {node_src(node)}")
+        names = typed_names(variables, "variables")
         value = node.get("value")
-        return Let(typed_names(variables, "variables"), parse_expr(value) if value else None)
+        parsed_value = parse_expr(value, ctx) if value else None
+        if ctx is not None:
+            ctx.declare_identifiers(names, "variable", node)
+        return Let(names, parsed_value)
     if node_type == "YulAssignment":
         variable_names = node.get("variableNames", [])
         if not isinstance(variable_names, list):
             fail(f"Expected variableNames list at {node_src(node)}")
-        return Assign(typed_names(variable_names, "variableNames"), parse_expr(node["value"]))
+        return Assign(
+            typed_names(variable_names, "variableNames"),
+            parse_expr(node["value"], ctx),
+        )
     if node_type == "YulExpressionStatement":
-        return ExprStmt(parse_expr(node["expression"]))
+        return ExprStmt(parse_expr(node["expression"], ctx))
     if node_type == "YulIf":
         body = node.get("body")
         if not isinstance(body, dict):
             fail(f"Expected YulIf body at {node_src(node)}")
-        return If(parse_expr(node["condition"]), parse_block(body))
+        return If(parse_expr(node["condition"], ctx), parse_block(body, ctx))
     if node_type == "YulSwitch":
         cases: List[Tuple[int, List[Stmt]]] = []
         default: List[Stmt] = []
@@ -1147,23 +1466,45 @@ def parse_stmt(node: Any) -> Stmt:
             body_node = case.get("body")
             if not isinstance(body_node, dict):
                 fail(f"Expected YulCase body at {node_src(case)}")
-            body = parse_block(body_node)
+            body = parse_block(body_node, ctx)
             if value == "default":
                 default = body
             else:
-                literal = parse_expr(value)
-                if not isinstance(literal, Lit):
-                    fail(f"Yul switch case must be a literal at {node_src(case)}")
-                cases.append((literal.value, body))
-        return Switch(parse_expr(node["expression"]), cases, default)
+                literal = parse_expr(value, ctx)
+                cases.append(
+                    (
+                        yul_literal_word(literal, f"Yul switch case at {node_src(case)}"),
+                        body,
+                    )
+                )
+        return Switch(parse_expr(node["expression"], ctx), cases, default)
     if node_type == "YulForLoop":
         pre_node = node.get("pre")
         post_node = node.get("post")
         body_node = node.get("body")
         if not all(isinstance(part, dict) for part in [pre_node, post_node, body_node]):
             fail(f"Expected YulForLoop pre/post/body blocks at {node_src(node)}")
-        pre = parse_block(pre_node)
-        loop = For(parse_expr(node["condition"]), parse_block(post_node), parse_block(body_node))
+        if block_has_immediate_function_definition(pre_node):
+            fail(f"Yul for-loop init blocks cannot define functions at {node_src(node)}")
+        if ctx is None:
+            pre = parse_block(pre_node)
+            loop = For(
+                parse_expr(node["condition"]),
+                parse_block(post_node),
+                parse_block(body_node),
+            )
+            return loop if not pre else Block(pre + [loop])
+
+        ctx.push_identifier_scope()
+        try:
+            pre = parse_block(pre_node, ctx, creates_scope=False)
+            loop = For(
+                parse_expr(node["condition"], ctx),
+                parse_block(post_node, ctx),
+                parse_block(body_node, ctx),
+            )
+        finally:
+            ctx.pop_identifier_scope()
         return loop if not pre else Block(pre + [loop])
     if node_type == "YulBreak":
         return Control("Break")
@@ -1179,13 +1520,20 @@ def parse_stmt(node: Any) -> Stmt:
     fail(f"Unsupported Yul statement nodeType {node_type!r} at {node_src(node)}")
 
 
-def parse_function_def(node: Json) -> FunctionDef:
+def parse_function_def(node: Json, ctx: Optional[ParseContext] = None) -> FunctionDef:
     body = node.get("body")
     if not isinstance(body, dict):
         fail(f"Expected function body for {node.get('name')!r} at {node_src(node)}")
     params = typed_names(node.get("parameters", []), "parameters")
     returns = typed_names(node.get("returnVariables", []), "returnVariables")
-    return FunctionDef(params, returns, parse_block(body))
+    if ctx is None:
+        return FunctionDef(params, returns, parse_block(body))
+    ctx.push_identifier_scope()
+    try:
+        ctx.declare_identifiers(params + returns, "function parameter/result", node)
+        return FunctionDef(params, returns, parse_block(body, ctx))
+    finally:
+        ctx.pop_identifier_scope()
 
 
 def parse_yul_object(node: Json) -> YulObject:
@@ -1201,14 +1549,46 @@ def parse_yul_object(node: Json) -> YulObject:
         block = code.get("block") if isinstance(code, dict) else None
         if not isinstance(block, dict):
             fail(f"Expected code.block for YulObject {name!r}")
-        for stmt in block.get("statements", []):
+        statements = block.get("statements", [])
+        if not isinstance(statements, list):
+            fail(f"Expected statements list in YulObject {name!r} code block")
+        ctx = ParseContext()
+        top_level_functions: Dict[str, str] = {}
+        ctx.push_identifier_scope()
+        for stmt in statements:
             if isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition":
-                fn_name = stmt.get("name")
-                if not isinstance(fn_name, str):
-                    fail(f"Expected Yul function name at {node_src(stmt)}")
-                functions.append((fn_name, parse_function_def(stmt)))
-            else:
-                dispatcher.append(parse_stmt(stmt))
+                fn_name = yul_function_name(stmt)
+                if fn_name in top_level_functions:
+                    fail(
+                        f"Duplicate top-level Yul function {fn_name!r} in "
+                        f"object {name!r} at {node_src(stmt)}"
+                    )
+                ctx.declare_identifiers([fn_name], "function", stmt)
+                top_level_functions[fn_name] = fn_name
+                ctx.used_function_names.add(fn_name)
+
+        ctx.push_function_scope(top_level_functions)
+        try:
+            for stmt in statements:
+                if isinstance(stmt, dict) and stmt.get("nodeType") == "YulFunctionDefinition":
+                    fn_name = yul_function_name(stmt)
+                    functions.append((fn_name, parse_function_def(stmt, ctx)))
+                else:
+                    dispatcher.append(parse_stmt(stmt, ctx))
+        finally:
+            ctx.pop_function_scope()
+            ctx.pop_identifier_scope()
+
+        functions.extend(ctx.hoisted_functions)
+        if ctx.clz_helper_name is not None:
+            if ctx.clz_arg_name is None or ctx.clz_return_name is None:
+                fail("Internal error: incomplete clz helper context")
+            functions.append(
+                (
+                    ctx.clz_helper_name,
+                    clz_helper_function_def(ctx.clz_arg_name, ctx.clz_return_name),
+                )
+            )
 
     data = []
     subobjects = []
@@ -1411,7 +1791,7 @@ def render_concrete_yul_backend_defs(yul_definition: str) -> str:
     validate_lean_name(bytecode, "bytecode definition name")
     return f"""
 noncomputable def {checked_assembly} : Option EvmCompiler.Assembly.Program :=
-  EvmCompiler.Yul.Program.compileChecked? {yul_definition}
+  EvmCompiler.Yul.Program.compileSolcChecked? {yul_definition}
 
 noncomputable def {target} : Option EvmCompiler.Assembly.TargetProgram := do
   let asm ← {checked_assembly}
@@ -1433,7 +1813,7 @@ def render_optional_yul_backend_defs(optional_yul_definition: str) -> str:
     return f"""
 noncomputable def {checked_assembly} : Option EvmCompiler.Assembly.Program := do
   let yul ← {optional_yul_definition}
-  EvmCompiler.Yul.Program.compileChecked? yul
+  EvmCompiler.Yul.Program.compileSolcChecked? yul
 
 noncomputable def {target} : Option EvmCompiler.Assembly.TargetProgram := do
   let asm ← {checked_assembly}
@@ -1543,6 +1923,32 @@ def render_frontend_module(
         to_objects_with_local_data_base_definition,
         "to-Objects-with-local-data-base definition name",
     )
+    resolved_object_data_definition = definition + "ResolvedObjectData"
+    validate_lean_name(
+        resolved_object_data_definition,
+        "resolved-object-data definition name",
+    )
+    to_yul_with_computed_object_data_definition = (
+        definition + "ToYulWithComputedObjectData"
+    )
+    validate_lean_name(
+        to_yul_with_computed_object_data_definition,
+        "to-Yul-with-computed-object-data definition name",
+    )
+    to_objects_with_computed_object_data_definition = (
+        definition + "ToObjectsWithComputedObjectData"
+    )
+    validate_lean_name(
+        to_objects_with_computed_object_data_definition,
+        "to-Objects-with-computed-object-data definition name",
+    )
+    checked_assembly_with_computed_object_data_definition = (
+        definition + "CheckedAssemblyWithComputedObjectData"
+    )
+    validate_lean_name(
+        checked_assembly_with_computed_object_data_definition,
+        "checked-assembly-with-computed-object-data definition name",
+    )
     namespace_parts = []
     if namespace:
         namespace_parts = namespace.split(".")
@@ -1585,8 +1991,18 @@ noncomputable def {to_objects_definition} : Option EvmCompiler.Objects.Program :
     )
     bytecode_image_definition = definition + "UncheckedBytecodeImage"
     object_image_definition = definition + "UncheckedObjectImage"
+    checked_bytecode_image_definition = definition + "CheckedBytecodeImage"
+    checked_object_image_definition = definition + "CheckedObjectImage"
     validate_lean_name(bytecode_image_definition, "unchecked bytecode image definition name")
     validate_lean_name(object_image_definition, "unchecked object image definition name")
+    validate_lean_name(
+        checked_bytecode_image_definition,
+        "checked bytecode image definition name",
+    )
+    validate_lean_name(
+        checked_object_image_definition,
+        "checked object image definition name",
+    )
     body += f"""
 def {object_image_definition} : Option {LEAN_FRONTEND}.ObjectImage :=
   {definition}.object.bytecodeImageUnchecked?
@@ -1595,6 +2011,15 @@ def {bytecode_image_definition} : Option ByteArray :=
   Option.map
     (fun image => EvmCompiler.Assembly.Bytecode.ofList image.bytes)
     {object_image_definition}
+
+noncomputable def {checked_object_image_definition} :
+    Option {LEAN_FRONTEND}.ObjectImage :=
+  {definition}.object.bytecodeImageChecked?
+
+noncomputable def {checked_bytecode_image_definition} : Option ByteArray :=
+  Option.map
+    (fun image => EvmCompiler.Assembly.Bytecode.ofList image.bytes)
+    {checked_object_image_definition}
 """
     linker_entries = list(linker_symbols or [])
     linker_symbols_definition = definition + "LinkerSymbols"
@@ -1604,6 +2029,12 @@ def {bytecode_image_definition} : Option ByteArray :=
     bytecode_image_with_linkers_definition = (
         definition + "UncheckedBytecodeImageWithLinkerSymbols"
     )
+    checked_object_image_with_linkers_definition = (
+        definition + "CheckedObjectImageWithLinkerSymbols"
+    )
+    checked_bytecode_image_with_linkers_definition = (
+        definition + "CheckedBytecodeImageWithLinkerSymbols"
+    )
     validate_lean_name(linker_symbols_definition, "linker-symbols definition name")
     validate_lean_name(
         object_image_with_linkers_definition,
@@ -1612,6 +2043,14 @@ def {bytecode_image_definition} : Option ByteArray :=
     validate_lean_name(
         bytecode_image_with_linkers_definition,
         "unchecked bytecode image with linker symbols definition name",
+    )
+    validate_lean_name(
+        checked_object_image_with_linkers_definition,
+        "checked object image with linker symbols definition name",
+    )
+    validate_lean_name(
+        checked_bytecode_image_with_linkers_definition,
+        "checked bytecode image with linker symbols definition name",
     )
     linker_symbols_rendered = lean_list(
         [entry.lean_ir() for entry in linker_entries],
@@ -1631,7 +2070,41 @@ def {bytecode_image_with_linkers_definition} : Option ByteArray :=
   Option.map
     (fun image => EvmCompiler.Assembly.Bytecode.ofList image.bytes)
     {object_image_with_linkers_definition}
+
+noncomputable def {checked_object_image_with_linkers_definition} :
+    Option {LEAN_FRONTEND}.ObjectImage :=
+  {definition}.object.bytecodeImageCheckedWithLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {checked_bytecode_image_with_linkers_definition} :
+    Option ByteArray :=
+  Option.map
+    (fun image => EvmCompiler.Assembly.Bytecode.ofList image.bytes)
+    {checked_object_image_with_linkers_definition}
+
+def {resolved_object_data_definition} :
+    Option {LEAN_FRONTEND}.Program :=
+  {definition}.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+def {to_yul_with_computed_object_data_definition} :
+    Option EvmCompiler.Yul.Program :=
+  {definition}.toYulProgramWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {to_objects_with_computed_object_data_definition} :
+    Option EvmCompiler.Objects.Program :=
+  {definition}.toObjectsWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {checked_assembly_with_computed_object_data_definition} :
+    Option EvmCompiler.Assembly.Program :=
+  {definition}.compileCheckedWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
 """
+    body += render_optional_yul_backend_defs(
+        to_yul_with_computed_object_data_definition
+    )
     body += render_optional_yul_backend_defs(to_yul_definition)
     layout_entries = list(object_layout or [])
     layout = (
@@ -1703,6 +2176,18 @@ def render_frontend_json_module(
     to_objects_with_local_data_base_definition = (
         definition + "ToObjectsWithLocalDataBase"
     )
+    checked_object_image_definition = definition + "CheckedObjectImage"
+    checked_bytecode_image_definition = definition + "CheckedBytecodeImage"
+    resolved_object_data_definition = definition + "ResolvedObjectData"
+    to_yul_with_computed_object_data_definition = (
+        definition + "ToYulWithComputedObjectData"
+    )
+    to_objects_with_computed_object_data_definition = (
+        definition + "ToObjectsWithComputedObjectData"
+    )
+    checked_assembly_with_computed_object_data_definition = (
+        definition + "CheckedAssemblyWithComputedObjectData"
+    )
     for generated_name, what in [
         (json_definition, "JSON definition name"),
         (decode_definition, "JSON decode definition name"),
@@ -1717,6 +2202,24 @@ def render_frontend_json_module(
         (
             to_objects_with_local_data_base_definition,
             "to-Objects-with-local-data-base definition name",
+        ),
+        (checked_object_image_definition, "checked object image definition name"),
+        (
+            checked_bytecode_image_definition,
+            "checked bytecode image definition name",
+        ),
+        (resolved_object_data_definition, "resolved-object-data definition name"),
+        (
+            to_yul_with_computed_object_data_definition,
+            "to-Yul-with-computed-object-data definition name",
+        ),
+        (
+            to_objects_with_computed_object_data_definition,
+            "to-Objects-with-computed-object-data definition name",
+        ),
+        (
+            checked_assembly_with_computed_object_data_definition,
+            "checked-assembly-with-computed-object-data definition name",
         ),
     ]:
         validate_lean_name(generated_name, what)
@@ -1779,6 +2282,15 @@ def {definition}UncheckedObjectImage :
 def {definition}UncheckedBytecodeImage : Option ByteArray := do
   let image ← {definition}UncheckedObjectImage
   some (EvmCompiler.Assembly.Bytecode.ofList image.bytes)
+
+noncomputable def {checked_object_image_definition} :
+    Option EvmCompiler.Solidity.Frontend.ObjectImage := do
+  let program ← {definition}
+  program.object.bytecodeImageChecked?
+
+noncomputable def {checked_bytecode_image_definition} : Option ByteArray := do
+  let image ← {checked_object_image_definition}
+  some (EvmCompiler.Assembly.Bytecode.ofList image.bytes)
 """
     linker_entries = list(linker_symbols or [])
     linker_symbols_definition = definition + "LinkerSymbols"
@@ -1788,6 +2300,12 @@ def {definition}UncheckedBytecodeImage : Option ByteArray := do
     bytecode_image_with_linkers_definition = (
         definition + "UncheckedBytecodeImageWithLinkerSymbols"
     )
+    checked_object_image_with_linkers_definition = (
+        definition + "CheckedObjectImageWithLinkerSymbols"
+    )
+    checked_bytecode_image_with_linkers_definition = (
+        definition + "CheckedBytecodeImageWithLinkerSymbols"
+    )
     validate_lean_name(linker_symbols_definition, "linker-symbols definition name")
     validate_lean_name(
         object_image_with_linkers_definition,
@@ -1796,6 +2314,14 @@ def {definition}UncheckedBytecodeImage : Option ByteArray := do
     validate_lean_name(
         bytecode_image_with_linkers_definition,
         "unchecked bytecode image with linker symbols definition name",
+    )
+    validate_lean_name(
+        checked_object_image_with_linkers_definition,
+        "checked object image with linker symbols definition name",
+    )
+    validate_lean_name(
+        checked_bytecode_image_with_linkers_definition,
+        "checked bytecode image with linker symbols definition name",
     )
     linker_symbols_rendered = lean_list(
         [entry.lean_ir() for entry in linker_entries],
@@ -1815,7 +2341,45 @@ def {object_image_with_linkers_definition} :
 def {bytecode_image_with_linkers_definition} : Option ByteArray := do
   let image ← {object_image_with_linkers_definition}
   some (EvmCompiler.Assembly.Bytecode.ofList image.bytes)
+
+noncomputable def {checked_object_image_with_linkers_definition} :
+    Option EvmCompiler.Solidity.Frontend.ObjectImage := do
+  let program ← {definition}
+  program.object.bytecodeImageCheckedWithLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {checked_bytecode_image_with_linkers_definition} :
+    Option ByteArray := do
+  let image ← {checked_object_image_with_linkers_definition}
+  some (EvmCompiler.Assembly.Bytecode.ofList image.bytes)
+
+def {resolved_object_data_definition} :
+    Option EvmCompiler.Solidity.Frontend.Program := do
+  let program ← {definition}
+  program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+def {to_yul_with_computed_object_data_definition} :
+    Option EvmCompiler.Yul.Program := do
+  let program ← {definition}
+  program.toYulProgramWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {to_objects_with_computed_object_data_definition} :
+    Option EvmCompiler.Objects.Program := do
+  let program ← {definition}
+  program.toObjectsWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
+
+noncomputable def {checked_assembly_with_computed_object_data_definition} :
+    Option EvmCompiler.Assembly.Program := do
+  let program ← {definition}
+  program.compileCheckedWithComputedObjectDataAndLinkerSymbols?
+    {linker_symbols_definition}
 """
+    body += render_optional_yul_backend_defs(
+        to_yul_with_computed_object_data_definition
+    )
     body += render_optional_yul_backend_defs(to_yul_definition)
     layout_entries = list(object_layout or [])
     layout = (
@@ -1920,6 +2484,9 @@ def collect_expr_summary(
         return
     if isinstance(expr, StringLit):
         increment_nested(expr_counts, "stringLiteral")
+        return
+    if isinstance(expr, BytesLit):
+        increment_nested(expr_counts, "bytesLiteral")
         return
     if isinstance(expr, Var):
         increment_nested(expr_counts, "var")
@@ -2067,13 +2634,25 @@ def bridge_summary_hint_strings(
     hints = []
     if call_kind_counts.get(CALL_DIALECT_BUILTIN, 0) > 0:
         hints.append(
-            "dialect-builtins-present: bridge JSON preserves verbatim-style "
-            "dialect calls, but the executable backend path may reject them"
+            "unsupported-dialect-builtins-present: bridge JSON preserves "
+            "verbatim/EOF dialect calls, but checked executable lowering rejects them"
         )
-    if call_kind_counts.get(CALL_OBJECT_BUILTIN, 0) > 0:
+    object_builtin_names = set(call_name_counts.get(CALL_OBJECT_BUILTIN, Counter()))
+    unresolved_object_builtins = sorted(
+        object_builtin_names & BACKEND_OBJECT_BUILTINS_REQUIRING_LINKER
+    )
+    computed_object_builtins = sorted(
+        object_builtin_names & BACKEND_OBJECT_BUILTINS_COMPUTED
+    )
+    if unresolved_object_builtins:
         hints.append(
-            "object-builtins-present: bytecode emission may need object layout, "
-            "data-base, immutable, or linker-symbol resolution"
+            "linker-symbols-present: executable lowering needs an explicit "
+            "linker-symbol map"
+        )
+    if computed_object_builtins:
+        hints.append(
+            "object-builtins-computed: datasize/dataoffset/datacopy/immutable builtins "
+            "are resolved by the computed object-image path"
         )
     primitive_calls = call_name_counts.get(CALL_PRIMITIVE, Counter())
     external_primitives = sorted(
@@ -2110,45 +2689,47 @@ def bridge_summary_backend_compatibility(
     )
     object_builtin_names = sorted(object_builtin_calls)
     dialect_builtin_names = sorted(dialect_builtin_calls)
+    linker_object_builtins = sorted(
+        name for name in object_builtin_names
+        if name in BACKEND_OBJECT_BUILTINS_REQUIRING_LINKER
+    )
+    computed_object_builtins = sorted(
+        name for name in object_builtin_names
+        if name in BACKEND_OBJECT_BUILTINS_COMPUTED
+    )
     notes = []
     external_primitives = sorted(
         name for name in unsupported_primitives
         if name in BACKEND_EXTERNAL_EFFECT_PRIMITIVES
     )
-    static_mode_primitives = sorted(
+    account_code_primitives = sorted(
         name for name in unsupported_primitives
-        if name in BACKEND_STATIC_MODE_PRIMITIVES
-    )
-    code_image_primitives = sorted(
-        name for name in unsupported_primitives
-        if name in BACKEND_CODE_IMAGE_PRIMITIVES
+        if name in BACKEND_EXTERNAL_ACCOUNT_CODE_PRIMITIVES
     )
     if external_primitives:
         notes.append(
             "current backend does not lower external call/create primitives"
         )
-    if static_mode_primitives:
+    if account_code_primitives:
         notes.append(
-            "current checked Yul bridge rejects storage writes and logs until "
-            "static-mode behavior is modeled"
-        )
-    if code_image_primitives:
-        notes.append(
-            "current checked Yul bridge rejects code-image primitives until "
-            "code-size/code-copy semantics are bridged"
+            "current backend does not lower external account-code inspection primitives"
         )
     if dialect_builtin_names:
         notes.append(
-            "dialect builtins are preserved structurally but not executable"
+            "verbatim and EOF dialect builtins are intentionally rejected before "
+            "executable core Yul lowering"
         )
-    if object_builtin_names:
+    if linker_object_builtins:
         notes.append(
-            "object builtins need layout, data-base, immutable, or linker "
-            "resolution before executable lowering"
+            "linkersymbol object builtin needs an explicit linker-symbol map"
+        )
+    if computed_object_builtins:
+        notes.append(
+            "computed object/data builtins are resolved by the object-image path"
         )
     if unsupported_primitives or dialect_builtin_names:
         status = "blocked"
-    elif object_builtin_names:
+    elif linker_object_builtins:
         status = "needs-resolution"
     else:
         status = "ready"
@@ -2935,6 +3516,13 @@ def bridge_uint256(value: Any, what: str) -> int:
     return bridge_uint(value, what, 2**256)
 
 
+def bridge_byte_array(value: Any, what: str) -> List[int]:
+    return [
+        bridge_uint(item, f"{what}[{index}]", 256)
+        for index, item in enumerate(bridge_array(value, what))
+    ]
+
+
 def bridge_string_array(value: Any, what: str) -> List[str]:
     return [
         bridge_string(item, f"{what}[{index}]")
@@ -2957,6 +3545,8 @@ def decode_bridge_expr(data: Any) -> Expr:
         return Lit(bridge_uint256(expr.get("value"), "literal.value"))
     if node == "stringLiteral":
         return StringLit(bridge_string(expr.get("value"), "stringLiteral.value"))
+    if node == "bytesLiteral":
+        return BytesLit(bridge_byte_array(expr.get("bytes"), "bytesLiteral.bytes"))
     if node == "var":
         return Var(bridge_string(expr.get("name"), "var.name"))
     if node == "call":
@@ -4170,33 +4760,44 @@ def main : IO Unit := do
   let markerImmutableValues :=
     EvmCompiler.Solidity.Frontend.ImmutableReference.markerEntriesFromNat
       0 immutableNames
-  let items := object.effectiveItems
+  let items? := do
+    let childImages ← childImages?
+    object.payloadItems? childImages
   let childImmutableReferences? := do
     let childImages ← childImages?
     some
       (EvmCompiler.Solidity.Frontend.ObjectImage.immutableReferenceEntries
         childImages)
+  let dataSizes? := do
+    let childImages ← childImages?
+    let items ← items?
+    EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataSizeEntries?
+      object.data childImages items
   let layout0? := do
     let childImages ← childImages?
+    let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.objectLayoutEntriesFromNat?
       object.data childImages 0 items
   let dataOffsets0? := do
     let childImages ← childImages?
+    let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataOffsetEntriesFromNat?
       object.data childImages 0 items
   let payload? := do
     let childImages ← childImages?
+    let items ← items?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.payloadBytes?
       object.data childImages items
   let placeholderCode? := do
     let layout0 ← layout0?
+    let dataSizes ← dataSizes?
     let dataOffsets0 ← dataOffsets0?
     let childImmutableReferences ← childImmutableReferences?
     let placeholderLayout : EvmCompiler.Solidity.Frontend.ObjectLayout :=
       {{ entries := layout0 }}
     let placeholderContext : EvmCompiler.Solidity.Frontend.ObjectBuiltinContext :=
       {{ layout := placeholderLayout
-        dataSizes := object.dataSizeEntries
+        dataSizes := dataSizes
         dataOffsets := dataOffsets0
         linkerSymbols := evmCompilerRunnerLinkerSymbols
         immutableValues := zeroImmutableValues
@@ -4208,24 +4809,27 @@ def main : IO Unit := do
     some placeholderCode.length
   let layout? := do
     let childImages ← childImages?
+    let items ← items?
     let codeBase ← codeBase?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.objectLayoutEntriesFromNat?
       object.data childImages codeBase items
   let dataOffsets? := do
     let childImages ← childImages?
+    let items ← items?
     let codeBase ← codeBase?
     EvmCompiler.Solidity.Frontend.ObjectItemRef.List.dataOffsetEntriesFromNat?
       object.data childImages codeBase items
   let code? := do
     let codeBase ← codeBase?
     let payload ← payload?
+    let dataSizes ← dataSizes?
     let layout ← layout?
     let dataOffsets ← dataOffsets?
     let childImmutableReferences ← childImmutableReferences?
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
     let context : EvmCompiler.Solidity.Frontend.ObjectBuiltinContext :=
       {{ layout := {{ entries := layout }}
-        dataSizes := object.dataSizeEntries
+        dataSizes := dataSizes
         dataOffsets := dataOffsets
         linkerSymbols := evmCompilerRunnerLinkerSymbols
         immutableValues := zeroImmutableValues
@@ -4235,13 +4839,14 @@ def main : IO Unit := do
   let markerCode? := do
     let codeBase ← codeBase?
     let payload ← payload?
+    let dataSizes ← dataSizes?
     let layout ← layout?
     let dataOffsets ← dataOffsets?
     let childImmutableReferences ← childImmutableReferences?
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
     let context : EvmCompiler.Solidity.Frontend.ObjectBuiltinContext :=
       {{ layout := {{ entries := layout }}
-        dataSizes := object.dataSizeEntries
+        dataSizes := dataSizes
         dataOffsets := dataOffsets
         linkerSymbols := evmCompilerRunnerLinkerSymbols
         immutableValues := markerImmutableValues
@@ -4251,11 +4856,22 @@ def main : IO Unit := do
   let objectImage? :=
     object.bytecodeImageUncheckedWithLinkerSymbols?
       evmCompilerRunnerLinkerSymbols
+  let computedObjectData? :=
+    object.computedObjectDataWithLinkerSymbols?
+      evmCompilerRunnerLinkerSymbols
+  let resolvedObjectData? :=
+    program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      evmCompilerRunnerLinkerSymbols
+  let solcValidatedObjectData? := do
+    let resolved ← resolvedObjectData?
+    resolved.object.toSolcYulProgram?
   let stages :=
     [ ("to_yul_contract", evmCompilerRunnerStageSome toYulContract?)
     , ("lower_code_unchecked", evmCompilerRunnerStageSome lowerCodeUnchecked?)
     , ("functions_compile", evmCompilerRunnerStageSome functionsCompile?)
     , ("child_images", evmCompilerRunnerStageSome childImages?)
+    , ("payload_items", evmCompilerRunnerStageSome items?)
+    , ("data_sizes", evmCompilerRunnerStageSome dataSizes?)
     , ("layout0", evmCompilerRunnerStageSome layout0?)
     , ("data_offsets0", evmCompilerRunnerStageSome dataOffsets0?)
     , ("payload", evmCompilerRunnerStageSome payload?)
@@ -4264,9 +4880,14 @@ def main : IO Unit := do
     , ("data_offsets", evmCompilerRunnerStageSome dataOffsets?)
     , ("code", evmCompilerRunnerStageSome code?)
     , ("marker_code", evmCompilerRunnerStageSome markerCode?)
+    , ("computed_object_data", evmCompilerRunnerStageSome computedObjectData?)
+    , ("resolved_object_data", evmCompilerRunnerStageSome resolvedObjectData?)
+    , ("solc_validation", evmCompilerRunnerStageSome solcValidatedObjectData?)
     , ("object_image", evmCompilerRunnerStageSome objectImage?)
     ]
-  let objectImageOk := evmCompilerRunnerStageSome objectImage?
+  let objectImageOk :=
+    evmCompilerRunnerStageSome objectImage? &&
+      evmCompilerRunnerStageSome solcValidatedObjectData?
   let firstNone :=
     if objectImageOk then
       "none"

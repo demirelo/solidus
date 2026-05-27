@@ -39,6 +39,18 @@ def string_literal(value):
     }
 
 
+def hex_string_literal(hex_value, value=None):
+    node = {
+        "nodeType": "YulLiteral",
+        "kind": "string",
+        "hexValue": hex_value,
+        "nativeSrc": "0:0:0",
+    }
+    if value is not None:
+        node["value"] = value
+    return node
+
+
 def identifier(name):
     return {"nodeType": "YulIdentifier", "name": name, "nativeSrc": "0:0:0"}
 
@@ -305,6 +317,57 @@ class SolidityToYulLeanTests(unittest.TestCase):
         with self.assertRaises(bridge.ConversionError):
             bridge.yul_string_literal_word("x" * 33)
 
+    def test_hex_string_literal_emits_right_padded_word(self):
+        expr = bridge.parse_expr(hex_string_literal("ff00"))
+        word = int.from_bytes(bytes([0xFF, 0x00]).ljust(32, b"\x00"), "big")
+
+        self.assertIsInstance(expr, bridge.BytesLit)
+        self.assertEqual(expr.bytes, [0xFF, 0x00])
+        self.assertEqual(bridge.yul_bytes_literal_word([0xFF, 0x00]), word)
+        self.assertIn(f"EvmYul.UInt256.ofNat {word}", expr.lean())
+        self.assertIn("Expr.bytesLit", expr.lean_ir())
+        self.assertIn("UInt8.ofNat 255", expr.lean_ir())
+        self.assertEqual(
+            expr.bridge_json(),
+            {"node": "bytesLiteral", "bytes": [0xFF, 0x00]},
+        )
+
+    def test_hex_string_literal_prefers_hex_value_when_solc_also_decodes_text(self):
+        expr = bridge.parse_expr(hex_string_literal("6162", value="ab"))
+
+        self.assertIsInstance(expr, bridge.BytesLit)
+        self.assertEqual(expr.bytes, [0x61, 0x62])
+
+    def test_switch_cases_accept_string_and_hex_string_literals(self):
+        stmt = bridge.parse_stmt(
+            {
+                "nodeType": "YulSwitch",
+                "expression": identifier("x"),
+                "cases": [
+                    {
+                        "value": string_literal("ok"),
+                        "body": block([]),
+                        "nativeSrc": "0:0:0",
+                    },
+                    {
+                        "value": hex_string_literal("ff"),
+                        "body": block([]),
+                        "nativeSrc": "0:0:0",
+                    },
+                ],
+                "nativeSrc": "0:0:0",
+            }
+        )
+
+        self.assertIsInstance(stmt, bridge.Switch)
+        self.assertEqual(
+            [value for value, _body in stmt.cases],
+            [
+                bridge.yul_string_literal_word("ok"),
+                bridge.yul_bytes_literal_word([0xFF]),
+            ],
+        )
+
     def test_object_builtin_is_preserved_in_bridge_json_but_rejected_by_lean(self):
         expr = bridge.parse_expr(call("datasize", [string_literal("runtime")]))
         self.assertEqual(expr.bridge_json()["calleeKind"], "objectBuiltin")
@@ -377,6 +440,310 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(len(root.dispatcher), 1)
         self.assertEqual([name for name, _ in root.functions], ["f"])
         self.assertEqual(root.data, [bridge.DataSection("metadata", [0xaa, 0xbb, 0xcc])])
+
+    def test_nested_functions_are_hoisted_and_calls_rewritten(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            block(
+                                [
+                                    {
+                                        "nodeType": "YulFunctionDefinition",
+                                        "name": "f",
+                                        "parameters": [],
+                                        "returnVariables": [{"name": "r"}],
+                                        "body": block(
+                                            [
+                                                {
+                                                    "nodeType": "YulAssignment",
+                                                    "variableNames": [identifier("r")],
+                                                    "value": literal("1"),
+                                                    "nativeSrc": "0:0:0",
+                                                }
+                                            ]
+                                        ),
+                                        "nativeSrc": "0:0:0",
+                                    },
+                                    {
+                                        "nodeType": "YulFunctionDefinition",
+                                        "name": "g",
+                                        "parameters": [],
+                                        "returnVariables": [{"name": "r"}],
+                                        "body": block(
+                                            [
+                                                {
+                                                    "nodeType": "YulAssignment",
+                                                    "variableNames": [identifier("r")],
+                                                    "value": call("f", []),
+                                                    "nativeSrc": "0:0:0",
+                                                }
+                                            ]
+                                        ),
+                                        "nativeSrc": "0:0:0",
+                                    },
+                                    {
+                                        "nodeType": "YulVariableDeclaration",
+                                        "variables": [{"name": "y"}],
+                                        "value": call("g", []),
+                                        "nativeSrc": "0:0:0",
+                                    },
+                                ]
+                            )
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        function_names = [name for name, _ in root.functions]
+        self.assertEqual(function_names, ["__yul_gen_0_f", "__yul_gen_1_g"])
+        dispatcher_block = root.dispatcher[0]
+        self.assertIsInstance(dispatcher_block, bridge.Block)
+        nested_let = dispatcher_block.stmts[0]
+        self.assertIsInstance(nested_let, bridge.Let)
+        self.assertIsInstance(nested_let.value, bridge.Call)
+        self.assertEqual(nested_let.value.callee, "__yul_gen_1_g")
+
+        _, g_fn = root.functions[1]
+        g_assign = g_fn.body[0]
+        self.assertIsInstance(g_assign, bridge.Assign)
+        self.assertIsInstance(g_assign.value, bridge.Call)
+        self.assertEqual(g_assign.value.callee, "__yul_gen_0_f")
+
+    def test_nested_function_source_shadowing_is_rejected_before_hoisting(self):
+        with self.assertRaisesRegex(bridge.ConversionError, "already taken"):
+            bridge.parse_yul_object(
+                {
+                    "nodeType": "YulObject",
+                    "name": "object",
+                    "code": {
+                        "block": block(
+                            [
+                                block(
+                                    [
+                                        {
+                                            "nodeType": "YulFunctionDefinition",
+                                            "name": "f",
+                                            "parameters": [],
+                                            "returnVariables": [],
+                                            "body": block([]),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                        {
+                                            "nodeType": "YulVariableDeclaration",
+                                            "variables": [{"name": "f"}],
+                                            "value": literal("2"),
+                                            "nativeSrc": "0:0:0",
+                                        },
+                                    ]
+                                )
+                            ]
+                        )
+                    },
+                    "subObjects": [],
+                }
+            )
+
+    def test_nested_function_conflict_with_outer_variable_is_rejected(self):
+        with self.assertRaisesRegex(bridge.ConversionError, "already taken"):
+            bridge.parse_yul_object(
+                {
+                    "nodeType": "YulObject",
+                    "name": "object",
+                    "code": {
+                        "block": block(
+                            [
+                                {
+                                    "nodeType": "YulVariableDeclaration",
+                                    "variables": [{"name": "x"}],
+                                    "value": literal("1"),
+                                    "nativeSrc": "0:0:0",
+                                },
+                                block(
+                                    [
+                                        {
+                                            "nodeType": "YulFunctionDefinition",
+                                            "name": "x",
+                                            "parameters": [],
+                                            "returnVariables": [],
+                                            "body": block([]),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                            ]
+                        )
+                    },
+                    "subObjects": [],
+                }
+            )
+
+    def test_function_parameter_cannot_shadow_source_function_name(self):
+        with self.assertRaisesRegex(bridge.ConversionError, "already taken"):
+            bridge.parse_yul_object(
+                {
+                    "nodeType": "YulObject",
+                    "name": "object",
+                    "code": {
+                        "block": block(
+                            [
+                                block(
+                                    [
+                                        {
+                                            "nodeType": "YulFunctionDefinition",
+                                            "name": "f",
+                                            "parameters": [{"name": "f"}],
+                                            "returnVariables": [],
+                                            "body": block([]),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                )
+                            ]
+                        )
+                    },
+                    "subObjects": [],
+                }
+            )
+
+    def test_clz_calls_are_expanded_to_generated_yul_helper(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "__yul_gen_0_clz",
+                                "parameters": [],
+                                "returnVariables": [{"name": "r"}],
+                                "body": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("r")],
+                                            "value": literal("0"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "z"}],
+                                "value": call("clz", [identifier("x")]),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertEqual(
+            [name for name, _ in root.functions],
+            ["__yul_gen_0_clz", "__yul_gen_1_clz"],
+        )
+        clz_call = root.dispatcher[0].value
+        self.assertIsInstance(clz_call, bridge.Call)
+        self.assertEqual(clz_call.callee, "__yul_gen_1_clz")
+        self.assertEqual(clz_call.callee_kind, bridge.CALL_USER)
+
+        helper = root.functions[1][1]
+        self.assertEqual(len(helper.params), 1)
+        self.assertEqual(len(helper.returns), 1)
+        self.assertEqual(helper.body[0], bridge.Assign([helper.returns[0]], bridge.Lit(256)))
+        self.assertIn("EvmYul.Operation.SHR", helper.lean())
+
+    def test_for_loop_init_function_definition_is_rejected_like_solc(self):
+        with self.assertRaises(bridge.ConversionError):
+            bridge.parse_stmt(
+                {
+                    "nodeType": "YulForLoop",
+                    "pre": block(
+                        [
+                            {
+                                "nodeType": "YulFunctionDefinition",
+                                "name": "f",
+                                "parameters": [],
+                                "returnVariables": [],
+                                "body": block([]),
+                                "nativeSrc": "0:0:0",
+                            }
+                        ]
+                    ),
+                    "condition": literal("1"),
+                    "post": block([]),
+                    "body": block([]),
+                    "nativeSrc": "0:0:0",
+                },
+                bridge.ParseContext(),
+            )
+
+    def test_for_loop_init_scope_does_not_escape_source_scope(self):
+        root = bridge.parse_yul_object(
+            {
+                "nodeType": "YulObject",
+                "name": "object",
+                "code": {
+                    "block": block(
+                        [
+                            {
+                                "nodeType": "YulForLoop",
+                                "pre": block(
+                                    [
+                                        {
+                                            "nodeType": "YulVariableDeclaration",
+                                            "variables": [{"name": "i"}],
+                                            "value": literal("0"),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "condition": call(
+                                    "lt",
+                                    [identifier("i"), literal("1")],
+                                ),
+                                "post": block(
+                                    [
+                                        {
+                                            "nodeType": "YulAssignment",
+                                            "variableNames": [identifier("i")],
+                                            "value": call(
+                                                "add",
+                                                [identifier("i"), literal("1")],
+                                            ),
+                                            "nativeSrc": "0:0:0",
+                                        }
+                                    ]
+                                ),
+                                "body": block([]),
+                                "nativeSrc": "0:0:0",
+                            },
+                            {
+                                "nodeType": "YulVariableDeclaration",
+                                "variables": [{"name": "i"}],
+                                "value": literal("2"),
+                                "nativeSrc": "0:0:0",
+                            },
+                        ]
+                    )
+                },
+                "subObjects": [],
+            }
+        )
+
+        self.assertIsInstance(root.dispatcher[0], bridge.Block)
+        self.assertEqual(root.dispatcher[1], bridge.Let(["i"], bridge.Lit(2)))
 
     def test_bridge_json_preserves_selected_object_tree(self):
         root = bridge.parse_yul_object(
@@ -569,12 +936,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(primitive_names["stop"], 1)
         self.assertEqual(summary["calls"]["objectBuiltin"]["names"][0]["name"], "datacopy")
         self.assertEqual(summary["calls"]["user"]["names"][0]["name"], "helper")
-        self.assertEqual(summary["backendCompatibility"]["status"], "needs-resolution")
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
         self.assertEqual(
             summary["backendCompatibility"]["objectBuiltinNames"],
             ["datacopy"],
         )
-        self.assertIn("object-builtins-present", "\n".join(summary["backendHints"]))
+        self.assertIn("object-builtins-computed", "\n".join(summary["backendHints"]))
 
     def test_bridge_json_summary_marks_current_backend_blockers(self):
         obj = bridge.YulObject(
@@ -656,7 +1023,67 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "\n".join(summary["backendHints"]),
         )
 
-    def test_bridge_json_summary_marks_checked_yul_boundary_blockers(self):
+    def test_bridge_json_summary_marks_external_account_code_family_blocked(self):
+        external_primitives = ["extcodesize", "extcodecopy", "extcodehash"]
+        obj = bridge.YulObject(
+            name="runtime",
+            dispatcher=[
+                bridge.ExprStmt(bridge.Call(name, [], bridge.CALL_PRIMITIVE))
+                for name in external_primitives
+            ],
+            functions=[],
+            data=[],
+            subobjects=[],
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            obj,
+            "ExternalCode.sol",
+            "ExternalCode",
+            "runtime",
+        )
+
+        compatibility = summary["backendCompatibility"]
+        self.assertEqual(compatibility["status"], "blocked")
+        self.assertEqual(
+            compatibility["unsupportedPrimitiveNames"],
+            sorted(external_primitives),
+        )
+        self.assertIn("external account-code", " ".join(compatibility["notes"]))
+
+    def test_bridge_json_summary_marks_unsupported_dialect_builtins_blocked(self):
+        obj = bridge.YulObject(
+            name="runtime",
+            dispatcher=[
+                bridge.ExprStmt(bridge.parse_expr(call("dataloadn", [literal("0")]))),
+                bridge.ExprStmt(bridge.parse_expr(call("verbatim_0i_0o", []))),
+            ],
+            functions=[],
+            data=[],
+            subobjects=[],
+        )
+
+        summary = bridge.bridge_json_summary_artifact(
+            obj,
+            "Dialect.sol",
+            "Dialect",
+            "runtime",
+        )
+
+        compatibility = summary["backendCompatibility"]
+        self.assertEqual(compatibility["status"], "blocked")
+        self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
+        self.assertEqual(
+            compatibility["dialectBuiltinNames"],
+            ["dataloadn", "verbatim_0i_0o"],
+        )
+        self.assertIn("verbatim and EOF", " ".join(compatibility["notes"]))
+        self.assertIn(
+            "unsupported-dialect-builtins-present",
+            "\n".join(summary["backendHints"]),
+        )
+
+    def test_bridge_json_summary_marks_local_effects_and_code_image_ready(self):
         obj = bridge.YulObject(
             name="runtime",
             dispatcher=[
@@ -701,14 +1128,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
 
         compatibility = summary["backendCompatibility"]
-        self.assertEqual(compatibility["status"], "blocked")
+        self.assertEqual(compatibility["status"], "ready")
         self.assertEqual(
             compatibility["unsupportedPrimitiveNames"],
-            ["codecopy", "log3", "sstore"],
+            [],
         )
-        notes = " ".join(compatibility["notes"])
-        self.assertIn("static-mode", notes)
-        self.assertIn("code-image", notes)
+        self.assertEqual(compatibility["notes"], [])
 
     def test_bridge_json_manifest_summary_uses_manifest_metadata_without_lean(self):
         obj = bridge.YulObject(
@@ -776,10 +1201,10 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "evm-compiler.solc-yul-bridge-manifest-summary.v1",
         )
         self.assertEqual(summary["counts"]["objects"], 1)
-        self.assertEqual(summary["backendCompatibility"]["status"], "blocked")
+        self.assertEqual(summary["backendCompatibility"]["status"], "ready")
         self.assertEqual(
             summary["backendCompatibility"]["unsupportedPrimitiveNames"],
-            ["sstore"],
+            [],
         )
         self.assertEqual(summary["objects"][0]["source"], "Input.sol")
         self.assertEqual(
@@ -1006,6 +1431,16 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
         self.assertIn("program.object.bytecodeImageUnchecked?", rendered)
         self.assertIn(
+            "noncomputable def programCheckedBytecodeImage : Option ByteArray",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programCheckedObjectImage",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Solidity.Frontend.ObjectImage", rendered)
+        self.assertIn("program.object.bytecodeImageChecked?", rendered)
+        self.assertIn(
             "def programLinkerSymbols :",
             rendered,
         )
@@ -1019,6 +1454,54 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
         self.assertIn(
             "program.object.bytecodeImageUncheckedWithLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programCheckedObjectImageWithLinkerSymbols",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programCheckedBytecodeImageWithLinkerSymbols",
+            rendered,
+        )
+        self.assertIn(
+            "program.object.bytecodeImageCheckedWithLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "def programResolvedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Solidity.Frontend.Program", rendered)
+        self.assertIn(
+            "program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "def programToYulWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Yul.Program", rendered)
+        self.assertIn(
+            "program.toYulProgramWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programToObjectsWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Objects.Program", rendered)
+        self.assertIn(
+            "program.toObjectsWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programCheckedAssemblyWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Assembly.Program", rendered)
+        self.assertIn(
+            "program.compileCheckedWithComputedObjectDataAndLinkerSymbols?",
             rendered,
         )
         self.assertIn(
@@ -1058,7 +1541,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             "Option EvmCompiler.Assembly.Program",
             rendered,
         )
-        self.assertIn("EvmCompiler.Yul.Program.compileChecked? program", rendered)
+        self.assertIn("EvmCompiler.Yul.Program.compileSolcChecked? program", rendered)
         self.assertIn(
             "noncomputable def programTarget : "
             "Option EvmCompiler.Assembly.TargetProgram",
@@ -1100,7 +1583,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             rendered,
         )
         self.assertIn("let yul ← programToYul", rendered)
-        self.assertIn("EvmCompiler.Yul.Program.compileChecked? yul", rendered)
+        self.assertIn("EvmCompiler.Yul.Program.compileSolcChecked? yul", rendered)
         self.assertIn(
             "noncomputable def programToYulTarget : "
             "Option EvmCompiler.Assembly.TargetProgram",
@@ -1318,9 +1801,9 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertEqual(compatibility["status"], "needs-resolution")
         self.assertEqual(compatibility["objectBuiltinNames"], ["linkersymbol"])
         self.assertEqual(compatibility["unsupportedPrimitiveNames"], [])
-        self.assertIn("linker resolution", " ".join(compatibility["notes"]))
+        self.assertIn("linkersymbol object builtin", " ".join(compatibility["notes"]))
         self.assertIn(
-            "object-builtins-present",
+            "linker-symbols-present",
             "\n".join(summary["backendHints"]),
         )
 
@@ -1359,6 +1842,43 @@ class SolidityToYulLeanTests(unittest.TestCase):
         )
         self.assertIn("let program ← program", rendered)
         self.assertIn("program.object.bytecodeImageUnchecked?", rendered)
+        self.assertIn("program.object.bytecodeImageChecked?", rendered)
+        self.assertIn(
+            "def programResolvedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Solidity.Frontend.Program", rendered)
+        self.assertIn(
+            "program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "def programToYulWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Yul.Program", rendered)
+        self.assertIn(
+            "program.toYulProgramWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programToObjectsWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Objects.Program", rendered)
+        self.assertIn(
+            "program.toObjectsWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
+        self.assertIn(
+            "noncomputable def programCheckedAssemblyWithComputedObjectData :",
+            rendered,
+        )
+        self.assertIn("Option EvmCompiler.Assembly.Program", rendered)
+        self.assertIn(
+            "program.compileCheckedWithComputedObjectDataAndLinkerSymbols?",
+            rendered,
+        )
 
     def test_lean_ir_module_preserves_datacopy_until_layout_resolution(self):
         obj = bridge.YulObject(
@@ -1917,8 +2437,15 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("BridgeJson.parseProgram? input", rendered)
         self.assertIn("bytecodeImageUncheckedWithLinkerSymbols?", rendered)
         self.assertIn('"functions_compile"', rendered)
+        self.assertIn('"payload_items"', rendered)
+        self.assertIn('"data_sizes"', rendered)
         self.assertIn('"placeholder_code"', rendered)
+        self.assertIn('"computed_object_data"', rendered)
+        self.assertIn('"resolved_object_data"', rendered)
+        self.assertIn('"solc_validation"', rendered)
         self.assertIn('"object_image"', rendered)
+        self.assertNotIn('"checked_computed_object_data"', rendered)
+        self.assertNotIn('"checked_object_image"', rendered)
         self.assertIn('"lean_backend_check="', rendered)
         self.assertIn('("MathLib.sol:MathLib", EvmYul.UInt256.ofNat 42)', rendered)
 
@@ -1967,7 +2494,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
                     ["x"],
                     bridge.Call(
                         "add",
-                        [bridge.Var("x"), bridge.Lit(2)],
+                        [bridge.Var("x"), bridge.BytesLit([0x02])],
                         bridge.CALL_PRIMITIVE,
                     ),
                 ),
@@ -2028,6 +2555,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
             dispatcher=[
                 bridge.Let(["x"], None),
                 bridge.Assign(["x"], bridge.StringLit("blob")),
+                bridge.Assign(["x"], bridge.BytesLit([0xAA, 0xBB])),
                 bridge.ExprStmt(
                     bridge.Call(
                         "verbatim_0i_0o",
@@ -6637,11 +7165,11 @@ class SolidityToYulLeanTests(unittest.TestCase):
     def test_forge_artifact_json_replaces_bytecode_but_keeps_abi_metadata(self):
         compatibility = {
             "profile": "current-yul-compiler",
-            "status": "needs-resolution",
+            "status": "ready",
             "unsupportedPrimitiveNames": [],
             "objectBuiltinNames": ["dataoffset"],
             "dialectBuiltinNames": [],
-            "notes": ["object builtins need layout resolution"],
+            "notes": ["computed object/data builtins are resolved by the object-image path"],
         }
         bridge_json = {
             "schema": bridge.BRIDGE_JSON_PROVENANCE_SCHEMA,
@@ -8241,12 +8769,12 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("lean-backend-check", selfdestruct_smoke)
         self.assertIn("bridge-json-summary", selfdestruct_smoke)
         self.assertIn("selfdestruct_decode_primitive=yes", selfdestruct_smoke)
-        self.assertIn("selfdestruct_decode_backend_compatibility=blocked", selfdestruct_smoke)
+        self.assertIn("selfdestruct_decode_backend_compatibility=ready", selfdestruct_smoke)
         self.assertIn("selfdestruct_decode_backend_check=pass", selfdestruct_smoke)
         self.assertIn("selfdestruct_decode_backend_check_passed=", selfdestruct_smoke)
         self.assertIn('("SelfDestructBox", "runtime"): ("pass", "none")', selfdestruct_smoke)
         self.assertIn('"selfdestruct" in unsupported', selfdestruct_smoke)
-        self.assertIn('"sstore" not in unsupported', selfdestruct_smoke)
+        self.assertIn('"sstore" in unsupported', selfdestruct_smoke)
         for behavior in [
             "selfdestruct(recipient)",
             "selfdestruct(0)",
@@ -8273,7 +8801,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("bridge-json-summary", fallback_smoke)
         self.assertIn("fallback_decode_frontend_metadata=yes", fallback_smoke)
         self.assertIn("fallback_decode_primitives=yes", fallback_smoke)
-        self.assertIn("fallback_decode_backend_compatibility=blocked", fallback_smoke)
+        self.assertIn("fallback_decode_backend_compatibility=ready", fallback_smoke)
         self.assertIn("fallback_decode_backend_check=pass", fallback_smoke)
         self.assertIn("fallback_decode_backend_check_passed=", fallback_smoke)
         self.assertIn('("FallbackBox", "runtime"): ("pass", "none")', fallback_smoke)
@@ -8313,7 +8841,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("bridge-json-summary", event_matrix_smoke)
         self.assertIn("event_matrix_decode_frontend_metadata=yes", event_matrix_smoke)
         self.assertIn("event_matrix_decode_log_primitives=yes", event_matrix_smoke)
-        self.assertIn("event_matrix_decode_backend_compatibility=blocked", event_matrix_smoke)
+        self.assertIn("event_matrix_decode_backend_compatibility=ready", event_matrix_smoke)
         self.assertIn("event_matrix_decode_backend_check=pass", event_matrix_smoke)
         self.assertIn("event_matrix_decode_backend_check_passed=", event_matrix_smoke)
         self.assertIn('("EventMatrix", "runtime"): ("pass", "none")', event_matrix_smoke)
@@ -8397,7 +8925,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("minitoken_decode_runtime_first_none=", minitoken_smoke)
         self.assertIn("minitoken_decode_frontend_metadata=yes", minitoken_smoke)
         self.assertIn("minitoken_decode_primitives=yes", minitoken_smoke)
-        self.assertIn("minitoken_decode_backend_compatibility=blocked", minitoken_smoke)
+        self.assertIn("minitoken_decode_backend_compatibility=ready", minitoken_smoke)
         for primitive in [
             "caller",
             "keccak256",
@@ -8435,7 +8963,7 @@ class SolidityToYulLeanTests(unittest.TestCase):
         self.assertIn("bridge-json-summary", error_panic_smoke)
         self.assertIn("error_panic_decode_frontend_metadata=yes", error_panic_smoke)
         self.assertIn("error_panic_decode_primitives=yes", error_panic_smoke)
-        self.assertIn("error_panic_decode_backend_compatibility=blocked", error_panic_smoke)
+        self.assertIn("error_panic_decode_backend_compatibility=ready", error_panic_smoke)
         self.assertIn("error_panic_decode_backend_check_objects=", error_panic_smoke)
         self.assertIn("error_panic_decode_backend_check_passed=", error_panic_smoke)
         self.assertIn("error_panic_decode_backend_check_failed=", error_panic_smoke)

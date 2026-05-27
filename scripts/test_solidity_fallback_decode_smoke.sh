@@ -136,20 +136,16 @@ if missing_primitives:
     raise SystemExit(f"FallbackBox summary missing primitives: {missing_primitives!r}")
 
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected FallbackBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"log2", "sstore"} - unsupported)
-if missing_blockers:
+unexpected_blockers = sorted({"log2", "sstore"} & unsupported)
+if unexpected_blockers:
     raise SystemExit(
-        f"FallbackBox summary missing backend blockers: {missing_blockers!r}"
-    )
-notes = compatibility.get("notes", [])
-if not any("storage writes and logs" in note for note in notes):
-    raise SystemExit(
-        f"FallbackBox summary missing storage/log blocker note: {compatibility!r}"
+        f"FallbackBox summary still marks supported primitives unsupported: "
+        f"{unexpected_blockers!r}"
     )
 
 check = json.loads(check_path.read_text())
@@ -211,5 +207,5 @@ print(f"fallback_decode_runtime_functions={len(functions)}")
 print(f"fallback_decode_summary_calls={runtime_summary['counts']['calls']}")
 print("fallback_decode_frontend_metadata=yes")
 print("fallback_decode_primitives=yes")
-print("fallback_decode_backend_compatibility=blocked")
+print("fallback_decode_backend_compatibility=ready")
 PY

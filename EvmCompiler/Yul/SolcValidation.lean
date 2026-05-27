@@ -1,0 +1,409 @@
+import EvmCompiler.Yul.Compiler
+
+namespace EvmCompiler
+namespace Yul
+
+/-
+Solc-facing validation for the normalized core Yul representation.
+
+This layer is intentionally source-facing: it checks whether a direct
+`Yul.Program` construction satisfies the static language conditions that solc's
+Yul parser/analyzer would normally enforce before either source execution or
+compiler lowering is trusted.
+
+The current core AST has already erased raw Yul object syntax, for-loop init
+blocks, literal kinds, and the distinction between an absent switch default and
+`default {}`.  This checker therefore validates the normalized `YulContract`
+shape used by the backend, while keeping those representation limits explicit.
+-/
+namespace SolcValidation
+
+structure Signature where
+  inputs : Nat
+  outputs : Nat
+  deriving Inhabited, Repr
+
+def sig (inputs outputs : Nat) : Signature :=
+  { inputs := inputs, outputs := outputs }
+
+inductive EvmVersion where
+  | frontier
+  | homestead
+  | byzantium
+  | constantinople
+  | istanbul
+  | london
+  | paris
+  | cancun
+  | osaka
+  deriving DecidableEq, Repr
+
+namespace EvmVersion
+
+def rank : EvmVersion → Nat
+  | .frontier => 0
+  | .homestead => 1
+  | .byzantium => 2
+  | .constantinople => 3
+  | .istanbul => 4
+  | .london => 5
+  | .paris => 6
+  | .cancun => 7
+  | .osaka => 8
+
+def atLeast? (version minimum : EvmVersion) : Bool :=
+  decide (minimum.rank ≤ version.rank)
+
+end EvmVersion
+
+structure DialectProfile where
+  evmVersion : EvmVersion
+  eof : Bool
+  deriving Repr
+
+def defaultDialectProfile : DialectProfile :=
+  { evmVersion := .cancun, eof := false }
+
+def primitiveSignature : EvmYul.Operation .Yul → Signature
+  | .StopArith .STOP => sig 0 0
+  | .StopArith .ADD => sig 2 1
+  | .StopArith .MUL => sig 2 1
+  | .StopArith .SUB => sig 2 1
+  | .StopArith .DIV => sig 2 1
+  | .StopArith .SDIV => sig 2 1
+  | .StopArith .MOD => sig 2 1
+  | .StopArith .SMOD => sig 2 1
+  | .StopArith .ADDMOD => sig 3 1
+  | .StopArith .MULMOD => sig 3 1
+  | .StopArith .EXP => sig 2 1
+  | .StopArith .SIGNEXTEND => sig 2 1
+  | .CompBit .LT => sig 2 1
+  | .CompBit .GT => sig 2 1
+  | .CompBit .SLT => sig 2 1
+  | .CompBit .SGT => sig 2 1
+  | .CompBit .EQ => sig 2 1
+  | .CompBit .ISZERO => sig 1 1
+  | .CompBit .AND => sig 2 1
+  | .CompBit .OR => sig 2 1
+  | .CompBit .XOR => sig 2 1
+  | .CompBit .NOT => sig 1 1
+  | .CompBit .BYTE => sig 2 1
+  | .CompBit .SHL => sig 2 1
+  | .CompBit .SHR => sig 2 1
+  | .CompBit .SAR => sig 2 1
+  | .Keccak .KECCAK256 => sig 2 1
+  | .Env .ADDRESS => sig 0 1
+  | .Env .BALANCE => sig 1 1
+  | .Env .ORIGIN => sig 0 1
+  | .Env .CALLER => sig 0 1
+  | .Env .CALLVALUE => sig 0 1
+  | .Env .CALLDATALOAD => sig 1 1
+  | .Env .CALLDATASIZE => sig 0 1
+  | .Env .CALLDATACOPY => sig 3 0
+  | .Env .CODESIZE => sig 0 1
+  | .Env .GASPRICE => sig 0 1
+  | .Env .CODECOPY => sig 3 0
+  | .Env .EXTCODESIZE => sig 1 1
+  | .Env .EXTCODECOPY => sig 4 0
+  | .Env .RETURNDATASIZE => sig 0 1
+  | .Env .RETURNDATACOPY => sig 3 0
+  | .Env .EXTCODEHASH => sig 1 1
+  | .Block .BLOCKHASH => sig 1 1
+  | .Block .COINBASE => sig 0 1
+  | .Block .TIMESTAMP => sig 0 1
+  | .Block .NUMBER => sig 0 1
+  | .Block .PREVRANDAO => sig 0 1
+  | .Block .GASLIMIT => sig 0 1
+  | .Block .CHAINID => sig 0 1
+  | .Block .SELFBALANCE => sig 0 1
+  | .Block .BASEFEE => sig 0 1
+  | .Block .BLOBHASH => sig 1 1
+  | .Block .BLOBBASEFEE => sig 0 1
+  | .StackMemFlow .POP => sig 1 0
+  | .StackMemFlow .MLOAD => sig 1 1
+  | .StackMemFlow .MSTORE => sig 2 0
+  | .StackMemFlow .SLOAD => sig 1 1
+  | .StackMemFlow .SSTORE => sig 2 0
+  | .StackMemFlow .MSTORE8 => sig 2 0
+  | .StackMemFlow .MSIZE => sig 0 1
+  | .StackMemFlow .GAS => sig 0 1
+  | .StackMemFlow .TLOAD => sig 1 1
+  | .StackMemFlow .TSTORE => sig 2 0
+  | .StackMemFlow .MCOPY => sig 3 0
+  | .Log .LOG0 => sig 2 0
+  | .Log .LOG1 => sig 3 0
+  | .Log .LOG2 => sig 4 0
+  | .Log .LOG3 => sig 5 0
+  | .Log .LOG4 => sig 6 0
+  | .System .CREATE => sig 3 1
+  | .System .CALL => sig 7 1
+  | .System .CALLCODE => sig 7 1
+  | .System .RETURN => sig 2 0
+  | .System .DELEGATECALL => sig 6 1
+  | .System .CREATE2 => sig 4 1
+  | .System .STATICCALL => sig 6 1
+  | .System .REVERT => sig 2 0
+  | .System .INVALID => sig 0 0
+  | .System .SELFDESTRUCT => sig 1 0
+
+def primitiveAvailable? (profile : DialectProfile)
+    (op : EvmYul.Operation .Yul) : Bool :=
+  match op with
+  | .System .DELEGATECALL =>
+      profile.evmVersion.atLeast? .homestead
+  | .Env .RETURNDATASIZE
+  | .Env .RETURNDATACOPY
+  | .System .STATICCALL
+  | .System .REVERT =>
+      profile.evmVersion.atLeast? .byzantium
+  | .CompBit .SHL
+  | .CompBit .SHR
+  | .CompBit .SAR
+  | .Env .EXTCODEHASH
+  | .System .CREATE2 =>
+      profile.evmVersion.atLeast? .constantinople
+  | .Block .CHAINID
+  | .Block .SELFBALANCE =>
+      profile.evmVersion.atLeast? .istanbul
+  | .Block .BASEFEE =>
+      profile.evmVersion.atLeast? .london
+  -- The core AST erases solc's `difficulty()`/`prevrandao()` spelling split
+  -- into the same operation.  Source importers must enforce the spelling gate
+  -- before lowering; direct core validation accepts the shared operation so it
+  -- does not reject valid pre-Paris `difficulty()` programs.
+  | .Block .PREVRANDAO =>
+      true
+  | .Block .BLOBHASH
+  | .Block .BLOBBASEFEE
+  | .StackMemFlow .TLOAD
+  | .StackMemFlow .TSTORE
+  | .StackMemFlow .MCOPY =>
+      profile.evmVersion.atLeast? .cancun
+  | _ => true
+
+def hasDoubleDot? : List Char → Bool
+  | [] => false
+  | [_] => false
+  | first :: second :: rest =>
+      (first == '.' && second == '.') || hasDoubleDot? (second :: rest)
+
+def identifierStart? (c : Char) : Bool :=
+  c.isAlpha || c == '_' || c == '$'
+
+def identifierContinue? (c : Char) : Bool :=
+  c.isAlphanum || c == '_' || c == '$' || c == '.'
+
+def numberedNames (pref : String) (start count : Nat) : List Name :=
+  (List.range count).map fun i => pref ++ toString (start + i)
+
+def primitiveReservedNames : List Name :=
+  [ "stop", "add", "mul", "sub", "div", "sdiv", "mod", "smod"
+  , "addmod", "mulmod", "exp", "signextend", "lt", "gt", "slt", "sgt"
+  , "eq", "iszero", "and", "or", "xor", "not", "byte", "shl", "shr"
+  , "sar", "keccak256", "sha3", "address", "balance", "origin", "caller"
+  , "callvalue", "calldataload", "calldatasize", "calldatacopy", "codesize"
+  , "gasprice", "codecopy", "extcodesize", "extcodecopy", "returndatasize"
+  , "returndatacopy", "extcodehash", "blockhash", "coinbase", "timestamp"
+  , "number", "difficulty", "prevrandao", "gaslimit", "chainid"
+  , "selfbalance", "basefee", "blobhash", "blobbasefee", "pop", "mload"
+  , "mstore", "sload", "sstore", "mstore8", "msize", "gas", "tload"
+  , "tstore", "mcopy", "log0", "log1", "log2", "log3", "log4", "create"
+  , "call", "callcode", "return", "delegatecall", "create2", "staticcall"
+  , "revert", "invalid", "selfdestruct", "jump", "jumpi", "jumpdest", "pc"
+  , "clz", "dataloadn", "auxdataloadn", "eofcreate", "returncontract"
+  , "rjump", "rjumpi", "callf", "retf", "jumpf" ] ++
+    numberedNames "push" 0 33 ++ numberedNames "dup" 1 16 ++
+    numberedNames "swap" 1 16
+
+def objectReservedNames : List Name :=
+  [ "linkersymbol", "datasize", "dataoffset", "datacopy", "setimmutable"
+  , "loadimmutable", "memoryguard" ]
+
+def reservedIdentifier? (name : Name) : Bool :=
+  primitiveReservedNames.contains name ||
+    objectReservedNames.contains name ||
+      name.startsWith "verbatim"
+
+def identifierSyntax? (name : Name) : Bool :=
+  match name.toList with
+  | [] => false
+  | first :: rest =>
+      identifierStart? first &&
+        (rest.all identifierContinue? &&
+          (!name.endsWith "." && !hasDoubleDot? rest))
+
+def bindingName? (name : Name) : Bool :=
+  identifierSyntax? name && !reservedIdentifier? name
+
+def bindingNames? (names : List Name) : Bool :=
+  names.all bindingName?
+
+def namesNodup? (names : List Name) : Bool :=
+  decide names.Nodup
+
+def namesFresh? (env names : List Name) : Bool :=
+  names.all fun name => decide (name ∉ env)
+
+def namesIn? (env names : List Name) : Bool :=
+  names.all fun name => decide (name ∈ env)
+
+def nonemptyNames? (names : List Name) : Bool :=
+  match names with
+  | [] => false
+  | _ :: _ => true
+
+def bindableList? (env names : List Name) : Bool :=
+  nonemptyNames? names &&
+    (bindingNames? names && (namesNodup? names && namesFresh? env names))
+
+def assignableList? (vars names : List Name) : Bool :=
+  nonemptyNames? names && (namesNodup? names && namesIn? vars names)
+
+def caseValuesNodup? (cases : List (Word × List AstStmt)) : Bool :=
+  decide ((cases.map Prod.fst).Nodup)
+
+def lookupFunction? (contract : AstContract) (functionName : Name) :
+    Option AstFunctionDefinition :=
+  contract.functions.lookup functionName
+
+def StmtOutVars (vars : List Name) : AstStmt → List Name
+  | .Let names _value? => identNames names ++ vars
+  | _ => vars
+
+mutual
+  def ExprOk? (profile : DialectProfile) (contract : AstContract)
+      (vars : List Name) :
+      Nat → AstExpr → Bool
+    | expected, .Lit _value => decide (expected = 1)
+    | expected, .Var name =>
+        decide (expected = 1) && decide (identName name ∈ vars)
+    | expected, .Call (.inl prim) args =>
+        let signature := primitiveSignature prim
+        primitiveAvailable? profile prim &&
+          (decide (expected = signature.outputs) &&
+            (decide (args.length = signature.inputs) &&
+              ExprsOk? profile contract vars args))
+    | expected, .Call (.inr functionName) args =>
+        match lookupFunction? contract functionName with
+        | none => false
+        | some (.Def params returns _body) =>
+            decide (expected = returns.length) &&
+              (decide (args.length = params.length) &&
+                ExprsOk? profile contract vars args)
+
+  def ExprsOk? (profile : DialectProfile) (contract : AstContract)
+      (vars : List Name) :
+      List AstExpr → Bool
+    | [] => true
+    | head :: tail =>
+        ExprOk? profile contract vars 1 head &&
+          ExprsOk? profile contract vars tail
+
+  def StmtOk? (profile : DialectProfile) (contract : AstContract)
+      (functionNames vars : List Name) (canBreak canContinue canLeave : Bool) :
+      AstStmt → Bool
+    | .Block body =>
+        StmtsOk? profile contract functionNames vars canBreak canContinue
+          canLeave body
+    | .Let names none =>
+        bindableList? (functionNames ++ vars) (identNames names)
+    | .Let names (some value) =>
+        bindableList? (functionNames ++ vars) (identNames names) &&
+          ExprOk? profile contract vars (names.length) value
+    | .Assign names value =>
+        assignableList? vars (identNames names) &&
+          ExprOk? profile contract vars (names.length) value
+    | .ExprStmtCall value =>
+        ExprOk? profile contract vars 0 value
+    | .Switch scrutinee cases defaultBody =>
+        ExprOk? profile contract vars 1 scrutinee &&
+          (caseValuesNodup? cases &&
+            (CasesOk? profile contract functionNames vars canBreak canContinue
+              canLeave cases &&
+              StmtsOk? profile contract functionNames vars canBreak canContinue
+                canLeave defaultBody))
+    | .For cond post body =>
+        ExprOk? profile contract vars 1 cond &&
+          (StmtsOk? profile contract functionNames vars false false canLeave
+            post &&
+            StmtsOk? profile contract functionNames vars true true canLeave
+              body)
+    | .If cond body =>
+        ExprOk? profile contract vars 1 cond &&
+          StmtsOk? profile contract functionNames vars canBreak canContinue
+            canLeave body
+    | .Break => canBreak
+    | .Continue => canContinue
+    | .Leave => canLeave
+
+  def StmtsOk? (profile : DialectProfile) (contract : AstContract)
+      (functionNames vars : List Name) (canBreak canContinue canLeave : Bool) :
+      List AstStmt → Bool
+    | [] => true
+    | head :: tail =>
+        StmtOk? profile contract functionNames vars canBreak canContinue
+          canLeave head &&
+          StmtsOk? profile contract functionNames (StmtOutVars vars head)
+            canBreak canContinue canLeave tail
+
+  def CasesOk? (profile : DialectProfile) (contract : AstContract)
+      (functionNames vars : List Name) (canBreak canContinue canLeave : Bool) :
+      List (Word × List AstStmt) → Bool
+    | [] => true
+    | (_value, body) :: rest =>
+        StmtsOk? profile contract functionNames vars canBreak canContinue
+          canLeave body &&
+          CasesOk? profile contract functionNames vars canBreak canContinue
+            canLeave rest
+end
+
+def FunctionOk? (profile : DialectProfile) (contract : AstContract)
+    (functionNames : List Name) : AstFunctionDefinition → Bool
+  | .Def params returns body =>
+      let locals := identNames returns ++ identNames params
+      bindingNames? locals &&
+        (namesNodup? locals &&
+          (namesFresh? functionNames locals &&
+            StmtsOk? profile contract functionNames locals false false true
+              body))
+
+def FunctionEntriesOk? (profile : DialectProfile) (contract : AstContract)
+    (functionNames : List Name) : List (Name × AstFunctionDefinition) → Bool
+  | [] => true
+  | (_name, fn) :: rest =>
+      FunctionOk? profile contract functionNames fn &&
+        FunctionEntriesOk? profile contract functionNames rest
+
+def FunctionNamesOk? (functionNames : List Name) : Bool :=
+  bindingNames? functionNames && namesNodup? functionNames
+
+def ContractOkWithEntries? (profile : DialectProfile)
+    (contract : AstContract)
+    (entries : List (Name × AstFunctionDefinition)) : Bool :=
+  let functionNames := entries.map Prod.fst
+  FunctionNamesOk? functionNames &&
+    (StmtOk? profile contract functionNames [] false false false
+      contract.dispatcher &&
+      FunctionEntriesOk? profile contract functionNames entries)
+
+noncomputable def ContractOkWith? (profile : DialectProfile)
+    (contract : AstContract) : Bool :=
+  let entries := Contract.functionEntries contract
+  ContractOkWithEntries? profile contract entries
+
+noncomputable def ProgramOkWith? (profile : DialectProfile)
+    (program : Program) : Bool :=
+  ContractOkWith? profile program.contract
+
+noncomputable def ContractOk? (contract : AstContract) : Bool :=
+  ContractOkWith? defaultDialectProfile contract
+
+noncomputable def ProgramOk? (program : Program) : Bool :=
+  ProgramOkWith? defaultDialectProfile program
+
+noncomputable def ProgramOk (program : Program) : Prop :=
+  ProgramOk? program = true
+
+end SolcValidation
+end Yul
+end EvmCompiler

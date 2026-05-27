@@ -165,10 +165,10 @@ run_summary_case \
   PackedStorageBox.sol \
   PackedStorageBox \
   2 \
-  blocked \
+  ready \
   sload,sstore \
-  sstore \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   external_call \
@@ -185,20 +185,20 @@ run_summary_case \
   FallbackBox.sol \
   FallbackBox \
   2 \
-  blocked \
+  ready \
   callvalue,calldataload,calldatasize,log2,return,sstore \
-  log2,sstore \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   event_matrix \
   EventMatrix.sol \
   EventMatrix \
   2 \
-  blocked \
+  ready \
   log0,log1,log2,log3,log4 \
-  log0,log1,log2,log3,log4 \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   try_catch \
@@ -207,7 +207,7 @@ run_summary_case \
   4 \
   blocked \
   call,returndatacopy,returndatasize,revert,log2 \
-  call,log2 \
+  call \
   "external call/create primitives"
 
 run_summary_case \
@@ -215,20 +215,20 @@ run_summary_case \
   ErrorPanicBox.sol \
   ErrorPanicBox \
   2 \
-  blocked \
+  ready \
   div,log2,mul,revert,sload,sstore \
-  log2,sstore \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   mini_token \
   MiniToken.sol \
   MiniToken \
   2 \
-  blocked \
+  ready \
   caller,keccak256,log3,revert,sload,sstore \
-  log3,sstore \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   factory_create \
@@ -245,10 +245,10 @@ run_summary_case \
   StorageArrayBox.sol \
   StorageArrayBox \
   2 \
-  blocked \
+  ready \
   keccak256,log2,sload,sstore \
-  log2,sstore \
-  "storage writes and logs"
+  "" \
+  ""
 
 run_summary_case \
   abi_dynamic \

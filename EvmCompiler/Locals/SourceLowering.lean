@@ -2,6 +2,7 @@ import EvmCompiler.Locals.SourceSemantics
 import EvmCompiler.Locals.Semantics
 import EvmCompiler.Locals.StackLowering
 import EvmCompiler.Locals.Preservation
+import EvmYul.Semantics
 
 set_option linter.unusedSimpArgs false
 set_option linter.unnecessarySimpa false
@@ -890,94 +891,37 @@ theorem structured_terminal_step_revert_of_stack
         EvmYul.EVM.State.replaceStackAndIncrPC]
       rfl
 
-open EvmYul
+def selfdestructTerminalState
+    (state : EVMState) (recipient : Word) (tail : EvmYul.Stack Word) :
+    EVMState :=
+  EvmYul.EVM.selfdestructState state recipient tail
 
-def selfdestructShared (shared : EvmYul.SharedState .EVM)
-    (recipient : Word) : EvmYul.SharedState .EVM :=
-  let source := shared.executionEnv.codeOwner
-  let target : AccountAddress := AccountAddress.ofUInt256 recipient
-  if shared.createdAccounts.contains source then
-    let substate' : Substate :=
-      { shared.substate with
-        selfDestructSet := shared.substate.selfDestructSet.insert source
-        accessedAccounts := shared.substate.accessedAccounts.insert target }
-    let accountMap' :=
-      match shared.lookupAccount source with
-      | none =>
-          dbg_trace
-            "No 'self' found to be destructed; this should probably not be happening;"
-          shared.accountMap
-      | some sourceAccount =>
-          match shared.lookupAccount target with
-          | none =>
-              if sourceAccount.balance == ⟨0⟩ then
-                shared.accountMap
-              else
-                shared.accountMap.insert target
-                    { (default : Account .EVM) with
-                      balance := sourceAccount.balance }
-                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
-          | some targetAccount =>
-              if target = source then
-                shared.accountMap.insert target
-                    { targetAccount with balance := ⟨0⟩ }
-                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
-              else
-                shared.accountMap.insert target
-                    { targetAccount with
-                      balance := targetAccount.balance + sourceAccount.balance }
-                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
-    { shared with accountMap := accountMap', substate := substate' }
-  else
-    let substate' : Substate :=
-      { shared.substate with
-        accessedAccounts := shared.substate.accessedAccounts.insert target }
-    let accountMap' :=
-      match shared.lookupAccount source with
-      | none =>
-          dbg_trace
-            "No 'self' found to be destructed; this should probably not be happening;"
-          shared.accountMap
-      | some sourceAccount =>
-          match shared.lookupAccount target with
-          | none =>
-              if sourceAccount.balance == ⟨0⟩ then
-                shared.accountMap
-              else
-                shared.accountMap.insert target
-                    { (default : Account .EVM) with
-                      balance := sourceAccount.balance }
-                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
-          | some targetAccount =>
-              if target = source then
-                shared.accountMap
-              else
-                shared.accountMap.insert target
-                    { targetAccount with
-                      balance := targetAccount.balance + sourceAccount.balance }
-                  |>.insert source { sourceAccount with balance := ⟨0⟩ }
-    { shared with accountMap := accountMap', substate := substate' }
+theorem selfdestructTerminalState_toSharedState_of_toSharedState_eq
+    (state₁ state₂ : EVMState) (recipient : Word)
+    (tail₁ tail₂ : EvmYul.Stack Word)
+    (hShared : state₁.toSharedState = state₂.toSharedState) :
+    (selfdestructTerminalState state₁ recipient tail₁).toSharedState =
+      (selfdestructTerminalState state₂ recipient tail₂).toSharedState := by
+  cases state₁ with
+  | mk shared₁ pc₁ stack₁ execLength₁ =>
+      cases state₂ with
+      | mk shared₂ pc₂ stack₂ execLength₂ =>
+          simp at hShared
+          subst shared₂
+          simp [selfdestructTerminalState, EvmYul.EVM.selfdestructState,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
 
 theorem structured_terminal_step_selfdestruct_of_stack
     (state : EVMState) (recipient : Word) (tail : EvmYul.Stack Word)
     (hStack : state.stack = recipient :: tail) :
     Structured.Terminal.step .selfdestruct state =
-      .ok (({ state with
-        toSharedState := selfdestructShared state.toSharedState recipient
-      }).replaceStackAndIncrPC tail) := by
-  cases state with
-  | mk shared pc stack execLength =>
-      simp at hStack
-      subst stack
-      unfold Structured.Terminal.step Assembly.Target.stepInstr
-        Assembly.PrimOp.step
-      simp [Assembly.PrimOp.continuingStep?, Assembly.HaltKind.toPrimOp,
-        Assembly.PrimOp.toEVM]
-      unfold EvmYul.step
-      unfold Id.run
-      simp [selfdestructShared, EvmYul.Stack.pop,
-        EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC]
-      split <;> rfl
+      .ok (selfdestructTerminalState state recipient tail) := by
+  simpa [Structured.Terminal.step, Assembly.Target.stepInstr,
+    Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+    Assembly.HaltKind.toPrimOp, Assembly.PrimOp.toEVM,
+    selfdestructTerminalState]
+    using EvmYul.EVM.step_selfdestruct_of_stack state recipient tail hStack
 
 theorem structured_terminal_step_selfdestruct_nil
     (state : EVMState) (hStack : state.stack = []) :
@@ -1027,7 +971,8 @@ theorem structured_terminal_stop_step_exists
         evm'.toSharedState = shared' := by
   let evm' : EVMState :=
     { evm with
-      toMachineState := evm.toMachineState.setReturnData .empty }
+      toMachineState :=
+        (evm.toMachineState.setReturnData .empty).setHReturn .empty }
   refine ⟨evm', ?_, ?_⟩
   · simp [Structured.Terminal.step, Assembly.Target.stepInstr,
       Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
@@ -1273,9 +1218,7 @@ theorem structured_terminal_selfdestruct_step
           execLength := 0 }
       have hIso :
           Structured.Terminal.step .selfdestruct iso =
-            .ok (({ iso with
-              toSharedState := selfdestructShared iso.toSharedState recipient
-            }).replaceStackAndIncrPC tail) := by
+            .ok (selfdestructTerminalState iso recipient tail) := by
         apply structured_terminal_step_selfdestruct_of_stack
         simp [iso, hValues]
       simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
@@ -1288,8 +1231,8 @@ theorem structured_terminal_selfdestruct_step
       rw [hTarget] at hStep
       cases hStep
       cases hEval
-      simp [hShared, EvmYul.EVM.State.replaceStackAndIncrPC,
-        EvmYul.EVM.State.incrPC]
+      apply selfdestructTerminalState_toSharedState_of_toSharedState_eq
+      simp [iso, hShared]
 
 theorem structured_terminal_selfdestruct_step_exists
     {shared shared' : EvmYul.SharedState .EVM}
@@ -1318,9 +1261,7 @@ theorem structured_terminal_selfdestruct_step_exists
       simp [Source.PrimitiveSemantics.structured, iso, hIso] at hEval
   | cons recipient tail =>
       let evm' : EVMState :=
-        ({ evm with
-          toSharedState := selfdestructShared evm.toSharedState recipient
-        }).replaceStackAndIncrPC (tail ++ baseStack)
+        selfdestructTerminalState evm recipient (tail ++ baseStack)
       refine ⟨evm', ?_, ?_⟩
       · apply structured_terminal_step_selfdestruct_of_stack
         rw [hStack, hValues]
@@ -1386,14 +1327,18 @@ theorem structured_terminal_ok_of_stop_or_argCount
         Structured.Terminal.step .stop iso =
           .ok
             { iso with
-              toMachineState := iso.toMachineState.setReturnData .empty } := by
+              toMachineState :=
+                (iso.toMachineState.setReturnData .empty).setHReturn
+                  .empty } := by
       simp [Structured.Terminal.step, Assembly.Target.stepInstr,
         Assembly.HaltKind.toPrimOp, Assembly.PrimOp.step,
         Assembly.PrimOp.continuingStep?, Assembly.PrimOp.toEVM]
       rfl
     refine
       ⟨({ iso with
-          toMachineState := iso.toMachineState.setReturnData .empty }).toSharedState,
+          toMachineState :=
+            (iso.toMachineState.setReturnData .empty).setHReturn
+              .empty }).toSharedState,
         ?_⟩
     simp [Source.PrimitiveSemantics.structured, iso, hStep]
   · have hLen : values.length = Assembly.HaltKind.argCount .return := by
@@ -1482,18 +1427,12 @@ theorem structured_terminal_ok_of_stop_or_argCount
                 execLength := 0 }
             have hStep :
                 Structured.Terminal.step .selfdestruct iso =
-                  .ok
-                    (({ iso with
-                      toSharedState :=
-                        selfdestructShared iso.toSharedState recipient
-                    }).replaceStackAndIncrPC []) := by
+                  .ok (selfdestructTerminalState iso recipient []) := by
               apply structured_terminal_step_selfdestruct_of_stack
               simp [iso]
             refine
-              ⟨((({ iso with
-                  toSharedState :=
-                    selfdestructShared iso.toSharedState recipient
-                }).replaceStackAndIncrPC [])).toSharedState, ?_⟩
+              ⟨(selfdestructTerminalState iso recipient []).toSharedState,
+                ?_⟩
             simp [Source.PrimitiveSemantics.structured, iso, hStep]
         | cons _ _ => simp at hLen
 

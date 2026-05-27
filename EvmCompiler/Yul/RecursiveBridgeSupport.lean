@@ -1450,6 +1450,58 @@ theorem function_body_safe_of_contract_lookup
 
 end SafeLookup
 
+namespace CallSafeLookup
+
+theorem functionEntries_functionDefinition_of_find?
+    {entries : List (Name × AstFunctionDefinition)}
+    {functionName : Name} {fn : AstFunctionDefinition}
+    (hEntries : Safe.CallSafe.functionEntries entries)
+    (hFind : FunctionEntryList.find? functionName entries = some fn) :
+    Safe.CallSafe.functionDefinition fn := by
+  induction entries with
+  | nil =>
+      simp [FunctionEntryList.find?] at hFind
+  | cons entry rest ih =>
+      rcases entry with ⟨headName, headFn⟩
+      rcases hEntries with ⟨hHead, hRest⟩
+      by_cases hEq : headName = functionName
+      · have hHeadFn : headFn = fn := by
+          simpa [FunctionEntryList.find?, hEq] using hFind
+        simpa [hHeadFn] using hHead
+      · simp [FunctionEntryList.find?, hEq] at hFind
+        exact ih hRest hFind
+
+theorem functionDefinition_of_contract_lookup
+    {program : Program} {functionName : Name}
+    {fn : AstFunctionDefinition}
+    (hSafe : Safe.CallSafe.program program)
+    (hLookup : program.contract.functions.lookup functionName = some fn) :
+    Safe.CallSafe.functionDefinition fn := by
+  have hFind :
+      FunctionEntryList.find? functionName
+          (Contract.functionEntries program.contract) =
+        some fn :=
+    FunctionEntryList.find?_contract_functionEntries_of_lookup
+      program.contract hLookup
+  unfold Safe.CallSafe.program Safe.FeatureCoverage.Family.program
+    Safe.FeatureCoverage.Family.contract at hSafe
+  exact functionEntries_functionDefinition_of_find? hSafe.2 hFind
+
+theorem function_body_safe_of_contract_lookup
+    {program : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    (hSafe : Safe.CallSafe.program program)
+    (hLookup :
+      program.contract.functions.lookup functionName =
+        some (.Def params returns body)) :
+    Safe.CallSafe.stmts body := by
+  have hFn :
+      Safe.CallSafe.functionDefinition (.Def params returns body) :=
+    functionDefinition_of_contract_lookup hSafe hLookup
+  simpa [Safe.CallSafe.functionDefinition] using hFn
+
+end CallSafeLookup
+
 namespace UserCallArity
 
 /-
@@ -3931,6 +3983,35 @@ theorem safe_exprs_reverse {args : List AstExpr}
         safe_exprs_append (ih hSafe.2)
           (by simp [Safe.exprs, hSafe.1])
 
+theorem family_exprs_append
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {left right : List AstExpr}
+    (hLeft : Safe.FeatureCoverage.Family.exprs primitive userCall left)
+    (hRight : Safe.FeatureCoverage.Family.exprs primitive userCall right) :
+    Safe.FeatureCoverage.Family.exprs primitive userCall (left ++ right) := by
+  induction left with
+  | nil =>
+      simpa using hRight
+  | cons head tail ih =>
+      simp [Safe.FeatureCoverage.Family.exprs] at hLeft
+      simp [Safe.FeatureCoverage.Family.exprs, hLeft.1, ih hLeft.2]
+
+theorem family_exprs_reverse
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {args : List AstExpr}
+    (hSafe : Safe.FeatureCoverage.Family.exprs primitive userCall args) :
+    Safe.FeatureCoverage.Family.exprs primitive userCall args.reverse := by
+  induction args with
+  | nil =>
+      simp [Safe.FeatureCoverage.Family.exprs]
+  | cons head tail ih =>
+      simp [Safe.FeatureCoverage.Family.exprs] at hSafe
+      simpa using
+        family_exprs_append (ih hSafe.2)
+          (by simp [Safe.FeatureCoverage.Family.exprs, hSafe.1])
+
 theorem safe_exprs_of_safe_exprStmt_user_call
     {functionName : Name} {args : List AstExpr}
     (hSafe :
@@ -3995,6 +4076,28 @@ theorem safe_cases_selectSwitchCase
     (hCases : Safe.casesSafe cases)
     (hDefault : Safe.stmts defaultBody) :
     Safe.stmts (EvmYul.Yul.selectSwitchCase value defaultBody cases) := by
+  induction cases with
+  | nil =>
+      simpa [EvmYul.Yul.selectSwitchCase] using hDefault
+  | cons head rest ih =>
+      cases head with
+      | mk caseValue body =>
+          rcases hCases with ⟨hBody, hRest⟩
+          by_cases hEq : caseValue = value
+          · simp [EvmYul.Yul.selectSwitchCase, hEq, hBody]
+          · simpa [EvmYul.Yul.selectSwitchCase, hEq] using ih hRest
+
+theorem family_safe_cases_selectSwitchCase
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {value : Word} {cases : List (Word × List AstStmt)}
+    {defaultBody : List AstStmt}
+    (hCases :
+      Safe.FeatureCoverage.Family.casesSafe primitive userCall cases)
+    (hDefault :
+      Safe.FeatureCoverage.Family.stmts primitive userCall defaultBody) :
+    Safe.FeatureCoverage.Family.stmts primitive userCall
+      (EvmYul.Yul.selectSwitchCase value defaultBody cases) := by
   induction cases with
   | nil =>
       simpa [EvmYul.Yul.selectSwitchCase] using hDefault
@@ -6150,6 +6253,13 @@ theorem SourcePairResultCheckpointAllowed.ok
       (.ok (state, value)) := by
   simpa [SourcePairResultCheckpointAllowed] using hAllowed
 
+theorem SourcePairResultCheckpointAllowed.error
+    {α : Type} {canBreak canContinue canLeave : Bool}
+    {err : Exception} :
+    SourcePairResultCheckpointAllowed (α := α)
+      canBreak canContinue canLeave (.error err) := by
+  simp [SourcePairResultCheckpointAllowed]
+
 def PrimitiveCallCheckpointAllowedForSafe : Prop :=
   ∀ {canBreak canContinue canLeave : Bool}
     {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
@@ -6481,6 +6591,167 @@ theorem StateCheckpointAllowed.callReturn
     StateCheckpointAllowed.setStore
       (StateCheckpointAllowed.overwrite? StateCheckpointAllowed.reviveJump
         hCaller)
+
+theorem StateCheckpointAllowed.addAccessedAccount
+    {canBreak canContinue canLeave : Bool}
+    {state : State} {address : EvmYul.AccountAddress}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    StateCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.addAccessedAccount state address) := by
+  simpa [EvmYul.Yul.addAccessedAccount] using
+    StateCheckpointAllowed.setState hAllowed
+
+theorem StateCheckpointAllowed.of_ok_shape
+    {canBreak canContinue canLeave : Bool} {state : State}
+    (hOk : ∃ shared store, state = (.Ok shared store : State)) :
+    StateCheckpointAllowed canBreak canContinue canLeave state := by
+  rcases hOk with ⟨shared, store, hState⟩
+  subst state
+  simp [StateCheckpointAllowed]
+
+theorem SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
+    {canBreak canContinue canLeave : Bool}
+    {state : State} {accountMap : Option (EvmYul.AccountMap .Yul)}
+    {inOffset inSize outOffset outSize value : Word}
+    (hAllowed :
+      StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.buildContractCallEmptyReturnState state accountMap
+        inOffset inSize outOffset outSize value) := by
+  cases state with
+  | Ok shared store =>
+      simp [EvmYul.Yul.buildContractCallEmptyReturnState,
+        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+  | OutOfFuel =>
+      simp [EvmYul.Yul.buildContractCallEmptyReturnState,
+        SourcePairResultCheckpointAllowed]
+  | Checkpoint jump =>
+      cases jump <;>
+        simpa [EvmYul.Yul.buildContractCallEmptyReturnState,
+          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+          using hAllowed
+
+theorem SourcePairResultCheckpointAllowed.buildContractCallReturnState
+    {canBreak canContinue canLeave : Bool}
+    {state : State} {accountMap : EvmYul.AccountMap .Yul}
+    {substate : EvmYul.Substate} {returnData : ByteArray}
+    {inOffset inSize outOffset outSize value : Word}
+    (hAllowed :
+      StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.buildContractCallReturnState state accountMap substate
+        returnData inOffset inSize outOffset outSize value) := by
+  cases state with
+  | Ok shared store =>
+      simp [EvmYul.Yul.buildContractCallReturnState,
+        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+  | OutOfFuel =>
+      simp [EvmYul.Yul.buildContractCallReturnState,
+        SourcePairResultCheckpointAllowed]
+  | Checkpoint jump =>
+      cases jump <;>
+        simpa [EvmYul.Yul.buildContractCallReturnState,
+          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+          using hAllowed
+
+theorem SourcePairResultCheckpointAllowed.restoreRevertedContractCallState
+    {canBreak canContinue canLeave : Bool}
+    {callerState bodyState : State}
+    {inOffset inSize outOffset outSize : Word}
+    (hAllowed :
+      StateCheckpointAllowed canBreak canContinue canLeave callerState) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.restoreRevertedContractCallState callerState bodyState
+        inOffset inSize outOffset outSize) := by
+  cases callerState with
+  | Ok shared store =>
+      simp [EvmYul.Yul.restoreRevertedContractCallState,
+        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+  | OutOfFuel =>
+      simp [EvmYul.Yul.restoreRevertedContractCallState,
+        SourcePairResultCheckpointAllowed]
+  | Checkpoint jump =>
+      cases jump <;>
+        simpa [EvmYul.Yul.restoreRevertedContractCallState,
+          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+          using hAllowed
+
+theorem SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState
+    {canBreak canContinue canLeave : Bool}
+    {callerState bodyState : State} {varstore : EvmYul.Yul.VarStore}
+    {returnData : ByteArray} {inOffset inSize outOffset outSize : Word}
+    (hCaller :
+      StateCheckpointAllowed canBreak canContinue canLeave callerState)
+    (hBody :
+      StateCheckpointAllowed canBreak canContinue canLeave bodyState) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.restoreSuccessfulContractCallState callerState bodyState
+        varstore returnData inOffset inSize outOffset outSize) := by
+  cases callerState with
+  | Ok shared0 store0 =>
+      cases bodyState with
+      | Ok shared2 store2 =>
+          simp [EvmYul.Yul.restoreSuccessfulContractCallState,
+            SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+      | OutOfFuel =>
+          simp [EvmYul.Yul.restoreSuccessfulContractCallState,
+            SourcePairResultCheckpointAllowed]
+      | Checkpoint jump =>
+          cases jump <;>
+            simpa [EvmYul.Yul.restoreSuccessfulContractCallState,
+              SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+              using hBody
+  | OutOfFuel =>
+      simp [EvmYul.Yul.restoreSuccessfulContractCallState,
+        SourcePairResultCheckpointAllowed]
+  | Checkpoint jump =>
+      cases jump <;>
+        simpa [EvmYul.Yul.restoreSuccessfulContractCallState,
+          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
+          using hCaller
+
+theorem SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState_of_body_ok_shape
+    {canBreak canContinue canLeave : Bool}
+    {callerState bodyState : State} {varstore : EvmYul.Yul.VarStore}
+    {returnData : ByteArray} {inOffset inSize outOffset outSize : Word}
+    (hCaller :
+      StateCheckpointAllowed canBreak canContinue canLeave callerState)
+    (hBodyOk : ∃ shared store, bodyState = (.Ok shared store : State)) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.restoreSuccessfulContractCallState callerState bodyState
+        varstore returnData inOffset inSize outOffset outSize) :=
+  SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState hCaller
+    (StateCheckpointAllowed.of_ok_shape hBodyOk)
+
+theorem SourcePairResultCheckpointAllowed.buildPrecompiledContractCallState
+    {canBreak canContinue canLeave : Bool}
+    {state : State} {accountMap : EvmYul.AccountMap .Yul}
+    {precompiled : EvmYul.PrecompiledContract} {gas : Word}
+    {executionEnv : EvmYul.ExecutionEnv .Yul}
+    {inOffset inSize outOffset outSize : Word}
+    (hAllowed :
+      StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.buildPrecompiledContractCallState state accountMap
+        precompiled gas executionEnv inOffset inSize outOffset outSize) := by
+  unfold EvmYul.Yul.buildPrecompiledContractCallState
+  cases hRun :
+      runPrecompiledContract precompiled accountMap gas
+        state.toState.substate executionEnv with
+  | mk success rest =>
+      cases rest with
+      | mk accountMapAfter rest =>
+          cases rest with
+          | mk _gasAfter rest =>
+              cases rest with
+              | mk substateAfter returnData =>
+                  cases success <;> simp
+                  · exact
+                      SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
+                        hAllowed
+                  · exact
+                      SourcePairResultCheckpointAllowed.buildContractCallReturnState
+                        hAllowed
 
 theorem SourceResultCheckpointAllowed.of_state
     {canBreak canContinue canLeave : Bool} {state : State}
@@ -8904,6 +9175,55 @@ structure CheckpointCallSound : Prop where
       SourcePairResultCheckpointAllowed canBreak canContinue canLeave
         (EvmYul.Yul.call fuel args (some functionName) codeOverride state)
 
+structure FamilyCheckpointExpressionSound
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) : Prop where
+  evalValues :
+    ∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {expr : AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.FeatureCoverage.Family.expr primitive userCall expr →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.evalValues fuel expr codeOverride state)
+  eval :
+    ∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {expr : AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.FeatureCoverage.Family.expr primitive userCall expr →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.eval fuel expr codeOverride state)
+  exprStmtCall :
+    ∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {expr : AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.FeatureCoverage.Family.expr primitive userCall expr →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourceResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.exec fuel (.ExprStmtCall expr) codeOverride state)
+
+structure FamilyCheckpointCallSound
+    (primitive : EvmYul.Operation .Yul → Prop)
+    (userCall : Name → Prop) : Prop where
+  primCall :
+    ∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {prim : EvmYul.Operation .Yul}
+      {state : State} {args : List Word},
+      primitive prim →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.primCall fuel state prim args)
+  userCall :
+    ∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {functionName : Name}
+      {args : List Word} {codeOverride : Option AstContract}
+      {state : State},
+      userCall functionName →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.call fuel args (some functionName) codeOverride state)
+
 theorem CheckpointExpressionSound.of_evalValues_exprStmtCall
     (hEvalValues :
       ∀ {canBreak canContinue canLeave : Bool}
@@ -8922,6 +9242,32 @@ theorem CheckpointExpressionSound.of_evalValues_exprStmtCall
         SourceResultCheckpointAllowed canBreak canContinue canLeave
           (EvmYul.Yul.exec fuel (.ExprStmtCall expr) codeOverride state)) :
     CheckpointExpressionSound where
+  evalValues := hEvalValues
+  eval := fun hSafe hState =>
+    SourcePairResultCheckpointAllowed.eval_of_evalValues
+      (hEvalValues hSafe hState)
+  exprStmtCall := hExprStmtCall
+
+theorem FamilyCheckpointExpressionSound.of_evalValues_exprStmtCall
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    (hEvalValues :
+      ∀ {canBreak canContinue canLeave : Bool}
+        {fuel : Nat} {expr : AstExpr}
+        {codeOverride : Option AstContract} {state : State},
+        Safe.FeatureCoverage.Family.expr primitive userCall expr →
+        StateCheckpointAllowed canBreak canContinue canLeave state →
+        SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+          (EvmYul.Yul.evalValues fuel expr codeOverride state))
+    (hExprStmtCall :
+      ∀ {canBreak canContinue canLeave : Bool}
+        {fuel : Nat} {expr : AstExpr}
+        {codeOverride : Option AstContract} {state : State},
+        Safe.FeatureCoverage.Family.expr primitive userCall expr →
+        StateCheckpointAllowed canBreak canContinue canLeave state →
+        SourceResultCheckpointAllowed canBreak canContinue canLeave
+          (EvmYul.Yul.exec fuel (.ExprStmtCall expr) codeOverride state)) :
+    FamilyCheckpointExpressionSound primitive userCall where
   evalValues := hEvalValues
   eval := fun hSafe hState =>
     SourcePairResultCheckpointAllowed.eval_of_evalValues
@@ -9157,6 +9503,215 @@ theorem CheckpointExpressionSound.of_callSound
                                   (StateCheckpointAllowed.of_pair_result_ok
                                     hArgsAllowed hArgs))
 
+theorem FamilyCheckpointExpressionSound.of_callSound
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    (hCall : FamilyCheckpointCallSound primitive userCall) :
+    FamilyCheckpointExpressionSound primitive userCall := by
+  let hFuel :
+        ∀ fuel,
+          (∀ {canBreak canContinue canLeave : Bool}
+            {expr : AstExpr} {codeOverride : Option AstContract}
+            {state : State},
+            Safe.FeatureCoverage.Family.expr primitive userCall expr →
+            StateCheckpointAllowed canBreak canContinue canLeave state →
+            SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+              (EvmYul.Yul.evalValues fuel expr codeOverride state)) ∧
+          (∀ {canBreak canContinue canLeave : Bool}
+            {exprs : List AstExpr} {codeOverride : Option AstContract}
+            {state : State},
+            Safe.FeatureCoverage.Family.exprs primitive userCall exprs →
+            StateCheckpointAllowed canBreak canContinue canLeave state →
+            SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+              (EvmYul.Yul.evalArgs fuel exprs codeOverride state)) := by
+    intro fuel
+    refine Nat.strong_induction_on fuel ?_
+    intro fuel ih
+    cases fuel with
+    | zero =>
+        constructor
+        · intro canBreak canContinue canLeave expr codeOverride state
+            _hSafe _hState
+          simp [EvmYul.Yul.evalValues, SourcePairResultCheckpointAllowed]
+        · intro canBreak canContinue canLeave exprs codeOverride state
+            _hSafe _hState
+          simp [EvmYul.Yul.evalArgs, SourcePairResultCheckpointAllowed]
+    | succ fuelPred =>
+        have ihPred := ih fuelPred (Nat.lt_succ_self fuelPred)
+        constructor
+        · intro canBreak canContinue canLeave expr codeOverride state
+            hSafe hState
+          cases expr with
+          | Lit value =>
+              exact
+                SourcePairResultCheckpointAllowed.evalValues_lit_succ_of_state
+                  hState
+          | Var name =>
+              exact
+                SourcePairResultCheckpointAllowed.evalValues_var_succ_of_state
+                  hState
+          | Call callee args =>
+              cases callee with
+              | inl prim =>
+                  rcases hSafe with ⟨hSafePrim, hSafeArgs⟩
+                  simp [EvmYul.Yul.evalValues]
+                  have hArgsAllowed :
+                      SourcePairResultCheckpointAllowed canBreak canContinue
+                        canLeave
+                        (EvmYul.Yul.reverse'
+                          (EvmYul.Yul.evalArgs fuelPred args.reverse
+                            codeOverride state)) :=
+                    SourcePairResultCheckpointAllowed.reverse'
+                      ((ihPred).2 (family_exprs_reverse hSafeArgs) hState)
+                  cases hArgs :
+                      EvmYul.Yul.reverse'
+                        (EvmYul.Yul.evalArgs fuelPred args.reverse
+                          codeOverride state) with
+                  | error err =>
+                      simp [hArgs, SourcePairResultCheckpointAllowed]
+                  | ok pair =>
+                      cases pair with
+                      | mk stateAfter values =>
+                          simpa [hArgs] using
+                            hCall.primCall hSafePrim
+                              (StateCheckpointAllowed.of_pair_result_ok
+                                hArgsAllowed hArgs)
+              | inr functionName =>
+                  rcases hSafe with ⟨hSupported, hSafeArgs⟩
+                  simp [EvmYul.Yul.evalValues]
+                  have hArgsAllowed :
+                      SourcePairResultCheckpointAllowed canBreak canContinue
+                        canLeave
+                        (EvmYul.Yul.reverse'
+                          (EvmYul.Yul.evalArgs fuelPred args.reverse
+                            codeOverride state)) :=
+                    SourcePairResultCheckpointAllowed.reverse'
+                      ((ihPred).2 (family_exprs_reverse hSafeArgs) hState)
+                  cases hArgs :
+                      EvmYul.Yul.reverse'
+                        (EvmYul.Yul.evalArgs fuelPred args.reverse
+                          codeOverride state) with
+                  | error err =>
+                      simp [hArgs, SourcePairResultCheckpointAllowed]
+                  | ok pair =>
+                      cases pair with
+                      | mk stateAfter values =>
+                          simpa [hArgs] using
+                            hCall.userCall
+                              (functionName := functionName)
+                              (codeOverride := codeOverride)
+                              hSupported
+                              (StateCheckpointAllowed.of_pair_result_ok
+                                hArgsAllowed hArgs)
+        · intro canBreak canContinue canLeave exprs codeOverride state
+            hSafe hState
+          cases exprs with
+          | nil =>
+              exact
+                SourcePairResultCheckpointAllowed.evalArgs_nil_succ_of_state
+                  hState
+          | cons head tail =>
+              rcases hSafe with ⟨hHeadSafe, hTailSafe⟩
+              cases fuelPred with
+              | zero =>
+                  exact
+                    SourcePairResultCheckpointAllowed.evalArgs_cons_succ_of_eval_tail
+                      SourcePairResultCheckpointAllowed.evalTail_zero
+              | succ fuelTail =>
+                  have ihTail := ih fuelTail (by omega)
+                  exact
+                    SourcePairResultCheckpointAllowed.evalArgs_cons_succ_of_eval_tail
+                      (SourcePairResultCheckpointAllowed.evalTail_succ_of_head_tail
+                        (SourcePairResultCheckpointAllowed.eval_of_evalValues
+                          ((ihPred).1 hHeadSafe hState))
+                        (fun hHeadOk =>
+                          (ihTail).2 hTailSafe
+                            (StateCheckpointAllowed.of_pair_result_ok
+                              (SourcePairResultCheckpointAllowed.eval_of_evalValues
+                                ((ihPred).1 hHeadSafe hState))
+                              hHeadOk)))
+  apply FamilyCheckpointExpressionSound.of_evalValues_exprStmtCall
+  · intro canBreak canContinue canLeave fuel expr codeOverride state
+      hSafe hState
+    exact (hFuel fuel).1 hSafe hState
+  · intro canBreak canContinue canLeave fuel expr codeOverride state
+      hSafe hState
+    cases fuel with
+    | zero =>
+        simp [EvmYul.Yul.exec, SourceResultCheckpointAllowed]
+    | succ fuelPred =>
+        cases expr with
+        | Lit value =>
+            simp [EvmYul.Yul.exec, SourceResultCheckpointAllowed]
+        | Var name =>
+            simp [EvmYul.Yul.exec, SourceResultCheckpointAllowed]
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                rcases hSafe with ⟨hSafePrim, hSafeArgs⟩
+                rw [Imported.exec_expr_prim_call_succ]
+                have hArgsAllowed :
+                    SourcePairResultCheckpointAllowed canBreak canContinue
+                      canLeave
+                      (EvmYul.Yul.reverse'
+                        (EvmYul.Yul.evalArgs fuelPred args.reverse
+                          codeOverride state)) :=
+                  SourcePairResultCheckpointAllowed.reverse'
+                    ((hFuel fuelPred).2 (family_exprs_reverse hSafeArgs)
+                      hState)
+                cases hArgs :
+                    EvmYul.Yul.reverse'
+                      (EvmYul.Yul.evalArgs fuelPred args.reverse codeOverride
+                        state) with
+                | error err =>
+                    simp [hArgs, EvmYul.Yul.execPrimCall,
+                      SourceResultCheckpointAllowed]
+                | ok pair =>
+                    cases pair with
+                    | mk stateAfter values =>
+                        simpa [hArgs, EvmYul.Yul.execPrimCall] using
+                          SourceResultCheckpointAllowed.multifill'
+                            (names := [])
+                            (hCall.primCall hSafePrim
+                              (StateCheckpointAllowed.of_pair_result_ok
+                                hArgsAllowed hArgs))
+            | inr functionName =>
+                rcases hSafe with ⟨hSupported, hSafeArgs⟩
+                rw [Imported.exec_expr_user_call_succ]
+                have hArgsAllowed :
+                    SourcePairResultCheckpointAllowed canBreak canContinue
+                      canLeave
+                      (EvmYul.Yul.reverse'
+                        (EvmYul.Yul.evalArgs fuelPred args.reverse
+                          codeOverride state)) :=
+                  SourcePairResultCheckpointAllowed.reverse'
+                    ((hFuel fuelPred).2 (family_exprs_reverse hSafeArgs)
+                      hState)
+                cases hArgs :
+                    EvmYul.Yul.reverse'
+                      (EvmYul.Yul.evalArgs fuelPred args.reverse codeOverride
+                        state) with
+                | error err =>
+                    simp [hArgs, EvmYul.Yul.execCall,
+                      SourceResultCheckpointAllowed]
+                | ok pair =>
+                    cases pair with
+                    | mk stateAfter values =>
+                        cases fuelPred with
+                        | zero =>
+                            simp [hArgs, EvmYul.Yul.execCall,
+                              SourceResultCheckpointAllowed]
+                        | succ fuel' =>
+                            simpa [hArgs, EvmYul.Yul.execCall] using
+                              SourceResultCheckpointAllowed.multifill'
+                                (names := [])
+                                (hCall.userCall
+                                  (fuel := fuel') (functionName := functionName)
+                                  (args := values) (codeOverride := codeOverride)
+                                  hSupported
+                                  (StateCheckpointAllowed.of_pair_result_ok
+                                    hArgsAllowed hArgs))
+
 theorem CheckpointCallSound.of_primitiveCallCheckpointAllowedForSafeState
     (hPrim : PrimitiveCallCheckpointAllowedForSafeState) :
     CheckpointCallSound where
@@ -9171,6 +9726,591 @@ theorem CheckpointCallSound.of_primitiveCallCheckpointAllowedForSafe
   CheckpointCallSound.of_primitiveCallCheckpointAllowedForSafeState
     (PrimitiveCallCheckpointAllowedForSafeState.of_ok_and_nonOk
       hPrimCheckpoint hPrimNonOk)
+
+def PrimitiveCALLCheckpointAllowedForState : Prop :=
+  ∀ {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {state : State} {args : List Word},
+    StateCheckpointAllowed canBreak canContinue canLeave state →
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.primCall fuel state (.System .CALL) args)
+
+/--
+Child-dispatcher terminal-control invariant for CALL.
+
+When `CALL` executes a Yul child, a child `YulHalt` is restored as a successful
+external-call result. The parent proof only needs to know that the child halt
+state is not an unhandled Yul control checkpoint for the surrounding control
+context. This is intentionally weaker than requiring an ordinary `.Ok` state:
+historical imported-Yul resource states such as `.OutOfFuel` are harmless for
+checkpoint freedom because restoration turns them into errors rather than
+successful checkpoint states.
+
+The remaining whole-world proof should construct this invariant from the child
+world relation / recursive child evidence for compiled callees, or from a
+fuel-inductive imported-Yul semantic invariant over accepted worlds.
+-/
+def CallDispatcherYulHaltStateCheckpointAllowedForOkState : Prop :=
+  ∀ {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    {haltState : State} {haltValue : Word},
+    EvmYul.Yul.callDispatcher fuel codeOverride (.Ok shared store) =
+      .error (.YulHalt haltState haltValue) →
+    StateCheckpointAllowed canBreak canContinue canLeave haltState
+
+theorem PrimitiveCALLCheckpointAllowedForState.of_callDispatcher_yulHalt_checkpoint
+    (hChildHaltCheckpoint :
+      CallDispatcherYulHaltStateCheckpointAllowedForOkState) :
+    PrimitiveCALLCheckpointAllowedForState := by
+  intro canBreak canContinue canLeave fuel state args hState
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall, SourcePairResultCheckpointAllowed]
+  | succ fuelPred =>
+      cases args with
+      | nil =>
+          simp [EvmYul.Yul.primCall, SourcePairResultCheckpointAllowed]
+      | cons gas args =>
+          cases args with
+          | nil =>
+              simp [EvmYul.Yul.primCall, SourcePairResultCheckpointAllowed]
+          | cons address args =>
+              cases args with
+              | nil =>
+                  simp [EvmYul.Yul.primCall,
+                    SourcePairResultCheckpointAllowed]
+              | cons value args =>
+                  cases args with
+                  | nil =>
+                      simp [EvmYul.Yul.primCall,
+                        SourcePairResultCheckpointAllowed]
+                  | cons inOffset args =>
+                      cases args with
+                      | nil =>
+                          simp [EvmYul.Yul.primCall,
+                            SourcePairResultCheckpointAllowed]
+                      | cons inSize args =>
+                          cases args with
+                          | nil =>
+                              simp [EvmYul.Yul.primCall,
+                                SourcePairResultCheckpointAllowed]
+                          | cons outOffset args =>
+                              cases args with
+                              | nil =>
+                                  simp [EvmYul.Yul.primCall,
+                                    SourcePairResultCheckpointAllowed]
+                              | cons outSize _extra =>
+                                  have hCALLMutableGuard :
+                                      ¬ (¬ state.executionEnv.perm ∧
+                                        ((EvmYul.Operation.CALL :
+                                            EvmYul.Operation .Yul) ∈
+                                          [EvmYul.Operation.CREATE,
+                                            EvmYul.Operation.CREATE2,
+                                            EvmYul.Operation.SSTORE,
+                                            EvmYul.Operation.SELFDESTRUCT,
+                                            EvmYul.Operation.LOG0,
+                                            EvmYul.Operation.LOG1,
+                                            EvmYul.Operation.LOG2,
+                                            EvmYul.Operation.LOG3,
+                                            EvmYul.Operation.LOG4,
+                                            EvmYul.Operation.TSTORE])) := by
+                                    simp [EvmYul.Operation.CALL,
+                                      EvmYul.Operation.CREATE,
+                                      EvmYul.Operation.CREATE2,
+                                      EvmYul.Operation.SSTORE,
+                                      EvmYul.Operation.SELFDESTRUCT,
+                                      EvmYul.Operation.LOG0,
+                                      EvmYul.Operation.LOG1,
+                                      EvmYul.Operation.LOG2,
+                                      EvmYul.Operation.LOG3,
+                                      EvmYul.Operation.LOG4,
+                                      EvmYul.Operation.TSTORE]
+                                  simp only [EvmYul.Yul.primCall,
+                                    hCALLMutableGuard]
+                                  by_cases hStatic :
+                                      state.executionEnv.perm = false ∧
+                                        ¬ value = ⟨0⟩
+                                  · simpa [hStatic, Except.bind, bind, throw,
+                                      throwThe, MonadExceptOf.throw] using
+                                      (SourcePairResultCheckpointAllowed.error
+                                        (α := List Word)
+                                        (err :=
+                                          EvmYul.Yul.Exception.StaticModeViolation))
+                                  · let address' :=
+                                      EvmYul.AccountAddress.ofUInt256 address
+                                    let accessed :=
+                                      EvmYul.Yul.addAccessedAccount state
+                                        address'
+                                    have hAccessed :
+                                        StateCheckpointAllowed canBreak
+                                          canContinue canLeave accessed := by
+                                      simpa [accessed, address'] using
+                                        StateCheckpointAllowed.addAccessedAccount
+                                          (state := state)
+                                          (address := address') hState
+                                    cases hTransfer :
+                                        EvmYul.Yul.callTransferAccountMap?
+                                          state.sharedState.accountMap
+                                          state.executionEnv.codeOwner
+                                          address' value with
+                                    | none =>
+                                        simpa [EvmYul.Yul.primCall, hStatic,
+                                          address', accessed, hTransfer]
+                                          using
+                                            SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
+                                              (accountMap := none)
+                                              (inOffset := inOffset)
+                                              (inSize := inSize)
+                                              (outOffset := outOffset)
+                                              (outSize := outSize)
+                                              (value := (⟨0⟩ : Word))
+                                              hAccessed
+                                    | some accountMap₁ =>
+                                        by_cases hDepth :
+                                            state.executionEnv.depth ≥ 1024
+                                        · simpa [EvmYul.Yul.primCall, hStatic,
+                                            address', accessed, hTransfer,
+                                            hDepth]
+                                            using
+                                              SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
+                                                (accountMap := none)
+                                                (inOffset := inOffset)
+                                                (inSize := inSize)
+                                                (outOffset := outOffset)
+                                                (outSize := outSize)
+                                                (value := (⟨0⟩ : Word))
+                                                hAccessed
+                                        · cases hAccessedState : accessed with
+                                          | OutOfFuel =>
+                                              simp [EvmYul.Yul.primCall,
+                                                hStatic, address', accessed,
+                                                hTransfer, hDepth,
+                                                hAccessedState,
+                                                SourcePairResultCheckpointAllowed]
+                                          | Checkpoint jump =>
+                                              cases jump <;>
+                                                simpa [EvmYul.Yul.primCall,
+                                                  hStatic, address', accessed,
+                                                  hTransfer, hDepth,
+                                                  hAccessedState,
+                                                  SourcePairResultCheckpointAllowed,
+                                                  StateCheckpointAllowed]
+                                                  using hAccessed
+                                          | Ok sharedState varstore =>
+                                              cases hExecute :
+                                                  EvmYul.toExecute .Yul
+                                                    state.sharedState.accountMap
+                                                    address' with
+                                              | Precompiled precompiled =>
+                                                  simpa [EvmYul.Yul.primCall,
+                                                    hStatic, address',
+                                                    accessed, hTransfer,
+                                                    hDepth, hAccessedState,
+                                                    hExecute]
+                                                    using
+                                                      SourcePairResultCheckpointAllowed.buildPrecompiledContractCallState
+                                                        (accountMap := accountMap₁)
+                                                        (precompiled := precompiled)
+                                                        (gas :=
+                                                          EvmYul.UInt256.ofNat
+                                                            (EvmYul.EVM.Ccallgas
+                                                              address' address'
+                                                              value gas
+                                                              state.sharedState.accountMap
+                                                              state.toMachineState
+                                                              state.toState.substate))
+                                                        (executionEnv :=
+                                                          { sharedState.executionEnv with
+                                                            calldata :=
+                                                              state.toMachineState.memory.readWithPadding
+                                                                inOffset.toNat
+                                                                inSize.toNat
+                                                            code := default
+                                                            codeBytes := default
+                                                            codeOwner := address'
+                                                            source :=
+                                                              state.executionEnv.codeOwner
+                                                            weiValue := value
+                                                            depth :=
+                                                              state.executionEnv.depth + 1 })
+                                                        (inOffset := inOffset)
+                                                        (inSize := inSize)
+                                                        (outOffset := outOffset)
+                                                        (outSize := outSize)
+                                                        hAccessed
+                                              | Code code =>
+                                                  cases hFind :
+                                                      state.sharedState.accountMap.find?
+                                                        address' with
+                                                  | none =>
+                                                      simpa [EvmYul.Yul.primCall,
+                                                        hStatic, address',
+                                                        accessed, hTransfer,
+                                                        hDepth, hAccessedState,
+                                                        hExecute, hFind]
+                                                        using
+                                                          SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
+                                                            (accountMap :=
+                                                              some accountMap₁)
+                                                            (inOffset := inOffset)
+                                                            (inSize := inSize)
+                                                            (outOffset := outOffset)
+                                                            (outSize := outSize)
+                                                            (value := (⟨1⟩ : Word))
+                                                            hAccessed
+                                                  | some yulContract =>
+                                                      let calldata :=
+                                                        state.toMachineState.memory.readWithPadding
+                                                          inOffset.toNat
+                                                          inSize.toNat
+                                                      let callGas :=
+                                                        EvmYul.EVM.Ccallgas
+                                                          address' address'
+                                                          value gas
+                                                          state.sharedState.accountMap
+                                                          state.toMachineState
+                                                          state.toState.substate
+                                                      let childShared :
+                                                          EvmYul.SharedState .Yul :=
+                                                        { sharedState with
+                                                          executionEnv :=
+                                                            { sharedState.executionEnv with
+                                                              calldata := calldata
+                                                              code :=
+                                                                yulContract.code
+                                                              codeBytes :=
+                                                                yulContract.codeBytes
+                                                              codeOwner :=
+                                                                address'
+                                                              source :=
+                                                                state.executionEnv.codeOwner
+                                                              weiValue := value
+                                                              depth :=
+                                                                state.executionEnv.depth + 1 }
+                                                          toMachineState :=
+                                                            EvmYul.MachineState.freshExternalCall
+                                                              (EvmYul.UInt256.ofNat
+                                                                callGas)
+                                                          accountMap :=
+                                                            accountMap₁ }
+                                                      cases hCall :
+                                                          EvmYul.Yul.callDispatcher
+                                                            fuelPred
+                                                            (some yulContract.code)
+                                                            (.Ok childShared
+                                                              default) with
+                                                      | ok pair =>
+                                                          rcases pair with
+                                                            ⟨bodyState, rets⟩
+                                                          have hBody :
+                                                              StateCheckpointAllowed
+                                                                canBreak
+                                                                canContinue
+                                                                canLeave
+                                                                bodyState :=
+                                                            StateCheckpointAllowed.of_pair_result_ok
+                                                              (SourcePairResultCheckpointAllowed.callDispatcher_of_ok_state
+                                                                (fuel := fuelPred)
+                                                                (codeOverride :=
+                                                                  some yulContract.code)
+                                                                (shared :=
+                                                                  childShared)
+                                                                (store :=
+                                                                  default))
+                                                              hCall
+                                                          simpa [EvmYul.Yul.primCall,
+                                                            hStatic, address',
+                                                            accessed, hTransfer,
+                                                            hDepth,
+                                                            hAccessedState,
+                                                            hExecute, hFind,
+                                                            calldata,
+                                                            callGas,
+                                                            childShared,
+                                                            hCall]
+                                                            using
+                                                              SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState
+                                                                (callerState :=
+                                                                  accessed)
+                                                                (bodyState :=
+                                                                  bodyState)
+                                                                (varstore :=
+                                                                  varstore)
+                                                                (returnData :=
+                                                                  ByteArray.empty)
+                                                                (inOffset :=
+                                                                  inOffset)
+                                                                (inSize :=
+                                                                  inSize)
+                                                                (outOffset :=
+                                                                  outOffset)
+                                                                (outSize :=
+                                                                  outSize)
+                                                                hAccessed hBody
+                                                      | error err =>
+                                                          cases err with
+                                                          | YulHalt haltState haltValue =>
+                                                              have hBody :
+                                                                  StateCheckpointAllowed
+                                                                    canBreak
+                                                                    canContinue
+                                                                    canLeave
+                                                                    haltState :=
+                                                                hChildHaltCheckpoint
+                                                                  (shared :=
+                                                                    childShared)
+                                                                  (store :=
+                                                                    default)
+                                                                  (haltState :=
+                                                                    haltState)
+                                                                  (haltValue :=
+                                                                    haltValue)
+                                                                  hCall
+                                                              simpa [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall]
+                                                                using
+                                                                  SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState
+                                                                    (callerState :=
+                                                                      accessed)
+                                                                    (bodyState :=
+                                                                      haltState)
+                                                                    (varstore :=
+                                                                      varstore)
+                                                                    (returnData :=
+                                                                      haltState.toMachineState.H_return)
+                                                                    (inOffset :=
+                                                                      inOffset)
+                                                                    (inSize :=
+                                                                      inSize)
+                                                                    (outOffset :=
+                                                                      outOffset)
+                                                                    (outSize :=
+                                                                      outSize)
+                                                                    hAccessed
+                                                                    hBody
+                                                          | Revert revertState =>
+                                                              simpa [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall]
+                                                                using
+                                                                  SourcePairResultCheckpointAllowed.restoreRevertedContractCallState
+                                                                    (callerState :=
+                                                                      accessed)
+                                                                    (bodyState :=
+                                                                      revertState)
+                                                                    (inOffset :=
+                                                                      inOffset)
+                                                                    (inSize :=
+                                                                      inSize)
+                                                                    (outOffset :=
+                                                                      outOffset)
+                                                                    (outSize :=
+                                                                      outSize)
+                                                                    hAccessed
+                                                          | OutOfFuel =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | InvalidArguments =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | NotEncodableRLP =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | InvalidInstruction =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | StaticModeViolation =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | MissingContract msg =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | MissingContractFunction msg =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | InvalidExpression =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | UnknownIdentifier id =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | DuplicateDeclaration id =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+                                                          | YulEXTCODESIZENotImplemented =>
+                                                              simp [EvmYul.Yul.primCall,
+                                                                hStatic,
+                                                                address',
+                                                                accessed,
+                                                                hTransfer,
+                                                                hDepth,
+                                                                hAccessedState,
+                                                                hExecute, hFind,
+                                                                calldata,
+                                                                callGas,
+                                                                childShared,
+                                                                hCall,
+                                                                SourcePairResultCheckpointAllowed]
+
+def PrimitiveCallCheckpointAllowedForCallSafeState : Prop :=
+  ∀ {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {state : State} {args : List Word},
+    Safe.CallSafe.primitive yulPrim →
+    StateCheckpointAllowed canBreak canContinue canLeave state →
+    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.primCall fuel state yulPrim args)
+
+theorem PrimitiveCallCheckpointAllowedForCallSafeState.of_safe_and_call
+    (hSafePrim : PrimitiveCallCheckpointAllowedForSafeState)
+    (hCALL : PrimitiveCALLCheckpointAllowedForState) :
+    PrimitiveCallCheckpointAllowedForCallSafeState := by
+  intro canBreak canContinue canLeave fuel yulPrim state args hPrim hState
+  have hSplit :=
+    (Safe.CallSafe.primitive_iff_safe_or_call yulPrim).mp hPrim
+  cases hSplit with
+  | inl hSafe =>
+      exact hSafePrim hSafe hState
+  | inr hEq =>
+      subst yulPrim
+      exact hCALL hState
+
+theorem FamilyCheckpointCallSound.of_callSafePrimitiveCheckpoint
+    (hPrim : PrimitiveCallCheckpointAllowedForCallSafeState) :
+    FamilyCheckpointCallSound Safe.CallSafe.primitive
+      Safe.CallSafe.userCall where
+  primCall := fun hSafe hState => hPrim hSafe hState
+  userCall := fun _hSupported hState =>
+    SourcePairResultCheckpointAllowed.call_of_allowed_state hState
 
 theorem CheckpointExpressionSound.of_primitive_families :
     CheckpointExpressionSound :=
@@ -9400,6 +10540,268 @@ theorem SourceResultCheckpointAllowed.execSeq_of_scoped_safe
   (SourceResultCheckpointAllowed.exec_and_execSeq_of_scoped_safe hExpr).2
     hSafe hScoped hState
 
+theorem SourceResultCheckpointAllowed.exec_and_execSeq_of_scoped_family
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    (hExpr : FamilyCheckpointExpressionSound primitive userCall) :
+    (∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {stmt : AstStmt}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.FeatureCoverage.Family.stmt primitive userCall stmt →
+      ControlFlow.ScopedStmt canBreak canContinue canLeave stmt →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourceResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.exec fuel stmt codeOverride state)) ∧
+    (∀ {canBreak canContinue canLeave : Bool}
+      {fuel : Nat} {stmts : List AstStmt}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.FeatureCoverage.Family.stmts primitive userCall stmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave stmts →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      SourceResultCheckpointAllowed canBreak canContinue canLeave
+        (EvmYul.Yul.execSeq fuel stmts codeOverride state)) := by
+  suffices hFuel :
+      ∀ fuel,
+        (∀ {canBreak canContinue canLeave : Bool}
+          {stmt : AstStmt} {codeOverride : Option AstContract}
+          {state : State},
+          Safe.FeatureCoverage.Family.stmt primitive userCall stmt →
+          ControlFlow.ScopedStmt canBreak canContinue canLeave stmt →
+          StateCheckpointAllowed canBreak canContinue canLeave state →
+          SourceResultCheckpointAllowed canBreak canContinue canLeave
+            (EvmYul.Yul.exec fuel stmt codeOverride state)) ∧
+        (∀ {canBreak canContinue canLeave : Bool}
+          {stmts : List AstStmt} {codeOverride : Option AstContract}
+          {state : State},
+          Safe.FeatureCoverage.Family.stmts primitive userCall stmts →
+          ControlFlow.ScopedStmts canBreak canContinue canLeave stmts →
+          StateCheckpointAllowed canBreak canContinue canLeave state →
+          SourceResultCheckpointAllowed canBreak canContinue canLeave
+            (EvmYul.Yul.execSeq fuel stmts codeOverride state)) by
+    constructor
+    · intro canBreak canContinue canLeave fuel stmt codeOverride state
+        hSafe hScoped hState
+      exact (hFuel fuel).1 hSafe hScoped hState
+    · intro canBreak canContinue canLeave fuel stmts codeOverride state
+        hSafe hScoped hState
+      exact (hFuel fuel).2 hSafe hScoped hState
+  intro fuel
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro canBreak canContinue canLeave stmt codeOverride state
+          _hSafe _hScoped _hState
+        simp [EvmYul.Yul.exec, SourceResultCheckpointAllowed]
+      · intro canBreak canContinue canLeave stmts codeOverride state
+          _hSafe _hScoped _hState
+        simp [EvmYul.Yul.execSeq, SourceResultCheckpointAllowed]
+  | succ fuelPred =>
+      have ihPred := ih fuelPred (Nat.lt_succ_self fuelPred)
+      constructor
+      · intro canBreak canContinue canLeave stmt codeOverride state
+          hSafe hScoped hState
+        cases stmt with
+        | Block body =>
+            exact
+              SourceResultCheckpointAllowed.exec_block_succ_of_execSeq
+                ((ihPred).2
+                  (by
+                    simpa [Safe.FeatureCoverage.Family.stmt] using hSafe)
+                  (by simpa [ControlFlow.ScopedStmt] using hScoped)
+                  hState)
+        | Let names value? =>
+            cases value? with
+            | none =>
+                exact
+                  SourceResultCheckpointAllowed.exec_let_none_succ_of_state
+                    hState
+            | some value =>
+                exact
+                  SourceResultCheckpointAllowed.exec_let_some_succ_of_evalValues
+                    (hExpr.evalValues
+                      (by
+                        simpa [Safe.FeatureCoverage.Family.stmt] using hSafe)
+                      hState)
+        | Assign names value =>
+            exact
+              SourceResultCheckpointAllowed.exec_assign_succ_of_evalValues
+                (hExpr.evalValues
+                  (by
+                    simpa [Safe.FeatureCoverage.Family.stmt] using hSafe)
+                  hState)
+        | ExprStmtCall value =>
+            exact
+              hExpr.exprStmtCall
+                (by simpa [Safe.FeatureCoverage.Family.stmt] using hSafe)
+                hState
+        | Switch cond cases defaultBody =>
+            rcases hSafe with ⟨hCondSafe, hCasesSafe, hDefaultSafe⟩
+            exact
+              SourceResultCheckpointAllowed.exec_switch_succ_of_scoped_case
+                hScoped
+                (hExpr.eval hCondSafe hState)
+                (fun {stateAfter : State} {value : Word} hEvalOk
+                    hSelectedScoped =>
+                  (ihPred).1
+                    (by
+                      simpa [Safe.FeatureCoverage.Family.stmt] using
+                        family_safe_cases_selectSwitchCase
+                          (primitive := primitive) (userCall := userCall)
+                          (value := value) hCasesSafe hDefaultSafe)
+                    (by simpa [ControlFlow.ScopedStmt] using
+                      hSelectedScoped)
+                    (StateCheckpointAllowed.of_pair_result_ok
+                      (hExpr.eval hCondSafe hState) hEvalOk))
+        | For cond post body =>
+            rcases hSafe with ⟨hCondSafe, hPostSafe, hBodySafe⟩
+            cases fuelPred with
+            | zero =>
+                simp [EvmYul.Yul.exec, EvmYul.Yul.loop,
+                  SourceResultCheckpointAllowed]
+            | succ fuel1 =>
+                cases fuel1 with
+                | zero =>
+                    simp [EvmYul.Yul.exec, EvmYul.Yul.loop,
+                      SourceResultCheckpointAllowed]
+                | succ fuel' =>
+                    have ihLoop := ih fuel' (by omega)
+                    exact
+                      SourceResultCheckpointAllowed.exec_for_succ_succ_succ_of_scoped_parts
+                        hScoped hState
+                        (hExpr.eval hCondSafe
+                          (StateCheckpointAllowed.mkOk hState))
+                        (fun hEvalOk _hNonzero hBodyScoped =>
+                          (ihLoop).1
+                            (by simpa [Safe.FeatureCoverage.Family.stmt]
+                              using hBodySafe)
+                            (by simpa [ControlFlow.ScopedStmt] using
+                              hBodyScoped)
+                            (StateCheckpointAllowed.mono
+                              (by intro _h; rfl) (by intro _h; rfl)
+                              (by intro h; exact h)
+                              (StateCheckpointAllowed.of_pair_result_ok
+                                (hExpr.eval hCondSafe
+                                  (StateCheckpointAllowed.mkOk hState))
+                                hEvalOk)))
+                        (fun hPostInput hPostScoped =>
+                          (ihLoop).1
+                            (by simpa [Safe.FeatureCoverage.Family.stmt]
+                              using hPostSafe)
+                            (by simpa [ControlFlow.ScopedStmt] using
+                              hPostScoped)
+                            hPostInput)
+                        (fun hLoopInput hLoopScoped =>
+                          (ihLoop).1
+                            (by exact ⟨hCondSafe, hPostSafe, hBodySafe⟩)
+                            hLoopScoped hLoopInput)
+        | If cond body =>
+            rcases hSafe with ⟨hCondSafe, hBodySafe⟩
+            exact
+              SourceResultCheckpointAllowed.exec_if_succ_of_scoped_body
+                hScoped
+                (hExpr.eval hCondSafe hState)
+                (fun hEvalOk _hNonzero hBodyScoped =>
+                  (ihPred).1
+                    (by simpa [Safe.FeatureCoverage.Family.stmt]
+                      using hBodySafe)
+                    (by simpa [ControlFlow.ScopedStmt] using hBodyScoped)
+                    (StateCheckpointAllowed.of_pair_result_ok
+                      (hExpr.eval hCondSafe hState) hEvalOk))
+        | Continue =>
+            exact
+              SourceResultCheckpointAllowed.exec_continue_succ_of_scoped
+                hScoped hState
+        | Break =>
+            exact
+              SourceResultCheckpointAllowed.exec_break_succ_of_scoped
+                hScoped hState
+        | Leave =>
+            exact
+              SourceResultCheckpointAllowed.exec_leave_succ_of_scoped
+                hScoped hState
+      · intro canBreak canContinue canLeave stmts codeOverride state
+          hSafe hScoped hState
+        cases stmts with
+        | nil =>
+            exact SourceResultCheckpointAllowed.execSeq_nil_succ hState
+        | cons head rest =>
+            rcases hSafe with ⟨hHeadSafe, hRestSafe⟩
+            rcases hScoped with ⟨hHeadScoped, hRestScoped⟩
+            exact
+              SourceResultCheckpointAllowed.execSeq_cons_succ
+                ((ihPred).1 hHeadSafe hHeadScoped hState)
+                (fun hHeadOk =>
+                  (ihPred).2 hRestSafe hRestScoped
+                    (StateCheckpointAllowed.of_result_ok
+                      ((ihPred).1 hHeadSafe hHeadScoped hState)
+                      hHeadOk))
+
+theorem SourceResultCheckpointAllowed.exec_of_scoped_family
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    (hExpr : FamilyCheckpointExpressionSound primitive userCall)
+    {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmt : AstStmt}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.FeatureCoverage.Family.stmt primitive userCall stmt)
+    (hScoped : ControlFlow.ScopedStmt canBreak canContinue canLeave stmt)
+    (hState : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourceResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.exec fuel stmt codeOverride state) :=
+  (SourceResultCheckpointAllowed.exec_and_execSeq_of_scoped_family hExpr).1
+    hSafe hScoped hState
+
+theorem SourceResultCheckpointAllowed.execSeq_of_scoped_family
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    (hExpr : FamilyCheckpointExpressionSound primitive userCall)
+    {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmts : List AstStmt}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.FeatureCoverage.Family.stmts primitive userCall stmts)
+    (hScoped : ControlFlow.ScopedStmts canBreak canContinue canLeave stmts)
+    (hState : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourceResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.execSeq fuel stmts codeOverride state) :=
+  (SourceResultCheckpointAllowed.exec_and_execSeq_of_scoped_family hExpr).2
+    hSafe hScoped hState
+
+theorem SourceResultCheckpointAllowed.exec_of_scoped_callSafe
+    (hExpr :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmt : AstStmt}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.stmt stmt)
+    (hScoped : ControlFlow.ScopedStmt canBreak canContinue canLeave stmt)
+    (hState : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourceResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.exec fuel stmt codeOverride state) :=
+  SourceResultCheckpointAllowed.exec_of_scoped_family
+    (primitive := Safe.CallSafe.primitive)
+    (userCall := Safe.CallSafe.userCall)
+    hExpr (by simpa [Safe.CallSafe.stmt] using hSafe) hScoped hState
+
+theorem SourceResultCheckpointAllowed.execSeq_of_scoped_callSafe
+    (hExpr :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmts : List AstStmt}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.stmts stmts)
+    (hScoped : ControlFlow.ScopedStmts canBreak canContinue canLeave stmts)
+    (hState : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    SourceResultCheckpointAllowed canBreak canContinue canLeave
+      (EvmYul.Yul.execSeq fuel stmts codeOverride state) :=
+  SourceResultCheckpointAllowed.execSeq_of_scoped_family
+    (primitive := Safe.CallSafe.primitive)
+    (userCall := Safe.CallSafe.userCall)
+    hExpr (by simpa [Safe.CallSafe.stmts] using hSafe) hScoped hState
+
 /--
 A syntactically well-scoped `for` consumes body `break`/`continue` internally.
 So, when it is run as a statement from an ordinary `Ok` state, the whole `for`
@@ -9509,6 +10911,78 @@ theorem SourceResultCheckpointAllowed.function_body_ok_of_scoped_safe
           (👌 (EvmYul.Yul.State.Ok sharedArgs storeArgs).initcall
             params returns argValues)) :=
     SourceResultCheckpointAllowed.exec_of_scoped_safe
+      hExpr hSafeBlock hScopedBlock (by
+        have hInitial :
+            StateCheckpointAllowed false false true
+              (.Ok sharedArgs storeArgs) := by
+          simp [StateCheckpointAllowed]
+        have hStore :
+            StateCheckpointAllowed false false true
+              (EvmYul.Yul.State.setStore (.Ok sharedArgs storeArgs)
+                (default : State)) :=
+          StateCheckpointAllowed.setStore hInitial
+        have hReturns :
+            StateCheckpointAllowed false false true
+              (EvmYul.Yul.State.zeroFill returns
+                (EvmYul.Yul.State.setStore (.Ok sharedArgs storeArgs)
+                  (default : State))) :=
+          StateCheckpointAllowed.zeroFill hStore
+        have hParams :
+            StateCheckpointAllowed false false true
+              (EvmYul.Yul.State.multifill params argValues
+                (EvmYul.Yul.State.zeroFill returns
+                  (EvmYul.Yul.State.setStore (.Ok sharedArgs storeArgs)
+                    (default : State)))) :=
+          StateCheckpointAllowed.multifill hReturns
+        simpa [EvmYul.Yul.State.initcall] using
+          StateCheckpointAllowed.mkOk hParams)
+  simpa [hExec] using hAllowed
+
+/--
+CALL-safe sibling of `function_body_ok_of_scoped_safe`.
+
+Function bodies selected from a `Safe.CallSafe.program` may contain ordinary
+`CALL`, so the checkpoint argument is the family-generic CALL-safe expression
+contract rather than the old no-external-call `CheckpointExpressionSound`.
+-/
+theorem SourceResultCheckpointAllowed.function_body_ok_of_scoped_callSafe
+    (hExpr :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    {program : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {sharedArgs : EvmYul.SharedState .Yul}
+    {storeArgs : EvmYul.Yul.VarStore} {argValues : List Word}
+    {bodyFuel : Nat} {bodyState : State}
+    (hSafe : Safe.CallSafe.program program)
+    (hScoped : ControlFlow.ProgramScoped program)
+    (hLookup :
+      program.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hExec :
+      EvmYul.Yul.exec bodyFuel (.Block body) (some program.contract)
+          (👌 (EvmYul.Yul.State.Ok sharedArgs storeArgs).initcall
+            params returns argValues) =
+        .ok bodyState) :
+    SourceResultCheckpointAllowed false false true (.ok bodyState) := by
+  have hSafeBody :
+      Safe.CallSafe.stmts body :=
+    CallSafeLookup.function_body_safe_of_contract_lookup hSafe hLookup
+  have hSafeBlock :
+      Safe.CallSafe.stmt (.Block body) := by
+    simpa [Safe.CallSafe.stmt] using hSafeBody
+  have hScopedBody :
+      ControlFlow.ScopedStmts false false true body :=
+    ControlFlow.function_body_scoped_of_contract_lookup hScoped hLookup
+  have hScopedBlock :
+      ControlFlow.ScopedStmt false false true (.Block body) := by
+    simpa [ControlFlow.ScopedStmt] using hScopedBody
+  have hAllowed :
+      SourceResultCheckpointAllowed false false true
+        (EvmYul.Yul.exec bodyFuel (.Block body) (some program.contract)
+          (👌 (EvmYul.Yul.State.Ok sharedArgs storeArgs).initcall
+            params returns argValues)) :=
+    SourceResultCheckpointAllowed.exec_of_scoped_callSafe
       hExpr hSafeBlock hScopedBlock (by
         have hInitial :
             StateCheckpointAllowed false false true
@@ -24908,7 +26382,18 @@ theorem safeBasicOneOutputPrimCall_ok_single
               simp [Prim.toBasicOp?] at hBasic
               subst op
               simp [Expressions.Structured.BasicOp.outputs] at hOutputs
-          | CODESIZE | EXTCODESIZE | EXTCODEHASH =>
+          | CODESIZE =>
+              have hExec :
+                  yulPrimListResult
+                    (EvmYul.Yul.executionEnvOp
+                      (.ofNat ∘ ByteArray.size ∘
+                        EvmYul.ExecutionEnv.codeBytes)
+                      source args) = .ok (sourceAfter, values) := by
+                simp [EvmYul.Yul.primCall] at hCall
+                unfold EvmYul.step at hCall
+                simpa [yulPrimListResult] using hCall
+              exact wrapped_yul_executionEnvOp_ok_single hExec
+          | EXTCODESIZE | EXTCODEHASH =>
               simpa [Safe.primitive] using hSafe
           | GASPRICE =>
               have hExec :
@@ -25536,7 +27021,30 @@ theorem safeBasicOneOutputPrimCall_error_not_relatable
                 simpa [yulPrimListResult] using hCall
               exact wrapped_yul_executionEnvOp_error_not_relatable
                 hExec hRelatable
-          | CODESIZE | CODECOPY | EXTCODESIZE | EXTCODECOPY | EXTCODEHASH =>
+          | CODESIZE =>
+              have hExec :
+                  yulPrimListResult
+                    (EvmYul.Yul.executionEnvOp
+                      (.ofNat ∘ ByteArray.size ∘
+                        EvmYul.ExecutionEnv.codeBytes)
+                      source args) = .error err := by
+                simp [EvmYul.Yul.primCall] at hCall
+                have hStep :
+                    EvmYul.step
+                        ((.Env .CODESIZE : EvmYul.Operation .Yul)) none =
+                      EvmYul.Yul.executionEnvOp
+                        (.ofNat ∘ ByteArray.size ∘
+                          EvmYul.ExecutionEnv.codeBytes) := by
+                  rfl
+                rw [hStep] at hCall
+                simpa [yulPrimListResult] using hCall
+              exact wrapped_yul_executionEnvOp_error_not_relatable
+                hExec hRelatable
+          | CODECOPY =>
+              simp [Prim.toBasicOp?] at hBasic
+              rw [← hBasic] at hOutputs
+              simp [Expressions.Structured.BasicOp.outputs] at hOutputs
+          | EXTCODESIZE | EXTCODECOPY | EXTCODEHASH =>
               simp [Safe.primitive] at hSafe
           | RETURNDATASIZE =>
               have hExec :
@@ -26149,7 +27657,28 @@ theorem safeBasicZeroOutputPrimCall_error_not_relatable
                 simpa [yulPrimListResult] using hCall
               exact wrapped_yul_ternaryCopyOp_error_not_relatable
                 hExec hRelatable
-          | CODESIZE | CODECOPY | EXTCODESIZE | EXTCODECOPY | EXTCODEHASH =>
+          | CODESIZE =>
+              simp [Prim.toBasicOp?] at hBasic
+              rw [← hBasic] at hOutputs
+              simp [Expressions.Structured.BasicOp.outputs] at hOutputs
+          | CODECOPY =>
+              have hExec :
+                  yulPrimListResult
+                    (EvmYul.Yul.ternaryCopyOp
+                      EvmYul.SharedState.codeBytesCopy source args) =
+                    .error err := by
+                simp [EvmYul.Yul.primCall] at hCall
+                have hStep :
+                    EvmYul.step
+                        ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                      EvmYul.Yul.ternaryCopyOp
+                        EvmYul.SharedState.codeBytesCopy := by
+                  rfl
+                rw [hStep] at hCall
+                simpa [yulPrimListResult] using hCall
+              exact wrapped_yul_ternaryCopyOp_error_not_relatable
+                hExec hRelatable
+          | EXTCODESIZE | EXTCODECOPY | EXTCODEHASH =>
               simp [Safe.primitive] at hSafe
           | RETURNDATACOPY =>
               simp [EvmYul.Yul.primCall] at hCall
@@ -26781,6 +28310,63 @@ structure SourceArgListPreludeRegularAllCheckedAt
       SourceArgListPreludeRegularAt cfg layout prim program ctxArg argFuel
         argList (some contract) pre lowerArgs
 
+/--
+Family-checked regular argument-prelude bundle.
+
+This is the feature-parametric sibling of
+`SourceArgListPreludeRegularAllCheckedAt`.  The old checked bundle is still the
+right surface for the no-external-call public theorem; CALL-capable recursive
+bridges need this family-shaped version so nested argument expressions may
+contain exactly the primitive/user-call family admitted by the bridge.
+-/
+structure SourceArgListPreludeRegularAllFamilyCheckedAt
+    (coveredPrim : EvmYul.Operation .Yul → Prop)
+    (coveredUserCall : Name → Prop)
+    (cfg : StateRelConfig)
+    (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program)
+    (contract : AstContract)
+    (coverLayout : List Name)
+    (maxFuel : Nat) : Prop where
+  direct :
+    ∀ {argFuel : Nat} {ctxArg : Functions.Source.Ctx}
+      {freshState : Fresh.State} {argList : List AstExpr}
+      {lowerArgs : List (Locals.Expr 1)},
+      argFuel ≤ maxFuel →
+      FreshCoversLayout coverLayout freshState →
+      Expr.List.directCallArgsSafe? argList = true →
+      Expr.List.toLocals1? argList = some lowerArgs →
+      SourceArgListPreludeRegularAt cfg layout prim program ctxArg argFuel
+        argList (some contract) [] lowerArgs
+  lower :
+    ∀ {argFuel : Nat} {ctxArg : Functions.Source.Ctx}
+      {freshState freshState' : Fresh.State} {argList : List AstExpr}
+      {pre : List Functions.Stmt}
+      {lowerArgs : List (Locals.Expr 1)},
+      argFuel ≤ maxFuel →
+      FreshCoversLayout coverLayout freshState →
+      Safe.FeatureCoverage.Family.exprs coveredPrim coveredUserCall argList →
+      SourceExprsScoped layout argList →
+      UserCallArity.ExprsOk contract argList →
+      Expr.List.lowerBound1? freshState argList =
+        some (pre, lowerArgs, freshState') →
+      SourceArgListPreludeRegularAt cfg layout prim program ctxArg argFuel
+        argList (some contract) pre lowerArgs
+
+/-- CALL-safe instance of the family-checked argument-prelude bundle. -/
+abbrev SourceArgListPreludeRegularAllCallSafeCheckedAt
+    (cfg : StateRelConfig)
+    (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program)
+    (contract : AstContract)
+    (coverLayout : List Name)
+    (maxFuel : Nat) : Prop :=
+  SourceArgListPreludeRegularAllFamilyCheckedAt
+    Safe.CallSafe.primitive Safe.CallSafe.userCall cfg layout prim program
+    contract coverLayout maxFuel
+
 theorem SourceArgListPreludeRegularAllAt.mono
     {cfg : StateRelConfig}
     {layout : List Name}
@@ -26839,6 +28425,30 @@ theorem SourceArgListPreludeRegularAllCheckedAt.mono
       hArgs.lower (Nat.le_trans hFuel hLe) hCovers hSafe hScoped hOk
         hLower⟩
 
+theorem SourceArgListPreludeRegularAllFamilyCheckedAt.mono
+    {coveredPrim : EvmYul.Operation .Yul → Prop}
+    {coveredUserCall : Name → Prop}
+    {cfg : StateRelConfig}
+    {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program}
+    {contract : AstContract}
+    {coverLayout : List Name}
+    {smallFuel maxFuel : Nat}
+    (hLe : smallFuel ≤ maxFuel)
+    (hArgs :
+      SourceArgListPreludeRegularAllFamilyCheckedAt coveredPrim
+        coveredUserCall cfg layout prim program contract coverLayout
+        maxFuel) :
+    SourceArgListPreludeRegularAllFamilyCheckedAt coveredPrim
+      coveredUserCall cfg layout prim program contract coverLayout
+      smallFuel :=
+  ⟨fun hFuel hCovers hDirect hToLocals =>
+      hArgs.direct (Nat.le_trans hFuel hLe) hCovers hDirect hToLocals,
+   fun hFuel hCovers hSafe hScoped hOk hLower =>
+      hArgs.lower (Nat.le_trans hFuel hLe) hCovers hSafe hScoped hOk
+        hLower⟩
+
 /--
 Zero-fuel checked argument-prelude bundle.
 
@@ -26855,6 +28465,34 @@ theorem SourceArgListPreludeRegularAllCheckedAt.zero
     {coverLayout : List Name} :
     SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
       contract coverLayout 0 := by
+  refine ⟨?_, ?_⟩
+  · intro argFuel ctxArg freshState argList lowerArgs hFuel _hCovers
+      _hDirect hToLocals
+    have hFuelEq : argFuel = 0 := Nat.le_zero.mp hFuel
+    subst argFuel
+    refine ⟨toLocals1?_length hToLocals, ?_⟩
+    intro source compiler sourceAfter values _hInitial hEval
+    simp [EvmYul.Yul.evalArgs] at hEval
+  · intro argFuel ctxArg freshState freshState' argList pre lowerArgs hFuel
+      _hCovers _hSafe _hScoped _hOk hLower
+    have hFuelEq : argFuel = 0 := Nat.le_zero.mp hFuel
+    subst argFuel
+    refine ⟨Expr.List.lowerBound1?_length_lowerArgs_eq hLower, ?_⟩
+    intro source compiler sourceAfter values _hInitial hEval
+    simp [EvmYul.Yul.evalArgs] at hEval
+
+/-- Zero-fuel family-checked argument-prelude bundle. -/
+theorem SourceArgListPreludeRegularAllFamilyCheckedAt.zero
+    {coveredPrim : EvmYul.Operation .Yul → Prop}
+    {coveredUserCall : Name → Prop}
+    {cfg : StateRelConfig}
+    {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program}
+    {contract : AstContract}
+    {coverLayout : List Name} :
+    SourceArgListPreludeRegularAllFamilyCheckedAt coveredPrim
+      coveredUserCall cfg layout prim program contract coverLayout 0 := by
   refine ⟨?_, ?_⟩
   · intro argFuel ctxArg freshState argList lowerArgs hFuel _hCovers
       _hDirect hToLocals
@@ -41529,6 +43167,341 @@ theorem checkedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope_of_seq
             simp [SourceResultNoCheckpoint] at hNoCheckpoint
 
 /--
+CALL-safe checked adapter from the typed-continuation block bridge to the
+handler-aware hidden block mode interface.
+
+This is the `Safe.CallSafe` counterpart of
+`checkedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope_of_seqKont_block_frontier`.
+It keeps the hidden-mode proof from depending on the old CALL-rejecting
+`Safe.stmts` predicate; the only extra semantic input is the family checkpoint
+fact for the CALL-admitting primitive/user-call surface.
+-/
+theorem checkedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope_of_seqKont_block_frontier_callSafe
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {canBreak canContinue canLeave : Bool}
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hSafe : Safe.CallSafe.stmts sourceStmts)
+    (hScoped :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts)
+    (hHandlers : HiddenModeHandlersAvailable ctx layout canBreak canContinue)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSeq :
+      ∀ {allowedInner : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedInner sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedInner sourceResult →
+          SourceResultModeKontSupported ctx layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        CheckedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg reserved
+          layout (SourceModeKontLayouts.block layout outcomeLayout)
+          terminalRel revertRel prim program ctx sourceFuel compileFuel
+          sourceStmts codeOverride allowedInner) :
+    CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel.succ compileFuel sourceStmts codeOverride := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  let blockKonts := SourceModeKontLayouts.block layout outcomeLayout
+  have hKont :
+      ∀ {allowed : Except Exception State → Prop},
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout blockKonts
+            sourceResult) →
+        SourceResultBlockKontSoundWhenAtExactHiddenScope cfg layout blockKonts
+          terminalRel revertRel prim program ctx sourceFuel.succ sourceStmts
+          codeOverride lowerBlock allowed := by
+    intro allowed hAllowed hSupported
+    exact
+      sourceResultBlockKontSoundWhenAtExactHiddenScope_of_seqKont_block_supported
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (body := sourceStmts) (codeOverride := codeOverride)
+        (lowerBody := lowerBlock) (allowed := allowed)
+        hAllowed
+        (by
+          intro sourceResult hAllow
+          simpa [blockKonts] using hSupported hAllow)
+        hScopeContains
+        (fun {allowedInner} hAllowedInner hSupportedInner =>
+          (hSeq (allowedInner := allowedInner) hAllowedInner
+            (by
+              intro sourceResult hAllow
+              simpa [blockKonts] using hSupportedInner hAllow))
+            hCovers hLower)
+  refine
+    { regular := ?_
+      brk := ?_
+      cont := ?_
+      leave := ?_
+      halt := ?_ }
+  · intro sharedIn sharedOut storeIn storeOut compilerIn hDomainIn
+      _hDomainOut hSource hInitial
+    let allowed : Except Exception State → Prop :=
+      fun result =>
+        result =
+          (.ok (.Ok sharedOut storeOut) : Except Exception State)
+    have hAllowed :
+        ∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [SourceResultRelatable]
+    have hSupported :
+        ∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout blockKonts
+            sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      intro name hMem
+      simpa [blockKonts, SourceModeKontLayouts.block] using hMem
+    have hInitialExact : SourceStateExactRel cfg layout
+        (.Ok sharedIn storeIn) compilerIn :=
+      SourceStateExactRel.ofRelDomain hInitial hDomainIn
+    rcases (hKont hAllowed hSupported) hInitialExact rfl hSource with
+      ⟨sourceOutcome, targetFuel, hRun, hRel⟩
+    cases hRel with
+    | ok hOk =>
+        cases hOk with
+        | regular hRelState =>
+            exact ⟨_, targetFuel, hRun, by
+              simpa [blockKonts, SourceModeKontLayouts.block] using
+                hRelState⟩
+  · intro sharedIn sharedOut storeIn storeOut compilerIn hDomainIn
+      _hDomainOut hSource hInitial
+    cases canBreak with
+    | false =>
+        have hSafeBlock : Safe.CallSafe.stmt (.Block sourceStmts) := by
+          simpa [Safe.CallSafe.stmt, Safe.CallSafe.stmts] using hSafe
+        have hScopedBlock :
+            ControlFlow.ScopedStmt false canContinue canLeave
+              (.Block sourceStmts) := by
+          simpa [ControlFlow.ScopedStmt] using hScoped
+        have hAllowedResult :
+            SourceResultCheckpointAllowed false canContinue canLeave
+              (EvmYul.Yul.exec sourceFuel.succ (.Block sourceStmts)
+                codeOverride (.Ok sharedIn storeIn)) :=
+          SourceResultCheckpointAllowed.exec_of_scoped_callSafe
+            hCheckpoint hSafeBlock hScopedBlock
+            (by simp [StateCheckpointAllowed])
+        rw [hSource] at hAllowedResult
+        simp [SourceResultCheckpointAllowed, StateCheckpointAllowed] at hAllowedResult
+    | true =>
+        let allowed : Except Exception State → Prop :=
+          fun result =>
+            result =
+              (.ok (.Checkpoint (.Break sharedOut storeOut)) :
+                Except Exception State)
+        have hAllowed :
+            ∀ {sourceResult}, allowed sourceResult →
+              SourceResultRelatable sourceResult := by
+          intro sourceResult hEq
+          subst sourceResult
+          simp [SourceResultRelatable]
+        have hSupported :
+            ∀ {sourceResult}, allowed sourceResult →
+              SourceResultModeKontSupported ctx layout blockKonts
+                sourceResult := by
+          intro sourceResult hEq
+          subst sourceResult
+          rcases hHandlers.1 rfl with ⟨breakScope, hBreak, hContains⟩
+          exact
+            SourceResultModeKontSupported.break_of_scope
+              (ctx := ctx) (currentLayout := layout)
+              (breakScope := breakScope)
+              (konts := blockKonts) hBreak
+              (by
+                intro name hMem
+                exact hContains name
+                  (by
+                    simpa [blockKonts, SourceModeKontLayouts.block] using
+                      hMem))
+        have hInitialExact : SourceStateExactRel cfg layout
+            (.Ok sharedIn storeIn) compilerIn :=
+          SourceStateExactRel.ofRelDomain hInitial hDomainIn
+        rcases (hKont hAllowed hSupported) hInitialExact rfl hSource with
+          ⟨sourceOutcome, targetFuel, hRun, hRel⟩
+        cases hRel with
+        | ok hOk =>
+            cases hOk with
+            | regular hRelState =>
+                cases hRelState
+            | brk hRelState =>
+                exact ⟨_, targetFuel, hRun, by
+                  simpa [blockKonts, SourceModeKontLayouts.block] using
+                    hRelState⟩
+  · intro sharedIn sharedOut storeIn storeOut compilerIn hDomainIn
+      _hDomainOut hSource hInitial
+    cases canContinue with
+    | false =>
+        have hSafeBlock : Safe.CallSafe.stmt (.Block sourceStmts) := by
+          simpa [Safe.CallSafe.stmt, Safe.CallSafe.stmts] using hSafe
+        have hScopedBlock :
+            ControlFlow.ScopedStmt canBreak false canLeave
+              (.Block sourceStmts) := by
+          simpa [ControlFlow.ScopedStmt] using hScoped
+        have hAllowedResult :
+            SourceResultCheckpointAllowed canBreak false canLeave
+              (EvmYul.Yul.exec sourceFuel.succ (.Block sourceStmts)
+                codeOverride (.Ok sharedIn storeIn)) :=
+          SourceResultCheckpointAllowed.exec_of_scoped_callSafe
+            hCheckpoint hSafeBlock hScopedBlock
+            (by simp [StateCheckpointAllowed])
+        rw [hSource] at hAllowedResult
+        simp [SourceResultCheckpointAllowed, StateCheckpointAllowed] at hAllowedResult
+    | true =>
+        let allowed : Except Exception State → Prop :=
+          fun result =>
+            result =
+              (.ok (.Checkpoint (.Continue sharedOut storeOut)) :
+                Except Exception State)
+        have hAllowed :
+            ∀ {sourceResult}, allowed sourceResult →
+              SourceResultRelatable sourceResult := by
+          intro sourceResult hEq
+          subst sourceResult
+          simp [SourceResultRelatable]
+        have hSupported :
+            ∀ {sourceResult}, allowed sourceResult →
+              SourceResultModeKontSupported ctx layout blockKonts
+                sourceResult := by
+          intro sourceResult hEq
+          subst sourceResult
+          rcases hHandlers.2 rfl with ⟨continueScope, hContinue, hContains⟩
+          exact
+            SourceResultModeKontSupported.continue_of_scope
+              (ctx := ctx) (currentLayout := layout)
+              (continueScope := continueScope)
+              (konts := blockKonts) hContinue
+              (by
+                intro name hMem
+                exact hContains name
+                  (by
+                    simpa [blockKonts, SourceModeKontLayouts.block] using
+                      hMem))
+        have hInitialExact : SourceStateExactRel cfg layout
+            (.Ok sharedIn storeIn) compilerIn :=
+          SourceStateExactRel.ofRelDomain hInitial hDomainIn
+        rcases (hKont hAllowed hSupported) hInitialExact rfl hSource with
+          ⟨sourceOutcome, targetFuel, hRun, hRel⟩
+        cases hRel with
+        | ok hOk =>
+            cases hOk with
+            | regular hRelState =>
+                cases hRelState
+            | cont hRelState =>
+                exact ⟨_, targetFuel, hRun, by
+                  simpa [blockKonts, SourceModeKontLayouts.block] using
+                    hRelState⟩
+  · intro sharedIn sharedOut storeIn storeOut compilerIn hDomainIn hSource
+      hCompat hInitial
+    let allowed : Except Exception State → Prop :=
+      fun result =>
+        result =
+          (.ok (.Checkpoint (.Leave sharedOut storeOut)) :
+            Except Exception State)
+    have hAllowed :
+        ∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      simp [SourceResultRelatable]
+    have hSupported :
+        ∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout blockKonts
+            sourceResult := by
+      intro sourceResult hEq
+      subst sourceResult
+      have hLeave :
+          ctx.leaveScope? = some outcomeLayout ∧
+            ∀ name, name ∈ outcomeLayout → name ∈ layout := by
+        simpa [SourceResultOutcomeLayoutCompatible] using hCompat
+      exact
+        SourceResultModeKontSupported.leave_of_scope
+          (ctx := ctx) (currentLayout := layout) (konts := blockKonts)
+          hLeave.1
+          (by
+            intro name hMem
+            exact hLeave.2 name
+              (by
+                simpa [blockKonts, SourceModeKontLayouts.block] using hMem))
+    have hInitialExact : SourceStateExactRel cfg layout
+        (.Ok sharedIn storeIn) compilerIn :=
+      SourceStateExactRel.ofRelDomain hInitial hDomainIn
+    rcases (hKont hAllowed hSupported) hInitialExact rfl hSource with
+      ⟨sourceOutcome, targetFuel, hRun, hRel⟩
+    cases hRel with
+    | ok hOk =>
+        cases hOk with
+        | regular hRelState =>
+            cases hRelState
+        | leave hRelState =>
+            exact ⟨_, targetFuel, hRun, by
+              simpa [blockKonts, SourceModeKontLayouts.block] using
+                hRelState⟩
+  · intro sharedIn storeIn compilerIn sourceResult hDomainIn hSource
+      hRelatable hNotRegular hNoCheckpoint hInitial
+    let allowed : Except Exception State → Prop :=
+      fun result => result = sourceResult
+    have hAllowed :
+        ∀ {sourceResult'}, allowed sourceResult' →
+          SourceResultRelatable sourceResult' := by
+      intro sourceResult' hEq
+      subst sourceResult'
+      exact hRelatable
+    have hSupported :
+        ∀ {sourceResult'}, allowed sourceResult' →
+          SourceResultModeKontSupported ctx layout blockKonts
+            sourceResult' := by
+      intro sourceResult' hEq
+      subst sourceResult'
+      cases sourceResult with
+      | error err =>
+          simp [SourceResultModeKontSupported]
+      | ok state =>
+          cases state with
+          | Ok shared store =>
+              simp [SourceResultNotRegularOk] at hNotRegular
+          | OutOfFuel =>
+              simp [SourceResultModeKontSupported]
+          | Checkpoint jump =>
+              simp [SourceResultNoCheckpoint] at hNoCheckpoint
+    have hInitialExact : SourceStateExactRel cfg layout
+        (.Ok sharedIn storeIn) compilerIn :=
+      SourceStateExactRel.ofRelDomain hInitial hDomainIn
+    rcases (hKont hAllowed hSupported) hInitialExact rfl hSource with
+      ⟨sourceOutcome, targetFuel, hRun, hRel⟩
+    cases hRel with
+    | yulHalt hTerminal =>
+        exact ⟨_, _, targetFuel, hRun,
+          SourceResultOutcomeRel.yulHalt hTerminal⟩
+    | revert hRevert =>
+        exact ⟨.revert, _, targetFuel, hRun,
+          SourceResultOutcomeRel.revert hRevert⟩
+    | ok hOk =>
+        cases hOk with
+        | regular hRelState =>
+            cases hRelState
+            simp [SourceResultNotRegularOk] at hNotRegular
+        | brk hRelState =>
+            simp [SourceResultNoCheckpoint] at hNoCheckpoint
+        | cont hRelState =>
+            simp [SourceResultNoCheckpoint] at hNoCheckpoint
+        | leave hRelState =>
+            simp [SourceResultNoCheckpoint] at hNoCheckpoint
+
+/--
 Checked block closure from a compile-fuel-specific hidden-context sequence
 proof into the hidden-scope block interface.
 -/
@@ -51464,6 +53437,99 @@ theorem ProgramBridgeContext.function_body_source_scoped_of_lookup_lower
   simpa [hLowerReturns, hLowerParams] using hScoped
 
 /--
+CALL-capable variant of `ProgramBridgeContext`.
+
+This is the context surface the ordinary-CALL recursive bridge should migrate
+to.  It deliberately carries `Safe.CallSafe.program`, not old `Safe.program`,
+so `.System.CALL` is admitted while account-code inspection, creation, and the
+remaining external-call family members stay excluded by explicit feature
+coverage.
+-/
+structure ProgramCALLBridgeContext
+    (yulProgram : Program) (program : Functions.Program) : Prop where
+  toObjects :
+    yulProgram.toObjects? =
+      some ({ root := Objects.Object.mk "root" program [] [] } :
+        Objects.Program)
+  callSafe : Safe.CallSafe.program yulProgram
+  sourceScoped : SourceLexical.ProgramScoped yulProgram
+  controlScoped : ControlFlow.ProgramScoped yulProgram
+  noShadowing : Safe.NoShadowing.program yulProgram
+  userCalls : UserCallArity.ProgramOk yulProgram
+
+theorem ProgramCALLBridgeContext.dispatcher_facts
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program) :
+    Safe.CallSafe.stmt yulProgram.contract.dispatcher ∧
+      ControlFlow.ScopedStmt false false false
+        yulProgram.contract.dispatcher ∧
+      UserCallArity.StmtOk yulProgram.contract
+        yulProgram.contract.dispatcher := by
+  constructor
+  · simpa [Safe.CallSafe.program, Safe.CallSafe.contract] using
+      context.callSafe.1
+  constructor
+  · exact ControlFlow.program_scoped_dispatcher context.controlScoped
+  · simpa [UserCallArity.ProgramOk, UserCallArity.ContractOk] using
+      context.userCalls.1
+
+theorem ProgramCALLBridgeContext.function_body_facts_of_lookup
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body)) :
+    Safe.CallSafe.stmts body ∧
+      ControlFlow.ScopedStmts false false true body ∧
+      UserCallArity.StmtsOk yulProgram.contract body := by
+  constructor
+  · exact CallSafeLookup.function_body_safe_of_contract_lookup
+      context.callSafe hLookup
+  constructor
+  · exact ControlFlow.function_body_scoped_of_contract_lookup
+      context.controlScoped hLookup
+  · exact UserCallArity.program_lookup_bodyOk
+      context.userCalls hLookup
+
+theorem ProgramCALLBridgeContext.dispatcher_source_scoped
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program) :
+    SourceLexical.StmtScoped [] yulProgram.contract.dispatcher :=
+  context.sourceScoped.1
+
+theorem ProgramCALLBridgeContext.function_body_source_scoped_of_lookup
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body)) :
+    SourceLexical.StmtsScoped (identNames returns ++ identNames params)
+      body :=
+    SourceLexical.function_body_scoped_of_contract_lookup
+      (program := yulProgram) (functionName := functionName)
+      (params := params) (returns := returns) (body := body)
+      context.sourceScoped hLookup
+
+theorem ProgramCALLBridgeContext.function_body_source_scoped_of_lookup_lower
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {lowerFn : Functions.FunDef}
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns) :
+    SourceLexical.StmtsScoped (lowerFn.returns ++ lowerFn.params) body := by
+  have hScoped := context.function_body_source_scoped_of_lookup hLookup
+  simpa [hLowerReturns, hLowerParams] using hScoped
+
+/--
 Accepted-program recursive bridge boundary.
 
 This is the top-down induction target for the actual final theorem.  Compared
@@ -52286,6 +54352,702 @@ structure ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
       sourceFuel ≤ bound →
       SourceArgListPreludeRegularAllCheckedAt cfg layout prim program
         yulProgram.contract (reserved ++ layout) sourceFuel
+
+/--
+Reservation-aware accepted-program recursive bridge boundary for ordinary
+`CALL`.
+
+This is the CALL-admitting counterpart of
+`ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved`: the
+source guards use `Safe.CallSafe`, so the bridge target can include ordinary
+`CALL` without pretending it satisfies the old no-external-call
+`Safe.program` predicate.
+-/
+structure ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+    (cfg : StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (yulProgram : Program) (program : Functions.Program)
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (bound : Nat) : Prop where
+  stmt :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceFuel : Nat} {sourceStmt : AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmt sourceStmt →
+      ControlFlow.ScopedStmt canBreak canContinue canLeave sourceStmt →
+      UserCallArity.StmtOk yulProgram.contract sourceStmt →
+      SourceLexical.StmtScoped layout sourceStmt →
+      SourceNamesReserved reserved (Stmt.names sourceStmt) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      sourceFuel ≤ bound →
+      ctx.scope = layout →
+      CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+        sourceStmt (some yulProgram.contract) allowed
+  block :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceFuel : Nat} {sourceStmts : List AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      sourceFuel ≤ bound →
+      ctx.scope = layout →
+      CheckedBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+          sourceStmts (some yulProgram.contract) allowed
+  hiddenBlock :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      sourceFuel ≤ bound →
+      (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+      CheckedBlockLoweringSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts (some yulProgram.contract) allowed
+  hiddenModeBlock :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+      sourceFuel ≤ bound →
+      (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+      CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts (some yulProgram.contract)
+  args :
+    ∀ {reserved layout : List Name} {sourceFuel : Nat},
+      sourceFuel ≤ bound →
+      SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+        yulProgram.contract (reserved ++ layout) sourceFuel
+
+/-- Exact-fuel frontier for the CALL-admitting reservation-aware bridge. -/
+structure ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved
+    (cfg : StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (yulProgram : Program) (program : Functions.Program)
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (sourceFuel : Nat) : Prop where
+  stmt :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceStmt : AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmt sourceStmt →
+      ControlFlow.ScopedStmt canBreak canContinue canLeave sourceStmt →
+      UserCallArity.StmtOk yulProgram.contract sourceStmt →
+      SourceLexical.StmtScoped layout sourceStmt →
+      SourceNamesReserved reserved (Stmt.names sourceStmt) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      ctx.scope = layout →
+      CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+        sourceStmt (some yulProgram.contract) allowed
+  block :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {sourceStmts : List AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      ctx.scope = layout →
+      CheckedBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+        sourceStmts (some yulProgram.contract) allowed
+  hiddenBlock :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {compileFuel : Nat} {sourceStmts : List AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+          sourceResult) →
+      (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+      CheckedBlockLoweringSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts (some yulProgram.contract)
+        allowed
+  hiddenModeBlock :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {compileFuel : Nat} {sourceStmts : List AstStmt}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+      (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+      CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts (some yulProgram.contract)
+  args :
+    ∀ {reserved layout : List Name},
+      SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+        yulProgram.contract (reserved ++ layout) sourceFuel
+
+theorem programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_zero
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context 0 := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmt allowed
+      canBreak canContinue canLeave _hSafe _hScoped _hStmtOk _hSourceScoped
+      _hReserved hAllowed _hCompat hFuel hScope
+    have hFuelEq : sourceFuel = 0 := Nat.le_zero.mp hFuel
+    subst hFuelEq
+    intro freshState freshState' lowerStmts _hCovers _hLower
+    refine ⟨hScope, ?_⟩
+    intro source compiler sourceResult _hInitial hAllow hSource
+    have hZero :
+        EvmYul.Yul.exec 0 (.Block [sourceStmt])
+            (some yulProgram.contract) source =
+          .error .OutOfFuel :=
+      Imported.exec_zero (.Block [sourceStmt])
+        (some yulProgram.contract) source
+    rw [hZero] at hSource
+    subst sourceResult
+    exact False.elim (sourceResultRelatable_outOfFuel_false (hAllowed hAllow))
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmts allowed
+      canBreak canContinue canLeave _hSafe _hScoped _hStmtsOk _hSourceScoped
+      _hReserved hAllowed _hCompat hFuel hScope
+    have hFuelEq : sourceFuel = 0 := Nat.le_zero.mp hFuel
+    subst hFuelEq
+    intro freshState freshState' lowerBlock _hCovers _hLower
+    refine ⟨hScope, ?_⟩
+    intro source compiler sourceResult _hInitial hAllow hSource
+    have hZero :
+        EvmYul.Yul.exec 0 (.Block sourceStmts)
+            (some yulProgram.contract) source =
+          .error .OutOfFuel :=
+      Imported.exec_zero (.Block sourceStmts)
+        (some yulProgram.contract) source
+    rw [hZero] at hSource
+    subst sourceResult
+    exact False.elim (sourceResultRelatable_outOfFuel_false (hAllowed hAllow))
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      allowed canBreak canContinue canLeave _hSafe _hScoped _hStmtsOk
+      _hSourceScoped _hReserved hAllowed _hCompat hFuel _hScopeContains
+    have hFuelEq : sourceFuel = 0 := Nat.le_zero.mp hFuel
+    subst hFuelEq
+    intro freshState freshState' lowerBlock _hCovers _hLower
+    intro source compiler sourceResult _hInitial hAllow hSource
+    have hZero :
+        EvmYul.Yul.exec 0 (.Block sourceStmts)
+            (some yulProgram.contract) source =
+          .error .OutOfFuel :=
+      Imported.exec_zero (.Block sourceStmts)
+        (some yulProgram.contract) source
+    rw [hZero] at hSource
+    subst sourceResult
+    exact False.elim (sourceResultRelatable_outOfFuel_false (hAllowed hAllow))
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      canBreak canContinue canLeave _hSafe _hScoped _hStmtsOk _hSourceScoped
+      _hReserved _hHandlers hFuel _hScopeContains
+    have hFuelEq : sourceFuel = 0 := Nat.le_zero.mp hFuel
+    subst hFuelEq
+    intro freshState freshState' lowerBlock _hCovers _hLower
+    refine ⟨?regular, ?brk, ?cont, ?leave, ?halt⟩
+    · intro sharedIn sharedOut storeIn storeOut compilerIn _hDomainIn
+        _hDomainOut hSource _hRelIn
+      have hZero :
+          EvmYul.Yul.exec 0 (.Block sourceStmts)
+              (some yulProgram.contract) (.Ok sharedIn storeIn) =
+            .error .OutOfFuel :=
+        Imported.exec_zero (.Block sourceStmts)
+          (some yulProgram.contract) (.Ok sharedIn storeIn)
+      rw [hZero] at hSource
+      cases hSource
+    · intro sharedIn sharedOut storeIn storeOut compilerIn _hDomainIn
+        _hDomainOut hSource _hRelIn
+      have hZero :
+          EvmYul.Yul.exec 0 (.Block sourceStmts)
+              (some yulProgram.contract) (.Ok sharedIn storeIn) =
+            .error .OutOfFuel :=
+        Imported.exec_zero (.Block sourceStmts)
+          (some yulProgram.contract) (.Ok sharedIn storeIn)
+      rw [hZero] at hSource
+      cases hSource
+    · intro sharedIn sharedOut storeIn storeOut compilerIn _hDomainIn
+        _hDomainOut hSource _hRelIn
+      have hZero :
+          EvmYul.Yul.exec 0 (.Block sourceStmts)
+              (some yulProgram.contract) (.Ok sharedIn storeIn) =
+            .error .OutOfFuel :=
+        Imported.exec_zero (.Block sourceStmts)
+          (some yulProgram.contract) (.Ok sharedIn storeIn)
+      rw [hZero] at hSource
+      cases hSource
+    · intro sharedIn sharedOut storeIn storeOut compilerIn _hDomainIn hSource
+        _hCompat _hRelIn
+      have hZero :
+          EvmYul.Yul.exec 0 (.Block sourceStmts)
+              (some yulProgram.contract) (.Ok sharedIn storeIn) =
+            .error .OutOfFuel :=
+        Imported.exec_zero (.Block sourceStmts)
+          (some yulProgram.contract) (.Ok sharedIn storeIn)
+      rw [hZero] at hSource
+      cases hSource
+    · intro sharedIn storeIn compilerIn sourceResult _hDomainIn hSource
+        hRelatable _hNotRegular _hNoCheckpoint _hRelIn
+      have hZero :
+          EvmYul.Yul.exec 0 (.Block sourceStmts)
+              (some yulProgram.contract) (.Ok sharedIn storeIn) =
+            .error .OutOfFuel :=
+        Imported.exec_zero (.Block sourceStmts)
+          (some yulProgram.contract) (.Ok sharedIn storeIn)
+      rw [hZero] at hSource
+      subst sourceResult
+      exact False.elim (sourceResultRelatable_outOfFuel_false hRelatable)
+  · intro reserved layout sourceFuel hFuel
+    have hFuelEq : sourceFuel = 0 := Nat.le_zero.mp hFuel
+    subst hFuelEq
+    exact SourceArgListPreludeRegularAllFamilyCheckedAt.zero
+
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.mono
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {m n : Nat}
+    (hLe : n ≤ m)
+    (hBridge :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context m) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context n := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmt allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtOk hSourceScoped
+      hReserved hAllowed hCompat hFuel hScope
+    exact
+      hBridge.stmt hSafe hScoped hStmtOk hSourceScoped hReserved hAllowed
+        hCompat (Nat.le_trans hFuel hLe) hScope
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmts allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hAllowed hCompat hFuel hScope
+    exact
+      hBridge.block hSafe hScoped hStmtsOk hSourceScoped hReserved hAllowed
+        hCompat (Nat.le_trans hFuel hLe) hScope
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      allowed canBreak canContinue canLeave hSafe hScoped hStmtsOk
+      hSourceScoped hReserved hAllowed hCompat hFuel hScopeContains
+    exact
+      hBridge.hiddenBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hAllowed hCompat (Nat.le_trans hFuel hLe) hScopeContains
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hHandlers hFuel hScopeContains
+    exact
+      hBridge.hiddenModeBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hHandlers (Nat.le_trans hFuel hLe) hScopeContains
+  · intro reserved layout sourceFuel hFuel
+    exact hBridge.args (Nat.le_trans hFuel hLe)
+
+theorem ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved.of_whenUpTo
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program}
+    {bound sourceFuel : Nat}
+    (hBridge :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel ≤ bound) :
+    ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context sourceFuel := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro reserved layout outcomeLayout ctx sourceStmt allowed canBreak
+      canContinue canLeave hSafe hScoped hStmtOk hSourceScoped hReserved
+      hAllowed hCompat hScope
+    exact
+      hBridge.stmt hSafe hScoped hStmtOk hSourceScoped hReserved hAllowed
+        hCompat hFuel hScope
+  · intro reserved layout outcomeLayout ctx sourceStmts allowed canBreak
+      canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+      hAllowed hCompat hScope
+    exact
+      hBridge.block hSafe hScoped hStmtsOk hSourceScoped hReserved hAllowed
+        hCompat hFuel hScope
+  · intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hAllowed hCompat hScopeContains
+    exact
+      hBridge.hiddenBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hAllowed hCompat hFuel hScopeContains
+  · intro reserved layout outcomeLayout ctx compileFuel sourceStmts canBreak
+      canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+      hHandlers hScopeContains
+    exact
+      hBridge.hiddenModeBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hHandlers hFuel hScopeContains
+  · intro reserved layout
+    exact hBridge.args hFuel
+
+theorem ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved.of_frontier_fields
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program}
+    {sourceFuel : Nat}
+    (hStmt :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {sourceStmt : AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmt sourceStmt →
+        ControlFlow.ScopedStmt canBreak canContinue canLeave sourceStmt →
+        UserCallArity.StmtOk yulProgram.contract sourceStmt →
+        SourceLexical.StmtScoped layout sourceStmt →
+        SourceNamesReserved reserved (Stmt.names sourceStmt) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        ctx.scope = layout →
+        CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+          sourceStmt (some yulProgram.contract) allowed)
+    (hBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        ctx.scope = layout →
+        CheckedBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+          sourceStmts (some yulProgram.contract) allowed)
+    (hHiddenBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedBlockLoweringSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel compileFuel sourceStmts (some yulProgram.contract)
+          allowed)
+    (hHiddenModeBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel compileFuel sourceStmts (some yulProgram.contract))
+    (hArgs :
+      ∀ {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) sourceFuel) :
+    ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context sourceFuel := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro reserved layout outcomeLayout ctx sourceStmt allowed canBreak
+      canContinue canLeave hSafe hScoped hStmtOk hSourceScoped hReserved
+      hAllowed hCompat hScope
+    exact
+      hStmt hSafe hScoped hStmtOk hSourceScoped hReserved hAllowed hCompat
+        hScope
+  · intro reserved layout outcomeLayout ctx sourceStmts allowed canBreak
+      canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+      hAllowed hCompat hScope
+    exact
+      hBlock hSafe hScoped hStmtsOk hSourceScoped hReserved hAllowed hCompat
+        hScope
+  · intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hAllowed hCompat hScopeContains
+    exact
+      hHiddenBlock hSafe hScoped hStmtsOk hSourceScoped hReserved hAllowed
+        hCompat hScopeContains
+  · intro reserved layout outcomeLayout ctx compileFuel sourceStmts canBreak
+      canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+      hHandlers hScopeContains
+    exact
+      hHiddenModeBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hHandlers hScopeContains
+  · intro reserved layout
+    exact hArgs
+
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_atExactFuel
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    (hPrev :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hFrontier :
+      ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound.succ) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context bound.succ := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmt allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtOk hSourceScoped
+      hReserved hAllowed hCompat hFuel hScope
+    by_cases hPrevFuel : sourceFuel ≤ bound
+    · exact
+        hPrev.stmt hSafe hScoped hStmtOk hSourceScoped hReserved hAllowed
+          hCompat hPrevFuel hScope
+    · have hEq : sourceFuel = bound.succ := by omega
+      subst sourceFuel
+      exact
+        hFrontier.stmt hSafe hScoped hStmtOk hSourceScoped hReserved
+          hAllowed hCompat hScope
+  · intro reserved layout outcomeLayout ctx sourceFuel sourceStmts allowed
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hAllowed hCompat hFuel hScope
+    by_cases hPrevFuel : sourceFuel ≤ bound
+    · exact
+        hPrev.block hSafe hScoped hStmtsOk hSourceScoped hReserved hAllowed
+          hCompat hPrevFuel hScope
+    · have hEq : sourceFuel = bound.succ := by omega
+      subst sourceFuel
+      exact
+        hFrontier.block hSafe hScoped hStmtsOk hSourceScoped hReserved
+          hAllowed hCompat hScope
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      allowed canBreak canContinue canLeave hSafe hScoped hStmtsOk
+      hSourceScoped hReserved hAllowed hCompat hFuel hScopeContains
+    by_cases hPrevFuel : sourceFuel ≤ bound
+    · exact
+        hPrev.hiddenBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+          hAllowed hCompat hPrevFuel hScopeContains
+    · have hEq : sourceFuel = bound.succ := by omega
+      subst sourceFuel
+      exact
+        hFrontier.hiddenBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+          hAllowed hCompat hScopeContains
+  · intro reserved layout outcomeLayout ctx sourceFuel compileFuel sourceStmts
+      canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+      hReserved hHandlers hFuel hScopeContains
+    by_cases hPrevFuel : sourceFuel ≤ bound
+    · exact
+        hPrev.hiddenModeBlock hSafe hScoped hStmtsOk hSourceScoped hReserved
+          hHandlers hPrevFuel hScopeContains
+    · have hEq : sourceFuel = bound.succ := by omega
+      subst sourceFuel
+      exact
+        hFrontier.hiddenModeBlock hSafe hScoped hStmtsOk hSourceScoped
+          hReserved hHandlers hScopeContains
+  · intro reserved layout sourceFuel hFuel
+    by_cases hPrevFuel : sourceFuel ≤ bound
+    · exact hPrev.args hPrevFuel
+    · have hEq : sourceFuel = bound.succ := by omega
+      subst sourceFuel
+      exact hFrontier.args
+
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_frontier_fields
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hStmt :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {sourceStmt : AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmt sourceStmt →
+        ControlFlow.ScopedStmt canBreak canContinue canLeave sourceStmt →
+        UserCallArity.StmtOk yulProgram.contract sourceStmt →
+        SourceLexical.StmtScoped layout sourceStmt →
+        SourceNamesReserved reserved (Stmt.names sourceStmt) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        ctx.scope = layout →
+        CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+          outcomeLayout terminalRel revertRel prim program ctx bound.succ
+          sourceStmt (some yulProgram.contract) allowed)
+    (hBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        ctx.scope = layout →
+        CheckedBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+          outcomeLayout terminalRel revertRel prim program ctx bound.succ
+          sourceStmts (some yulProgram.contract) allowed)
+    (hHiddenBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedBlockLoweringSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound.succ compileFuel sourceStmts (some yulProgram.contract)
+          allowed)
+    (hHiddenModeBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound.succ compileFuel sourceStmts (some yulProgram.contract))
+    (hArgs :
+      ∀ {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) bound.succ) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context bound.succ :=
+  ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_atExactFuel
+    hRecursive
+    (ProgramCALLAcceptedRecursiveSourceBridgeAtExactFuelCompatNamesReserved.of_frontier_fields
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (yulProgram := yulProgram) (program := program)
+      (context := context) (sourceFuel := bound.succ)
+      hStmt hBlock hHiddenBlock hHiddenModeBlock hArgs)
 
 /--
 Narrow capability view of the reservation-aware accepted recursive bridge.
@@ -53278,6 +56040,106 @@ theorem sourceResultBlockSoundWhenAtExact_of_program_accepted_recursive_actual_o
       hFuel hScope) hCovers hLower
 
 /--
+CALL-admitting reservation-aware accepted-program variant of
+`sourceResultBlockSoundWhenAtExact_of_program_accepted_recursive_actual_ok_reserved`.
+
+The proof is the same callee-body reconstruction, but the syntactic guard is
+`Safe.CallSafe.stmts` so function bodies may contain ordinary `CALL`.
+-/
+theorem sourceResultBlockSoundWhenAtExact_of_programCALL_accepted_recursive_actual_ok_reserved
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {lowerFn : Functions.FunDef}
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier}
+    {body : List AstStmt} {freshBefore freshAfter : Fresh.State}
+    {bodyFuel : Nat} {bodyState : State}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : bodyFuel ≤ bound)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hCoversContract :
+      FreshCoversLayout (Contract.names yulProgram.contract) freshBefore)
+    (hLower :
+      Stmt.List.toBlock? freshBefore body = some (lowerFn.body, freshAfter))
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hNoOutOfFuel : bodyState ≠ .OutOfFuel)
+    (hCheckpoint :
+      SourceResultCheckpointAllowed false false true (.ok bodyState)) :
+    SourceResultBlockSoundWhenAtExact cfg
+      (lowerFn.returns ++ lowerFn.params)
+      (lowerFn.returns ++ lowerFn.params) terminalRel revertRel prim program
+      (Functions.Source.FunDef.bodyCtx lowerFn) bodyFuel body
+      (some yulProgram.contract) lowerFn.body
+      (fun candidate => candidate = .ok bodyState) := by
+  have hAllowed :
+      ∀ {candidate}, candidate = .ok bodyState →
+        SourceResultRelatable candidate := by
+    intro candidate hEq
+    subst candidate
+    cases bodyState <;> simp [SourceResultRelatable]
+    exact hNoOutOfFuel rfl
+  have hCompat :
+      ∀ {candidate}, candidate = .ok bodyState →
+        SourceResultOutcomeLayoutCompatible
+          (Functions.Source.FunDef.bodyCtx lowerFn)
+          (lowerFn.returns ++ lowerFn.params)
+          (lowerFn.returns ++ lowerFn.params) candidate := by
+    intro candidate hEq
+    subst candidate
+    exact
+      sourceResultOutcomeLayoutCompatible_bodyCtx_same_of_checkpoint
+        (fn := lowerFn) hCheckpoint
+  have hScope :
+      (Functions.Source.FunDef.bodyCtx lowerFn).scope =
+        lowerFn.returns ++ lowerFn.params := by
+    simp [Functions.Source.FunDef.bodyCtx]
+  have hSourceScoped :
+      SourceLexical.StmtsScoped (lowerFn.returns ++ lowerFn.params) body := by
+    exact
+      context.function_body_source_scoped_of_lookup_lower hLookup hLowerParams
+        hLowerReturns
+  rcases context.function_body_facts_of_lookup hLookup with
+    ⟨hSafe, hScoped, hStmtsOk⟩
+  have hReservedBody :
+      SourceNamesReserved (Contract.names yulProgram.contract)
+        (Stmt.List.names body) :=
+    FunctionEntryList.sourceNamesReserved_contract_body_of_lookup hLookup
+  have hCovers :
+      FreshCoversLayout
+        (Contract.names yulProgram.contract ++
+          (lowerFn.returns ++ lowerFn.params))
+        freshBefore := by
+    intro name hMem
+    rcases List.mem_append.mp hMem with hContract | hLayout
+    · exact hCoversContract name hContract
+    · exact
+        hCoversContract name
+          (FunctionEntryList.params_returns_mem_contract_names_of_lookup
+            hLookup (by
+              simpa [hLowerReturns, hLowerParams] using hLayout))
+  exact
+    (hRecursive.block
+      (reserved := Contract.names yulProgram.contract)
+      (layout := lowerFn.returns ++ lowerFn.params)
+      (outcomeLayout := lowerFn.returns ++ lowerFn.params)
+      (ctx := Functions.Source.FunDef.bodyCtx lowerFn)
+      (sourceFuel := bodyFuel) (sourceStmts := body)
+      (allowed := fun candidate => candidate = .ok bodyState)
+      (canBreak := false) (canContinue := false) (canLeave := true)
+      hSafe hScoped hStmtsOk hSourceScoped hReservedBody hAllowed hCompat
+      hFuel hScope) hCovers hLower
+
+/--
 Reservation-aware accepted-program variant of
 `sourceResultBlockSoundWhenAtExact_of_program_recursive_actual_error`.
 -/
@@ -53296,6 +56158,98 @@ theorem sourceResultBlockSoundWhenAtExact_of_program_accepted_recursive_actual_e
     {bodyFuel : Nat} {err : Exception}
     (hRecursive :
       ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : bodyFuel ≤ bound)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hCoversContract :
+      FreshCoversLayout (Contract.names yulProgram.contract) freshBefore)
+    (hLower :
+      Stmt.List.toBlock? freshBefore body = some (lowerFn.body, freshAfter))
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hRelatable : SourceResultRelatable (.error err)) :
+    SourceResultBlockSoundWhenAtExact cfg
+      (lowerFn.returns ++ lowerFn.params)
+      (lowerFn.returns ++ lowerFn.params) terminalRel revertRel prim program
+      (Functions.Source.FunDef.bodyCtx lowerFn) bodyFuel body
+      (some yulProgram.contract) lowerFn.body
+      (fun candidate => candidate = .error err) := by
+  have hAllowed :
+      ∀ {candidate}, candidate = .error err →
+        SourceResultRelatable candidate := by
+    intro candidate hEq
+    subst candidate
+    exact hRelatable
+  have hCompat :
+      ∀ {candidate}, candidate = .error err →
+        SourceResultOutcomeLayoutCompatible
+          (Functions.Source.FunDef.bodyCtx lowerFn)
+          (lowerFn.returns ++ lowerFn.params)
+          (lowerFn.returns ++ lowerFn.params) candidate := by
+    intro candidate hEq
+    subst candidate
+    simp [SourceResultOutcomeLayoutCompatible]
+  have hScope :
+      (Functions.Source.FunDef.bodyCtx lowerFn).scope =
+        lowerFn.returns ++ lowerFn.params := by
+    simp [Functions.Source.FunDef.bodyCtx]
+  have hSourceScoped :
+      SourceLexical.StmtsScoped (lowerFn.returns ++ lowerFn.params) body := by
+    exact
+      context.function_body_source_scoped_of_lookup_lower hLookup hLowerParams
+        hLowerReturns
+  rcases context.function_body_facts_of_lookup hLookup with
+    ⟨hSafe, hScoped, hStmtsOk⟩
+  have hReservedBody :
+      SourceNamesReserved (Contract.names yulProgram.contract)
+        (Stmt.List.names body) :=
+    FunctionEntryList.sourceNamesReserved_contract_body_of_lookup hLookup
+  have hCovers :
+      FreshCoversLayout
+        (Contract.names yulProgram.contract ++
+          (lowerFn.returns ++ lowerFn.params))
+        freshBefore := by
+    intro name hMem
+    rcases List.mem_append.mp hMem with hContract | hLayout
+    · exact hCoversContract name hContract
+    · exact
+        hCoversContract name
+          (FunctionEntryList.params_returns_mem_contract_names_of_lookup
+            hLookup (by
+              simpa [hLowerReturns, hLowerParams] using hLayout))
+  exact
+    (hRecursive.block
+      (reserved := Contract.names yulProgram.contract)
+      (layout := lowerFn.returns ++ lowerFn.params)
+      (outcomeLayout := lowerFn.returns ++ lowerFn.params)
+      (ctx := Functions.Source.FunDef.bodyCtx lowerFn)
+      (sourceFuel := bodyFuel) (sourceStmts := body)
+      (allowed := fun candidate => candidate = .error err)
+      (canBreak := false) (canContinue := false) (canLeave := true)
+      hSafe hScoped hStmtsOk hSourceScoped hReservedBody hAllowed hCompat
+      hFuel hScope) hCovers hLower
+
+/--
+CALL-admitting reservation-aware accepted-program variant of
+`sourceResultBlockSoundWhenAtExact_of_program_accepted_recursive_actual_error_reserved`.
+-/
+theorem sourceResultBlockSoundWhenAtExact_of_programCALL_accepted_recursive_actual_error_reserved
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {lowerFn : Functions.FunDef}
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier}
+    {body : List AstStmt} {freshBefore freshAfter : Fresh.State}
+    {bodyFuel : Nat} {err : Exception}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
         terminalRel revertRel prim yulProgram program context bound)
     (hFuel : bodyFuel ≤ bound)
     (hLookup :
@@ -54216,6 +57170,96 @@ theorem sourceFunDef_runBody_returned_lookup_of_program_accepted_recursive_actua
       hInsert hSound hInitial rfl hCheckpoint hExec
 
 /--
+CALL-admitting function-body return extraction for one concrete successful
+callee-body run.
+
+This is the recursive body helper needed by the ordinary-CALL path: once the
+callee body is known to be CALL-safe and checkpoint-compatible, its compiled
+function body can be obtained from the CALL-aware recursive bridge.
+-/
+theorem sourceFunDef_runBody_returned_lookup_of_programCALL_accepted_recursive_actual_source_ok_reserved
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {fn : Functions.FunDef}
+    {args : List Word} {paramStore : Locals.Source.Store}
+    {shared0 : EvmYul.SharedState .EVM}
+    {sourceFuel : Nat}
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {freshBefore freshAfter : Fresh.State}
+    {sourceInitial bodyState : State}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel ≤ bound)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hCoversContract :
+      FreshCoversLayout (Contract.names yulProgram.contract) freshBefore)
+    (hLower :
+      Stmt.List.toBlock? freshBefore body =
+        some (fn.body, freshAfter))
+    (hLowerParams : fn.params = identNames params)
+    (hLowerReturns : fn.returns = identNames returns)
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hInitial :
+      SourceStateExactRel cfg (fn.returns ++ fn.params) sourceInitial
+        ({ shared := shared0,
+           vars := Functions.Source.Store.initReturns fn.returns
+             paramStore } : Objects.Source.State))
+    (hCheckpoint :
+      SourceResultCheckpointAllowed false false true (.ok bodyState))
+    (hNoOutOfFuel : bodyState ≠ .OutOfFuel)
+    (hExec :
+      EvmYul.Yul.exec sourceFuel (.Block body)
+          (some yulProgram.contract) sourceInitial =
+        .ok bodyState) :
+    ∃ bodyFuel : Nat, ∃ bodyCompiler : Objects.Source.State,
+      Functions.Source.FunDef.runBody prim program fn args bodyFuel shared0 =
+        .ok
+          (Functions.Source.CallResult.returned bodyCompiler.shared
+            (fn.returns.map fun name =>
+              EvmYul.Yul.State.lookup! name
+                (EvmYul.Yul.State.reviveJump bodyState))) ∧
+      SourceStateRel cfg (fn.returns ++ fn.params)
+        (EvmYul.Yul.State.reviveJump bodyState) bodyCompiler := by
+  have hSound :
+      SourceResultBlockSoundWhenAtExact cfg (fn.returns ++ fn.params)
+        (fn.returns ++ fn.params) terminalRel revertRel prim program
+        (Functions.Source.FunDef.bodyCtx fn) sourceFuel body
+        (some yulProgram.contract) fn.body
+        (fun candidate => candidate = .ok bodyState) :=
+    sourceResultBlockSoundWhenAtExact_of_programCALL_accepted_recursive_actual_ok_reserved
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+        (prim := prim) (yulProgram := yulProgram) (program := program)
+        (context := context) (bound := bound) (lowerFn := fn)
+        (functionName := functionName) (params := params)
+        (returns := returns) (body := body) (freshBefore := freshBefore)
+        (freshAfter := freshAfter) (bodyFuel := sourceFuel)
+        (bodyState := bodyState)
+        hRecursive hFuel hLookup hCoversContract hLower hLowerParams
+        hLowerReturns hNoOutOfFuel hCheckpoint
+  exact
+    sourceFunDef_runBody_returned_lookup_of_bodySound_source_ok
+      (cfg := cfg) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (fn := fn) (args := args) (paramStore := paramStore)
+      (shared0 := shared0) (sourceFuel := sourceFuel)
+      (sourceBody := body) (codeOverride := some yulProgram.contract)
+      (sourceInitial := sourceInitial) (bodyState := bodyState)
+      (allowed := fun candidate => candidate = .ok bodyState)
+      hInsert hSound hInitial rfl hCheckpoint hExec
+
+/--
 Reservation-aware accepted-program function-body terminal reconstruction for
 one concrete callee-body error.
 -/
@@ -54280,6 +57324,90 @@ theorem sourceFunDef_runBody_halted_of_program_accepted_recursive_actual_error_r
         (some yulProgram.contract) fn.body
         (fun candidate => candidate = .error err) :=
     sourceResultBlockSoundWhenAtExact_of_program_accepted_recursive_actual_error_reserved
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (yulProgram := yulProgram) (program := program)
+      (context := context) (bound := bound) (lowerFn := fn)
+      (functionName := functionName) (params := params)
+      (returns := returns) (body := body) (freshBefore := freshBefore)
+      (freshAfter := freshAfter) (bodyFuel := sourceFuel) (err := err)
+      hRecursive hFuel hLookup hCoversContract hLower hLowerParams
+      hLowerReturns hRelatable
+  exact
+    sourceFunDef_runBody_halted_of_bodySound_error
+      (cfg := cfg) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (fn := fn) (args := args) (paramStore := paramStore)
+      (shared0 := shared0) (sourceFuel := sourceFuel)
+      (sourceBody := body) (codeOverride := some yulProgram.contract)
+      (sourceInitial := sourceInitial) (err := err)
+      (allowed := fun candidate => candidate = .error err)
+      (outcomeLayout := outcomeLayout) hInsert hSound hInitial rfl hExec
+
+/--
+CALL-admitting function-body terminal reconstruction for one concrete callee
+body error.
+-/
+theorem sourceFunDef_runBody_halted_of_programCALL_accepted_recursive_actual_error_reserved
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {fn : Functions.FunDef}
+    {args : List Word} {paramStore : Locals.Source.Store}
+    {shared0 : EvmYul.SharedState .EVM}
+    {sourceFuel : Nat}
+    {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {freshBefore freshAfter : Fresh.State}
+    {sourceInitial : State} {err : Exception}
+    {outcomeLayout : List Name}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved cfg
+        terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel ≤ bound)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hCoversContract :
+      FreshCoversLayout (Contract.names yulProgram.contract) freshBefore)
+    (hLower :
+      Stmt.List.toBlock? freshBefore body =
+        some (fn.body, freshAfter))
+    (hLowerParams : fn.params = identNames params)
+    (hLowerReturns : fn.returns = identNames returns)
+    (hRelatable : SourceResultRelatable (.error err))
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hInitial :
+      SourceStateExactRel cfg (fn.returns ++ fn.params) sourceInitial
+        ({ shared := shared0,
+           vars := Functions.Source.Store.initReturns fn.returns
+             paramStore } : Objects.Source.State))
+    (hExec :
+      EvmYul.Yul.exec sourceFuel (.Block body) (some yulProgram.contract)
+          sourceInitial =
+        .error err) :
+    ∃ kind : Assembly.HaltKind,
+    ∃ compilerAfter : Objects.Source.State,
+    ∃ bodyRunFuel : Nat,
+      Functions.Source.FunDef.runBody prim program fn args bodyRunFuel
+          shared0 =
+        .ok (Functions.Source.CallResult.halted kind compilerAfter) ∧
+      SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
+        (.error err)
+        (Functions.Source.Outcome.halt kind compilerAfter) := by
+  have hSound :
+      SourceResultBlockSoundWhenAtExact cfg (fn.returns ++ fn.params)
+        (fn.returns ++ fn.params) terminalRel revertRel prim program
+        (Functions.Source.FunDef.bodyCtx fn) sourceFuel body
+        (some yulProgram.contract) fn.body
+        (fun candidate => candidate = .error err) :=
+    sourceResultBlockSoundWhenAtExact_of_programCALL_accepted_recursive_actual_error_reserved
       (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
       (prim := prim) (yulProgram := yulProgram) (program := program)
       (context := context) (bound := bound) (lowerFn := fn)
@@ -59377,6 +62505,280 @@ theorem sourceLetUserCall_regular_of_execCall_program_accepted_recursive
               sourceBodyFuel + 2, hRunCall, hRelCall⟩
 
 /--
+CALL-admitting sibling of
+`sourceLetUserCall_regular_of_execCall_program_accepted_recursive`.
+
+The selected callee body is discharged through the CALL-aware recursive bridge,
+so ordinary `CALL` inside recursively called function bodies is no longer
+forced through the old no-CALL `ProgramBridgeContext`.
+-/
+theorem sourceLetUserCall_regular_of_execCall_programCALL_accepted_recursive
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {layout : List Name}
+    {sourceFuel : Nat} {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr}
+    {lowerArgs : List (Locals.Expr 1)}
+    {compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {argValues : List Word}
+    {sharedArgs sharedAfter : EvmYul.SharedState .Yul}
+    {storeArgs storeAfter : EvmYul.Yul.VarStore}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hCallFuel : sourceFuel ≤ bound)
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hLowerArgsLength : lowerArgs.length = args.length)
+    (hTargetsNoDup : (identNames names).Nodup)
+    (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames names →
+        compilerAfterArgs.vars.contains name = true)
+    (hCallerArgs :
+      SourceStateRel cfg layout (.Ok sharedArgs storeArgs)
+        compilerAfterArgs)
+    (hArgsRun :
+      Functions.Source.ArgList.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, argValues))
+    (hExecCall :
+      EvmYul.Yul.execCall sourceFuel functionName names
+          (some yulProgram.contract)
+          (.ok (.Ok sharedArgs storeArgs, argValues)) =
+        .ok (.Ok sharedAfter storeAfter)) :
+    ∃ compilerAfterCall : Objects.Source.State,
+    ∃ ctxAfterCall : Functions.Source.Ctx,
+    ∃ callFuel : Nat,
+      Functions.Source.Block.runOpen prim program ctx callFuel
+          { stmts :=
+              [Functions.Stmt.call (identNames names) functionName
+                lowerArgs] }
+          compilerAfterPre =
+        .ok
+          (Functions.Source.Outcome.regular compilerAfterCall,
+            ctxAfterCall) ∧
+      SourceStateRel cfg ((identNames names).reverse ++ layout)
+        (.Ok sharedAfter storeAfter) compilerAfterCall := by
+  rcases
+      execCall_user_ok_contract_body_exists
+        (callFuel := sourceFuel) (shared := sharedArgs)
+        (store := storeArgs) (args := argValues)
+        (functionName := functionName) (targets := names)
+        (contract := yulProgram.contract)
+        (stateAfter := .Ok sharedAfter storeAfter) hExecCall with
+    ⟨bodyFuel, _yulAccount, fnAst, bodyState, hFuelEq, _hFindAccount,
+      hLookupFn, hBodyExec, hFinal⟩
+  cases fnAst with
+  | Def params returns body =>
+      have hLookup :
+          yulProgram.contract.functions.lookup functionName =
+            some (.Def params returns body) := hLookupFn
+      have hBodyExecBlock :
+          EvmYul.Yul.exec bodyFuel (.Block body) (some yulProgram.contract)
+              (👌 (EvmYul.Yul.State.Ok sharedArgs storeArgs).initcall
+                params returns argValues) =
+            .ok bodyState := by
+        simpa using hBodyExec
+      have hBodyFuel : bodyFuel ≤ bound := by
+        omega
+      rcases
+          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh_contract
+            (program := yulProgram) (functionProgram := program)
+            (functionName := functionName)
+            (fn := .Def params returns body) context.toObjects hLookup with
+        ⟨lowerFn, hFindLower, params0, returns0, body0, freshBefore,
+          freshAfter, hFnEq, hBodyLower, hLowerName, hLowerParams,
+          hLowerReturns, hFreshBody⟩
+      cases hFnEq
+      have hArgsLengthAst : args.length = params.length :=
+        UserCallArity.let_user_lookup_args_length hStmtOk hLookup
+      have hArgValuesLength : argValues.length = (identNames params).length := by
+        have hArgRunLength :=
+          Functions.Source.ArgList.eval_length prim hArgsRun
+        calc
+          argValues.length = lowerArgs.length := hArgRunLength
+          _ = args.length := hLowerArgsLength
+          _ = params.length := hArgsLengthAst
+          _ = (identNames params).length := by simp [identNames]
+      rcases
+          source_insertMany_exists_of_length
+            (names := identNames params) (values := argValues)
+            (store := Locals.Source.Store.empty) hArgValuesLength with
+        ⟨paramStore, hInsert⟩
+      rcases
+          NoShadowing.contract_lookup_param_return_facts
+            (program := yulProgram) context.noShadowing hLookup with
+        ⟨hParamsNoDup, hReturnsNoDup, hDisjoint⟩
+      cases hCallerArgs with
+      | ok hSharedArgs hVarsArgs =>
+          have hInitialExactRaw :
+              SourceStateExactRel cfg
+                (identNames returns ++ identNames params)
+                (EvmYul.Yul.State.initcall params returns argValues
+                  (.Ok sharedArgs storeArgs))
+                ({ shared := compilerAfterArgs.shared,
+                   vars :=
+                    Functions.Source.Store.initReturns (identNames returns)
+                      paramStore } : Objects.Source.State) :=
+            sourceStateExactRel_initcall_of_insertMany
+              (cfg := cfg) (sharedYul := sharedArgs)
+              (sharedSource := compilerAfterArgs.shared)
+              (callerStore := storeArgs) (params := params)
+              (rets := returns) (args := argValues)
+              (paramStore := paramStore) hSharedArgs hInsert hParamsNoDup
+              hReturnsNoDup hDisjoint
+          have hInitialExact :
+              SourceStateExactRel cfg
+                (lowerFn.returns ++ lowerFn.params)
+                (EvmYul.Yul.State.mkOk
+                  (EvmYul.Yul.State.initcall params returns argValues
+                    (.Ok sharedArgs storeArgs)))
+                ({ shared := compilerAfterArgs.shared,
+                   vars :=
+                    Functions.Source.Store.initReturns lowerFn.returns
+                      paramStore } : Objects.Source.State) := by
+            simpa [hLowerReturns, hLowerParams, EvmYul.Yul.State.mkOk,
+              initcall_ok_insertPairs] using hInitialExactRaw
+          have hInsertLower :
+              Functions.Source.Store.insertMany lowerFn.params argValues
+                  Locals.Source.Store.empty =
+                some paramStore := by
+            simpa [hLowerParams] using hInsert
+          have hBodyAllowedHere :
+              SourceResultCheckpointAllowed false false true
+                (.ok bodyState) :=
+            SourceResultCheckpointAllowed.function_body_ok_of_scoped_callSafe
+              hCheckpoint context.callSafe context.controlScoped hLookup
+              hBodyExecBlock
+          have hBodyNotOutOfFuel : bodyState ≠ .OutOfFuel := by
+            intro hOut
+            subst bodyState
+            simp [EvmYul.Yul.State.reviveJump,
+              EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore,
+              EvmYul.Yul.State.multifill] at hFinal
+          rcases
+              sourceFunDef_runBody_returned_lookup_of_programCALL_accepted_recursive_actual_source_ok_reserved
+                (cfg := cfg) (terminalRel := terminalRel)
+                (revertRel := revertRel) (prim := prim)
+                (yulProgram := yulProgram) (program := program)
+                (context := context) (bound := bound) (fn := lowerFn)
+                (args := argValues) (paramStore := paramStore)
+                (shared0 := compilerAfterArgs.shared)
+                (sourceFuel := bodyFuel) (functionName := functionName)
+                (params := params) (returns := returns) (body := body)
+                (freshBefore := freshBefore) (freshAfter := freshAfter)
+                (sourceInitial :=
+                  EvmYul.Yul.State.mkOk
+                    (EvmYul.Yul.State.initcall params returns argValues
+                      (.Ok sharedArgs storeArgs)))
+                (bodyState := bodyState)
+                  hRecursive hBodyFuel hLookup hFreshBody hBodyLower
+                  hLowerParams hLowerReturns
+                  hInsertLower hInitialExact hBodyAllowedHere
+                hBodyNotOutOfFuel hBodyExecBlock with
+            ⟨sourceBodyFuel, bodyCompiler, hRunBody, hBodyRel⟩
+          let returnValues : List Word :=
+            lowerFn.returns.map fun name =>
+              EvmYul.Yul.State.lookup! name
+                (EvmYul.Yul.State.reviveJump bodyState)
+          have hReturnValuesLength :
+              returnValues.length = (identNames names).length := by
+            have hTargetsLength :
+                (identNames names).length = returns.length :=
+              UserCallArity.let_user_lookup_identNames_length
+                hStmtOk hLookup
+            calc
+              returnValues.length = lowerFn.returns.length := by
+                simp [returnValues]
+              _ = (identNames returns).length := by rw [hLowerReturns]
+              _ = returns.length := by simp [identNames]
+              _ = (identNames names).length := hTargetsLength.symm
+          rcases
+              source_assignMany_exists_of_length_contains
+                (names := identNames names) (values := returnValues)
+                (store := compilerAfterArgs.vars) hReturnValuesLength
+                hTargetContains with
+            ⟨returnStore, hAssign⟩
+          have hReturnValuesEq :
+              returnValues =
+                returns.map fun name =>
+                  EvmYul.Yul.State.lookup! name bodyState := by
+            calc
+              returnValues =
+                  (identNames returns).map fun name =>
+                    EvmYul.Yul.State.lookup! name
+                      (EvmYul.Yul.State.reviveJump bodyState) := by
+                simp [returnValues, hLowerReturns]
+              _ =
+                  returns.map fun name =>
+                    EvmYul.Yul.State.lookup! name
+                      (EvmYul.Yul.State.reviveJump bodyState) := by
+                simp [identNames_eq_self]
+              _ =
+                  returns.map fun name =>
+                    EvmYul.Yul.State.lookup! name bodyState := by
+                simp [lookupBang_reviveJump_eq]
+          have hFinalReturnValues :
+              EvmYul.Yul.State.multifill (identNames names) returnValues
+                  (((EvmYul.Yul.State.reviveJump bodyState).overwrite?
+                    (.Ok sharedArgs storeArgs)).setStore
+                    (.Ok sharedArgs storeArgs)) =
+                .Ok sharedAfter storeAfter := by
+            simpa [identNames_eq_self names, hReturnValuesEq] using hFinal
+          have hRunCall :
+              Functions.Source.Block.runOpen prim program ctx
+                  (sourceBodyFuel + 2)
+                  { stmts :=
+                      [Functions.Stmt.call (identNames names) functionName
+                        lowerArgs] }
+                  compilerAfterPre =
+                .ok
+                  (Functions.Source.Outcome.regular
+                    { shared := bodyCompiler.shared, vars := returnStore },
+                    ctx) := by
+            simpa [returnValues] using
+              sourceCallSingletonRunOpen_regular_of_runBody
+                (prim := prim) (program := program) (ctx := ctx)
+                (targets := identNames names) (functionName := functionName)
+                (lowerArgs := lowerArgs)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterArgs := compilerAfterArgs)
+                (compilerAfterCall :=
+                  { shared := bodyCompiler.shared, vars := returnStore })
+                (argValues := argValues) (returnValues := returnValues)
+                (fn := lowerFn) (bodyFuel := sourceBodyFuel)
+                hTargetsNoDup hArgsRun hFindLower
+                (by simpa [returnValues] using hRunBody) hAssign
+          have hRelCall :
+              SourceStateRel cfg ((identNames names).reverse ++ layout)
+                (.Ok sharedAfter storeAfter)
+                ({ shared := bodyCompiler.shared, vars := returnStore } :
+                  Objects.Source.State) :=
+            sourceStateRel_userCall_letTargets_of_revive
+              (cfg := cfg) (layout := layout)
+              (bodyLayout := lowerFn.returns ++ lowerFn.params)
+              (targets := identNames names) (returnValues := returnValues)
+              (sharedArgs := sharedArgs) (sharedAfter := sharedAfter)
+              (storeArgs := storeArgs) (storeAfter := storeAfter)
+              (callerCompiler := compilerAfterArgs)
+              (bodyCompiler := bodyCompiler) (bodyState := bodyState)
+              (returnStore := returnStore)
+              (SourceStateRel.ok hSharedArgs hVarsArgs) hBodyRel hAssign
+              hTargetsNoDup hFresh hFinalReturnValues
+          exact
+            ⟨{ shared := bodyCompiler.shared, vars := returnStore }, ctx,
+              sourceBodyFuel + 2, hRunCall, hRelCall⟩
+
+/--
 Hidden-context statement bridge for returned-assignment user calls.
 
 This is the assignment sibling of
@@ -60982,6 +64384,276 @@ theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_program_accepted_re
           by simpa [List.append_assoc] using hTargetRun,
           hEvalTmp, hVisibleRel⟩
 
+/--
+CALL-admitting sibling of
+`sourceExprEvalPreludeSound_user_call_generated_ok_of_program_accepted_recursive_reservedBridge`.
+
+The generated hidden result slot still follows the same source/target
+reconstruction; only the recursive callee body bridge is upgraded to the
+CALL-aware accepted-program spine.
+-/
+theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_programCALL_accepted_recursive_reservedBridge
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {layout : List Name}
+    {sourceFuel : Nat} {functionName : Name} {args : List AstExpr}
+    {freshState freshArgsState freshAfter : Fresh.State}
+    {preArgs : List Functions.Stmt}
+    {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hCallFuel : sourceFuel.succ ≤ bound)
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (preArgs, lowerArgs, freshArgsState))
+    (hFresh :
+      Fresh.fresh? freshArgsState = some (tmp, freshAfter))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hArgsRegular :
+      SourceArgListPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args (some yulProgram.contract) preArgs lowerArgs) :
+    ∀ {source compiler sharedAfter storeAfter value},
+      SourceStateRel cfg layout source compiler →
+      EvmYul.Yul.eval sourceFuel.succ (.Call (.inr functionName) args)
+          (some yulProgram.contract) source =
+        .ok (.Ok sharedAfter storeAfter, value) →
+      ∃ compilerAfterPre : Objects.Source.State,
+      ∃ compilerAfter : Objects.Source.State,
+      ∃ ctxAfter : Functions.Source.Ctx,
+      ∃ targetFuel : Nat,
+        Functions.Source.Block.runOpen prim program ctx targetFuel
+            { stmts :=
+                preArgs ++
+                  [Functions.Stmt.let_ tmp (.lit Expr.zero),
+                    Functions.Stmt.call [tmp] functionName lowerArgs] }
+            compiler =
+          .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+        Locals.Source.Expr.evalOne prim (.var tmp) compilerAfterPre =
+          .ok (compilerAfter, value) ∧
+        SourceStateRel cfg layout (.Ok sharedAfter storeAfter) compilerAfter := by
+  intro source compiler sharedAfter storeAfter value hInitial hEval
+  rcases eval_user_call_ok_split hEval with
+    ⟨argFuel, hFuelEq, sourceAfterArgs, argValues, returnValues,
+      hArgEval, hCall, hHead⟩
+  have hArgFuelEq : argFuel = sourceFuel := by
+    exact Nat.succ.inj hFuelEq.symm
+  subst argFuel
+  rcases hArgsRegular.2 hInitial hArgEval with
+    ⟨compilerAfterArgsPre, compilerAfterArgs, ctxAfterArgs, preFuel,
+      hPreRun, hArgsRun, hRelArgs⟩
+  rcases Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs with
+    ⟨lowerNames, hLowerNames⟩
+  have hCompilerAfterArgs :
+      compilerAfterArgs = compilerAfterArgsPre := by
+    rw [hLowerNames] at hArgsRun
+    exact sourceArgList_eval_var_map_state_eq hArgsRun
+  subst compilerAfterArgs
+  have hLowerMem :
+      ∀ name, name ∈ lowerNames → name ∈ freshArgsState.used :=
+    lowerBound1?_lowerArg_names_mem_final_used hLowerArgs hLowerNames
+  have hTmpNotInLowerNames : tmp ∉ lowerNames := by
+    intro hMem
+    exact fresh?_name_not_mem_used hFresh (hLowerMem tmp hMem)
+  have hArgsRunVars :
+      Functions.Source.ArgList.eval prim
+          (lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+          compilerAfterArgsPre =
+        .ok (compilerAfterArgsPre, argValues) := by
+    simpa [hLowerNames] using hArgsRun
+  let compilerAfterInit : Objects.Source.State :=
+    compilerAfterArgsPre.insert tmp Expr.zero
+  have hArgsRunInserted :
+      Functions.Source.ArgList.eval prim lowerArgs compilerAfterInit =
+        .ok (compilerAfterInit, argValues) := by
+    simpa [compilerAfterInit, hLowerNames] using
+      sourceArgList_eval_var_map_insert_of_not_mem
+        (prim := prim) (names := lowerNames) (tmp := tmp)
+        (value := Expr.zero) hArgsRunVars hTmpNotInLowerNames
+  have hRelInserted :
+      SourceStateRel cfg layout sourceAfterArgs compilerAfterInit :=
+    SourceStateRel.insert_hidden hRelArgs hTmpFreshLayout
+  cases hRelInserted with
+  | @ok sharedArgs storeArgs compilerAfterInit hSharedArgs hVarsArgs =>
+      have hStmtOk :
+          UserCallArity.StmtOk yulProgram.contract
+            (.Let [tmp] (some (.Call (.inr functionName) args))) := by
+        rcases hExprOk with ⟨hCallOk, hArgsOk⟩
+        rcases hCallOk with
+          ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
+        exact
+          ⟨⟨params, returns, body, hLookup, by simpa using hReturnsLen.symm,
+              hArgsLen⟩, hArgsOk⟩
+      have hLowerArgsLength : lowerArgs.length = args.length :=
+        Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+      have hTargetContains :
+          ∀ name, name ∈ [tmp] →
+            compilerAfterInit.vars.contains name = true := by
+        intro name hMem
+        simp at hMem
+        subst name
+        simp [compilerAfterInit, Locals.Source.Store.contains,
+          Locals.Source.State.insert, Locals.Source.Store.insert_self]
+      have hTargetsFresh :
+          ∀ name, name ∈ [tmp] → name ∉ layout := by
+        intro name hMem
+        simp at hMem
+        subst name
+        exact hTmpFreshLayout
+      have hExecCall :
+          EvmYul.Yul.execCall sourceFuel.succ functionName [tmp]
+              (some yulProgram.contract)
+              (.ok (.Ok sharedArgs storeArgs, argValues)) =
+            .ok
+              (.Ok sharedAfter
+                (VarStackRel.insertPairs (List.zip [tmp] returnValues)
+                  storeAfter)) := by
+        simp [EvmYul.Yul.execCall, hCall, EvmYul.Yul.multifill',
+          VarStackRel.multifill_ok]
+      rcases
+          sourceLetUserCall_regular_of_execCall_programCALL_accepted_recursive
+            (cfg := cfg) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim)
+            (yulProgram := yulProgram) (program := program)
+            (context := context) (bound := bound)
+            (ctx :=
+              { ctxAfterArgs with
+                scope := tmp :: ctxAfterArgs.scope })
+            (layout := layout) (sourceFuel := sourceFuel.succ)
+            (names := [tmp]) (functionName := functionName)
+            (args := args) (lowerArgs := lowerArgs)
+            (compilerAfterPre := compilerAfterInit)
+            (compilerAfterArgs := compilerAfterInit)
+            (argValues := argValues) (sharedArgs := sharedArgs)
+            (sharedAfter := sharedAfter) (storeArgs := storeArgs)
+            (storeAfter :=
+              VarStackRel.insertPairs (List.zip [tmp] returnValues)
+                storeAfter)
+            hRecursive hCheckpoint hCallFuel hStmtOk hLowerArgsLength
+            (List.nodup_singleton tmp)
+            hTargetsFresh hTargetContains
+            (SourceStateRel.ok hSharedArgs hVarsArgs)
+            hArgsRunInserted hExecCall with
+        ⟨compilerAfterCall, ctxAfterCall, callFuel, hRunCall, hRelCall⟩
+      have hLetRun :
+          Functions.Source.Block.runOpen prim program ctxAfterArgs 2
+              { stmts := [Functions.Stmt.let_ tmp (.lit Expr.zero)] }
+              compilerAfterArgsPre =
+            .ok
+              (Functions.Source.Outcome.regular compilerAfterInit,
+                { ctxAfterArgs with
+                  scope := tmp :: ctxAfterArgs.scope }) := by
+        simp [compilerAfterInit, Functions.Source.Block.runOpen,
+          Functions.Source.Stmt.run, Functions.Source.Expr.evalOne,
+          Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular]
+      rcases
+          Functions.Source.Block.runOpen_append_regular_exists
+            prim program
+            [Functions.Stmt.let_ tmp (.lit Expr.zero)]
+            [Functions.Stmt.call [tmp] functionName lowerArgs]
+            ctxAfterArgs
+            { ctxAfterArgs with
+              scope := tmp :: ctxAfterArgs.scope }
+            compilerAfterArgsPre compilerAfterInit
+            (Functions.Source.Outcome.regular compilerAfterCall)
+            ctxAfterCall ⟨2, hLetRun⟩ ⟨callFuel, hRunCall⟩ with
+        ⟨letCallFuel, hLetCallRun⟩
+      rcases
+          Functions.Source.Block.runOpen_append_regular_exists
+            prim program preArgs
+            [Functions.Stmt.let_ tmp (.lit Expr.zero),
+              Functions.Stmt.call [tmp] functionName lowerArgs]
+            ctx ctxAfterArgs compiler compilerAfterArgsPre
+            (Functions.Source.Outcome.regular compilerAfterCall)
+            ctxAfterCall ⟨preFuel, hPreRun⟩
+            ⟨letCallFuel, hLetCallRun⟩ with
+        ⟨targetFuel, hTargetRun⟩
+      have hLookupTmpSource :
+          (VarStackRel.insertPairs (List.zip [tmp] returnValues)
+              storeAfter).lookup tmp =
+            some value := by
+        cases sourceFuel with
+        | zero =>
+            simp [EvmYul.Yul.call] at hCall
+        | succ bodyFuel =>
+            rcases
+                call_user_ok_contract_body
+                  (fuel := bodyFuel) (shared := sharedArgs)
+                  (store := storeArgs) (args := argValues)
+                  (values := returnValues) (functionName := functionName)
+                  (contract := yulProgram.contract)
+                  (stateAfter := .Ok sharedAfter storeAfter)
+                  (by simpa using hCall) with
+              ⟨_acct, fn, bodyState, _hFind, hLookup, _hBody, _hState,
+                hValuesEq⟩
+            cases fn with
+            | Def params returns body =>
+                have hReturnsLen :
+                    returns.length = 1 :=
+                  UserCallArity.expr_user_lookup_returns_length_one hExprOk
+                    hLookup
+                have hReturnLen : returnValues.length = 1 := by
+                  rw [hValuesEq]
+                  simpa using hReturnsLen
+                cases returnValues with
+                | nil =>
+                    simp at hReturnLen
+                | cons ret rest =>
+                    cases rest with
+                    | nil =>
+                        simp at hHead
+                        subst ret
+                        simp [VarStackRel.insertPairs]
+                    | cons ret2 rest =>
+                        simp at hReturnLen
+      have hLookupTmp :
+          compilerAfterCall.vars tmp = some value :=
+        SourceStateRel.vars_eq_some_of_layout_lookup
+          (cfg := cfg) (layout := [tmp].reverse ++ layout)
+          (shared := sharedAfter)
+          (store :=
+            VarStackRel.insertPairs (List.zip [tmp] returnValues)
+              storeAfter)
+          (compiler := compilerAfterCall)
+          (name := tmp) (value := value)
+          hRelCall (by simp) hLookupTmpSource
+      have hEvalTmp :
+          Locals.Source.Expr.evalOne prim (.var tmp) compilerAfterCall =
+            .ok (compilerAfterCall, value) := by
+        simp [Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
+          hLookupTmp]
+      have hVisibleRel :
+          SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+            compilerAfterCall :=
+        SourceStateRel.of_hidden_multifill
+          (cfg := cfg) (layout := layout) (targets := [tmp])
+          (values := returnValues) (shared := sharedAfter)
+          (sharedAfter := sharedAfter) (store := storeAfter)
+          (storeAfter :=
+            VarStackRel.insertPairs (List.zip [tmp] returnValues)
+              storeAfter)
+          (compiler := compilerAfterCall)
+          hRelCall hTargetsFresh
+          (by simp [VarStackRel.multifill_ok])
+      exact
+        ⟨compilerAfterCall, compilerAfterCall, ctxAfterCall, targetFuel,
+          by simpa [List.append_assoc] using hTargetRun,
+          hEvalTmp, hVisibleRel⟩
+
 
 theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_program_accepted_recursive
     {cfg : StateRelConfig}
@@ -61337,6 +65009,107 @@ theorem sourceExprEvalPreludeSound_user_call_direct_ok_of_program_accepted_recur
           (lowerArgs := []) (tmp := tmp)
           hRecursive hCallFuel hExprOk hLowerArgs hFresh hTmpFreshLayout
           hArgsRegular hInitial hEval
+  | cons head tail =>
+      simp [Expr.List.directCallArgsSafe?] at hDirect
+
+/--
+CALL-admitting direct-empty-argument sibling of
+`sourceExprEvalPreludeSound_user_call_direct_ok_of_program_accepted_recursive_reservedBridge`.
+
+This is intentionally still empty-argument only; non-direct and nested
+arguments must go through the checked argument-prelude frontier instead of
+being treated as a compatibility shortcut.
+-/
+theorem sourceExprEvalPreludeSound_user_call_direct_ok_of_programCALL_accepted_recursive_reservedBridge
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    {ctx : Functions.Source.Ctx} {layout : List Name}
+    {sourceFuel : Nat} {functionName : Name} {args : List AstExpr}
+    {freshState freshAfter : Fresh.State}
+    {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hCallFuel : sourceFuel.succ ≤ bound)
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hDirect : Expr.List.directCallArgsSafe? args = true)
+    (hToLocals : Expr.List.toLocals1? args = some lowerArgs)
+    (hFresh : Fresh.fresh? freshState = some (tmp, freshAfter))
+    (hTmpFreshLayout : tmp ∉ layout) :
+    ∀ {source compiler sharedAfter storeAfter value},
+      SourceStateRel cfg layout source compiler →
+      EvmYul.Yul.eval sourceFuel.succ (.Call (.inr functionName) args)
+          (some yulProgram.contract) source =
+        .ok (.Ok sharedAfter storeAfter, value) →
+      ∃ compilerAfterPre : Objects.Source.State,
+      ∃ compilerAfter : Objects.Source.State,
+      ∃ ctxAfter : Functions.Source.Ctx,
+      ∃ targetFuel : Nat,
+        Functions.Source.Block.runOpen prim program ctx targetFuel
+            { stmts :=
+                [Functions.Stmt.let_ tmp (.lit Expr.zero),
+                  Functions.Stmt.call [tmp] functionName lowerArgs] }
+            compiler =
+          .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+        Locals.Source.Expr.evalOne prim (.var tmp) compilerAfterPre =
+          .ok (compilerAfter, value) ∧
+        SourceStateRel cfg layout (.Ok sharedAfter storeAfter) compilerAfter := by
+  cases args with
+  | nil =>
+      simp [Expr.List.toLocals1?] at hToLocals
+      subst lowerArgs
+      have hLowerArgs :
+          Expr.List.lowerBound1? freshState [] =
+            some ([], [], freshState) := by
+        simp [Expr.List.lowerBound1?]
+      have hArgsRegular :
+          SourceArgListPreludeRegularAt cfg layout prim program ctx sourceFuel
+            [] (some yulProgram.contract) [] [] :=
+        by
+          refine ⟨by simp, ?_⟩
+          intro source compiler sourceAfter values hInitial hEval
+          cases sourceFuel with
+          | zero =>
+              simp [EvmYul.Yul.evalArgs] at hEval
+          | succ fuel =>
+              have hPair :
+                  (source, []) = (sourceAfter, values.reverse) := by
+                simpa [EvmYul.Yul.evalArgs] using hEval
+              injection hPair with hSource hValuesRev
+              subst sourceAfter
+              have hValues : values = [] := by
+                have hRev := congrArg List.reverse hValuesRev
+                simpa using hRev
+              subst values
+              exact
+                ⟨compiler, compiler, ctx, 1,
+                  by simp [Functions.Source.Block.runOpen],
+                  by simp [Functions.Source.ArgList.eval],
+                  hInitial⟩
+      intro source compiler sharedAfter storeAfter value hInitial hEval
+      exact
+        sourceExprEvalPreludeSound_user_call_generated_ok_of_programCALL_accepted_recursive_reservedBridge
+          (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+          (prim := prim) (yulProgram := yulProgram) (program := program)
+          (context := context) (bound := bound) (ctx := ctx)
+          (layout := layout) (sourceFuel := sourceFuel)
+          (functionName := functionName) (args := [])
+          (freshState := freshState) (freshArgsState := freshState)
+          (freshAfter := freshAfter) (preArgs := [])
+          (lowerArgs := []) (tmp := tmp)
+          hRecursive hCheckpoint hCallFuel hExprOk hLowerArgs hFresh
+          hTmpFreshLayout hArgsRegular hInitial hEval
   | cons head tail =>
       simp [Expr.List.directCallArgsSafe?] at hDirect
 
@@ -78752,7 +82525,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_stop_call
         SourceStateRel cfg layout source compiler →
         ∃ sharedAfter : EvmYul.SharedState .EVM,
           prim.terminal .stop compiler.shared [] = .ok sharedAfter ∧
-          terminalRel .stop (EvmYul.UInt256.ofNat 0) source
+          terminalRel .stop (EvmYul.UInt256.ofNat 0)
+            (Imported.stopTerminalSourceState source)
             (compiler.withShared sharedAfter)) :
     CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
       outcomeLayout terminalRel revertRel prim program ctx sourceFuel
@@ -135065,6 +138839,490 @@ theorem ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.s
     hArgs
 
 /--
+CALL-admitting reservation-aware successor handoff from a supported
+hidden-context sequence frontier.
+
+This is the CALL-safe counterpart of
+`ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_hiddenCtxSeq_frontier_fields_supported`:
+the recursive shell, statement frontier, block frontier, and hidden block
+frontier all consume `Safe.CallSafe` rather than the old CALL-rejecting
+`Safe.program` surface.
+-/
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_hiddenCtxSeq_frontier_fields_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hStmt :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {sourceStmt : AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmt sourceStmt →
+        ControlFlow.ScopedStmt canBreak canContinue canLeave sourceStmt →
+        UserCallArity.StmtOk yulProgram.contract sourceStmt →
+        SourceLexical.StmtScoped layout sourceStmt →
+        SourceNamesReserved reserved (Stmt.names sourceStmt) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
+            sourceResult) →
+        ctx.scope = layout →
+        CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact cfg reserved layout
+          outcomeLayout terminalRel revertRel prim program ctx bound.succ
+          sourceStmt (some yulProgram.contract) allowed)
+    (hSeq :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound compileFuel sourceStmts (some yulProgram.contract) allowed)
+    (hHiddenModeBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound.succ compileFuel sourceStmts (some yulProgram.contract))
+    (hArgs :
+      ∀ {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) bound.succ) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context bound.succ :=
+  ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_frontier_fields
+    (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (yulProgram := yulProgram) (program := program)
+    (context := context) (bound := bound) hRecursive hStmt
+    (hBlock := by
+      intro reserved layout outcomeLayout ctx sourceStmts allowed canBreak
+        canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hAllowed hCompat hScope
+      exact
+        checkedBlockLoweringSoundWhenFreshNamesAtExact_of_hiddenCtxSeq_frontier_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (bound := bound) (sourceStmts := sourceStmts)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hReserved hAllowed hCompat hScope
+          (fun {compileFuel} {allowedInner} hReservedInner hAllowedInner
+              hSupportedInner hScopeContains =>
+            hSeq (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (ctx := ctx)
+              (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+              (allowed := allowedInner) (canBreak := canBreak)
+              (canContinue := canContinue) (canLeave := canLeave)
+              hSafe hScoped hStmtsOk hSourceScoped hReservedInner
+              hAllowedInner hSupportedInner hScopeContains))
+    (hHiddenBlock := by
+      intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+        canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+        hReserved hAllowed hCompat hScopeContains
+      exact
+        checkedBlockLoweringSoundWhenFreshNamesAtCompileFuelHiddenScope_of_hiddenCtxSeq_frontier_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (bound := bound) (compileFuel := compileFuel)
+          (sourceStmts := sourceStmts)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hReserved hAllowed hCompat hScopeContains
+          (fun {allowedInner} hReservedInner hAllowedInner hSupportedInner
+              hScopeContainsInner =>
+            hSeq (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (ctx := ctx)
+              (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+              (allowed := allowedInner) (canBreak := canBreak)
+              (canContinue := canContinue) (canLeave := canLeave)
+              hSafe hScoped hStmtsOk hSourceScoped hReservedInner
+              hAllowedInner hSupportedInner hScopeContainsInner))
+    (hHiddenModeBlock := by
+      intro reserved layout outcomeLayout ctx compileFuel sourceStmts canBreak
+        canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hHandlers hScopeContains
+      exact
+        hHiddenModeBlock (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (ctx := ctx)
+          (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+          (canBreak := canBreak) (canContinue := canContinue)
+          (canLeave := canLeave) hSafe hScoped hStmtsOk hSourceScoped
+          hReserved hHandlers hScopeContains)
+    hArgs
+
+/--
+CALL-admitting successor handoff from one supported hidden-context sequence
+frontier.
+
+The statement frontier is derived from the same CALL-safe open-sequence theorem
+by wrapping a singleton block; this leaves the remaining semantic work focused
+on the CALL-safe sequence frontier and hidden-mode frontier rather than on
+boilerplate statement/block closure.
+-/
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_sequence_frontier_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hSeq :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound compileFuel sourceStmts (some yulProgram.contract) allowed)
+    (hHiddenModeBlock :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        HiddenModeHandlersAvailable ctx layout canBreak canContinue →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound.succ compileFuel sourceStmts (some yulProgram.contract))
+    (hArgs :
+      ∀ {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) bound.succ) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context bound.succ :=
+  ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_hiddenCtxSeq_frontier_fields_supported
+    (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (yulProgram := yulProgram) (program := program)
+    (context := context) (bound := bound) hRecursive
+    (hStmt := by
+      intro reserved layout outcomeLayout ctx sourceStmt allowed canBreak
+        canContinue canLeave hSafe hScoped hStmtOk hSourceScoped hReserved
+        hAllowed hCompat hScope
+      exact
+        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_singleton_block
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := bound.succ)
+          (sourceStmt := sourceStmt)
+          (codeOverride := some yulProgram.contract)
+          (allowed := allowed)
+          (checkedBlockLoweringSoundWhenFreshNamesAtExact_of_hiddenCtxSeq_frontier_reserved_supported
+            (cfg := cfg) (reserved := reserved) (layout := layout)
+            (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim) (program := program)
+            (ctx := ctx) (bound := bound) (sourceStmts := [sourceStmt])
+            (codeOverride := some yulProgram.contract) (allowed := allowed)
+            (by simpa [Stmt.List.names] using hReserved)
+            hAllowed hCompat hScope
+            (fun {compileFuel} {allowedInner} hReservedInner hAllowedInner
+                hSupportedInner hScopeContains =>
+              hSeq (reserved := reserved) (layout := layout)
+                (outcomeLayout := outcomeLayout) (ctx := ctx)
+                (compileFuel := compileFuel) (sourceStmts := [sourceStmt])
+                (allowed := allowedInner) (canBreak := canBreak)
+                (canContinue := canContinue) (canLeave := canLeave)
+                (by
+                  change Safe.FeatureCoverage.Family.stmts
+                    Safe.CallSafe.primitive Safe.CallSafe.userCall
+                    [sourceStmt]
+                  exact And.intro hSafe trivial)
+                (by
+                  simpa [ControlFlow.ScopedStmts] using
+                    And.intro hScoped trivial)
+                (by
+                  simpa [UserCallArity.StmtsOk] using
+                    And.intro hStmtOk trivial)
+                (by
+                  simpa [SourceLexical.StmtsScoped] using
+                    And.intro hSourceScoped trivial)
+                hReservedInner hAllowedInner hSupportedInner
+                hScopeContains)))
+    hSeq hHiddenModeBlock hArgs
+
+/--
+CALL-admitting successor handoff from an open sequence frontier plus a
+typed-continuation sequence frontier.
+
+The ordinary sequence frontier still proves the block/outcome-layout surface.
+The typed-continuation frontier now constructs the handler-aware hidden-mode
+block using the CALL-safe checkpoint invariant, so callers no longer need to
+provide `hiddenModeBlock` directly.
+-/
+theorem ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_sequence_kont_frontier_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program} {bound : Nat}
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hSeq :
+      ∀ {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program ctx
+          bound compileFuel sourceStmts (some yulProgram.contract) allowed)
+    (hSeqKont :
+      ∀ {reserved layout : List Name} {konts : SourceModeKontLayouts}
+        {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout konts sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout konts →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg reserved
+          layout konts terminalRel revertRel prim program ctx bound
+          compileFuel sourceStmts (some yulProgram.contract) allowed)
+    (hArgs :
+      ∀ {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) bound.succ) :
+    ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+      cfg terminalRel revertRel prim yulProgram program context bound.succ :=
+  ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_sequence_frontier_supported
+    (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+    (prim := prim) (yulProgram := yulProgram) (program := program)
+    (context := context) (bound := bound) hRecursive hSeq
+    (hHiddenModeBlock := by
+      intro reserved layout outcomeLayout ctx compileFuel sourceStmts canBreak
+        canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped hReserved
+        hHandlers hScopeContains
+      exact
+        checkedHiddenBlockModeSoundWhenFreshNamesAtCompileFuelHiddenScope_of_seqKont_block_frontier_callSafe
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := bound) (compileFuel := compileFuel)
+          (sourceStmts := sourceStmts)
+          (codeOverride := some yulProgram.contract)
+          (canBreak := canBreak) (canContinue := canContinue)
+          (canLeave := canLeave) hCheckpoint hSafe hScoped hHandlers
+          hScopeContains
+          (fun {allowedInner} hAllowedInner hSupportedInner =>
+            hSeqKont (reserved := reserved) (layout := layout)
+              (konts := SourceModeKontLayouts.block layout outcomeLayout)
+              (ctx := ctx) (compileFuel := compileFuel)
+              (sourceStmts := sourceStmts) (allowed := allowedInner)
+              (canBreak := canBreak) (canContinue := canContinue)
+              (canLeave := canLeave) hSafe hScoped hStmtsOk hSourceScoped
+              hReserved hAllowedInner hSupportedInner
+              (SourceModeKontLayouts.block_controlWithin layout outcomeLayout)
+              hScopeContains))
+    hArgs
+
+/--
+CALL-safe open-sequence frontier at one source-fuel bound.
+
+This names the non-terminal half of the CALL-admitting all-head proof that the
+recursive bridge still has to construct.  Keeping it private to the source
+bridge support layer avoids turning the frontier itself into a public oracle.
+-/
+def CALLSeqLoweringFrontierAt
+    (cfg : StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (yulProgram : Program) (program : Functions.Program)
+    (bound : Nat) : Prop :=
+  ∀ {reserved layout outcomeLayout : List Name}
+    {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {sourceStmts : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool},
+    Safe.CallSafe.stmts sourceStmts →
+    ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+    UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+    SourceLexical.StmtsScoped layout sourceStmts →
+    SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultRelatable sourceResult) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+        sourceResult) →
+    (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+    CheckedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      bound compileFuel sourceStmts (some yulProgram.contract) allowed
+
+/--
+CALL-safe typed-continuation sequence frontier at one source-fuel bound.
+
+This is the handler-aware companion to `CALLSeqLoweringFrontierAt`; together
+they are exactly the remaining all-head constructor obligations for the CALL
+recursive bridge.
+-/
+def CALLSeqKontFrontierAt
+    (cfg : StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (yulProgram : Program) (program : Functions.Program)
+    (bound : Nat) : Prop :=
+  ∀ {reserved layout : List Name} {konts : SourceModeKontLayouts}
+    {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {sourceStmts : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool},
+    Safe.CallSafe.stmts sourceStmts →
+    ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+    UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+    SourceLexical.StmtsScoped layout sourceStmts →
+    SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultRelatable sourceResult) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultModeKontSupported ctx layout konts sourceResult) →
+    SourceModeKontLayouts.ControlWithin layout konts →
+    (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+    CheckedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg reserved
+      layout konts terminalRel revertRel prim program ctx bound compileFuel
+      sourceStmts (some yulProgram.contract) allowed
+
+/--
+All-bounds CALL-admitting recursive bridge from checked CALL-safe frontiers.
+
+This closes the source-fuel induction once the two CALL-safe all-head frontiers
+are supplied.  The theorem deliberately keeps those frontiers as internal proof
+obligations; the public whole-world proof should construct them from primitive
+CALL/world evidence rather than expose them at the top theorem boundary.
+-/
+theorem programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_allBounds_of_sequence_kont_frontiers_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program}
+    (hCheckpoint :
+      FamilyCheckpointExpressionSound Safe.CallSafe.primitive
+        Safe.CallSafe.userCall)
+    (hSeq :
+      ∀ {bound : Nat},
+        ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+          cfg terminalRel revertRel prim yulProgram program context bound →
+        CALLSeqLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+          program bound)
+    (hSeqKont :
+      ∀ {bound : Nat},
+        ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+          cfg terminalRel revertRel prim yulProgram program context bound →
+        CALLSeqKontFrontierAt cfg terminalRel revertRel prim yulProgram
+          program bound)
+    (hArgs :
+      ∀ {bound : Nat} {reserved layout : List Name},
+        SourceArgListPreludeRegularAllCallSafeCheckedAt cfg layout prim program
+          yulProgram.contract (reserved ++ layout) bound.succ) :
+    ∀ bound,
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound := by
+  intro bound
+  induction bound with
+  | zero =>
+      exact
+        programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_zero
+          (cfg := cfg) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim)
+          (yulProgram := yulProgram) (program := program)
+          (context := context)
+  | succ bound ih =>
+      exact
+        ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.succ_of_sequence_kont_frontier_supported
+          (cfg := cfg) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim)
+          (yulProgram := yulProgram) (program := program)
+          (context := context) (bound := bound) ih hCheckpoint
+          (hSeq (bound := bound) ih)
+          (hSeqKont (bound := bound) ih)
+          (by
+            intro reserved layout
+            exact hArgs (bound := bound) (reserved := reserved)
+              (layout := layout))
+
+/--
 Empty hidden-context sequence soundness at exact source fuel.
 
 At fuel zero the imported empty sequence reports out-of-fuel, which is ruled
@@ -164290,6 +168548,529 @@ theorem structured_terminal_ok_of_imported_terminal_relatable
                     rw [hResult] at hRelatable
                     simp [SourceResultRelatable] at hRelatable
 
+/--
+Sibling of `structured_terminal_ok_of_imported_terminal_relatable` reading off
+the imported result shape.
+
+If the imported Yul interpreter is about to execute a terminal primitive whose
+result is `SourceResultRelatable`, then the result is exactly
+`.error (.YulHalt _ _)` for non-revert kinds, or `.error (.Revert _)` for the
+revert kind. The proof mirrors the case structure of the sibling: failing-arity
+and static-mode branches discharge by `simp [SourceResultRelatable]` on
+`hRelatable`; successful-arity branches read off the halt or revert via
+`primCall_stop_eq`, `primCall_return_lit_lit_yul_halt`,
+`primCall_revert_lit_lit_revert`, and `step_selfdestruct_lit_eq`.
+-/
+theorem imported_terminal_call_result_shape
+    {sourceFuel : Nat} {source sourceAfterArgs : State}
+    {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+    {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {sourceResult : Except Exception State} {argValues : List Word}
+    (hTerminal : Prim.terminal? yulPrim = some kind)
+    (hRelatable : SourceResultRelatable sourceResult)
+    (hExecSeq :
+      EvmYul.Yul.execSeq sourceFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          codeOverride source =
+        sourceResult)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfterArgs, argValues.reverse)) :
+    (kind ≠ .revert ∧
+      ∃ haltState value, sourceResult = .error (.YulHalt haltState value)) ∨
+    (kind = .revert ∧
+      ∃ revertState, sourceResult = .error (.Revert revertState)) := by
+  cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+  case StopArith op =>
+    cases op <;> simp at hTerminal
+    cases hTerminal
+    -- `STOP` ignores its argument list and halts unconditionally.
+    cases sourceFuel with
+    | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+    | succ fuel =>
+        let stopState : State :=
+          sourceAfterArgs.setMachineState
+            (sourceAfterArgs.toMachineState.setHReturn ByteArray.empty)
+        have hPrim :
+            EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                ((.StopArith .STOP : EvmYul.Operation .Yul)) argValues =
+              .error (.YulHalt stopState (EvmYul.UInt256.ofNat 0)) := by
+          simpa [stopState] using
+            PrimSemantics.primCall_stop_eq fuel sourceAfterArgs argValues
+        have hResult :=
+          execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+            (sourceFuel := fuel.succ) (source := source)
+            (sourceAfterArgs := sourceAfterArgs)
+            (yulPrim := (.StopArith .STOP : EvmYul.Operation .Yul))
+            (args := args) (rest := rest)
+            (codeOverride := codeOverride) (argValues := argValues)
+            (err := .YulHalt stopState (EvmYul.UInt256.ofNat 0))
+            (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+        exact Or.inl ⟨by decide, _, _, hResult⟩
+  case System op =>
+    cases op <;> simp [Prim.terminal?] at hTerminal
+    · -- RETURN
+      cases hTerminal
+      cases sourceFuel with
+      | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          cases argValues with
+          | nil =>
+              have hPrim :=
+                PrimSemantics.primCall_return_nil_eq fuel sourceAfterArgs
+              have hResult :=
+                execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                  (sourceFuel := fuel.succ) (source := source)
+                  (sourceAfterArgs := sourceAfterArgs)
+                  (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                  (args := args) (rest := rest)
+                  (codeOverride := codeOverride) (argValues := [])
+                  (err := .InvalidArguments) (sourceResult := sourceResult)
+                  hEvalArgs hPrim hExecSeq
+              rw [hResult] at hRelatable
+              simp [SourceResultRelatable] at hRelatable
+          | cons offset restValues =>
+              cases restValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_return_singleton_eq fuel
+                      sourceAfterArgs offset
+                  have hResult :=
+                    execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [offset])
+                      (err := .InvalidArguments) (sourceResult := sourceResult)
+                      hEvalArgs hPrim hExecSeq
+                  rw [hResult] at hRelatable
+                  simp [SourceResultRelatable] at hRelatable
+              | cons size more =>
+                  cases more with
+                  | nil =>
+                      rcases
+                          PrimSemantics.primCall_return_lit_lit_yul_halt
+                            fuel sourceAfterArgs offset size with
+                        ⟨haltState, value, hPrim⟩
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset, size])
+                          (err := .YulHalt haltState value)
+                          (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+                      exact Or.inl ⟨by decide, haltState, value, hResult⟩
+                  | cons extra extras =>
+                      have hPrim :=
+                        PrimSemantics.primCall_return_cons_cons_cons_eq fuel
+                          sourceAfterArgs offset size extra extras
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := offset :: size :: extra :: extras)
+                          (err := .InvalidArguments)
+                          (sourceResult := sourceResult)
+                          hEvalArgs hPrim hExecSeq
+                      rw [hResult] at hRelatable
+                      simp [SourceResultRelatable] at hRelatable
+    · -- REVERT
+      cases hTerminal
+      cases sourceFuel with
+      | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          cases argValues with
+          | nil =>
+              have hPrim :=
+                PrimSemantics.primCall_revert_nil_eq fuel sourceAfterArgs
+              have hResult :=
+                execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                  (sourceFuel := fuel.succ) (source := source)
+                  (sourceAfterArgs := sourceAfterArgs)
+                  (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                  (args := args) (rest := rest)
+                  (codeOverride := codeOverride) (argValues := [])
+                  (err := .InvalidArguments) (sourceResult := sourceResult)
+                  hEvalArgs hPrim hExecSeq
+              rw [hResult] at hRelatable
+              simp [SourceResultRelatable] at hRelatable
+          | cons offset restValues =>
+              cases restValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_revert_singleton_eq fuel
+                      sourceAfterArgs offset
+                  have hResult :=
+                    execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [offset])
+                      (err := .InvalidArguments) (sourceResult := sourceResult)
+                      hEvalArgs hPrim hExecSeq
+                  rw [hResult] at hRelatable
+                  simp [SourceResultRelatable] at hRelatable
+              | cons size more =>
+                  cases more with
+                  | nil =>
+                      rcases
+                          PrimSemantics.primCall_revert_lit_lit_revert
+                            fuel sourceAfterArgs offset size with
+                        ⟨revertState, hPrim⟩
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset, size])
+                          (err := .Revert revertState)
+                          (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+                      exact Or.inr ⟨rfl, revertState, hResult⟩
+                  | cons extra extras =>
+                      have hPrim :=
+                        PrimSemantics.primCall_revert_cons_cons_cons_eq fuel
+                          sourceAfterArgs offset size extra extras
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := offset :: size :: extra :: extras)
+                          (err := .InvalidArguments)
+                          (sourceResult := sourceResult)
+                          hEvalArgs hPrim hExecSeq
+                      rw [hResult] at hRelatable
+                      simp [SourceResultRelatable] at hRelatable
+    · -- SELFDESTRUCT
+      cases hTerminal
+      cases sourceFuel with
+      | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+          · have hPrim :=
+              PrimSemantics.primCall_selfdestruct_static_eq fuel
+                sourceAfterArgs argValues hStatic
+            have hResult :=
+              execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                (args := args) (rest := rest)
+                (codeOverride := codeOverride) (argValues := argValues)
+                (err := .StaticModeViolation) (sourceResult := sourceResult)
+                hEvalArgs hPrim hExecSeq
+            rw [hResult] at hRelatable
+            simp [SourceResultRelatable] at hRelatable
+          · cases argValues with
+            | nil =>
+                have hPrim :=
+                  PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                    sourceAfterArgs hStatic
+                have hResult :=
+                  execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := [])
+                    (err := .InvalidArguments) (sourceResult := sourceResult)
+                    hEvalArgs hPrim hExecSeq
+                rw [hResult] at hRelatable
+                simp [SourceResultRelatable] at hRelatable
+            | cons recipient more =>
+                cases more with
+                | nil =>
+                    have hPrim :
+                        EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                            ((.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                            [recipient] =
+                          .error
+                            (.YulHalt
+                              (PrimSemantics.selfdestructState sourceAfterArgs
+                                recipient)
+                              (EvmYul.UInt256.ofNat 0)) := by
+                      simp [EvmYul.Yul.primCall, hStatic,
+                        PrimSemantics.step_selfdestruct_lit_eq]
+                    have hResult :=
+                      execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim :=
+                          (.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := [recipient])
+                        (err :=
+                          .YulHalt
+                            (PrimSemantics.selfdestructState sourceAfterArgs
+                              recipient)
+                            (EvmYul.UInt256.ofNat 0))
+                        (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+                    exact Or.inl ⟨by decide, _, _, hResult⟩
+                | cons extra extras =>
+                    have hPrim :=
+                      PrimSemantics.primCall_selfdestruct_cons_cons_eq fuel
+                        sourceAfterArgs recipient extra extras hStatic
+                    have hResult :=
+                      execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim :=
+                          (.System .SELFDESTRUCT : EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := recipient :: extra :: extras)
+                        (err := .InvalidArguments)
+                        (sourceResult := sourceResult) hEvalArgs hPrim hExecSeq
+                    rw [hResult] at hRelatable
+                    simp [SourceResultRelatable] at hRelatable
+
+/--
+Imported terminal calls that halt through a non-`RETURN` terminal leave the
+imported Yul `H_return` buffer empty.
+
+This is the semantic fact needed by external-call restoration: `RETURN` carries
+the child output in `H_return`, while `STOP` and `SELFDESTRUCT` produce empty
+external-call output and explicitly clear `H_return`.
+-/
+theorem imported_terminal_call_yulHalt_nonreturn_H_return_empty
+    {sourceFuel : Nat} {source sourceAfterArgs haltState : State}
+    {value : Word}
+    {yulPrim : EvmYul.Operation .Yul} {kind : Assembly.HaltKind}
+    {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {argValues : List Word}
+    (hTerminal : Prim.terminal? yulPrim = some kind)
+    (hExecSeq :
+      EvmYul.Yul.execSeq sourceFuel.succ.succ
+          (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest)
+          codeOverride source =
+        .error (.YulHalt haltState value))
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfterArgs, argValues.reverse))
+    (hNotReturn : kind ≠ .return) :
+    haltState.toMachineState.H_return = ByteArray.empty := by
+  cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+  case StopArith op =>
+    cases op <;> simp at hTerminal
+    cases hTerminal
+    cases sourceFuel with
+    | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+    | succ fuel =>
+        let stopState : State :=
+          sourceAfterArgs.setMachineState
+            (sourceAfterArgs.toMachineState.setHReturn ByteArray.empty)
+        have hPrim :
+            EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                ((.StopArith .STOP : EvmYul.Operation .Yul)) argValues =
+              .error (.YulHalt stopState (EvmYul.UInt256.ofNat 0)) := by
+          simpa [stopState] using
+            PrimSemantics.primCall_stop_eq fuel sourceAfterArgs argValues
+        have hResult :=
+          execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+            (sourceFuel := fuel.succ) (source := source)
+            (sourceAfterArgs := sourceAfterArgs)
+            (yulPrim := (.StopArith .STOP : EvmYul.Operation .Yul))
+            (args := args) (rest := rest)
+            (codeOverride := codeOverride) (argValues := argValues)
+            (err := .YulHalt stopState (EvmYul.UInt256.ofNat 0))
+            (sourceResult := .error (.YulHalt haltState value))
+            hEvalArgs hPrim hExecSeq
+        injection hResult with hErr
+        injection hErr with hStateEq _hValueEq
+        subst haltState
+        cases sourceAfterArgs <;> rfl
+  case System op =>
+    cases op <;> simp [Prim.terminal?] at hTerminal
+    · -- RETURN contradicts the non-return premise.
+      cases hTerminal
+      exact False.elim (hNotReturn rfl)
+    · -- REVERT produces `.Revert`, not `.YulHalt`.
+      cases hTerminal
+      cases sourceFuel with
+      | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          cases argValues with
+          | nil =>
+              have hPrim :=
+                PrimSemantics.primCall_revert_nil_eq fuel sourceAfterArgs
+              have hResult :=
+                execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                  (sourceFuel := fuel.succ) (source := source)
+                  (sourceAfterArgs := sourceAfterArgs)
+                  (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                  (args := args) (rest := rest)
+                  (codeOverride := codeOverride) (argValues := [])
+                  (err := .InvalidArguments)
+                  (sourceResult := .error (.YulHalt haltState value))
+                  hEvalArgs hPrim hExecSeq
+              cases hResult
+          | cons offset restValues =>
+              cases restValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_revert_singleton_eq fuel
+                      sourceAfterArgs offset
+                  have hResult :=
+                    execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [offset])
+                      (err := .InvalidArguments)
+                      (sourceResult := .error (.YulHalt haltState value))
+                      hEvalArgs hPrim hExecSeq
+                  cases hResult
+              | cons size more =>
+                  cases more with
+                  | nil =>
+                      rcases
+                          PrimSemantics.primCall_revert_lit_lit_revert
+                            fuel sourceAfterArgs offset size with
+                        ⟨revertState, hPrim⟩
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim :=
+                            (.System .REVERT : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset, size])
+                          (err := .Revert revertState)
+                          (sourceResult := .error (.YulHalt haltState value))
+                          hEvalArgs hPrim hExecSeq
+                      cases hResult
+                  | cons extra extras =>
+                      have hPrim :=
+                        PrimSemantics.primCall_revert_cons_cons_cons_eq fuel
+                          sourceAfterArgs offset size extra extras
+                      have hResult :=
+                        execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim :=
+                            (.System .REVERT : EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := offset :: size :: extra :: extras)
+                          (err := .InvalidArguments)
+                          (sourceResult := .error (.YulHalt haltState value))
+                          hEvalArgs hPrim hExecSeq
+                      cases hResult
+    · -- SELFDESTRUCT halts and clears `H_return`.
+      cases hTerminal
+      cases sourceFuel with
+      | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+      | succ fuel =>
+          by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+          · have hPrim :=
+              PrimSemantics.primCall_selfdestruct_static_eq fuel
+                sourceAfterArgs argValues hStatic
+            have hResult :=
+              execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.System .SELFDESTRUCT :
+                  EvmYul.Operation .Yul))
+                (args := args) (rest := rest)
+                (codeOverride := codeOverride) (argValues := argValues)
+                (err := .StaticModeViolation)
+                (sourceResult := .error (.YulHalt haltState value))
+                hEvalArgs hPrim hExecSeq
+            cases hResult
+          · cases argValues with
+            | nil =>
+                have hPrim :=
+                  PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                    sourceAfterArgs hStatic
+                have hResult :=
+                  execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT :
+                      EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := [])
+                    (err := .InvalidArguments)
+                    (sourceResult := .error (.YulHalt haltState value))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+            | cons recipient more =>
+                cases more with
+                | nil =>
+                    have hPrim :
+                        EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                            ((.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            [recipient] =
+                          .error
+                            (.YulHalt
+                              (PrimSemantics.selfdestructState sourceAfterArgs
+                                recipient)
+                              (EvmYul.UInt256.ofNat 0)) := by
+                      simp [EvmYul.Yul.primCall, hStatic,
+                        PrimSemantics.step_selfdestruct_lit_eq]
+                    have hResult :=
+                      execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim :=
+                          (.System .SELFDESTRUCT :
+                            EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := [recipient])
+                        (err :=
+                          .YulHalt
+                            (PrimSemantics.selfdestructState sourceAfterArgs
+                              recipient)
+                            (EvmYul.UInt256.ofNat 0))
+                        (sourceResult := .error (.YulHalt haltState value))
+                        hEvalArgs hPrim hExecSeq
+                    injection hResult with hErr
+                    injection hErr with hStateEq _hValueEq
+                    subst haltState
+                    cases sourceAfterArgs <;>
+                      simp [PrimSemantics.selfdestructState,
+                        EvmYul.Yul.State.setState,
+                        EvmYul.Yul.State.setMachineState,
+                        EvmYul.Yul.State.toMachineState,
+                        EvmYul.MachineState.setHReturn]
+                    all_goals rfl
+                | cons extra extras =>
+                    have hPrim :=
+                      PrimSemantics.primCall_selfdestruct_cons_cons_eq fuel
+                        sourceAfterArgs recipient extra extras hStatic
+                    have hResult :=
+                      execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim :=
+                          (.System .SELFDESTRUCT :
+                            EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := recipient :: extra :: extras)
+                        (err := .InvalidArguments)
+                        (sourceResult := .error (.YulHalt haltState value))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+
 end SourceBridgeFacts
 end Reference
 
@@ -164485,6 +169266,78 @@ theorem DispatcherBodyNoCheckpoint.of_scoped_safe_primitiveFamilies
   DispatcherBodyNoCheckpoint.of_scoped_safe_primitiveCallCheckpoint_split
     Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForSafe.of_primitive_families
     Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForSafeNonOk.of_primitive_families
+    hSafe hScoped
+
+theorem DispatcherBodyNoCheckpoint.of_scoped_callSafe
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {sourceFuel : Nat}
+    (hExpr :
+      Reference.SourceBridgeFacts.FamilyCheckpointExpressionSound
+        Reference.Safe.CallSafe.primitive Reference.Safe.CallSafe.userCall)
+    (hSafe : Reference.Safe.CallSafe.program program)
+    (hScoped :
+      Reference.SourceBridgeFacts.ControlFlow.ProgramScoped program) :
+    DispatcherBodyNoCheckpoint program shared store sourceFuel := by
+  apply DispatcherBodyNoCheckpoint.of_checkpointAllowed
+  have hSafeDispatcher :
+      Reference.Safe.CallSafe.stmt program.contract.dispatcher := by
+    simpa [Reference.Safe.CallSafe.program, Reference.Safe.CallSafe.contract]
+      using hSafe.1
+  have hSafeBlock :
+      Reference.Safe.CallSafe.stmt (.Block [program.contract.dispatcher]) := by
+    change
+      Reference.Safe.FeatureCoverage.Family.stmts
+        Reference.Safe.CallSafe.primitive Reference.Safe.CallSafe.userCall
+        [program.contract.dispatcher]
+    exact ⟨hSafeDispatcher, by trivial⟩
+  have hScopedDispatcher :
+      Reference.SourceBridgeFacts.ControlFlow.ScopedStmt false false false
+        program.contract.dispatcher :=
+    Reference.SourceBridgeFacts.ControlFlow.program_scoped_dispatcher hScoped
+  have hScopedBlock :
+      Reference.SourceBridgeFacts.ControlFlow.ScopedStmt false false false
+        (.Block [program.contract.dispatcher]) := by
+    simp [Reference.SourceBridgeFacts.ControlFlow.ScopedStmt,
+      Reference.SourceBridgeFacts.ControlFlow.ScopedStmts, hScopedDispatcher]
+  exact
+    Reference.SourceBridgeFacts.SourceResultCheckpointAllowed.exec_of_scoped_callSafe
+      hExpr hSafeBlock hScopedBlock (by
+        simp [Reference.SourceBridgeFacts.StateCheckpointAllowed])
+
+theorem DispatcherBodyNoCheckpoint.of_scoped_callSafe_primitiveCallCheckpoint
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {sourceFuel : Nat}
+    (hPrimCheckpoint :
+      Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForCallSafeState)
+    (hSafe : Reference.Safe.CallSafe.program program)
+    (hScoped :
+      Reference.SourceBridgeFacts.ControlFlow.ProgramScoped program) :
+    DispatcherBodyNoCheckpoint program shared store sourceFuel :=
+  DispatcherBodyNoCheckpoint.of_scoped_callSafe
+    (Reference.SourceBridgeFacts.FamilyCheckpointExpressionSound.of_callSound
+      (Reference.SourceBridgeFacts.FamilyCheckpointCallSound.of_callSafePrimitiveCheckpoint
+        hPrimCheckpoint))
+    hSafe hScoped
+
+theorem DispatcherBodyNoCheckpoint.of_scoped_callSafe_childHaltCheckpoint
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore} {sourceFuel : Nat}
+    (hChildHaltCheckpoint :
+      Reference.SourceBridgeFacts.CallDispatcherYulHaltStateCheckpointAllowedForOkState)
+    (hSafe : Reference.Safe.CallSafe.program program)
+    (hScoped :
+      Reference.SourceBridgeFacts.ControlFlow.ProgramScoped program) :
+    DispatcherBodyNoCheckpoint program shared store sourceFuel :=
+  DispatcherBodyNoCheckpoint.of_scoped_callSafe_primitiveCallCheckpoint
+    (Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForCallSafeState.of_safe_and_call
+      (Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForSafeState.of_ok_and_nonOk
+        Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForSafe.of_primitive_families
+        Reference.SourceBridgeFacts.PrimitiveCallCheckpointAllowedForSafeNonOk.of_primitive_families)
+      (Reference.SourceBridgeFacts.PrimitiveCALLCheckpointAllowedForState.of_callDispatcher_yulHalt_checkpoint
+        hChildHaltCheckpoint))
     hSafe hScoped
 
 /--
@@ -165692,6 +170545,172 @@ theorem checkedRecursiveDispatcherRunBridge_of_programAcceptedRecursiveSourceBri
     (sourceFuel := sourceFuel) (referenceResult := referenceResult)
     hSourceInitialRel hReferenceRun hRecursive hScope
     (Nat.le_refl sourceFuel) hNoOutOfFuel hObservation
+
+/--
+Dispatcher run bridge for the CALL-admitting reservation-aware recursive source
+bridge.
+
+This is the nearest consumer boundary for `ProgramCALLBridgeContext`: it uses
+`Safe.CallSafe` dispatcher facts and derives dispatcher checkpoint-freedom from
+the CALL child-halt terminal-control obligation for child dispatcher entries
+that actually start from ordinary `.Ok` states, instead of reconstructing old
+`Safe.program` or assuming the whole primitive checkpoint contract.
+-/
+theorem checkedRecursiveDispatcherRunBridge_of_programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_actual
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {context :
+      Reference.SourceBridgeFacts.ProgramCALLBridgeContext program
+        functionProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {bound sourceFuel : Nat} {referenceResult : Reference.Result}
+    (hSourceInitialRel :
+      Reference.SourceBridgeFacts.SourceStateExactRel cfg layout
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial)
+    (hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult)
+    (hRecursive :
+      Reference.SourceBridgeFacts.ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim program functionProgram context bound)
+    (hScope : Functions.Source.Ctx.initial.scope = layout)
+    (hFuel : sourceFuel ≤ bound)
+    (hChildHaltCheckpoint :
+      Reference.SourceBridgeFacts.CallDispatcherYulHaltStateCheckpointAllowedForOkState)
+    (hNoOutOfFuel :
+      DispatcherBodyNoOutOfFuel program shared store sourceFuel)
+    (hObservation :
+      DispatcherObservationSound cfg layout terminalRel revertRel outcomeRel
+        program (.Ok shared store)) :
+    CheckedRecursiveDispatcherRunBridge cfg layout terminalRel revertRel prim
+      outcomeRel program functionProgram shared store sourceInitial
+      sourceFuel := by
+  rcases
+      Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok
+        sourceFuel program (.Ok shared store) hReferenceRun with
+    ⟨sourceResult, hSourceRaw, hBodyResult⟩
+  have hSource :
+      EvmYul.Yul.exec sourceFuel (.Block [program.contract.dispatcher])
+          (some program.contract)
+          (.Ok
+            { shared with
+              executionEnv :=
+                { shared.executionEnv with code := program.contract } }
+            (default : EvmYul.Yul.VarStore)) =
+        sourceResult := by
+    simpa [Reference.Imported.dispatcherBody_installContract_ok,
+      Reference.Imported.dispatcherCallState_installContract_ok] using
+      hSourceRaw
+  let allowed : Except Reference.Exception Reference.State → Prop :=
+    fun candidate => candidate = sourceResult
+  have hAllowed :
+      ∀ {candidate}, allowed candidate →
+        Reference.SourceBridgeFacts.SourceResultRelatable candidate := by
+    intro candidate hEq
+    subst candidate
+    exact
+      Reference.SourceBridgeFacts.sourceResultRelatable_of_dispatcherRunResultOfBody_ok
+        (program := program) (state := .Ok shared store)
+        (sourceResult := sourceResult) (referenceResult := referenceResult)
+        (hNoOutOfFuel sourceResult hSource) hBodyResult
+  have hNoCheckpoint :
+      DispatcherBodyNoCheckpoint program shared store sourceFuel :=
+    DispatcherBodyNoCheckpoint.of_scoped_callSafe_childHaltCheckpoint
+      hChildHaltCheckpoint context.callSafe context.controlScoped
+  have hCompat :
+      ∀ {candidate}, allowed candidate →
+        Reference.SourceBridgeFacts.SourceResultOutcomeLayoutCompatible
+          Functions.Source.Ctx.initial layout layout candidate := by
+    intro candidate hEq
+    subst candidate
+    exact
+      Reference.SourceBridgeFacts.sourceResultOutcomeLayoutCompatible_initial_same_of_no_checkpoint
+        (layout := layout) (sourceResult := sourceResult)
+        (hNoCheckpoint sourceResult hSource)
+  rcases context.dispatcher_facts with
+    ⟨hCallSafeDispatcher, hScopedDispatcher, hStmtOk⟩
+  have hSourceScopedDispatcher :
+      Reference.SourceBridgeFacts.SourceLexical.StmtScoped layout
+        program.contract.dispatcher := by
+    have hScoped :
+        Reference.SourceBridgeFacts.SourceLexical.StmtScoped []
+          program.contract.dispatcher :=
+      context.dispatcher_source_scoped
+    simpa [← hScope] using hScoped
+  have hReservedDispatcher :
+      Reference.SourceBridgeFacts.SourceNamesReserved
+        (Stmt.names program.contract.dispatcher)
+        (Stmt.names program.contract.dispatcher) := by
+    intro name hMem
+    exact hMem
+  have hStmt :
+      Reference.SourceBridgeFacts.CheckedStmtBlockLoweringSoundWhenFreshNamesAtExact
+        cfg (Stmt.names program.contract.dispatcher) layout layout
+        terminalRel revertRel prim functionProgram Functions.Source.Ctx.initial
+        sourceFuel program.contract.dispatcher (some program.contract)
+        allowed :=
+    hRecursive.stmt hCallSafeDispatcher hScopedDispatcher hStmtOk
+      hSourceScopedDispatcher hReservedDispatcher hAllowed hCompat hFuel hScope
+  have hCovers :
+      Reference.SourceBridgeFacts.FreshCoversLayout
+        (Stmt.names program.contract.dispatcher ++ layout)
+        (Fresh.initial (Contract.names program.contract)) := by
+    simpa [hScope] using
+      Reference.SourceBridgeFacts.freshCoversDispatcherNames_initial_rootLayout
+        program.contract
+  have hDispatcher :
+      Reference.SourceBridgeFacts.CheckedDispatcherLoweringSoundWhenExact
+        cfg layout terminalRel revertRel prim functionProgram program
+        sourceFuel allowed :=
+    Reference.SourceBridgeFacts.checkedDispatcherLoweringSoundWhenExact_of_stmtBlockLoweringSoundWhenFreshNamesAtExact
+      (cfg := cfg)
+      (reserved := Stmt.names program.contract.dispatcher)
+      (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim)
+      (functionProgram := functionProgram) (program := program)
+      (sourceFuel := sourceFuel) (allowed := allowed) hStmt hCovers
+  rcases
+      Reference.BridgeFacts.toObjects?_dispatcher_body
+        (program := program) (functionProgram := functionProgram)
+        context.toObjects with
+    ⟨_stateAfterDispatcher, hLower⟩
+  exact
+    checkedRecursiveDispatcherRunBridge_of_run_bridge_observation
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (outcomeRel := outcomeRel)
+      (program := program) (functionProgram := functionProgram)
+      (shared := shared) (store := store) (sourceInitial := sourceInitial)
+      (sourceFuel := sourceFuel)
+      (Reference.SourceBridgeFacts.sourceResultBlockRunBridge_of_sound_when_exact
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim)
+        (program := functionProgram) (ctx := Functions.Source.Ctx.initial)
+        (sourceFuel := sourceFuel)
+        (sourceStmts := [program.contract.dispatcher])
+        (codeOverride := some program.contract)
+        (source :=
+          .Ok
+            { shared with
+              executionEnv :=
+                { shared.executionEnv with code := program.contract } }
+            (default : EvmYul.Yul.VarStore))
+        (compiler := sourceInitial) (lowerBlock := functionProgram.body)
+        (sourceResult := sourceResult)
+        (hDispatcher hLower) hSourceInitialRel rfl hSource)
+      hObservation
 
 theorem checkedRecursiveDispatcherSuccessfulSoundExact_of_checked_dispatcher_lowering_sound_when_exact
     {cfg : Reference.StateRelConfig} {layout : List Name}
@@ -168203,9 +173222,8 @@ Lexical scoping, control-flow scoping, user-call arity, supported-syntax
 coverage, and the current no-shadowing predicate are finite source checks.
 `Program.SourceAcceptedCore` is checked by lowering to `Objects.Program` and
 checking the lower function program's source WF/scoping predicates.  The
-no-shadowing predicate currently also checks `Safe.expr` at expression-bearing
-statements; that is constructed here explicitly rather than hidden inside
-`Reference.FullAccepted`.
+no-shadowing predicate is lexical only; semantic primitive-family coverage is
+carried separately by the feature-coverage packages below.
 -/
 structure RecursiveBridgeSourceStaticFacts (program : Program) : Prop where
   supported :
@@ -168378,6 +173396,115 @@ theorem of_checked? {program : Program}
       externalBoundary := hExternal }
 
 end RecursiveBridgeFeatureCoverage
+
+/--
+Feature coverage for the CALL-capable recursive bridge target.
+
+This is weaker than `RecursiveBridgeFeatureCoverage`: it admits ordinary
+`CALL` while still checking out external account-code inspection, contract
+creation, and the remaining external-call family members.  It is not enough to
+reuse the old recursive bridge directly; it names the next semantic bridge
+surface that the whole-world CALL proof should consume.
+-/
+structure RecursiveBridgeCALLFeatureCoverage (program : Program) : Prop where
+  localCodeImage :
+    Reference.Safe.FeatureCoverage.localCodeImageProgram program
+  externalCodeImage :
+    Reference.Safe.FeatureCoverage.externalCodeImageProgram program
+  createBoundary :
+    Reference.Safe.FeatureCoverage.createBoundaryProgram program
+  externalBoundaryExceptCALL :
+    Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram program
+
+namespace RecursiveBridgeCALLFeatureCoverage
+
+noncomputable def checked? (program : Program) : Bool :=
+  Reference.Safe.FeatureCoverage.localCodeImageProgram? program &&
+    (Reference.Safe.FeatureCoverage.externalCodeImageProgram? program &&
+      (Reference.Safe.FeatureCoverage.createBoundaryProgram? program &&
+        Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram?
+          program))
+
+theorem of_checked? {program : Program}
+    (hCheck : checked? program = true) :
+    RecursiveBridgeCALLFeatureCoverage program := by
+  have hAnd :
+      Reference.Safe.FeatureCoverage.localCodeImageProgram? program = true ∧
+        (Reference.Safe.FeatureCoverage.externalCodeImageProgram? program &&
+          (Reference.Safe.FeatureCoverage.createBoundaryProgram? program &&
+            Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram?
+              program)) =
+          true :=
+    by simpa [checked?] using hCheck
+  have hTail :
+      Reference.Safe.FeatureCoverage.externalCodeImageProgram? program =
+          true ∧
+        (Reference.Safe.FeatureCoverage.createBoundaryProgram? program &&
+          Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram?
+            program) =
+          true :=
+    by simpa using hAnd.2
+  have hLast :
+      Reference.Safe.FeatureCoverage.createBoundaryProgram? program = true ∧
+        Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram?
+          program =
+          true :=
+    by simpa using hTail.2
+  exact
+    { localCodeImage :=
+        Reference.Safe.FeatureCoverage.localCodeImageProgram_of_check
+          hAnd.1
+      externalCodeImage :=
+        Reference.Safe.FeatureCoverage.externalCodeImageProgram_of_check
+          hTail.1
+      createBoundary :=
+        Reference.Safe.FeatureCoverage.createBoundaryProgram_of_check
+          hLast.1
+      externalBoundaryExceptCALL :=
+        Reference.Safe.FeatureCoverage.externalBoundaryExceptCALLProgram_of_check
+          hLast.2 }
+
+theorem to_callSafeProgram_of_compileChecked? {program : Program}
+    {asm : Assembly.Program}
+    (hCoverage : RecursiveBridgeCALLFeatureCoverage program)
+    (hCompile : compileChecked? program = some asm) :
+    Reference.Safe.CallSafe.program program := by
+  have hImported :
+      Reference.Safe.FeatureCoverage.importedIncompleteProgram program :=
+    (Reference.Safe.FeatureCoverage.importedIncompleteProgram_iff_precise
+      program).mpr
+      ⟨hCoverage.localCodeImage, hCoverage.externalCodeImage,
+        hCoverage.createBoundary⟩
+  have hObject :
+      Reference.Safe.FeatureCoverage.objectBuiltinProgram program :=
+    Reference.Safe.FeatureCoverage.objectBuiltinProgram_of_compileChecked?_some
+      hCompile
+  exact
+    Reference.Safe.CallSafe.program_of_coverage program hImported
+      hCoverage.externalBoundaryExceptCALL hObject
+
+end RecursiveBridgeCALLFeatureCoverage
+
+namespace RecursiveBridgeFullSourceAccepted
+
+theorem to_programCALLBridgeContext {program : Program}
+    {functionProgram : Functions.Program} {asm : Assembly.Program}
+    (hFull : RecursiveBridgeFullSourceAccepted program)
+    (hCoverage : RecursiveBridgeCALLFeatureCoverage program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hCompile : compileChecked? program = some asm) :
+    Reference.SourceBridgeFacts.ProgramCALLBridgeContext program
+      functionProgram :=
+  { toObjects := hToObjects
+    callSafe := hCoverage.to_callSafeProgram_of_compileChecked? hCompile
+    sourceScoped := hFull.sourceScoped
+    controlScoped := hFull.controlScoped
+    noShadowing := hFull.reference.2.2
+    userCalls := hFull.userCalls }
+
+end RecursiveBridgeFullSourceAccepted
 
 /--
 Compiler-resource acceptedness for the bridge.
@@ -169094,6 +174221,1244 @@ theorem structured_of_observation
 
 end RecursiveBridgeTerminalContracts
 
+namespace RecursiveBridgeTerminalObservationContracts
+
+/--
+Canonical terminal-observation relation. The relation witnesses that
+`compiler` is exactly the post-image of an imported terminal trace under the
+structured source primitive semantics, with the imported halt state and value
+matching `haltState` / `value`.
+
+Concretely, the relation existentially packages the imported `execSeq`/`primCall`
+trace that produced the halt, the related compiler-side pre-state, and the
+structured `terminal` step on it that yields `compiler.shared`. Consumers can
+unpack this to recover the full semantic correspondence between the imported
+halt and the compiler halt — not just the failure type.
+-/
+def canonicalTerminalRel (cfg : Reference.StateRelConfig) :
+    Assembly.HaltKind → Word → Reference.State →
+      Objects.Source.State → Prop
+  | kind, value, haltState, compiler =>
+      ∃ (yulPrim : EvmYul.Operation .Yul)
+        (argFuel : Nat) (source sourceAfterArgs : Reference.State)
+        (sourceValues : List Word)
+        (args : List AstExpr) (rest : List AstStmt)
+        (codeOverride : Option AstContract)
+        (compilerAfterArgs : Objects.Source.State)
+        (sharedAfter : EvmYul.SharedState .EVM)
+        (layout : List Name),
+        Prim.terminal? yulPrim = some kind ∧
+        EvmYul.Yul.execSeq argFuel.succ.succ
+            (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest) codeOverride
+            source =
+          .error (.YulHalt haltState value) ∧
+        EvmYul.Yul.evalArgs argFuel args.reverse codeOverride source =
+          .ok (sourceAfterArgs, sourceValues.reverse) ∧
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout sourceAfterArgs
+          compilerAfterArgs ∧
+        Locals.Source.PrimitiveSemantics.structured.terminal kind
+            compilerAfterArgs.shared sourceValues.reverse =
+          .ok sharedAfter ∧
+        compiler = compilerAfterArgs.withShared sharedAfter
+
+/--
+Canonical revert-observation relation, defined analogously to
+`canonicalTerminalRel`: existentially packages the imported revert trace and
+the structured terminal step that yields `compiler.shared`.
+-/
+def canonicalRevertRel (cfg : Reference.StateRelConfig) :
+    Reference.State → Objects.Source.State → Prop
+  | revertState, compiler =>
+      ∃ (yulPrim : EvmYul.Operation .Yul)
+        (argFuel : Nat) (source sourceAfterArgs : Reference.State)
+        (sourceValues : List Word)
+        (args : List AstExpr) (rest : List AstStmt)
+        (codeOverride : Option AstContract)
+        (compilerAfterArgs : Objects.Source.State)
+        (sharedAfter : EvmYul.SharedState .EVM)
+        (layout : List Name),
+        Prim.terminal? yulPrim = some .revert ∧
+        EvmYul.Yul.execSeq argFuel.succ.succ
+            (.ExprStmtCall (.Call (.inl yulPrim) args) :: rest) codeOverride
+            source =
+          .error (.Revert revertState) ∧
+        EvmYul.Yul.evalArgs argFuel args.reverse codeOverride source =
+          .ok (sourceAfterArgs, sourceValues.reverse) ∧
+        Reference.SourceBridgeFacts.SourceStateRel cfg layout sourceAfterArgs
+          compilerAfterArgs ∧
+        Locals.Source.PrimitiveSemantics.structured.terminal .revert
+            compilerAfterArgs.shared sourceValues.reverse =
+          .ok sharedAfter ∧
+        compiler = compilerAfterArgs.withShared sharedAfter
+
+/--
+Two-argument imported `RETURN` terminal calls halt in an ordinary `.Ok` Yul
+state.  The machine state may be updated, but terminal `RETURN` does not create
+an out-of-fuel state or a checkpoint.
+-/
+theorem primCall_return_lit_lit_yulHalt_ok_shape
+    {fuel : Nat} {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore} {offset size : Word}
+    {haltState : Reference.State} {value : Word}
+    (hPrim :
+      EvmYul.Yul.primCall fuel.succ (.Ok sourceShared sourceStore)
+          ((.System .RETURN : EvmYul.Operation .Yul)) [offset, size] =
+        .error (.YulHalt haltState value)) :
+    ∃ shared store, haltState = .Ok shared store := by
+  simp [EvmYul.Yul.primCall] at hPrim
+  injection hPrim with hErr
+  injection hErr with hState _hValue
+  subst haltState
+  simp [EvmYul.Yul.State.setMachineState]
+
+/--
+Two-argument imported `REVERT` terminal calls revert from an ordinary `.Ok`
+Yul state.  This mirrors the `RETURN` shape lemma for the revert channel.
+-/
+theorem primCall_revert_lit_lit_revert_ok_shape
+    {fuel : Nat} {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore} {offset size : Word}
+    {revertState : Reference.State}
+    (hPrim :
+      EvmYul.Yul.primCall fuel.succ (.Ok sourceShared sourceStore)
+          ((.System .REVERT : EvmYul.Operation .Yul)) [offset, size] =
+        .error (.Revert revertState)) :
+    ∃ shared store, revertState = .Ok shared store := by
+  simp [EvmYul.Yul.primCall] at hPrim
+  injection hPrim with hErr
+  injection hErr with hState
+  subst revertState
+  simp [EvmYul.Yul.State.setMachineState]
+
+/--
+Concrete equation for the successful-arity imported `REVERT` primitive.
+The imported primitive and the structured terminal semantics both use the same
+`MachineState.evmRevert` update; this equation makes that update available
+without hiding it behind an existential.
+-/
+theorem primCall_revert_lit_lit_revert_eq
+    (fuel : Nat) (sourceShared : EvmYul.SharedState .Yul)
+    (sourceStore : EvmYul.Yul.VarStore) (offset size : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok sourceShared sourceStore)
+        ((.System .REVERT : EvmYul.Operation .Yul)) [offset, size] =
+      .error
+        (.Revert
+          ((.Ok sourceShared sourceStore : Reference.State).setMachineState
+            ((.Ok sourceShared sourceStore : Reference.State).toMachineState.evmRevert
+              offset size))) := by
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .REVERT : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmRevert yulState lits with
+          | .error e => .error e
+          | .ok (s, _) => .error (EvmYul.Yul.Exception.Revert s)) := by
+    rfl
+  rw [hStep]
+  rfl
+
+/--
+`evmReturn` is relation-preserving for the parts of the machine-state relation
+needed by terminal return observations.
+-/
+theorem machineStateRel_evmReturn
+    {cfg : Reference.StateRelConfig}
+    {source target : EvmYul.MachineState}
+    (hRel : Reference.MachineStateRel cfg source target)
+    (offset size : Word) :
+    Reference.MachineStateRel cfg
+      (source.evmReturn offset size) (target.evmReturn offset size) := by
+  rcases hRel with ⟨hGas, hActive, hMemory, hReturnData, _hReturn⟩
+  constructor
+  · simpa [EvmYul.MachineState.evmReturn] using hGas
+  · simp [EvmYul.MachineState.evmReturn, hActive]
+  · simp [EvmYul.MachineState.evmReturn, hMemory]
+  · simpa [EvmYul.MachineState.evmReturn] using hReturnData
+  · simp [EvmYul.MachineState.evmReturn, hMemory]
+
+/--
+`evmRevert` is relation-preserving for the machine-state relation.  It updates
+only memory-derived return output and active-word accounting, preserving
+return-data equality.
+-/
+theorem machineStateRel_evmRevert
+    {cfg : Reference.StateRelConfig}
+    {source target : EvmYul.MachineState}
+    (hRel : Reference.MachineStateRel cfg source target)
+    (offset size : Word) :
+    Reference.MachineStateRel cfg
+      (source.evmRevert offset size) (target.evmRevert offset size) := by
+  rcases hRel with ⟨hGas, hActive, hMemory, hReturnData, _hReturn⟩
+  constructor
+  · simpa [EvmYul.MachineState.evmRevert, EvmYul.MachineState.evmReturn]
+      using hGas
+  · simp [EvmYul.MachineState.evmRevert, EvmYul.MachineState.evmReturn,
+      hActive]
+  · simp [EvmYul.MachineState.evmRevert, EvmYul.MachineState.evmReturn,
+      hMemory]
+  · simpa [EvmYul.MachineState.evmRevert, EvmYul.MachineState.evmReturn]
+      using hReturnData
+  · simp [EvmYul.MachineState.evmRevert, EvmYul.MachineState.evmReturn,
+      hMemory]
+
+/--
+Shared-state lift of `machineStateRel_evmRevert`.
+-/
+theorem sharedStateRel_evmRevert
+    {cfg : Reference.StateRelConfig}
+    {source : EvmYul.SharedState .Yul}
+    {target : EvmYul.SharedState .EVM}
+    (hRel : Reference.SharedStateRel cfg source target)
+    (offset size : Word) :
+    Reference.SharedStateRel cfg
+      { source with toMachineState := source.toMachineState.evmRevert offset size }
+      { target with toMachineState := target.toMachineState.evmRevert offset size } := by
+  rcases hRel with ⟨hChain, hMachine⟩
+  exact ⟨hChain, machineStateRel_evmRevert hMachine offset size⟩
+
+/--
+Imported `SELFDESTRUCT` terminal state construction preserves the ordinary
+`.Ok` state shape.
+-/
+theorem selfdestructState_ok_shape
+    (sourceShared : EvmYul.SharedState .Yul)
+    (sourceStore : EvmYul.Yul.VarStore) (recipient : Word) :
+    ∃ shared store,
+      PrimSemantics.selfdestructState (.Ok sourceShared sourceStore) recipient =
+        .Ok shared store := by
+  simp [PrimSemantics.selfdestructState, EvmYul.Yul.selfdestructState,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.setMachineState]
+
+/--
+Canonical terminal observations for Yul halts cannot be the `.revert` terminal
+kind; canonical reverts are represented through `canonicalRevertRel` instead.
+-/
+theorem canonicalTerminalRel_nonrevert
+    {cfg : Reference.StateRelConfig}
+    {kind : Assembly.HaltKind} {value : Word}
+    {haltState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalTerminalRel cfg kind value haltState compiler) :
+    kind ≠ .revert := by
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, _hArgsRel, _hStruct, _hCompiler⟩
+  have hShape :=
+    Reference.SourceBridgeFacts.imported_terminal_call_result_shape
+      (sourceFuel := argFuel) (source := source)
+      (sourceAfterArgs := sourceAfterArgs) (yulPrim := yulPrim)
+      (kind := kind) (args := args) (rest := rest)
+      (codeOverride := codeOverride)
+      (sourceResult := .error (.YulHalt haltState value))
+      (argValues := sourceValues) hTerminal
+      (by simp [Reference.SourceBridgeFacts.SourceResultRelatable])
+      hExecSeq hEvalArgs
+  rcases hShape with
+    ⟨hNonRevert, _hResult⟩ | ⟨hRevert, _revertState, hResult⟩
+  · exact hNonRevert
+  · subst hRevert
+    cases hResult
+
+set_option maxHeartbeats 1200000
+
+/--
+Canonical terminal observations remember enough imported-Yul trace information
+to prove that the imported halt state is an ordinary `.Ok` state.
+-/
+theorem canonicalTerminalRel_ok_shape
+    {cfg : Reference.StateRelConfig}
+    {kind : Assembly.HaltKind} {value : Word}
+    {haltState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalTerminalRel cfg kind value haltState compiler) :
+    ∃ shared store, haltState = .Ok shared store := by
+  have hNonRevert : kind ≠ .revert :=
+    canonicalTerminalRel_nonrevert hRel
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, hArgsRel, _hStruct, _hCompiler⟩
+  cases hArgsRel with
+  | @ok sourceShared sourceStore compilerAfterArgs hShared hVars =>
+      let sourceAfterArgs : Reference.State := .Ok sourceShared sourceStore
+      cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+      case StopArith op =>
+        cases op <;> simp at hTerminal
+        cases hTerminal
+        cases argFuel with
+        | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+        | succ fuel =>
+            let stopState : Reference.State :=
+              sourceAfterArgs.setMachineState
+                (sourceAfterArgs.toMachineState.setHReturn ByteArray.empty)
+            have hPrim :
+                EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                    ((.StopArith .STOP : EvmYul.Operation .Yul)) sourceValues =
+                  .error (.YulHalt stopState (EvmYul.UInt256.ofNat 0)) := by
+              simpa [stopState, sourceAfterArgs] using
+                PrimSemantics.primCall_stop_eq fuel sourceAfterArgs sourceValues
+            have hResult :=
+              Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.StopArith .STOP : EvmYul.Operation .Yul))
+                (args := args) (rest := rest) (codeOverride := codeOverride)
+                (argValues := sourceValues)
+                (err := .YulHalt stopState (EvmYul.UInt256.ofNat 0))
+                (sourceResult := .error (.YulHalt haltState value))
+                hEvalArgs hPrim hExecSeq
+            injection hResult with hErr
+            injection hErr with hState _hValue
+            subst haltState
+            simp [stopState, sourceAfterArgs,
+              EvmYul.Yul.State.setMachineState]
+      case System op =>
+        cases op <;> simp at hTerminal
+        · -- RETURN
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              cases sourceValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_return_nil_eq fuel sourceAfterArgs
+                  have hResult :=
+                    Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [])
+                      (err := .InvalidArguments)
+                      (sourceResult := .error (.YulHalt haltState value))
+                      hEvalArgs hPrim hExecSeq
+                  cases hResult
+              | cons offset restValues =>
+                  cases restValues with
+                  | nil =>
+                      have hPrim :=
+                        PrimSemantics.primCall_return_singleton_eq fuel
+                          sourceAfterArgs offset
+                      have hResult :=
+                        Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .RETURN :
+                            EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset])
+                          (err := .InvalidArguments)
+                          (sourceResult := .error (.YulHalt haltState value))
+                          hEvalArgs hPrim hExecSeq
+                      cases hResult
+                  | cons size more =>
+                      cases more with
+                      | nil =>
+                          rcases
+                              PrimSemantics.primCall_return_lit_lit_yul_halt
+                                fuel sourceAfterArgs offset size with
+                            ⟨haltState', value', hPrim⟩
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := [offset, size])
+                              (err := .YulHalt haltState' value')
+                              (sourceResult := .error (.YulHalt haltState value))
+                              hEvalArgs hPrim hExecSeq
+                          have hShape :=
+                            primCall_return_lit_lit_yulHalt_ok_shape hPrim
+                          injection hResult with hErr
+                          injection hErr with hState _hValue
+                          rcases hShape with ⟨shared, store, hOk⟩
+                          exact ⟨shared, store, hState.trans hOk⟩
+                      | cons extra extras =>
+                          have hPrim :=
+                            PrimSemantics.primCall_return_cons_cons_cons_eq
+                              fuel sourceAfterArgs offset size extra extras
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := offset :: size :: extra :: extras)
+                              (err := .InvalidArguments)
+                              (sourceResult := .error (.YulHalt haltState value))
+                              hEvalArgs hPrim hExecSeq
+                          cases hResult
+        · -- REVERT
+          cases hTerminal
+          exact False.elim (hNonRevert rfl)
+        · -- SELFDESTRUCT
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+              · have hPrim :=
+                  PrimSemantics.primCall_selfdestruct_static_eq fuel
+                    sourceAfterArgs sourceValues hStatic
+                have hResult :=
+                  Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT :
+                      EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := sourceValues)
+                    (err := .StaticModeViolation)
+                    (sourceResult := .error (.YulHalt haltState value))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+              · cases sourceValues with
+                | nil =>
+                    have hPrim :=
+                      PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                        sourceAfterArgs hStatic
+                    have hResult :=
+                      Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .SELFDESTRUCT :
+                          EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride) (argValues := [])
+                        (err := .InvalidArguments)
+                        (sourceResult := .error (.YulHalt haltState value))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+                | cons recipient more =>
+                    cases more with
+                    | nil =>
+                        have hPrim :
+                            EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                                ((.System .SELFDESTRUCT :
+                                  EvmYul.Operation .Yul))
+                                [recipient] =
+                              .error
+                                (.YulHalt
+                                  (PrimSemantics.selfdestructState
+                                    sourceAfterArgs recipient)
+                                  (EvmYul.UInt256.ofNat 0)) := by
+                          simp [EvmYul.Yul.primCall, hStatic,
+                            PrimSemantics.step_selfdestruct_lit_eq]
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := [recipient])
+                            (err :=
+                              .YulHalt
+                                (PrimSemantics.selfdestructState
+                                  sourceAfterArgs recipient)
+                                (EvmYul.UInt256.ofNat 0))
+                            (sourceResult := .error (.YulHalt haltState value))
+                            hEvalArgs hPrim hExecSeq
+                        have hShape :=
+                          selfdestructState_ok_shape sourceShared sourceStore
+                            recipient
+                        injection hResult with hErr
+                        injection hErr with hState _hValue
+                        rcases hShape with ⟨shared, store, hOk⟩
+                        exact ⟨shared, store, hState.trans hOk⟩
+                    | cons extra extras =>
+                        have hPrim :=
+                          PrimSemantics.primCall_selfdestruct_cons_cons_eq fuel
+                            sourceAfterArgs recipient extra extras hStatic
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := recipient :: extra :: extras)
+                            (err := .InvalidArguments)
+                            (sourceResult := .error (.YulHalt haltState value))
+                            hEvalArgs hPrim hExecSeq
+                        cases hResult
+
+/--
+Canonical revert observations remember enough imported-Yul trace information
+to prove that the imported revert state is an ordinary `.Ok` state.
+-/
+theorem canonicalRevertRel_ok_shape
+    {cfg : Reference.StateRelConfig}
+    {revertState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalRevertRel cfg revertState compiler) :
+    ∃ shared store, revertState = .Ok shared store := by
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, hArgsRel, _hStruct, _hCompiler⟩
+  cases hArgsRel with
+  | @ok sourceShared sourceStore compilerAfterArgs hShared hVars =>
+      let sourceAfterArgs : Reference.State := .Ok sourceShared sourceStore
+      cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+      case StopArith op =>
+        cases op <;> simp at hTerminal
+      case System op =>
+        cases op <;> simp at hTerminal
+        cases argFuel with
+        | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+        | succ fuel =>
+            cases sourceValues with
+            | nil =>
+                have hPrim :=
+                  PrimSemantics.primCall_revert_nil_eq fuel sourceAfterArgs
+                have hResult :=
+                  Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := [])
+                    (err := .InvalidArguments)
+                    (sourceResult := .error (.Revert revertState))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+            | cons offset restValues =>
+                cases restValues with
+                | nil =>
+                    have hPrim :=
+                      PrimSemantics.primCall_revert_singleton_eq fuel
+                        sourceAfterArgs offset
+                    have hResult :=
+                      Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride) (argValues := [offset])
+                        (err := .InvalidArguments)
+                        (sourceResult := .error (.Revert revertState))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+                | cons size more =>
+                    cases more with
+                    | nil =>
+                        rcases
+                            PrimSemantics.primCall_revert_lit_lit_revert
+                              fuel sourceAfterArgs offset size with
+                          ⟨revertState', hPrim⟩
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .REVERT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := [offset, size])
+                            (err := .Revert revertState')
+                            (sourceResult := .error (.Revert revertState))
+                            hEvalArgs hPrim hExecSeq
+                        have hShape :=
+                          primCall_revert_lit_lit_revert_ok_shape hPrim
+                        injection hResult with hErr
+                        injection hErr with hState
+                        rcases hShape with ⟨shared, store, hOk⟩
+                        exact ⟨shared, store, hState.trans hOk⟩
+                    | cons extra extras =>
+                        have hPrim :=
+                          PrimSemantics.primCall_revert_cons_cons_cons_eq fuel
+                            sourceAfterArgs offset size extra extras
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .REVERT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := offset :: size :: extra :: extras)
+                            (err := .InvalidArguments)
+                            (sourceResult := .error (.Revert revertState))
+                            hEvalArgs hPrim hExecSeq
+                        cases hResult
+
+theorem canonicalTerminalRel_checkpointAllowed
+    {cfg : Reference.StateRelConfig}
+    {canBreak canContinue canLeave : Bool}
+    {kind : Assembly.HaltKind} {value : Word}
+    {haltState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalTerminalRel cfg kind value haltState compiler) :
+    Reference.SourceBridgeFacts.StateCheckpointAllowed
+      canBreak canContinue canLeave haltState :=
+  Reference.SourceBridgeFacts.StateCheckpointAllowed.of_ok_shape
+    (canonicalTerminalRel_ok_shape hRel)
+
+theorem canonicalRevertRel_checkpointAllowed
+    {cfg : Reference.StateRelConfig}
+    {canBreak canContinue canLeave : Bool}
+    {revertState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalRevertRel cfg revertState compiler) :
+    Reference.SourceBridgeFacts.StateCheckpointAllowed
+      canBreak canContinue canLeave revertState :=
+  Reference.SourceBridgeFacts.StateCheckpointAllowed.of_ok_shape
+    (canonicalRevertRel_ok_shape hRel)
+
+theorem canonicalTerminalRel_restoreSuccessfulContractCallState_checkpointAllowed
+    {cfg : Reference.StateRelConfig}
+    {canBreak canContinue canLeave : Bool}
+    {kind : Assembly.HaltKind} {value : Word}
+    {callerState haltState : Reference.State}
+    {compiler : Objects.Source.State}
+    {varstore : EvmYul.Yul.VarStore}
+    {returnData : ByteArray}
+    {inOffset inSize outOffset outSize : Word}
+    (hCaller :
+      Reference.SourceBridgeFacts.StateCheckpointAllowed
+        canBreak canContinue canLeave callerState)
+    (hRel : canonicalTerminalRel cfg kind value haltState compiler) :
+    Reference.SourceBridgeFacts.SourcePairResultCheckpointAllowed
+      canBreak canContinue canLeave
+      (EvmYul.Yul.restoreSuccessfulContractCallState callerState haltState
+        varstore returnData inOffset inSize outOffset outSize) :=
+  Reference.SourceBridgeFacts.SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState_of_body_ok_shape
+    hCaller (canonicalTerminalRel_ok_shape hRel)
+
+/--
+Canonical revert observations carry enough information to recover the full
+post-revert shared-state relation. Unlike non-return terminal success, `REVERT`
+does not clear the EVM return-data buffer, so the ordinary `SharedStateRel`
+is preserved by the matching imported and structured `evmRevert` updates.
+-/
+theorem canonicalRevertRel_shared
+    {cfg : Reference.StateRelConfig}
+    {yulChild : EvmYul.SharedState .Yul}
+    {childStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel : canonicalRevertRel cfg (.Ok yulChild childStore) compiler) :
+    Reference.SharedStateRel cfg yulChild compiler.shared := by
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, hArgsRel, hStruct, hCompiler⟩
+  cases hArgsRel with
+  | @ok sourceShared sourceStore compilerAfterArgs hShared hVars =>
+      let sourceAfterArgs : Reference.State := .Ok sourceShared sourceStore
+      cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+      case StopArith op =>
+        cases op <;> simp at hTerminal
+      case System op =>
+        cases op <;> simp at hTerminal
+        cases argFuel with
+        | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+        | succ fuel =>
+            cases sourceValues with
+            | nil =>
+                have hPrim :=
+                  PrimSemantics.primCall_revert_nil_eq fuel sourceAfterArgs
+                have hResult :=
+                  Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .REVERT : EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := [])
+                    (err := .InvalidArguments)
+                    (sourceResult := .error (.Revert (.Ok yulChild childStore)))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+            | cons offset restValues =>
+                cases restValues with
+                | nil =>
+                    have hPrim :=
+                      PrimSemantics.primCall_revert_singleton_eq fuel
+                        sourceAfterArgs offset
+                    have hResult :=
+                      Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .REVERT :
+                          EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride)
+                        (argValues := [offset])
+                        (err := .InvalidArguments)
+                        (sourceResult :=
+                          .error (.Revert (.Ok yulChild childStore)))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+                | cons size more =>
+                    cases more with
+                    | nil =>
+                        have hPrim :=
+                          primCall_revert_lit_lit_revert_eq fuel sourceShared
+                            sourceStore offset size
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .REVERT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := [offset, size])
+                            (err :=
+                              .Revert
+                                ((.Ok sourceShared sourceStore :
+                                  Reference.State).setMachineState
+                                  ((.Ok sourceShared sourceStore :
+                                    Reference.State).toMachineState.evmRevert
+                                      offset size)))
+                            (sourceResult :=
+                              .error (.Revert (.Ok yulChild childStore)))
+                            hEvalArgs hPrim hExecSeq
+                        injection hResult with hErr
+                        injection hErr with hState
+                        have hStateOk :
+                            (.Ok yulChild childStore : Reference.State) =
+                              .Ok
+                                { sourceShared with
+                                  toMachineState :=
+                                    sourceShared.toMachineState.evmRevert
+                                      offset size }
+                                sourceStore := by
+                          simpa [EvmYul.Yul.State.setMachineState,
+                            sourceAfterArgs] using hState
+                        injection hStateOk with hSharedEq _hStoreEq
+                        cases hSharedEq
+                        have hSharedAfterOk :
+                            (Except.ok sharedAfter :
+                              Except EVMException
+                                (EvmYul.SharedState .EVM)) =
+                              .ok
+                                { compilerAfterArgs.shared with
+                                  toMachineState :=
+                                    compilerAfterArgs.shared.toMachineState.evmRevert
+                                      offset size } := by
+                          simpa [Locals.Source.PrimitiveSemantics.structured,
+                            Structured.Terminal.step,
+                            Assembly.Target.stepInstr,
+                            Assembly.PrimOp.step,
+                            Assembly.PrimOp.continuingStep?,
+                            Assembly.HaltKind.toPrimOp,
+                            Assembly.PrimOp.toEVM,
+                            Locals.SourceLowering.PrimitiveSemantics.evm_step_revert_eq_binaryMachineStateOp,
+                            EvmYul.EVM.binaryMachineStateOp,
+                            EvmYul.Stack.pop2,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC,
+                            EvmYul.EVM.State.toSharedState,
+                            Id.run] using hStruct.symm
+                        injection hSharedAfterOk with hSharedAfter
+                        cases hSharedAfter
+                        cases hCompiler
+                        simpa using
+                          sharedStateRel_evmRevert hShared offset size
+                    | cons extra extras =>
+                        have hPrim :=
+                          PrimSemantics.primCall_revert_cons_cons_cons_eq fuel
+                            sourceAfterArgs offset size extra extras
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .REVERT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := offset :: size :: extra :: extras)
+                            (err := .InvalidArguments)
+                            (sourceResult :=
+                              .error (.Revert (.Ok yulChild childStore)))
+                            (by simpa [Nat.succ_eq_add_one] using hEvalArgs)
+                            (by simpa [Nat.succ_eq_add_one] using hPrim)
+                            (by simpa [Nat.succ_eq_add_one] using hExecSeq)
+                        cases hResult
+
+/--
+Canonical terminal observations remember enough imported-Yul trace information
+to prove that non-`RETURN` halts have empty `H_return`.
+-/
+theorem canonicalTerminalRel_nonreturn_H_return_empty
+    {cfg : Reference.StateRelConfig}
+    {kind : Assembly.HaltKind} {value : Word}
+    {haltState : Reference.State} {compiler : Objects.Source.State}
+    (hRel : canonicalTerminalRel cfg kind value haltState compiler)
+    (hNotReturn : kind ≠ .return) :
+    haltState.toMachineState.H_return = ByteArray.empty := by
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, _hArgsRel, _hStruct, _hCompiler⟩
+  exact
+    Reference.SourceBridgeFacts.imported_terminal_call_yulHalt_nonreturn_H_return_empty
+      (sourceFuel := argFuel) (source := source)
+      (sourceAfterArgs := sourceAfterArgs) (haltState := haltState)
+      (value := value) (yulPrim := yulPrim) (kind := kind)
+      (args := args) (rest := rest) (codeOverride := codeOverride)
+      (argValues := sourceValues) hTerminal hExecSeq hEvalArgs hNotReturn
+
+/--
+Canonical terminal observations carry enough information to recover the
+terminal child `H_return` observation, without requiring full child
+`SharedStateRel`. This is the terminal-success fact used by external-call
+restoration: non-`RETURN` terminals clear `H_return`, while `RETURN` computes
+it from related memories.
+-/
+theorem canonicalTerminalRel_H_return
+    {cfg : Reference.StateRelConfig}
+    {kind : Assembly.HaltKind} {value : Word}
+    {yulChild : EvmYul.SharedState .Yul}
+    {childStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      canonicalTerminalRel cfg kind value (.Ok yulChild childStore)
+        compiler) :
+    yulChild.toMachineState.H_return =
+      compiler.shared.toMachineState.H_return := by
+  have hNonRevert : kind ≠ .revert :=
+    canonicalTerminalRel_nonrevert hRel
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, hArgsRel, hStruct, hCompiler⟩
+  cases hArgsRel with
+  | @ok sourceShared sourceStore compilerAfterArgs hShared hVars =>
+      let sourceAfterArgs : Reference.State := .Ok sourceShared sourceStore
+      cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+      case StopArith op =>
+        cases op <;> simp at hTerminal
+        cases hTerminal
+        cases argFuel with
+        | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+        | succ fuel =>
+            let stopState : Reference.State :=
+              sourceAfterArgs.setMachineState
+                (sourceAfterArgs.toMachineState.setHReturn ByteArray.empty)
+            have hPrim :
+                EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                    ((.StopArith .STOP : EvmYul.Operation .Yul)) sourceValues =
+                  .error (.YulHalt stopState (EvmYul.UInt256.ofNat 0)) := by
+              simpa [stopState, sourceAfterArgs] using
+                PrimSemantics.primCall_stop_eq fuel sourceAfterArgs sourceValues
+            have hResult :=
+              Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.StopArith .STOP : EvmYul.Operation .Yul))
+                (args := args) (rest := rest) (codeOverride := codeOverride)
+                (argValues := sourceValues)
+                (err := .YulHalt stopState (EvmYul.UInt256.ofNat 0))
+                (sourceResult :=
+                  .error (.YulHalt (.Ok yulChild childStore) value))
+                hEvalArgs hPrim hExecSeq
+            injection hResult with hErr
+            injection hErr with hState _hValue
+            have hChild :
+                yulChild.toMachineState.H_return = ByteArray.empty := by
+              have hStateOk :
+                  (.Ok yulChild childStore : Reference.State) =
+                    .Ok
+                      { sourceShared with
+                        toMachineState :=
+                          sourceShared.toMachineState.setHReturn
+                            ByteArray.empty }
+                      sourceStore := by
+                simpa [stopState, sourceAfterArgs,
+                  EvmYul.Yul.State.setMachineState] using hState
+              injection hStateOk with hSharedEq _hStoreEq
+              cases hSharedEq
+              simp [EvmYul.MachineState.setHReturn]
+            have hSharedAfter :
+                sharedAfter.toMachineState.H_return = ByteArray.empty := by
+              let iso : EVMState :=
+                { toSharedState := compilerAfterArgs.shared,
+                  pc := EvmYul.UInt256.ofNat 0,
+                  stack := sourceValues,
+                  execLength := 0 }
+              have hStep :
+                  Structured.Terminal.step .stop iso =
+                    .ok
+                      { iso with
+                        toMachineState :=
+                          (iso.toMachineState.setReturnData
+                            ByteArray.empty).setHReturn ByteArray.empty } := by
+                simp [iso, Structured.Terminal.step,
+                  Assembly.Target.stepInstr, Assembly.HaltKind.toPrimOp,
+                  Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+                  Assembly.PrimOp.toEVM]
+                rfl
+              have hOk :
+                  sharedAfter =
+                      { compilerAfterArgs.shared with
+                        toMachineState :=
+                          (compilerAfterArgs.shared.toMachineState.setReturnData
+                            ByteArray.empty).setHReturn ByteArray.empty } := by
+                simpa [Locals.Source.PrimitiveSemantics.structured,
+                  iso, hStep, EvmYul.EVM.State.toSharedState] using
+                  hStruct.symm
+              cases hOk
+              simp [EvmYul.MachineState.setHReturn]
+            cases hCompiler
+            exact hChild.trans hSharedAfter.symm
+      case System op =>
+        cases op <;> simp at hTerminal
+        · -- RETURN
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              cases sourceValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_return_nil_eq fuel sourceAfterArgs
+                  have hResult :=
+                    Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [])
+                      (err := .InvalidArguments)
+                      (sourceResult :=
+                        .error (.YulHalt (.Ok yulChild childStore) value))
+                      hEvalArgs hPrim hExecSeq
+                  cases hResult
+              | cons offset restValues =>
+                  cases restValues with
+                  | nil =>
+                      have hPrim :=
+                        PrimSemantics.primCall_return_singleton_eq fuel
+                          sourceAfterArgs offset
+                      have hResult :=
+                        Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .RETURN :
+                            EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset])
+                          (err := .InvalidArguments)
+                          (sourceResult :=
+                            .error (.YulHalt (.Ok yulChild childStore) value))
+                          hEvalArgs hPrim hExecSeq
+                      cases hResult
+                  | cons size more =>
+                      cases more with
+                      | nil =>
+                          have hPrimEq :
+                              EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                                  ((.System .RETURN :
+                                    EvmYul.Operation .Yul)) [offset, size] =
+                                .error
+                                  (.YulHalt
+                                    (sourceAfterArgs.setMachineState
+                                      (sourceAfterArgs.toMachineState.evmReturn
+                                        offset size))
+                                    ((Option.none : Option Word).getD ⟨1⟩)) := by
+                            simp [EvmYul.Yul.primCall]
+                            have hStep :
+                                EvmYul.step
+                                    ((.System .RETURN :
+                                      EvmYul.Operation .Yul)) none =
+                                  (fun yulState lits =>
+                                    match
+                                      EvmYul.Yul.binaryMachineStateOp
+                                        EvmYul.MachineState.evmReturn
+                                        yulState lits with
+                                    | .error e => .error e
+                                    | .ok (s, v) =>
+                                        .error
+                                          (EvmYul.Yul.Exception.YulHalt s
+                                            (v.getD ⟨1⟩))) := by
+                              rfl
+                            rw [hStep]
+                            rfl
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := [offset, size])
+                              (err :=
+                                .YulHalt
+                                  (sourceAfterArgs.setMachineState
+                                    (sourceAfterArgs.toMachineState.evmReturn
+                                      offset size))
+                                  ((Option.none : Option Word).getD ⟨1⟩))
+                              (sourceResult :=
+                                .error
+                                  (.YulHalt (.Ok yulChild childStore) value))
+                              hEvalArgs hPrimEq hExecSeq
+                          injection hResult with hErr
+                          injection hErr with hState _hValue
+                          have hStateOk :
+                              (.Ok yulChild childStore : Reference.State) =
+                                .Ok
+                                  { sourceShared with
+                                    toMachineState :=
+                                      sourceShared.toMachineState.evmReturn
+                                        offset size }
+                                  sourceStore := by
+                            simpa [sourceAfterArgs,
+                              EvmYul.Yul.State.setMachineState] using hState
+                          injection hStateOk with hSharedEq _hStoreEq
+                          cases hSharedEq
+                          have hSharedAfterOk :
+                              (Except.ok sharedAfter :
+                                Except EVMException
+                                  (EvmYul.SharedState .EVM)) =
+                                .ok
+                                  { compilerAfterArgs.shared with
+                                    toMachineState :=
+                                      compilerAfterArgs.shared.toMachineState.evmReturn
+                                        offset size } := by
+                            simpa [Locals.Source.PrimitiveSemantics.structured,
+                              Structured.Terminal.step,
+                              Assembly.Target.stepInstr,
+                              Assembly.PrimOp.step,
+                              Assembly.PrimOp.continuingStep?,
+                              Assembly.HaltKind.toPrimOp,
+                              Assembly.PrimOp.toEVM,
+                              Locals.SourceLowering.PrimitiveSemantics.evm_step_return_eq_binaryMachineStateOp,
+                              EvmYul.EVM.binaryMachineStateOp,
+                              EvmYul.Stack.pop2,
+                              EvmYul.EVM.State.replaceStackAndIncrPC,
+                              EvmYul.EVM.State.incrPC,
+                              EvmYul.EVM.State.toSharedState,
+                              Id.run] using hStruct.symm
+                          injection hSharedAfterOk with hSharedAfter
+                          cases hSharedAfter
+                          cases hCompiler
+                          exact
+                            (machineStateRel_evmReturn hShared.machine
+                              offset size).H_return
+                      | cons extra extras =>
+                          have hPrim :=
+                            PrimSemantics.primCall_return_cons_cons_cons_eq
+                              fuel sourceAfterArgs offset size extra extras
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := offset :: size :: extra :: extras)
+                              (err := .InvalidArguments)
+                              (sourceResult :=
+                                .error
+                                  (.YulHalt (.Ok yulChild childStore) value))
+                              hEvalArgs hPrim hExecSeq
+                          cases hResult
+        · -- REVERT
+          cases hTerminal
+          exact False.elim (hNonRevert rfl)
+        · -- SELFDESTRUCT
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+              · have hPrim :=
+                  PrimSemantics.primCall_selfdestruct_static_eq fuel
+                    sourceAfterArgs sourceValues hStatic
+                have hResult :=
+                  Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT :
+                      EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := sourceValues)
+                    (err := .StaticModeViolation)
+                    (sourceResult :=
+                      .error (.YulHalt (.Ok yulChild childStore) value))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+              · cases sourceValues with
+                | nil =>
+                    have hPrim :=
+                      PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                        sourceAfterArgs hStatic
+                    have hResult :=
+                      Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .SELFDESTRUCT :
+                          EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride) (argValues := [])
+                        (err := .InvalidArguments)
+                        (sourceResult :=
+                          .error (.YulHalt (.Ok yulChild childStore) value))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+                | cons recipient more =>
+                    cases more with
+                    | nil =>
+                        have hPrim :
+                            EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                                ((.System .SELFDESTRUCT :
+                                  EvmYul.Operation .Yul))
+                                [recipient] =
+                              .error
+                                (.YulHalt
+                                  (PrimSemantics.selfdestructState
+                                    sourceAfterArgs recipient)
+                                  (EvmYul.UInt256.ofNat 0)) := by
+                          simp [EvmYul.Yul.primCall, hStatic,
+                            PrimSemantics.step_selfdestruct_lit_eq]
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := [recipient])
+                            (err :=
+                              .YulHalt
+                                (PrimSemantics.selfdestructState
+                                  sourceAfterArgs recipient)
+                                (EvmYul.UInt256.ofNat 0))
+                            (sourceResult :=
+                              .error
+                                (.YulHalt (.Ok yulChild childStore) value))
+                            hEvalArgs hPrim hExecSeq
+                        injection hResult with hErr
+                        injection hErr with hState _hValue
+                        have hChild :
+                            yulChild.toMachineState.H_return =
+                              ByteArray.empty := by
+                          have hStateOk :
+                              (.Ok yulChild childStore : Reference.State) =
+                                PrimSemantics.selfdestructState
+                                  sourceAfterArgs recipient := by
+                            exact hState
+                          simpa [PrimSemantics.selfdestructState,
+                            EvmYul.Yul.selfdestructState, sourceAfterArgs,
+                            EvmYul.Yul.State.setState,
+                            EvmYul.Yul.State.setMachineState,
+                            EvmYul.MachineState.setHReturn] using
+                            congrArg
+                              (fun state : Reference.State =>
+                                state.toMachineState.H_return) hStateOk
+                        have hSharedAfter :
+                            sharedAfter.toMachineState.H_return =
+                              ByteArray.empty := by
+                          let iso : EVMState :=
+                            { toSharedState := compilerAfterArgs.shared,
+                              pc := EvmYul.UInt256.ofNat 0,
+                              stack := [recipient],
+                              execLength := 0 }
+                          have hStep :
+                              Structured.Terminal.step .selfdestruct iso =
+                                .ok
+                                  (Locals.SourceLowering.PrimitiveSemantics.selfdestructTerminalState
+                                      iso recipient []) := by
+                            apply
+                              Locals.SourceLowering.PrimitiveSemantics.structured_terminal_step_selfdestruct_of_stack
+                            simp [iso]
+                          have hOk :
+                              sharedAfter =
+                                  (Locals.SourceLowering.PrimitiveSemantics.selfdestructTerminalState
+                                      iso
+                                      recipient []).toSharedState := by
+                            simpa [Locals.Source.PrimitiveSemantics.structured,
+                              iso, hStep] using hStruct.symm
+                          cases hOk
+                          simp [Locals.SourceLowering.PrimitiveSemantics.selfdestructTerminalState,
+                            EvmYul.EVM.selfdestructState,
+                            EvmYul.MachineState.setHReturn,
+                            EvmYul.EVM.State.replaceStackAndIncrPC,
+                            EvmYul.EVM.State.incrPC]
+                        cases hCompiler
+                        exact hChild.trans hSharedAfter.symm
+                    | cons extra extras =>
+                        have hPrim :=
+                          PrimSemantics.primCall_selfdestruct_cons_cons_eq
+                            fuel sourceAfterArgs recipient extra extras hStatic
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := recipient :: extra :: extras)
+                            (err := .InvalidArguments)
+                            (sourceResult :=
+                              .error
+                                (.YulHalt (.Ok yulChild childStore) value))
+                            hEvalArgs hPrim hExecSeq
+                        cases hResult
+
+/--
+The canonical relations satisfy the terminal-observation contract for every
+program.
+
+This discharges `hTerminalObservation` from the preferred top theorem. The
+proof packs the contract's premises — the imported trace, the related
+compiler-side state, the structured terminal step — into the existential
+witness of `canonicalTerminalRel` / `canonicalRevertRel`.
+-/
+theorem canonical (cfg : Reference.StateRelConfig) (program : Program) :
+    RecursiveBridgeTerminalObservationContracts cfg
+      (canonicalTerminalRel cfg) (canonicalRevertRel cfg) program where
+  terminal := by
+    intro layout outcomeLayout yulPrim kind args rest argFuel source
+      sourceResult sourceAfterArgs sourceValues hTerminal hRelatable hExecSeq
+      hEvalArgs compilerAfterArgs sharedAfter hArgsRel hStruct
+    rcases
+        Reference.SourceBridgeFacts.imported_terminal_call_result_shape
+          (sourceFuel := argFuel) (source := source)
+          (sourceAfterArgs := sourceAfterArgs) (yulPrim := yulPrim)
+          (kind := kind) (args := args) (rest := rest)
+          (codeOverride := some program.contract)
+          (sourceResult := sourceResult) (argValues := sourceValues)
+          hTerminal hRelatable hExecSeq hEvalArgs with
+      ⟨_hNotRevert, haltState, value, hResult⟩ |
+      ⟨hRevert, revertState, hResult⟩
+    · rw [hResult]
+      refine Reference.SourceBridgeFacts.SourceResultOutcomeRel.yulHalt
+        (terminalRel := canonicalTerminalRel cfg)
+        (revertRel := canonicalRevertRel cfg) ?_
+      refine
+        ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+          some program.contract, compilerAfterArgs, sharedAfter, layout,
+          hTerminal, ?_, hEvalArgs, hArgsRel, hStruct, rfl⟩
+      exact hExecSeq.trans hResult
+    · subst hRevert
+      rw [hResult]
+      refine Reference.SourceBridgeFacts.SourceResultOutcomeRel.revert
+        (terminalRel := canonicalTerminalRel cfg)
+        (revertRel := canonicalRevertRel cfg) ?_
+      refine
+        ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+          some program.contract, compilerAfterArgs, sharedAfter, layout,
+          hTerminal, ?_, hEvalArgs, hArgsRel, hStruct, rfl⟩
+      exact hExecSeq.trans hResult
+
+end RecursiveBridgeTerminalObservationContracts
+
 structure RecursiveBridgeExprResultContracts
     (cfg : Reference.StateRelConfig)
     (program : Program) : Prop where
@@ -169285,6 +175650,44 @@ theorem of_canonical_observation
   observation := dispatcherObservationSound_canonical
 
 end RecursiveBridgeSemanticContracts
+
+/--
+Semantic contract package for the CALL-admitting child bridge.
+
+The base contract keeps the already-proved terminal/observation/shared
+primitive surface.  The extra fields are the CALL-safe replacements needed by
+the recursive CALL frontier: primitive stack soundness and expression result
+shape must be stated over `Safe.CallSafe`, not the old CALL-rejecting `Safe`.
+-/
+structure RecursiveBridgeCALLSemanticContracts
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (outcomeRel : Reference.OutcomeRel)
+    (program : Program)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) : Prop where
+  base :
+    RecursiveBridgeSemanticContracts cfg terminalRel revertRel prim
+      outcomeRel program shared store
+  callPrimitiveStack :
+    ∀ {layout : List Name} {fuel : Nat}
+      {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+      Reference.Safe.CallSafe.primitive yulPrim →
+      Prim.toBasicOp? yulPrim = some op →
+      Reference.SourceBridgeFacts.PrimitiveStackSoundAtArity cfg layout prim
+        fuel yulPrim op
+  callExprResultOk :
+    ∀ {layout : List Name} {fuel : Nat}
+      {expr : AstExpr},
+      Reference.Safe.CallSafe.expr expr →
+      Reference.SourceBridgeFacts.SourceExprScoped layout expr →
+      Reference.SourceBridgeFacts.UserCallArity.ExprOk program.contract expr →
+      Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
+        (some program.contract)
 
 namespace RecursiveBridgeSemanticCoreContracts
 
@@ -170003,6 +176406,48 @@ structure RecursiveBridgeTopAssumptions
   targetRuntime : RecursiveBridgeTargetRuntime asm target initial
 
 /--
+CALL-capable child-top assumption package for the whole-world external bridge.
+
+Unlike `RecursiveBridgeTopAssumptions`, this does not reconstruct old
+`Reference.Accepted` through the no-external-call feature package.  It keeps
+source validity (`RecursiveBridgeFullSourceAccepted`) separate from the
+CALL-admitting feature coverage that still excludes the external families not
+yet handled by the whole-world proof.
+-/
+structure RecursiveBridgeCALLTopAssumptions
+    (cfg : Reference.StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (outcomeRel : Reference.OutcomeRel)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (sourceFuel : Nat)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  fullSourceAccepted : RecursiveBridgeFullSourceAccepted program
+  callFeatureCoverage : RecursiveBridgeCALLFeatureCoverage program
+  compileResources : RecursiveBridgeCompileResources program
+  semantics :
+    RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+      outcomeRel program shared store
+  initialShared :
+    Reference.SharedStateRel cfg
+      { shared with
+        executionEnv :=
+          { shared.executionEnv with code := program.contract } }
+      initial.toSharedState
+  sourceRun :
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult
+  compileTarget :
+    compileCheckedAssemblyTarget? program = some (asm, target)
+  targetRuntime : RecursiveBridgeTargetRuntime asm target initial
+
+/--
 Final bundled public theorem for the checked imported-Yul bridge into the
 gas-aware EVM target route.
 -/
@@ -170048,6 +176493,149 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     (initial := initial) (referenceResult := referenceResult)
     hTop.sourceAccepted hTop.compileResources hTop.semantics
     hTop.initialShared hTop.sourceRun hTop.compileTarget hTop.targetRuntime
+
+/--
+Bundled public theorem that also exposes the compiler-source run constructed
+inside the recursive dispatcher bridge.
+
+This is the source-run-bearing counterpart of
+`compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top`.
+It reconstructs the same checked recursive dispatcher bridge internally and
+returns the exact `SourceLowered.run` equality needed by external-call child
+evidence.
+-/
+theorem compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeTopAssumptions cfg terminalRel revertRel prim outcomeRel
+        program asm target shared store sourceFuel initial referenceResult) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+            target.GasOpcodeBoundary ∧
+              Assembly.GasOracleAssumption asm initial ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome := by
+  rcases compileCheckedAssemblyTarget?_eq_some hTop.compileTarget with
+    ⟨hCompile, hAssemble⟩
+  rcases exists_functionProgram_of_compileChecked? hCompile with
+    ⟨functionProgram, hToObjects⟩
+  let sourceInitial : Objects.Source.State :=
+    Functions.Source.Program.initialState initial.toSharedState
+  have hSourceInitialRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial := by
+    exact
+      Reference.SourceBridgeFacts.SourceStateRel.ok hTop.initialShared
+        (by
+          intro name hMem
+          cases hMem)
+  have hInitialRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (Program.installContract program (.Ok shared store)) sourceInitial := by
+    cases hSourceInitialRel with
+    | ok hShared _hVars =>
+        exact
+          Reference.SourceBridgeFacts.SourceStateRel.ok hShared
+            (by
+              intro name hMem
+              cases hMem)
+  let context :
+      Reference.SourceBridgeFacts.ProgramBridgeContext program
+        functionProgram :=
+    { toObjects := hToObjects
+      safe := Reference.safeProgram_of_accepted hTop.sourceAccepted.reference
+      sourceScoped := hTop.sourceAccepted.sourceScoped
+      controlScoped := hTop.sourceAccepted.controlScoped
+      noShadowing :=
+        Reference.noShadowingProgram_of_accepted
+          hTop.sourceAccepted.reference
+      userCalls := hTop.sourceAccepted.userCalls
+      checkpoint :=
+        Reference.SourceBridgeFacts.CheckpointExpressionSound.of_primitive_families }
+  have hRecursive :
+      Reference.SourceBridgeFacts.ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim program functionProgram context
+        sourceFuel :=
+    Reference.SourceBridgeFacts.programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_allBounds
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (yulProgram := program) (program := functionProgram)
+      (context := context) hTop.semantics.terminal
+      (by
+        intro layout fuel yulPrim op hSafe hBasic
+        exact
+          hTop.semantics.primitiveStack (layout := layout) (fuel := fuel)
+            (yulPrim := yulPrim) (op := op) hSafe hBasic)
+      hTop.semantics.exprResultOk sourceFuel
+  have hSourceInitialExact :
+      Reference.SourceBridgeFacts.SourceStateExactRel cfg []
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial :=
+    Reference.SourceBridgeFacts.SourceStateExactRel.of_initial_scope_default
+      (by rfl) hSourceInitialRel
+  have hBridge :
+      CheckedRecursiveDispatcherRunBridge cfg [] terminalRel revertRel prim
+        outcomeRel program functionProgram shared store sourceInitial
+        sourceFuel :=
+    checkedRecursiveDispatcherRunBridge_of_programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_actual
+      (cfg := cfg) (layout := []) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (outcomeRel := outcomeRel)
+      (program := program) (functionProgram := functionProgram)
+      (context := context) (shared := shared) (store := store)
+      (sourceInitial := sourceInitial) (bound := sourceFuel)
+      (sourceFuel := sourceFuel) (referenceResult := referenceResult)
+      hSourceInitialExact hTop.sourceRun.run hRecursive (by rfl)
+      (Nat.le_refl sourceFuel)
+      (RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel hTop.sourceRun)
+      hTop.semantics.observation
+  exact
+    compile_whole_program_result_sound_with_source_run_of_checked_recursive_dispatcher_run_bridge_compileAccepted
+      (cfg := cfg) (layout := []) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) hTop.semantics.primitiveSound
+      (stateRel := Reference.SourceBridgeFacts.SourceStateRel cfg [])
+      (outcomeRel := outcomeRel)
+      (program := program) (functionProgram := functionProgram)
+      (asm := asm) (target := target) (shared := shared) (store := store)
+      (sourceInitial := sourceInitial) (sourceFuel := sourceFuel)
+      (initial := initial) (referenceResult := referenceResult)
+      hTop.sourceAccepted.reference hToObjects hInitialRel hTop.sourceRun.run
+      hBridge hCompile hAssemble hTop.targetRuntime.runtime
+      (RecursiveBridgeCompileResources.to_sourceCompileAccepted
+        hTop.sourceAccepted hTop.compileResources)
+      hTop.targetRuntime.initialPc hTop.targetRuntime.initialStack rfl
 
 /--
 Whole-program compile theorem from the program-scoped recursive bridge, with

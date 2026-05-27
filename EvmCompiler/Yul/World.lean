@@ -242,7 +242,7 @@ theorem installContract_ok_eq_self_of_code
           executionEnv blocks genesisBlockHeader createdAccounts =>
           cases executionEnv with
           | mk codeOwner sender source weiValue calldata code gasPrice header
-              depth perm blobVersionedHashes =>
+              depth perm blobVersionedHashes codeBytes =>
               simp [Program.installContract] at hCode ⊢
               exact hCode.symm
 
@@ -279,6 +279,31 @@ theorem runResult_regular_of_installed_callDispatcher
       .ok (.regular state') := by
   rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
 
+theorem installed_callDispatcher_regular_of_runResult
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state' : EvmYul.Yul.State}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hRun :
+      Reference.runResult fuel program (.Ok shared store) =
+        .ok (.regular state')) :
+    ∃ rets : List EvmYul.UInt256,
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+          (.Ok shared store) =
+        .ok (state', rets) := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode] at hRun
+  cases hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (.Ok shared store) with
+  | ok result =>
+      rcases result with ⟨state, rets⟩
+      simp [hCall] at hRun
+      cases hRun
+      exact ⟨rets, by simpa [hCall]⟩
+  | error err =>
+      cases err <;> simp [hCall] at hRun
+
 theorem runResult_yulHalt_of_installed_callDispatcher
     {program : Program} {fuel : Nat}
     {shared : EvmYul.SharedState .Yul}
@@ -293,6 +318,30 @@ theorem runResult_yulHalt_of_installed_callDispatcher
       .ok (.yulHalt haltState value) := by
   rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
 
+theorem installed_callDispatcher_yulHalt_of_runResult
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {haltState : EvmYul.Yul.State} {value : EvmYul.UInt256}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hRun :
+      Reference.runResult fuel program (.Ok shared store) =
+        .ok (.yulHalt haltState value)) :
+    EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (.Ok shared store) =
+      .error (.YulHalt haltState value) := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode] at hRun
+  cases hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (.Ok shared store) with
+  | ok result =>
+      rcases result with ⟨state, rets⟩
+      simp [hCall] at hRun
+  | error err =>
+      cases err <;> simp [hCall] at hRun ⊢
+      case YulHalt haltState' value' =>
+        exact hRun
+
 theorem runResult_revert_of_installed_callDispatcher
     {program : Program} {fuel : Nat}
     {shared : EvmYul.SharedState .Yul}
@@ -306,6 +355,30 @@ theorem runResult_revert_of_installed_callDispatcher
     Reference.runResult fuel program (.Ok shared store) =
       .ok (.revert revertState) := by
   rw [runResult_eq_callDispatcher_of_installed_contract hCode, hCall]
+
+theorem installed_callDispatcher_revert_of_runResult
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {revertState : EvmYul.Yul.State}
+    (hCode : shared.executionEnv.code = program.contract)
+    (hRun :
+      Reference.runResult fuel program (.Ok shared store) =
+        .ok (.revert revertState)) :
+    EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (.Ok shared store) =
+      .error (.Revert revertState) := by
+  rw [runResult_eq_callDispatcher_of_installed_contract hCode] at hRun
+  cases hCall :
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (.Ok shared store) with
+  | ok result =>
+      rcases result with ⟨state, rets⟩
+      simp [hCall] at hRun
+  | error err =>
+      cases err <;> simp [hCall] at hRun ⊢
+      case Revert revertState' =>
+        exact hRun
 
 theorem runResult_error_of_installed_callDispatcher
     {program : Program} {fuel : Nat}
@@ -337,6 +410,53 @@ theorem runResult_error_of_installed_callDispatcher
   | UnknownIdentifier name => rfl
   | DuplicateDeclaration name => rfl
   | YulEXTCODESIZENotImplemented => rfl
+
+theorem runResult_regular_ok_shape
+    {program : Program} {fuel : Nat}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {state : EvmYul.Yul.State}
+    (hRun :
+      Reference.runResult fuel program (.Ok shared store) =
+        .ok (.regular state))
+    (hNotOutOfFuel : state ≠ .OutOfFuel) :
+    ∃ finalShared finalStore,
+      state = .Ok finalShared finalStore := by
+  cases fuel with
+  | zero =>
+      simp [Reference.Imported.runResult_zero] at hRun
+  | succ fuel =>
+      rcases
+          Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok
+            fuel program (.Ok shared store) hRun with
+        ⟨sourceResult, _hExec, hBody⟩
+      cases sourceResult with
+      | ok bodyState =>
+          cases bodyState with
+          | Ok finalShared _finalStore =>
+              simp [Reference.Imported.dispatcherRunResultOfBody,
+                Program.installContract, EvmYul.Yul.State.reviveJump,
+                EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore]
+                at hBody
+              cases hBody
+              exact ⟨finalShared, store, rfl⟩
+          | OutOfFuel =>
+              simp [Reference.Imported.dispatcherRunResultOfBody,
+                Program.installContract, EvmYul.Yul.State.reviveJump,
+                EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore]
+                at hBody
+              cases hBody
+              exact False.elim (hNotOutOfFuel rfl)
+          | Checkpoint jump =>
+              cases jump <;>
+                simp [Reference.Imported.dispatcherRunResultOfBody,
+                  Program.installContract, EvmYul.Yul.State.reviveJump,
+                  EvmYul.Yul.State.revive, EvmYul.Yul.State.overwrite?,
+                  EvmYul.Yul.State.setStore] at hBody <;>
+                cases hBody <;> exact ⟨_, store, rfl⟩
+      | error err =>
+          cases err <;>
+            simp [Reference.Imported.dispatcherRunResultOfBody] at hBody
 
 theorem compile_preserves_of_reference_source_runs_sourceStaticBoundary
     {prim : Objects.Source.PrimitiveSemantics}
@@ -1381,6 +1501,8 @@ structure CompiledAccountRel (yul : EvmYul.Account .Yul)
   balance : yul.balance = evm.balance
   storage : yul.storage = evm.storage
   tstorage : yul.tstorage = evm.tstorage
+  codeEmpty : (yul.code == default) = evm.code.isEmpty
+  codeBytes : yul.codeBytes = evm.code
   code : CompiledCodeRel yul.code evm.code
 
 theorem CompiledAccountRel.codeRel
@@ -1388,6 +1510,14 @@ theorem CompiledAccountRel.codeRel
     (hAccount : CompiledAccountRel yul evm) :
     codeImageRel yul.code evm.code :=
   hAccount.code
+
+theorem CompiledAccountRel.emptyAccount
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm) :
+    EvmYul.Account.emptyAccount yul =
+      EvmYul.Account.emptyAccount evm := by
+  simp [EvmYul.Account.emptyAccount, hAccount.nonce, hAccount.balance,
+    hAccount.codeEmpty]
 
 theorem CompiledAccountRel.with_balance
     {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
@@ -1401,6 +1531,8 @@ theorem CompiledAccountRel.with_balance
       balance := rfl
       storage := hAccount.storage
       tstorage := hAccount.tstorage
+      codeEmpty := hAccount.codeEmpty
+      codeBytes := hAccount.codeBytes
       code := hAccount.code }
 
 theorem CompiledAccountRel.update_storage
@@ -1418,6 +1550,8 @@ theorem CompiledAccountRel.update_storage
         balance := hAccount.balance
         storage := by simp [hAccount.storage]
         tstorage := hAccount.tstorage
+        codeEmpty := hAccount.codeEmpty
+        codeBytes := hAccount.codeBytes
         code := hAccount.code }
   · simp [hZero]
     exact
@@ -1425,6 +1559,8 @@ theorem CompiledAccountRel.update_storage
         balance := hAccount.balance
         storage := by simp [hAccount.storage]
         tstorage := hAccount.tstorage
+        codeEmpty := hAccount.codeEmpty
+        codeBytes := hAccount.codeBytes
         code := hAccount.code }
 
 theorem CompiledAccountRel.update_transientStorage
@@ -1442,6 +1578,8 @@ theorem CompiledAccountRel.update_transientStorage
         balance := hAccount.balance
         storage := hAccount.storage
         tstorage := by simp [hAccount.tstorage]
+        codeEmpty := hAccount.codeEmpty
+        codeBytes := hAccount.codeBytes
         code := hAccount.code }
   · simp [hZero]
     exact
@@ -1449,6 +1587,8 @@ theorem CompiledAccountRel.update_transientStorage
         balance := hAccount.balance
         storage := hAccount.storage
         tstorage := by simp [hAccount.tstorage]
+        codeEmpty := hAccount.codeEmpty
+        codeBytes := hAccount.codeBytes
         code := hAccount.code }
 
 theorem CompiledAccountRel.default_with_balance
@@ -1461,7 +1601,66 @@ theorem CompiledAccountRel.default_with_balance
       balance := rfl
       storage := rfl
       tstorage := rfl
+      codeEmpty := by
+        change ((default : AstContract) == default) =
+          ByteArray.isEmpty (default : ByteArray)
+        native_decide
+      codeBytes := rfl
       code := CompiledCodeRel.empty }
+
+theorem CompiledAccountRel.checkedCodeResourcesSourceStatic_of_yul_code_ne_default
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm)
+    (hCodeNondefault : yul.code ≠ default) :
+    ∃ (program : Program) (asm : Assembly.Program)
+        (target : Assembly.TargetProgram),
+      program.contract = yul.code ∧
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+          some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        evm.code = Assembly.Bytecode.encodeTarget target := by
+  exact
+    CompiledCodeRel.checkedBytecodeResourcesSourceStatic_of_not_empty
+      hAccount.code
+      (by
+        intro hEmpty
+        exact hCodeNondefault hEmpty.1)
+
+theorem CompiledAccountRel.evm_code_isEmpty_of_yul_code_default
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm)
+    (hCodeDefault : yul.code = default) :
+    evm.code.isEmpty = true := by
+  have hDefaultBeq :
+      ((default : AstContract) == default) = true := by
+    native_decide
+  simpa [hCodeDefault, hDefaultBeq] using hAccount.codeEmpty.symm
+
+theorem byteArray_eq_default_of_isEmpty
+    {bytes : ByteArray} (hEmpty : bytes.isEmpty = true) :
+    bytes = default := by
+  apply ByteArray.ext
+  apply Array.ext
+  · simpa [ByteArray.isEmpty] using hEmpty
+  · intro i _hBytes hDefault
+    have hDefaultSize : (default : ByteArray).data.size = 0 := rfl
+    omega
+
+theorem CompiledAccountRel.evm_code_eq_default_of_yul_code_default
+    {yul : EvmYul.Account .Yul} {evm : EvmYul.Account .EVM}
+    (hAccount : CompiledAccountRel yul evm)
+    (hCodeDefault : yul.code = default) :
+    evm.code = default :=
+  byteArray_eq_default_of_isEmpty
+    (hAccount.evm_code_isEmpty_of_yul_code_default hCodeDefault)
 
 inductive CompiledToExecuteRel :
     EvmYul.ToExecute .Yul → EvmYul.ToExecute .EVM → Prop
@@ -1502,6 +1701,59 @@ theorem CompiledAccountMapRel.find_yul
       evm.find? addr = some evmAccount ∧
         CompiledAccountRel yulAccount evmAccount :=
   hWorld.yul_to_evm addr yulAccount hFind
+
+theorem CompiledAccountMapRel.checkedCodeResourcesSourceStatic_of_find_yul_ne_default
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {addr : EvmYul.AccountAddress} {yulAccount : EvmYul.Account .Yul}
+    (hFind : yul.find? addr = some yulAccount)
+    (hCodeNondefault : yulAccount.code ≠ default) :
+    ∃ (evmAccount : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram),
+      evm.find? addr = some evmAccount ∧
+        CompiledAccountRel yulAccount evmAccount ∧
+        program.contract = yulAccount.code ∧
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+          some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        evmAccount.code = Assembly.Bytecode.encodeTarget target := by
+  rcases hWorld.find_yul hFind with
+    ⟨evmAccount, hFindEvm, hAccount⟩
+  rcases
+      hAccount.checkedCodeResourcesSourceStatic_of_yul_code_ne_default
+        hCodeNondefault with
+    ⟨program, asm, target, hContract, hCompile, hStatic,
+      hSourceAccepted, hSourceCompileAccepted, hCompileChecked, hBytecode,
+      hResources, hDecode, hJumpdest, hBytes⟩
+  exact
+    ⟨evmAccount, program, asm, target, hFindEvm, hAccount, hContract,
+      hCompile, hStatic, hSourceAccepted, hSourceCompileAccepted,
+      hCompileChecked, hBytecode, hResources, hDecode, hJumpdest, hBytes⟩
+
+theorem CompiledAccountMapRel.evm_code_isEmpty_of_find_yul_default
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {addr : EvmYul.AccountAddress} {yulAccount : EvmYul.Account .Yul}
+    (hFind : yul.find? addr = some yulAccount)
+    (hCodeDefault : yulAccount.code = default) :
+    ∃ evmAccount,
+      evm.find? addr = some evmAccount ∧
+        CompiledAccountRel yulAccount evmAccount ∧
+        evmAccount.code.isEmpty = true := by
+  rcases hWorld.find_yul hFind with
+    ⟨evmAccount, hFindEvm, hAccount⟩
+  exact
+    ⟨evmAccount, hFindEvm, hAccount,
+      hAccount.evm_code_isEmpty_of_yul_code_default hCodeDefault⟩
 
 theorem CompiledAccountMapRel.find_evm
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -1792,6 +2044,69 @@ theorem CompiledAccountMapRel.insert_insert_distinct_comm
         refine ⟨foundYul, ?_, hFoundAccount⟩
         rw [Batteries.RBMap.find?_insert]
         simp [hQueryB, Batteries.RBMap.find?_insert, hQueryA, hFoundYul]
+
+theorem CompiledAccountMapRel.selfdestructAccountMap
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (source target : EvmYul.AccountAddress) (created : Bool) :
+    CompiledAccountMapRel
+      (EvmYul.selfdestructAccountMap yul source target created)
+      (EvmYul.selfdestructAccountMap evm source target created) := by
+  unfold EvmYul.selfdestructAccountMap
+  cases hYulSource : yul.find? source with
+  | none =>
+      have hEvmSource := hWorld.not_find_evm_of_not_find_yul hYulSource
+      simp [hEvmSource]
+      exact hWorld
+  | some yulSource =>
+      rcases hWorld.find_yul hYulSource with
+        ⟨evmSource, hEvmSource, hSourceRel⟩
+      simp [hEvmSource]
+      cases hYulTarget : yul.find? target with
+      | none =>
+          have hEvmTarget := hWorld.not_find_evm_of_not_find_yul hYulTarget
+          simp [hEvmTarget, ← hSourceRel.balance]
+          by_cases hZero :
+              (yulSource.balance == (⟨0⟩ : EvmYul.UInt256)) = true
+          · simpa [hZero] using hWorld
+          · have hNonzero :
+                (yulSource.balance == (⟨0⟩ : EvmYul.UInt256)) = false := by
+              cases hBal :
+                  (yulSource.balance == (⟨0⟩ : EvmYul.UInt256)) <;>
+                simp [hBal] at hZero ⊢
+            simpa [hNonzero] using
+              (hWorld.insert target
+                (CompiledAccountRel.default_with_balance yulSource.balance)).insert
+                source (hSourceRel.with_balance (⟨0⟩ : EvmYul.UInt256))
+      | some yulTarget =>
+          rcases hWorld.find_yul hYulTarget with
+            ⟨evmTarget, hEvmTarget, hTargetRel⟩
+          simp [hEvmTarget]
+          by_cases hDistinct : target ≠ source
+          · simp [hDistinct]
+            have hTargetBalance :
+                CompiledAccountRel
+                  { yulTarget with
+                    balance := yulTarget.balance + yulSource.balance }
+                  { evmTarget with
+                    balance := evmTarget.balance + evmSource.balance } := by
+              rw [← hTargetRel.balance, ← hSourceRel.balance]
+              exact hTargetRel.with_balance
+                (yulTarget.balance + yulSource.balance)
+            exact
+              (hWorld.insert target hTargetBalance).insert source
+                (hSourceRel.with_balance (⟨0⟩ : EvmYul.UInt256))
+          · have hEq : target = source := by
+              by_contra hEq
+              exact hDistinct hEq
+            subst target
+            cases created
+            · simpa using hWorld
+            · simpa using
+                (hWorld.insert source
+                  (hTargetRel.with_balance
+                    (⟨0⟩ : EvmYul.UInt256))).insert source
+                  (hSourceRel.with_balance (⟨0⟩ : EvmYul.UInt256))
 
 theorem CompiledAccountMapRel.increaseBalance
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -2161,6 +2476,95 @@ theorem CompiledAccountMapRel.callTransferAccountMap?_of_evm_enough
   · simpa [evmCallTransfer] using
       hWorld.callTransferUnchecked_preserve source recipient value
 
+theorem CompiledAccountMapRel.callTransferAccountMap?_of_evm_enough_find_yul_nonempty
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    (hFindRecipient : yul.find? recipient = some yulRecipient)
+    (hEnough :
+      value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance))) :
+    ∃ yulAfter,
+      EvmYul.Yul.callTransferAccountMap? yul source recipient value =
+          some yulAfter ∧
+        yulAfter.isEmpty = false ∧
+        (evmCallTransfer evm source recipient value).isEmpty = false ∧
+        CompiledAccountMapRel yulAfter
+          (evmCallTransfer evm source recipient value) := by
+  rcases
+      hWorld.callTransferAccountMap?_of_evm_enough
+        (source := source) (recipient := recipient) hEnough with
+    ⟨yulAfter, hTransfer, hTransferRel⟩
+  rcases hWorld.find_yul hFindRecipient with
+    ⟨evmRecipient, hFindEvmRecipient, _hRecipientRel⟩
+  have hEvmParentNonempty : evm.isEmpty = false :=
+    accountMap_isEmpty_false_of_find? hFindEvmRecipient
+  have hEvmTransferNonempty :
+      (evmCallTransfer evm source recipient value).isEmpty = false := by
+    simpa [evmCallTransfer] using
+      callTransferUnchecked_isEmpty_false_of_parent_false
+        source recipient value hEvmParentNonempty
+  have hYulTransferNonempty : yulAfter.isEmpty = false := by
+    simpa [hEvmTransferNonempty] using
+      hTransferRel.isEmpty_eq
+  exact
+    ⟨yulAfter, hTransfer, hYulTransferNonempty,
+      hEvmTransferNonempty, hTransferRel⟩
+
+theorem CompiledAccountMapRel.ordinaryCall_nondefault_transferCheckedFacts
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {source recipient : EvmYul.AccountAddress}
+    {value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    (hFindRecipient : yul.find? recipient = some yulRecipient)
+    (hCodeNondefault : yulRecipient.code ≠ default)
+    (hEnough :
+      value ≤ (evm.find? source |>.option ⟨0⟩ (·.balance))) :
+    ∃ (yulAfter : EvmYul.AccountMap .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram),
+      EvmYul.Yul.callTransferAccountMap? yul source recipient value =
+          some yulAfter ∧
+        yulAfter.isEmpty = false ∧
+        (evmCallTransfer evm source recipient value).isEmpty = false ∧
+        CompiledAccountMapRel yulAfter
+          (evmCallTransfer evm source recipient value) ∧
+        evm.find? recipient = some evmRecipient ∧
+        CompiledAccountRel yulRecipient evmRecipient ∧
+        program.contract = yulRecipient.code ∧
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+          some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        evmRecipient.code = Assembly.Bytecode.encodeTarget target := by
+  rcases
+      hWorld.callTransferAccountMap?_of_evm_enough_find_yul_nonempty
+        hFindRecipient hEnough with
+    ⟨yulAfter, hTransfer, hYulNonempty, hEvmNonempty, hTransferRel⟩
+  rcases
+      hWorld.checkedCodeResourcesSourceStatic_of_find_yul_ne_default
+        hFindRecipient hCodeNondefault with
+    ⟨evmRecipient, program, asm, target, hFindEvm, hAccount,
+      hContract, hCompile, hStatic, hSourceAccepted,
+      hSourceCompileAccepted, hCompileChecked, hBytecode, hResources,
+      hDecode, hJumpdest, hBytes⟩
+  exact
+    ⟨yulAfter, evmRecipient, program, asm, target, hTransfer,
+      hYulNonempty, hEvmNonempty, hTransferRel, hFindEvm, hAccount,
+      hContract, hCompile, hStatic, hSourceAccepted,
+      hSourceCompileAccepted, hCompileChecked, hBytecode, hResources,
+      hDecode, hJumpdest, hBytes⟩
+
 theorem CompiledAccountMapRel.of_empty_child_to_empty_parent
     {yulChild : EvmYul.AccountMap .Yul}
     {evmChild evmParent : EvmYul.AccountMap .EVM}
@@ -2406,9 +2810,11 @@ theorem executionEnvRel_callFrame
     (weiValue : EvmYul.UInt256)
     (calldata : ByteArray)
     (gasPrice depth : Nat)
-    (header : EvmYul.BlockHeader)
-    (perm : Bool)
-    (blobVersionedHashes : List ByteArray) :
+      (header : EvmYul.BlockHeader)
+      (perm : Bool)
+      (blobVersionedHashes : List ByteArray)
+      (yulCodeBytes evmCodeBytes : ByteArray)
+      (hCodeBytes : yulCodeBytes = evmCode) :
     Reference.ExecutionEnvRel cfg
       { codeOwner := codeOwner
         sender := sender
@@ -2420,7 +2826,8 @@ theorem executionEnvRel_callFrame
         header := header
         depth := depth
         perm := perm
-        blobVersionedHashes := blobVersionedHashes }
+        blobVersionedHashes := blobVersionedHashes
+        codeBytes := yulCodeBytes }
       { codeOwner := codeOwner
         sender := sender
         source := source
@@ -2431,7 +2838,8 @@ theorem executionEnvRel_callFrame
         header := header
         depth := depth
         perm := perm
-        blobVersionedHashes := blobVersionedHashes } := by
+        blobVersionedHashes := blobVersionedHashes
+        codeBytes := evmCodeBytes } := by
   exact
     { codeOwner := rfl
       sender := rfl
@@ -2443,7 +2851,8 @@ theorem executionEnvRel_callFrame
       header := rfl
       depth := rfl
       perm := rfl
-      blobVersionedHashes := rfl }
+      blobVersionedHashes := rfl
+      codeBytes := hCodeBytes }
 
 theorem CompiledToExecuteRel.executionEnvRel_callFrame
     {cfg : Reference.StateRelConfig}
@@ -2458,9 +2867,15 @@ theorem CompiledToExecuteRel.executionEnvRel_callFrame
     (weiValue : EvmYul.UInt256)
     (calldata : ByteArray)
     (gasPrice depth : Nat)
-    (header : EvmYul.BlockHeader)
-    (perm : Bool)
-    (blobVersionedHashes : List ByteArray) :
+      (header : EvmYul.BlockHeader)
+      (perm : Bool)
+      (blobVersionedHashes : List ByteArray)
+      (yulCodeBytes evmCodeBytes : ByteArray)
+      (hCodeBytes :
+        yulCodeBytes =
+          match evmExec with
+          | EvmYul.ToExecute.Precompiled _ => default
+          | EvmYul.ToExecute.Code evmCode => evmCode) :
     Reference.ExecutionEnvRel cfg
       { codeOwner := codeOwner
         sender := sender
@@ -2475,7 +2890,8 @@ theorem CompiledToExecuteRel.executionEnvRel_callFrame
         header := header
         depth := depth
         perm := perm
-        blobVersionedHashes := blobVersionedHashes }
+        blobVersionedHashes := blobVersionedHashes
+        codeBytes := yulCodeBytes }
       { codeOwner := codeOwner
         sender := sender
         source := source
@@ -2489,20 +2905,23 @@ theorem CompiledToExecuteRel.executionEnvRel_callFrame
         header := header
         depth := depth
         perm := perm
-        blobVersionedHashes := blobVersionedHashes } := by
+        blobVersionedHashes := blobVersionedHashes
+        codeBytes := evmCodeBytes } := by
   cases hExec with
   | precompiled precompiled =>
-      simpa using
-        World.executionEnvRel_callFrame
-          (hCodeRel CompiledCodeRel.empty)
-          codeOwner sender source weiValue calldata gasPrice depth
-          header perm blobVersionedHashes
+        simpa using
+          World.executionEnvRel_callFrame
+            (hCodeRel CompiledCodeRel.empty)
+            codeOwner sender source weiValue calldata gasPrice depth
+            header perm blobVersionedHashes yulCodeBytes evmCodeBytes
+            hCodeBytes
   | code hCode =>
-      simpa using
-        World.executionEnvRel_callFrame
-          (hCodeRel hCode)
-          codeOwner sender source weiValue calldata gasPrice depth
-          header perm blobVersionedHashes
+        simpa using
+          World.executionEnvRel_callFrame
+            (hCodeRel hCode)
+            codeOwner sender source weiValue calldata gasPrice depth
+            header perm blobVersionedHashes yulCodeBytes evmCodeBytes
+            hCodeBytes
 
 theorem chainStateRel_addAccessedAccount
     {cfg : Reference.StateRelConfig}
@@ -3017,11 +3436,7 @@ theorem call_insufficientFunds_emptyReturn_rel
     {fuel gasCost : Nat}
     {blobVersionedHashes : List ByteArray}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
-    (hChargedShared :
-      Reference.SharedStateRel cfg yul
-        ({ evm with
-          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
-          : EvmYul.EVM.State).toSharedState)
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
     (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
     (store : EvmYul.Yul.VarStore)
     {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
@@ -3083,7 +3498,7 @@ theorem call_insufficientFunds_emptyReturn_rel
   · constructor
     · have hOwner :
         yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
-          rcases hChargedShared with ⟨hChain, _hMachine⟩
+          rcases hShared with ⟨hChain, _hMachine⟩
           simpa using hChain.executionEnv.codeOwner
       exact
         hParentWorld.callTransferAccountMap?_none_of_evm_not_enough
@@ -3093,8 +3508,83 @@ theorem call_insufficientFunds_emptyReturn_rel
           (by simpa [hOwner] using hNotEnough)
     · exact
         buildContractCallEmptyReturnState_afterAccess_none_rel
-          hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+          hShared store (EvmYul.AccountAddress.ofUInt256 address)
           inOffset inSize outOffset outSize ⟨0⟩ hGas
+
+theorem primCall_CALL_insufficientFunds_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hNotEnough :
+      ¬ value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  rcases
+      call_insufficientFunds_emptyReturn_rel hShared hParentWorld store
+        hNotEnough hGas with
+    ⟨hEvm, hTransfer, yulAfter, hBuild, hRel⟩
+  refine ⟨hEvm, yulAfter, ?_, hRel⟩
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    EvmYul.Yul.addAccessedAccount, EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.setState,
+    EvmYul.Yul.State.toState, EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hBuild
 
 theorem EVM_call_depthLimit_eq
     {fuel gasCost : Nat}
@@ -3135,11 +3625,7 @@ theorem call_depthLimit_emptyReturn_rel
     {fuel gasCost : Nat}
     {blobVersionedHashes : List ByteArray}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
-    (hChargedShared :
-      Reference.SharedStateRel cfg yul
-        ({ evm with
-          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
-          : EvmYul.EVM.State).toSharedState)
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
     (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
     (store : EvmYul.Yul.VarStore)
     {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
@@ -3206,11 +3692,11 @@ theorem call_depthLimit_emptyReturn_rel
   · exact EVM_call_depthLimit_eq hEnough hDepthLimit
   · have hOwner :
         yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
-      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      rcases hShared with ⟨hChain, _hMachine⟩
       simpa using hChain.executionEnv.codeOwner
     have hDepth :
         yul.executionEnv.depth = evm.executionEnv.depth := by
-      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      rcases hShared with ⟨hChain, _hMachine⟩
       simpa using hChain.executionEnv.depth
     constructor
     · exact
@@ -3224,8 +3710,85 @@ theorem call_depthLimit_emptyReturn_rel
         exact Nat.not_lt.mp hDepthLimit
       · exact
           buildContractCallEmptyReturnState_afterAccess_none_rel
-            hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+            hShared store (EvmYul.AccountAddress.ofUInt256 address)
             inOffset inSize outOffset outSize ⟨0⟩ hGas
+
+theorem primCall_CALL_depthLimit_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepthLimit : ¬ evm.executionEnv.depth < 1024)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  rcases
+      call_depthLimit_emptyReturn_rel hShared hParentWorld store
+        hEnough hDepthLimit hGas with
+    ⟨hEvm, hTransferExists, hDepthYul, yulAfter, hBuild, hRel⟩
+  rcases hTransferExists with ⟨yulCallMap, hTransfer, _hCallMapRel⟩
+  refine ⟨hEvm, yulAfter, ?_, hRel⟩
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer, hDepthYul,
+    EvmYul.Yul.addAccessedAccount, EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.setState,
+    EvmYul.Yul.State.toState, EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hBuild
 
 theorem UInt256_sub_zero (value : EvmYul.UInt256) :
     value - EvmYul.UInt256.ofNat 0 = value := by
@@ -3286,8 +3849,12 @@ theorem EVM_memoryExpansionCost_STOP (state : EvmYul.EVM.State) :
     EvmYul.EVM.memoryExpansionCost.μᵢ', EvmYul.EVM.Cₘ]
 
 def EVM_stopState (state : EvmYul.EVM.State) : EvmYul.EVM.State :=
-  { { state with execLength := state.execLength + 1 } with
-    toMachineState := state.toMachineState.setReturnData ByteArray.empty }
+  let stepped : EvmYul.EVM.State :=
+    { state with execLength := state.execLength + 1 }
+  { stepped with
+    toMachineState :=
+      (stepped.toMachineState.setReturnData ByteArray.empty).setHReturn
+        ByteArray.empty }
 
 theorem EVM_step_STOP_zero
     {fuel : Nat} (state : EvmYul.EVM.State) :
@@ -4093,6 +4660,742 @@ theorem compiledAccountMapRel_of_sharedStateRel_stateRelConfig
     CompiledAccountMapRel yul.accountMap evm.accountMap :=
   hShared.chain.accountMap
 
+theorem stateRelConfig_accountMapRel_of_compiledAccountMapRel
+    {varStackRel : Reference.VarStackRel}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yulMap : EvmYul.AccountMap .Yul}
+    {evmMap : EvmYul.AccountMap .EVM}
+    (hRel : CompiledAccountMapRel yulMap evmMap) :
+    (stateRelConfig varStackRel terminalRel revertRel gasAvailableRel
+      gasValueRel totalGasRel).accountMapRel yulMap evmMap := by
+  simpa [stateRelConfig, accountMapRel] using hRel
+
+structure OrdinaryCALLBranchFacts
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (address value : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (evmRecipient : EvmYul.Account .EVM)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram) : Prop where
+  findYul :
+    yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+      some yulRecipient
+  codeNondefault : yulRecipient.code ≠ default
+  transfer :
+    EvmYul.Yul.callTransferAccountMap? yul.accountMap
+        yul.executionEnv.codeOwner
+        (EvmYul.AccountAddress.ofUInt256 address) value =
+      some yulCallMap
+  yulTransferNonempty : yulCallMap.isEmpty = false
+  evmTransferNonempty :
+    (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+        (EvmYul.AccountAddress.ofUInt256 address) value).isEmpty =
+      false
+  transferRel :
+    CompiledAccountMapRel yulCallMap
+      (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+        (EvmYul.AccountAddress.ofUInt256 address) value)
+  findEvm :
+    evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+      some evmRecipient
+  accountRel : CompiledAccountRel yulRecipient evmRecipient
+  contract : program.contract = yulRecipient.code
+  compileBoundary :
+    compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+      some (asm, target)
+  sourceStatic : Program.RecursiveBridgeSourceStaticFacts program
+  sourceAccepted : Program.SourceAccepted program
+  sourceCompileAccepted : Program.SourceCompileAccepted program
+  compileChecked : Program.compileChecked? program = some asm
+  bytecode :
+    Program.compileCheckedAssemblyTargetBytecode? program =
+      some (asm, target)
+  resources :
+    _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources program
+  decode : Assembly.Bytecode.TargetFitsDecodeWindow target
+  jumpdest : Assembly.Bytecode.JumpdestCorrect target
+  code : evmRecipient.code = Assembly.Bytecode.encodeTarget target
+
+theorem OrdinaryCALLBranchFacts.sourceCodeBytes_eq_target
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {address value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    yulRecipient.codeBytes = Assembly.Bytecode.encodeTarget target :=
+  hFacts.accountRel.codeBytes.trans hFacts.code
+
+theorem OrdinaryCALLBranchFacts.fullSourceAccepted
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {address value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    Program.RecursiveBridgeFullSourceAccepted program :=
+  hFacts.sourceStatic.toFullSourceAccepted
+    (Program.accepted_of_sourceAccepted_compileChecked?
+      hFacts.sourceAccepted hFacts.compileChecked)
+
+inductive CALLBranchFacts
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (address value : EvmYul.UInt256) : Prop where
+  | insufficientFunds
+      (notEnough :
+        ¬ value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance))) :
+      CALLBranchFacts yul evm address value
+  | depthLimit
+      (enough :
+        value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance)))
+      (depthLimit : ¬ evm.executionEnv.depth < 1024) :
+      CALLBranchFacts yul evm address value
+  | noCode
+      (enough :
+        value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance)))
+      (depth : evm.executionEnv.depth < 1024)
+      (notPrecompile :
+        EvmYul.PrecompiledContract.ofAddress?
+          (EvmYul.AccountAddress.ofUInt256 address) = none)
+      (missingYul :
+        yul.accountMap.find?
+          (EvmYul.AccountAddress.ofUInt256 address) = none)
+      (missingEvm :
+        evm.accountMap.find?
+          (EvmYul.AccountAddress.ofUInt256 address) = none) :
+      CALLBranchFacts yul evm address value
+  | precompiled
+      (precompiled : EvmYul.PrecompiledContract)
+      (enough :
+        value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance)))
+      (depth : evm.executionEnv.depth < 1024)
+      (precompile :
+        EvmYul.PrecompiledContract.ofAddress?
+          (EvmYul.AccountAddress.ofUInt256 address) = some precompiled) :
+      CALLBranchFacts yul evm address value
+  | existingDefaultCode
+      (yulRecipient : EvmYul.Account .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (enough :
+        value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance)))
+      (depth : evm.executionEnv.depth < 1024)
+      (notPrecompile :
+        EvmYul.PrecompiledContract.ofAddress?
+          (EvmYul.AccountAddress.ofUInt256 address) = none)
+      (findYul :
+        yul.accountMap.find?
+          (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+      (codeDefault : yulRecipient.code = default)
+      (findEvm :
+        evm.accountMap.find?
+          (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+      (accountRel : CompiledAccountRel yulRecipient evmRecipient)
+      (evmCodeDefault : evmRecipient.code = default) :
+      CALLBranchFacts yul evm address value
+  | ordinary
+      (yulRecipient : EvmYul.Account .Yul)
+      (yulCallMap : EvmYul.AccountMap .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram)
+      (enough :
+        value ≤
+          (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+            (·.balance)))
+      (depth : evm.executionEnv.depth < 1024)
+      (notPrecompile :
+        EvmYul.PrecompiledContract.ofAddress?
+          (EvmYul.AccountAddress.ofUInt256 address) = none)
+      (facts :
+        OrdinaryCALLBranchFacts yul evm address value yulRecipient
+          yulCallMap evmRecipient program asm target) :
+      CALLBranchFacts yul evm address value
+
+theorem ordinaryCall_nondefault_transferCheckedFacts_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    {address value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeNondefault : yulRecipient.code ≠ default)
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance))) :
+    ∃ (yulCallMap : EvmYul.AccountMap .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram),
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap ∧
+        yulCallMap.isEmpty = false ∧
+        (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            (EvmYul.AccountAddress.ofUInt256 address) value).isEmpty =
+          false ∧
+        CompiledAccountMapRel yulCallMap
+          (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            (EvmYul.AccountAddress.ofUInt256 address) value) ∧
+        evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+          some evmRecipient ∧
+        CompiledAccountRel yulRecipient evmRecipient ∧
+        program.contract = yulRecipient.code ∧
+        compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+          some (asm, target) ∧
+        Program.RecursiveBridgeSourceStaticFacts program ∧
+        Program.SourceAccepted program ∧
+        Program.SourceCompileAccepted program ∧
+        Program.compileChecked? program = some asm ∧
+        Program.compileCheckedAssemblyTargetBytecode? program =
+          some (asm, target) ∧
+        _root_.EvmCompiler.Yul.Program.RecursiveBridgeCompileResources
+          program ∧
+        Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target ∧
+        evmRecipient.code = Assembly.Bytecode.encodeTarget target := by
+  have hWorld :
+      CompiledAccountMapRel yul.accountMap evm.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared
+  have hOwner :
+      yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.codeOwner
+  rcases
+      hWorld.ordinaryCall_nondefault_transferCheckedFacts
+        (source := yul.executionEnv.codeOwner)
+        (recipient := EvmYul.AccountAddress.ofUInt256 address)
+        (value := value)
+        hFindYul hCodeNondefault (by simpa [hOwner] using hEnough) with
+    ⟨yulCallMap, evmRecipient, program, asm, target, hTransfer,
+      hYulNonempty, hEvmNonempty, hTransferRel, hFindEvm, hAccount,
+      hContract, hCompile, hStatic, hSourceAccepted,
+      hSourceCompileAccepted, hCompileChecked, hBytecode, hResources,
+      hDecode, hJumpdest, hBytes⟩
+  exact
+    ⟨yulCallMap, evmRecipient, program, asm, target, hTransfer,
+      hYulNonempty, by simpa [hOwner] using hEvmNonempty,
+      by simpa [hOwner] using hTransferRel, hFindEvm, hAccount,
+      hContract, hCompile, hStatic, hSourceAccepted,
+      hSourceCompileAccepted, hCompileChecked, hBytecode, hResources,
+      hDecode, hJumpdest, hBytes⟩
+
+theorem ordinaryCALLBranchFacts_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    {address value : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeNondefault : yulRecipient.code ≠ default)
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance))) :
+    ∃ (yulCallMap : EvmYul.AccountMap .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram),
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target := by
+  rcases
+      ordinaryCall_nondefault_transferCheckedFacts_stateRelConfig
+        hShared hFindYul hCodeNondefault hEnough with
+    ⟨yulCallMap, evmRecipient, program, asm, target, hTransfer,
+      hYulNonempty, hEvmNonempty, hTransferRel, hFindEvm, hAccount,
+      hContract, hCompile, hStatic, hSourceAccepted,
+      hSourceCompileAccepted, hCompileChecked, hBytecode, hResources,
+      hDecode, hJumpdest, hBytes⟩
+  exact
+    ⟨yulCallMap, evmRecipient, program, asm, target,
+      { findYul := hFindYul
+        codeNondefault := hCodeNondefault
+        transfer := hTransfer
+        yulTransferNonempty := hYulNonempty
+        evmTransferNonempty := hEvmNonempty
+        transferRel := hTransferRel
+        findEvm := hFindEvm
+        accountRel := hAccount
+        contract := hContract
+        compileBoundary := hCompile
+        sourceStatic := hStatic
+        sourceAccepted := hSourceAccepted
+        sourceCompileAccepted := hSourceCompileAccepted
+        compileChecked := hCompileChecked
+        bytecode := hBytecode
+        resources := hResources
+        decode := hDecode
+        jumpdest := hJumpdest
+        code := hBytes }⟩
+
+theorem CALLBranchFacts_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (address value : EvmYul.UInt256) :
+    CALLBranchFacts yul evm address value := by
+  have hWorld :
+      CompiledAccountMapRel yul.accountMap evm.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared
+  by_cases hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance))
+  · by_cases hDepth : evm.executionEnv.depth < 1024
+    · cases hPrecompile :
+        EvmYul.PrecompiledContract.ofAddress?
+          (EvmYul.AccountAddress.ofUInt256 address) with
+      | some precompiled =>
+          exact
+            CALLBranchFacts.precompiled precompiled hEnough hDepth
+              hPrecompile
+      | none =>
+          cases hFindYul :
+              yul.accountMap.find?
+                (EvmYul.AccountAddress.ofUInt256 address) with
+          | none =>
+              exact
+                CALLBranchFacts.noCode hEnough hDepth hPrecompile hFindYul
+                  (hWorld.not_find_evm_of_not_find_yul hFindYul)
+          | some yulRecipient =>
+              by_cases hCodeDefault : yulRecipient.code = default
+              · rcases hWorld.find_yul hFindYul with
+                  ⟨evmRecipient, hFindEvm, hAccount⟩
+                exact
+                  CALLBranchFacts.existingDefaultCode yulRecipient
+                    evmRecipient hEnough hDepth hPrecompile hFindYul
+                    hCodeDefault hFindEvm hAccount
+                    (hAccount.evm_code_eq_default_of_yul_code_default
+                      hCodeDefault)
+              · rcases
+                  ordinaryCALLBranchFacts_stateRelConfig
+                    hShared hFindYul hCodeDefault hEnough with
+                  ⟨yulCallMap, evmRecipient, program, asm, target, hFacts⟩
+                exact
+                  CALLBranchFacts.ordinary yulRecipient yulCallMap
+                    evmRecipient program asm target hEnough hDepth
+                    hPrecompile hFacts
+    · exact CALLBranchFacts.depthLimit hEnough hDepth
+  · exact CALLBranchFacts.insufficientFunds hEnough
+
+inductive CALLPrimitiveRel
+    (cfg : Reference.StateRelConfig)
+    (sourceFuel evmFuel gasCost : Nat)
+    (blobVersionedHashes : List ByteArray)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (store : EvmYul.Yul.VarStore)
+    (gas address value inOffset inSize outOffset outSize :
+      EvmYul.UInt256) : Prop where
+  | intro
+      (ret : EvmYul.UInt256)
+      (evmAfter : EvmYul.EVM.State)
+      (yulAfter : EvmYul.SharedState .Yul)
+      (evmCall :
+    EvmYul.EVM.call evmFuel gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (ret, evmAfter))
+      (yulCall :
+    EvmYul.Yul.primCall sourceFuel (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [ret]))
+      (stateRel :
+    Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState) :
+      CALLPrimitiveRel cfg sourceFuel evmFuel gasCost blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize
+
+theorem primCall_CALL_insufficientFunds_emptyReturn_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hNotEnough :
+      ¬ value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  exact
+    primCall_CALL_insufficientFunds_emptyReturn_rel
+      (cfg :=
+        stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+      hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      store hStaticAllowed hNotEnough hGas
+
+theorem CALLPrimitiveRel.insufficientFunds_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hNotEnough :
+      ¬ value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ fuel.succ gasCost blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall ByteArray.empty
+      inOffset inSize outOffset outSize).gasAvailable +
+      EvmYul.UInt256.ofNat callGas
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      substate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate }
+  rcases
+      primCall_CALL_insufficientFunds_emptyReturn_rel_stateRelConfig
+        hShared store hStaticAllowed hNotEnough hGas with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨0⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, charged, callGas, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, charged, callGas, target] using hRel
+
+theorem primCall_CALL_depthLimit_emptyReturn_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepthLimit : ¬ evm.executionEnv.depth < 1024)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  exact
+    primCall_CALL_depthLimit_emptyReturn_rel
+      (cfg :=
+        stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+      hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      store hStaticAllowed hEnough hDepthLimit hGas
+
+theorem CALLPrimitiveRel.depthLimit_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepthLimit : ¬ evm.executionEnv.depth < 1024)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ fuel.succ gasCost blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall ByteArray.empty
+      inOffset inSize outOffset outSize).gasAvailable +
+      EvmYul.UInt256.ofNat callGas
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      substate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate }
+  rcases
+      primCall_CALL_depthLimit_emptyReturn_rel_stateRelConfig
+        hShared store hStaticAllowed hEnough hDepthLimit hGas with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨0⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, charged, callGas, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, charged, callGas, target] using hRel
+
 theorem dispatcherOutcomeRel_regular_ok_whole_running_compiledAccountMapRel
     {varStackRel : Reference.VarStackRel}
     {terminalCfgRel :
@@ -4470,6 +5773,115 @@ theorem sharedStateRel_of_XResultAgrees_halted_success
     ⟨hNotRevert, sharedStateRel_of_eraseGas_eq hShared hErase hGas,
       hOutput⟩
 
+theorem terminalReturnData_eq_of_halted_success
+    {cfg : Reference.StateRelConfig}
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {output : ByteArray}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hHaltOutput : halt.output = halt.kind.output halt.state)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild output))
+    (hNonReturnEmpty :
+      halt.kind ≠ .return →
+        yulChild.toMachineState.H_return = ByteArray.empty) :
+    yulChild.toMachineState.H_return = output := by
+  rcases hTargetChild with ⟨_hChain, hMachine⟩
+  rcases hAgree with ⟨hNotRevert, _hErase, hOutput⟩
+  cases hKind : halt.kind with
+  | stop =>
+      have hNotReturn : halt.kind ≠ .return := by
+        intro hReturn
+        rw [hKind] at hReturn
+        cases hReturn
+      have hEmpty := hNonReturnEmpty hNotReturn
+      have hHaltEmpty : halt.output = ByteArray.empty := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return = ByteArray.empty := hEmpty
+        _ = halt.output := hHaltEmpty.symm
+        _ = output := hOutput.symm
+  | «return» =>
+      have hHaltReturn :
+          halt.output = halt.state.toMachineState.H_return := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return =
+            halt.state.toMachineState.H_return := hMachine.H_return
+        _ = halt.output := hHaltReturn.symm
+        _ = output := hOutput.symm
+  | revert =>
+      exact False.elim (hNotRevert hKind)
+  | selfdestruct =>
+      have hNotReturn : halt.kind ≠ .return := by
+        intro hReturn
+        rw [hKind] at hReturn
+        cases hReturn
+      have hEmpty := hNonReturnEmpty hNotReturn
+      have hHaltEmpty : halt.output = ByteArray.empty := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return = ByteArray.empty := hEmpty
+        _ = halt.output := hHaltEmpty.symm
+        _ = output := hOutput.symm
+
+theorem terminalReturnData_eq_of_halted_success_H_return
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {output : ByteArray}
+    (hTargetHReturn :
+      yulChild.toMachineState.H_return =
+        halt.state.toMachineState.H_return)
+    (hHaltOutput : halt.output = halt.kind.output halt.state)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild output))
+    (hNonReturnEmpty :
+      halt.kind ≠ .return →
+        yulChild.toMachineState.H_return = ByteArray.empty) :
+    yulChild.toMachineState.H_return = output := by
+  rcases hAgree with ⟨hNotRevert, _hErase, hOutput⟩
+  cases hKind : halt.kind with
+  | stop =>
+      have hNotReturn : halt.kind ≠ .return := by
+        intro hReturn
+        rw [hKind] at hReturn
+        cases hReturn
+      have hEmpty := hNonReturnEmpty hNotReturn
+      have hHaltEmpty : halt.output = ByteArray.empty := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return = ByteArray.empty := hEmpty
+        _ = halt.output := hHaltEmpty.symm
+        _ = output := hOutput.symm
+  | «return» =>
+      have hHaltReturn :
+          halt.output = halt.state.toMachineState.H_return := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return =
+            halt.state.toMachineState.H_return := hTargetHReturn
+        _ = halt.output := hHaltReturn.symm
+        _ = output := hOutput.symm
+  | revert =>
+      exact False.elim (hNotRevert hKind)
+  | selfdestruct =>
+      have hNotReturn : halt.kind ≠ .return := by
+        intro hReturn
+        rw [hKind] at hReturn
+        cases hReturn
+      have hEmpty := hNonReturnEmpty hNotReturn
+      have hHaltEmpty : halt.output = ByteArray.empty := by
+        simpa [Assembly.HaltKind.output, hKind] using hHaltOutput
+      calc
+        yulChild.toMachineState.H_return = ByteArray.empty := hEmpty
+        _ = halt.output := hHaltEmpty.symm
+        _ = output := hOutput.symm
+
 theorem XResultAgrees_halted_revert
     {halt : Assembly.Halt}
     {returnedGas : EvmYul.UInt256}
@@ -4597,6 +6009,78 @@ theorem restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace
     hParent parentStore childStore addr hTargetChild hTrace.halted_output
     hAgree inOffset inSize outOffset outSize hGas
 
+theorem restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace_targetGas
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {returnedGas targetGas : EvmYul.UInt256}
+    {output : ByteArray}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        (.halted halt))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.revert returnedGas output))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    halt.kind = .revert ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreRevertedContractCallState
+            (EvmYul.Yul.addAccessedAccount
+              (.Ok yulParent parentStore) addr)
+            (.Ok yulChild childStore)
+            inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize with
+                gasAvailable := targetGas }
+            substate :=
+              (EvmYul.State.addAccessedAccount
+                evmParent.toState addr).substate } := by
+  rcases XResultAgrees_halted_revert hAgree with
+    ⟨hKind, hResultOutput⟩
+  rcases hTargetChild with ⟨_hChildChain, hChildMachine⟩
+  have hHaltReturn :
+      halt.output = halt.state.toMachineState.H_return := by
+    simpa [Assembly.HaltKind.output, hKind] using hTrace.halted_output
+  have hYulOutput :
+      yulChild.toMachineState.H_return = output := by
+    calc
+      yulChild.toMachineState.H_return =
+          halt.state.toMachineState.H_return := hChildMachine.H_return
+      _ = halt.output := hHaltReturn.symm
+      _ = output := hResultOutput.symm
+  have hGasYul :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall
+          yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [hYulOutput] using hGas
+  rcases
+    restoreRevertedContractCallState_afterAccess_ok_rel
+      hParent parentStore childStore addr
+      (yulChild := yulChild)
+      inOffset inSize outOffset outSize hGasYul with
+    ⟨yulAfter, hRestore, hRel⟩
+  exact ⟨hKind, yulAfter, hRestore, by simpa [hYulOutput] using hRel⟩
+
 theorem CompiledAccountMapRel.of_eraseGas_eq
     {yul : EvmYul.AccountMap .Yul} {target evm : EVMState}
     (hWorld : CompiledAccountMapRel yul target.accountMap)
@@ -4607,6 +6091,670 @@ theorem CompiledAccountMapRel.of_eraseGas_eq
       congrArg (fun state : EVMState => state.accountMap) hErase
   rw [hAccountMap]
   exact hWorld
+
+/--
+The part of a child execution state that parent call restoration actually
+merges back into the caller.
+
+This deliberately omits the child machine-state relation: successful call
+restoration receives the return bytes explicitly and computes the parent
+machine state from the parent, while the child contributes only world data.
+-/
+structure ExternalChildMergeRel
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.SharedState .EVM) : Prop where
+  accountMap :
+    CompiledAccountMapRel yul.accountMap evm.accountMap
+  substate : yul.substate = evm.substate
+  createdAccounts : yul.createdAccounts = evm.createdAccounts
+
+namespace ExternalChildMergeRel
+
+theorem of_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap) :
+    ExternalChildMergeRel yul evm := by
+  exact
+    ⟨hWorld, hShared.chain.substate, hShared.chain.createdAccounts⟩
+
+theorem of_eraseGas_eq
+    {yul : EvmYul.SharedState .Yul} {target evm : EVMState}
+    (hChild : ExternalChildMergeRel yul target.toSharedState)
+    (hErase : Assembly.eraseGas evm = Assembly.eraseGas target) :
+    ExternalChildMergeRel yul evm.toSharedState := by
+  have hSubstate : evm.substate = target.substate := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.substate) hErase
+  have hCreated : evm.createdAccounts = target.createdAccounts := by
+    simpa [Assembly.eraseGas] using
+      congrArg (fun state : EVMState => state.createdAccounts) hErase
+  exact
+    ⟨hChild.accountMap.of_eraseGas_eq hErase,
+      by simpa [hSubstate.symm] using hChild.substate,
+      by simpa [hCreated.symm] using hChild.createdAccounts⟩
+
+theorem selfdestruct_of_sharedStateRel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul}
+    {evm : EvmYul.SharedState .EVM}
+    (hShared : Reference.SharedStateRel cfg yul evm)
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (recipient : Word) (store : EvmYul.Yul.VarStore)
+    (pc : Word) (stack tail : EvmYul.Stack Word) (execLength : Nat) :
+    ExternalChildMergeRel
+      (EvmYul.Yul.selfdestructState (.Ok yul store) recipient).toSharedState
+      (EvmYul.EVM.selfdestructState
+        { toSharedState := evm
+          pc := pc
+          stack := stack
+          execLength := execLength } recipient tail).toSharedState := by
+  let source := yul.executionEnv.codeOwner
+  let target : EvmYul.AccountAddress :=
+    EvmYul.AccountAddress.ofUInt256 recipient
+  let created := yul.createdAccounts.contains source
+  have hSource : evm.executionEnv.codeOwner = source := by
+    simpa [source] using hShared.chain.executionEnv.codeOwner.symm
+  have hCreated :
+      evm.createdAccounts.contains evm.executionEnv.codeOwner = created := by
+    simp [created, source, hSource, hShared.chain.createdAccounts]
+  have hCreatedSource :
+      evm.createdAccounts.contains source = created := by
+    simp [created, source, hShared.chain.createdAccounts]
+  refine ⟨?_, ?_, ?_⟩
+  · simpa [EvmYul.Yul.selfdestructState, EvmYul.EVM.selfdestructState,
+      EvmYul.Yul.State.setState, EvmYul.Yul.State.setMachineState,
+      EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.toState,
+      EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.toMachineState,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+      source, target, created, hSource, hCreated, hCreatedSource] using
+      hWorld.selfdestructAccountMap source target created
+  · simp [EvmYul.Yul.selfdestructState, EvmYul.EVM.selfdestructState,
+      EvmYul.Yul.State.setState, EvmYul.Yul.State.setMachineState,
+      EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.toState,
+      EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.toMachineState,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+      source, created, hSource, hCreatedSource,
+      hShared.chain.substate]
+  · simp [EvmYul.Yul.selfdestructState, EvmYul.EVM.selfdestructState,
+      EvmYul.Yul.State.setState, EvmYul.Yul.State.setMachineState,
+      EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.toState,
+      EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.toMachineState,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+      hShared.chain.createdAccounts]
+
+end ExternalChildMergeRel
+
+set_option maxHeartbeats 1200000 in
+
+theorem canonicalTerminalRel_externalChildMergeRel
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {kind : Assembly.HaltKind} {value : Word}
+    {yulChild : EvmYul.SharedState .Yul}
+    {childStore : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        kind value (.Ok yulChild childStore) compiler) :
+    ExternalChildMergeRel yulChild compiler.shared := by
+  have hNonRevert : kind ≠ .revert :=
+    Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel_nonrevert
+      hRel
+  rcases hRel with
+    ⟨yulPrim, argFuel, source, sourceAfterArgs, sourceValues, args, rest,
+      codeOverride, compilerAfterArgs, sharedAfter, layout, hTerminal,
+      hExecSeq, hEvalArgs, hArgsRel, hStruct, hCompiler⟩
+  cases hArgsRel with
+  | @ok sourceShared sourceStore compilerAfterArgs hShared _hVars =>
+      let sourceAfterArgs : Reference.State := .Ok sourceShared sourceStore
+      have hWorld :
+          CompiledAccountMapRel sourceShared.accountMap
+            compilerAfterArgs.shared.accountMap :=
+        compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared
+      cases yulPrim <;> simp [Prim.terminal?] at hTerminal
+      case StopArith op =>
+        cases op <;> simp at hTerminal
+        cases hTerminal
+        cases argFuel with
+        | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+        | succ fuel =>
+            let stopState : Reference.State :=
+              sourceAfterArgs.setMachineState
+                (sourceAfterArgs.toMachineState.setHReturn ByteArray.empty)
+            have hPrim :
+                EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                    ((.StopArith .STOP : EvmYul.Operation .Yul)) sourceValues =
+                  .error (.YulHalt stopState (EvmYul.UInt256.ofNat 0)) := by
+              simpa [stopState, sourceAfterArgs] using
+                PrimSemantics.primCall_stop_eq fuel sourceAfterArgs sourceValues
+            have hResult :=
+              Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                (sourceFuel := fuel.succ) (source := source)
+                (sourceAfterArgs := sourceAfterArgs)
+                (yulPrim := (.StopArith .STOP : EvmYul.Operation .Yul))
+                (args := args) (rest := rest) (codeOverride := codeOverride)
+                (argValues := sourceValues)
+                (err := .YulHalt stopState (EvmYul.UInt256.ofNat 0))
+                (sourceResult :=
+                  .error (.YulHalt (.Ok yulChild childStore) value))
+                hEvalArgs hPrim hExecSeq
+            injection hResult with hErr
+            injection hErr with hState _hValue
+            have hStateOk :
+                (.Ok yulChild childStore : Reference.State) =
+                  .Ok
+                    { sourceShared with
+                      toMachineState :=
+                        sourceShared.toMachineState.setHReturn
+                          ByteArray.empty }
+                    sourceStore := by
+              simpa [stopState, sourceAfterArgs,
+                EvmYul.Yul.State.setMachineState] using hState
+            injection hStateOk with hSharedEq _hStoreEq
+            have hSharedAfter :
+                sharedAfter =
+                    { compilerAfterArgs.shared with
+                      toMachineState :=
+                        (compilerAfterArgs.shared.toMachineState.setReturnData
+                          ByteArray.empty).setHReturn ByteArray.empty } := by
+              let iso : EVMState :=
+                { toSharedState := compilerAfterArgs.shared,
+                  pc := EvmYul.UInt256.ofNat 0,
+                  stack := sourceValues,
+                  execLength := 0 }
+              have hStep :
+                  Structured.Terminal.step .stop iso =
+                    .ok
+                      { iso with
+                        toMachineState :=
+                          (iso.toMachineState.setReturnData
+                            ByteArray.empty).setHReturn ByteArray.empty } := by
+                simp [iso, Structured.Terminal.step,
+                  Assembly.Target.stepInstr, Assembly.HaltKind.toPrimOp,
+                  Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+                  Assembly.PrimOp.toEVM]
+                rfl
+              simpa [Locals.Source.PrimitiveSemantics.structured,
+                iso, hStep, EvmYul.EVM.State.toSharedState] using
+                hStruct.symm
+            cases hSharedEq
+            cases hSharedAfter
+            cases hCompiler
+            exact
+              ⟨by simpa using hWorld,
+                by simpa using hShared.chain.substate,
+                by simpa using hShared.chain.createdAccounts⟩
+      case System op =>
+        cases op <;> simp at hTerminal
+        · -- RETURN
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              cases sourceValues with
+              | nil =>
+                  have hPrim :=
+                    PrimSemantics.primCall_return_nil_eq fuel sourceAfterArgs
+                  have hResult :=
+                    Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                      (sourceFuel := fuel.succ) (source := source)
+                      (sourceAfterArgs := sourceAfterArgs)
+                      (yulPrim := (.System .RETURN : EvmYul.Operation .Yul))
+                      (args := args) (rest := rest)
+                      (codeOverride := codeOverride) (argValues := [])
+                      (err := .InvalidArguments)
+                      (sourceResult :=
+                        .error (.YulHalt (.Ok yulChild childStore) value))
+                      hEvalArgs hPrim hExecSeq
+                  cases hResult
+              | cons offset restValues =>
+                  cases restValues with
+                  | nil =>
+                      have hPrim :=
+                        PrimSemantics.primCall_return_singleton_eq fuel
+                          sourceAfterArgs offset
+                      have hResult :=
+                        Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                          (sourceFuel := fuel.succ) (source := source)
+                          (sourceAfterArgs := sourceAfterArgs)
+                          (yulPrim := (.System .RETURN :
+                            EvmYul.Operation .Yul))
+                          (args := args) (rest := rest)
+                          (codeOverride := codeOverride)
+                          (argValues := [offset])
+                          (err := .InvalidArguments)
+                          (sourceResult :=
+                            .error (.YulHalt (.Ok yulChild childStore) value))
+                          hEvalArgs hPrim hExecSeq
+                      cases hResult
+                  | cons size more =>
+                      cases more with
+                      | nil =>
+                          have hPrimEq :
+                              EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                                  ((.System .RETURN :
+                                    EvmYul.Operation .Yul)) [offset, size] =
+                                .error
+                                  (.YulHalt
+                                    (sourceAfterArgs.setMachineState
+                                      (sourceAfterArgs.toMachineState.evmReturn
+                                        offset size))
+                                    ((Option.none : Option Word).getD ⟨1⟩)) := by
+                            simp [EvmYul.Yul.primCall]
+                            have hStep :
+                                EvmYul.step
+                                    ((.System .RETURN :
+                                      EvmYul.Operation .Yul)) none =
+                                  (fun yulState lits =>
+                                    match
+                                      EvmYul.Yul.binaryMachineStateOp
+                                        EvmYul.MachineState.evmReturn
+                                        yulState lits with
+                                    | .error e => .error e
+                                    | .ok (s, v) =>
+                                        .error
+                                          (EvmYul.Yul.Exception.YulHalt s
+                                            (v.getD ⟨1⟩))) := by
+                              rfl
+                            rw [hStep]
+                            rfl
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := [offset, size])
+                              (err :=
+                                .YulHalt
+                                  (sourceAfterArgs.setMachineState
+                                    (sourceAfterArgs.toMachineState.evmReturn
+                                      offset size))
+                                  ((Option.none : Option Word).getD ⟨1⟩))
+                              (sourceResult :=
+                                .error
+                                  (.YulHalt (.Ok yulChild childStore) value))
+                              hEvalArgs hPrimEq hExecSeq
+                          injection hResult with hErr
+                          injection hErr with hState _hValue
+                          have hStateOk :
+                              (.Ok yulChild childStore : Reference.State) =
+                                .Ok
+                                  { sourceShared with
+                                    toMachineState :=
+                                      sourceShared.toMachineState.evmReturn
+                                        offset size }
+                                  sourceStore := by
+                            simpa [sourceAfterArgs,
+                              EvmYul.Yul.State.setMachineState] using hState
+                          injection hStateOk with hSharedEq _hStoreEq
+                          have hSharedAfterOk :
+                              (Except.ok sharedAfter :
+                                Except EVMException
+                                  (EvmYul.SharedState .EVM)) =
+                                .ok
+                                  { compilerAfterArgs.shared with
+                                    toMachineState :=
+                                      compilerAfterArgs.shared.toMachineState.evmReturn
+                                        offset size } := by
+                            simpa [Locals.Source.PrimitiveSemantics.structured,
+                              Structured.Terminal.step,
+                              Assembly.Target.stepInstr,
+                              Assembly.PrimOp.step,
+                              Assembly.PrimOp.continuingStep?,
+                              Assembly.HaltKind.toPrimOp,
+                              Assembly.PrimOp.toEVM,
+                              Locals.SourceLowering.PrimitiveSemantics.evm_step_return_eq_binaryMachineStateOp,
+                              EvmYul.EVM.binaryMachineStateOp,
+                              EvmYul.Stack.pop2,
+                              EvmYul.EVM.State.replaceStackAndIncrPC,
+                              EvmYul.EVM.State.incrPC,
+                              EvmYul.EVM.State.toSharedState,
+                              Id.run] using hStruct.symm
+                          injection hSharedAfterOk with hSharedAfter
+                          cases hSharedEq
+                          cases hSharedAfter
+                          cases hCompiler
+                          exact
+                            ⟨by simpa using hWorld,
+                              by simpa using hShared.chain.substate,
+                              by simpa using hShared.chain.createdAccounts⟩
+                      | cons extra extras =>
+                          have hPrim :=
+                            PrimSemantics.primCall_return_cons_cons_cons_eq
+                              fuel sourceAfterArgs offset size extra extras
+                          have hResult :=
+                            Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                              (sourceFuel := fuel.succ) (source := source)
+                              (sourceAfterArgs := sourceAfterArgs)
+                              (yulPrim := (.System .RETURN :
+                                EvmYul.Operation .Yul))
+                              (args := args) (rest := rest)
+                              (codeOverride := codeOverride)
+                              (argValues := offset :: size :: extra :: extras)
+                              (err := .InvalidArguments)
+                              (sourceResult :=
+                                .error
+                                  (.YulHalt (.Ok yulChild childStore) value))
+                              hEvalArgs hPrim hExecSeq
+                          cases hResult
+        · -- REVERT
+          cases hTerminal
+          exact False.elim (hNonRevert rfl)
+        · -- SELFDESTRUCT
+          cases hTerminal
+          cases argFuel with
+          | zero => simp [EvmYul.Yul.evalArgs] at hEvalArgs
+          | succ fuel =>
+              by_cases hStatic : sourceAfterArgs.executionEnv.perm = false
+              · have hPrim :=
+                  PrimSemantics.primCall_selfdestruct_static_eq fuel
+                    sourceAfterArgs sourceValues hStatic
+                have hResult :=
+                  Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                    (sourceFuel := fuel.succ) (source := source)
+                    (sourceAfterArgs := sourceAfterArgs)
+                    (yulPrim := (.System .SELFDESTRUCT :
+                      EvmYul.Operation .Yul))
+                    (args := args) (rest := rest)
+                    (codeOverride := codeOverride) (argValues := sourceValues)
+                    (err := .StaticModeViolation)
+                    (sourceResult :=
+                      .error (.YulHalt (.Ok yulChild childStore) value))
+                    hEvalArgs hPrim hExecSeq
+                cases hResult
+              · cases sourceValues with
+                | nil =>
+                    have hPrim :=
+                      PrimSemantics.primCall_selfdestruct_nil_eq fuel
+                        sourceAfterArgs hStatic
+                    have hResult :=
+                      Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                        (sourceFuel := fuel.succ) (source := source)
+                        (sourceAfterArgs := sourceAfterArgs)
+                        (yulPrim := (.System .SELFDESTRUCT :
+                          EvmYul.Operation .Yul))
+                        (args := args) (rest := rest)
+                        (codeOverride := codeOverride) (argValues := [])
+                        (err := .InvalidArguments)
+                        (sourceResult :=
+                          .error (.YulHalt (.Ok yulChild childStore) value))
+                        hEvalArgs hPrim hExecSeq
+                    cases hResult
+                | cons recipient more =>
+                    cases more with
+                    | nil =>
+                        have hPrim :
+                            EvmYul.Yul.primCall fuel.succ sourceAfterArgs
+                                ((.System .SELFDESTRUCT :
+                                  EvmYul.Operation .Yul))
+                                [recipient] =
+                              .error
+                                (.YulHalt
+                                  (PrimSemantics.selfdestructState
+                                    sourceAfterArgs recipient)
+                                  (EvmYul.UInt256.ofNat 0)) := by
+                          simp [EvmYul.Yul.primCall, hStatic,
+                            PrimSemantics.step_selfdestruct_lit_eq]
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := [recipient])
+                            (err :=
+                              .YulHalt
+                                (PrimSemantics.selfdestructState
+                                  sourceAfterArgs recipient)
+                                (EvmYul.UInt256.ofNat 0))
+                            (sourceResult :=
+                              .error
+                                (.YulHalt (.Ok yulChild childStore) value))
+                            hEvalArgs hPrim hExecSeq
+                        injection hResult with hErr
+                        injection hErr with hState _hValue
+                        have hStateOk :
+                            (.Ok yulChild childStore : Reference.State) =
+                              PrimSemantics.selfdestructState
+                                sourceAfterArgs recipient := by
+                          exact hState
+                        have hYulChild :
+                            yulChild =
+                              (PrimSemantics.selfdestructState
+                                sourceAfterArgs recipient).toSharedState := by
+                          simpa using
+                            congrArg EvmYul.Yul.State.toSharedState hStateOk
+                        have hSharedAfter :
+                            sharedAfter =
+                                (Locals.SourceLowering.PrimitiveSemantics.selfdestructTerminalState
+                                    { toSharedState := compilerAfterArgs.shared,
+                                      pc := EvmYul.UInt256.ofNat 0,
+                                      stack := [recipient],
+                                      execLength := 0 }
+                                    recipient []).toSharedState := by
+                          let iso : EVMState :=
+                            { toSharedState := compilerAfterArgs.shared,
+                              pc := EvmYul.UInt256.ofNat 0,
+                              stack := [recipient],
+                              execLength := 0 }
+                          have hStep :
+                              Structured.Terminal.step .selfdestruct iso =
+                                .ok
+                                  (Locals.SourceLowering.PrimitiveSemantics.selfdestructTerminalState
+                                      iso recipient []) := by
+                            apply
+                              Locals.SourceLowering.PrimitiveSemantics.structured_terminal_step_selfdestruct_of_stack
+                            simp [iso]
+                          simpa [Locals.Source.PrimitiveSemantics.structured,
+                            iso, hStep] using hStruct.symm
+                        cases hCompiler
+                        rw [hSharedAfter]
+                        have hMerge :=
+                          ExternalChildMergeRel.selfdestruct_of_sharedStateRel
+                            hShared hWorld recipient sourceStore
+                            (EvmYul.UInt256.ofNat 0) [recipient] [] 0
+                        simpa [hYulChild, PrimSemantics.selfdestructState,
+                          sourceAfterArgs] using hMerge
+                    | cons extra extras =>
+                        have hPrim :=
+                          PrimSemantics.primCall_selfdestruct_cons_cons_eq
+                            fuel sourceAfterArgs recipient extra extras hStatic
+                        have hResult :=
+                          Reference.SourceBridgeFacts.execSeq_expr_prim_call_error_of_evalArgs_ok_primCall_error
+                            (sourceFuel := fuel.succ) (source := source)
+                            (sourceAfterArgs := sourceAfterArgs)
+                            (yulPrim := (.System .SELFDESTRUCT :
+                              EvmYul.Operation .Yul))
+                            (args := args) (rest := rest)
+                            (codeOverride := codeOverride)
+                            (argValues := recipient :: extra :: extras)
+                            (err := .InvalidArguments)
+                            (sourceResult :=
+                              .error
+                                (.YulHalt (.Ok yulChild childStore) value))
+                            hEvalArgs hPrim hExecSeq
+                        cases hResult
+
+theorem wholeProgramOutcomeRel_halt_externalChildMergeRel
+    {yul : EvmYul.SharedState .Yul}
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {halt : Assembly.Halt}
+    (hChild : ExternalChildMergeRel yul source.shared)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) (.halted halt)) :
+    ExternalChildMergeRel yul halt.state.toSharedState := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.halt,
+          Locals.Source.Outcome.halt] at hBlock hStructured
+      rename_i directKind
+      rcases hStructured with ⟨_hKind, tokens, hFrame⟩
+      have hTargetAccountMap :
+          halt.state.accountMap = directState.evm.accountMap := by
+        simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+          congrArg (fun state : EVMState => state.accountMap)
+            hFrame.dataRel
+      have hDirectAccountMap :
+          directState.evm.accountMap = source.shared.accountMap := by
+        simpa using
+          congrArg (fun shared : EvmYul.SharedState .EVM =>
+            shared.accountMap) hBlock.2.symm
+      have hAccountMap :
+          CompiledAccountMapRel yul.accountMap halt.state.accountMap := by
+        simpa [hTargetAccountMap, hDirectAccountMap] using hChild.accountMap
+      have hTargetSubstate :
+          halt.state.substate = directState.evm.substate := by
+        simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+          congrArg (fun state : EVMState => state.substate)
+            hFrame.dataRel
+      have hDirectSubstate :
+          directState.evm.substate = source.shared.substate := by
+        simpa using
+          congrArg (fun shared : EvmYul.SharedState .EVM =>
+            shared.substate) hBlock.2.symm
+      have hSubstate : yul.substate = halt.state.substate := by
+        calc
+          yul.substate = source.shared.substate := hChild.substate
+          _ = directState.evm.substate := hDirectSubstate.symm
+          _ = halt.state.substate := hTargetSubstate.symm
+      have hTargetCreated :
+          halt.state.createdAccounts =
+            directState.evm.createdAccounts := by
+        simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+          congrArg (fun state : EVMState => state.createdAccounts)
+            hFrame.dataRel
+      have hDirectCreated :
+          directState.evm.createdAccounts =
+            source.shared.createdAccounts := by
+        simpa using
+          congrArg (fun shared : EvmYul.SharedState .EVM =>
+            shared.createdAccounts) hBlock.2.symm
+      have hCreated : yul.createdAccounts = halt.state.createdAccounts := by
+        calc
+          yul.createdAccounts = source.shared.createdAccounts :=
+            hChild.createdAccounts
+          _ = directState.evm.createdAccounts := hDirectCreated.symm
+          _ = halt.state.createdAccounts := hTargetCreated.symm
+      exact ⟨hAccountMap, hSubstate, hCreated⟩
+
+theorem wholeProgramOutcomeRel_halt_H_return
+    {yul : EvmYul.SharedState .Yul}
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {halt : Assembly.Halt}
+    (hChild :
+      yul.toMachineState.H_return =
+        source.shared.toMachineState.H_return)
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) (.halted halt)) :
+    yul.toMachineState.H_return =
+      halt.state.toMachineState.H_return := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.halt,
+          Locals.Source.Outcome.halt] at hBlock hStructured
+      rename_i directKind
+      rcases hStructured with ⟨_hKind, tokens, hFrame⟩
+      have hTargetHReturn :
+          halt.state.toMachineState.H_return =
+            directState.evm.toMachineState.H_return := by
+        simpa [Structured.Preservation.eraseControl, Assembly.eraseGas] using
+          congrArg
+            (fun state : EVMState => state.toMachineState.H_return)
+            hFrame.dataRel
+      have hDirectHReturn :
+          directState.evm.toMachineState.H_return =
+            source.shared.toMachineState.H_return := by
+        simpa using
+          congrArg
+            (fun shared : EvmYul.SharedState .EVM =>
+              shared.toMachineState.H_return)
+            hBlock.2.symm
+      calc
+        yul.toMachineState.H_return =
+            source.shared.toMachineState.H_return := hChild
+        _ = directState.evm.toMachineState.H_return :=
+            hDirectHReturn.symm
+        _ = halt.state.toMachineState.H_return := hTargetHReturn.symm
+
+theorem dispatcherOutcomeRel_yulHalt_ok_whole_childMergeRelations
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared finalShared : EvmYul.SharedState .Yul}
+    {initialStore finalStore : EvmYul.Yul.VarStore}
+    {value : Word}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.yulHalt (.Ok finalShared finalStore) value) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hTerminalChild :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok finalShared finalStore) compiler →
+          ExternalChildMergeRel finalShared compiler.shared) :
+    ∃ kind compiler halt,
+      terminalRel kind value (.Ok finalShared finalStore) compiler ∧
+        sourceOutcome = Functions.Source.Outcome.halt kind compiler ∧
+        targetOutcome = .halted halt ∧
+        halt.kind = kind ∧
+        ExternalChildMergeRel finalShared halt.state.toSharedState := by
+  rcases dispatcherOutcomeRel_yulHalt_whole_halted hOutcomeRel hWhole with
+    ⟨kind, compiler, halt, hTerminal, hSource, hTarget, hKind⟩
+  have hWholeHalt :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind compiler) (.halted halt) := by
+    simpa [hSource, hTarget] using hWhole
+  exact
+    ⟨kind, compiler, halt, hTerminal, hSource, hTarget, hKind,
+      wholeProgramOutcomeRel_halt_externalChildMergeRel
+        (hTerminalChild hTerminal) hWholeHalt⟩
 
 theorem restoreSuccessfulContractCallState_childEvm_rel
     {cfg : Reference.StateRelConfig}
@@ -4698,6 +6846,94 @@ theorem restoreSuccessfulContractCallState_childEvm_rel
       (evmChildCreated := evmChild.createdAccounts)
       (targetGas := targetGas)
       hAccountMap hSubstate hChildChain.createdAccounts
+      returnData inOffset inSize outOffset outSize hGas
+
+theorem restoreSuccessfulContractCallState_childMerge_rel
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {evmChild : EVMState}
+    (hChild : ExternalChildMergeRel yulChild evmChild.toSharedState)
+    (returnData : ByteArray)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ yulAfter,
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (.Ok yulParent parentStore)
+          (.Ok yulChild childStore)
+          restoreStore returnData inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+      Reference.SharedStateRel cfg yulAfter
+        { evmParent with
+          toMachineState :=
+            { evmParent.toMachineState.finishExternalCall returnData
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.accountMap
+            else
+              evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              evmParent.substate
+            else
+              evmChild.substate
+          createdAccounts := evmChild.createdAccounts } := by
+  rcases hParent with ⟨hParentChain, hParentMachine⟩
+  have hAccountMap :
+      cfg.accountMapRel
+        (if yulChild.accountMap.isEmpty then
+          yulParent.accountMap
+        else
+          yulChild.accountMap)
+        (if evmChild.accountMap.isEmpty then
+          evmParent.accountMap
+        else
+          evmChild.accountMap) :=
+    hCfgAccountMap <|
+      CompiledAccountMapRel.if_empty_parent
+        hParentWorld hChild.accountMap hChild.accountMap.isEmpty_eq
+  have hSubstate :
+      (if yulChild.accountMap.isEmpty then
+        yulParent.substate
+      else
+        yulChild.substate) =
+        if evmChild.accountMap.isEmpty then
+          evmParent.substate
+        else
+          evmChild.substate := by
+    cases hEvm : evmChild.accountMap.isEmpty
+    · have hYul : yulChild.accountMap.isEmpty = false := by
+        simpa [hEvm] using hChild.accountMap.isEmpty_eq
+      simp [hYul, hChild.substate]
+    · have hYul : yulChild.accountMap.isEmpty = true := by
+        simpa [hEvm] using hChild.accountMap.isEmpty_eq
+      simp [hYul, hParentChain.substate]
+  exact
+    restoreSuccessfulContractCallState_ok_rel
+      ⟨hParentChain, hParentMachine⟩ parentStore childStore restoreStore
+      (yulChild := yulChild)
+      (evmChildAccountMap := evmChild.accountMap)
+      (evmChildSubstate := evmChild.substate)
+      (evmChildCreated := evmChild.createdAccounts)
+      (targetGas := targetGas)
+      hAccountMap hSubstate hChild.createdAccounts
       returnData inOffset inSize outOffset outSize hGas
 
 theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success
@@ -4899,6 +7135,68 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success
         (hTargetChildWorld.of_eraseGas_eq hErase)
         returnData inOffset inSize outOffset outSize hGas⟩
 
+theorem restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_merge
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {returnData : ByteArray}
+    (hTargetChild :
+      ExternalChildMergeRel yulChild halt.state.toSharedState)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild returnData))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall returnData
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    halt.kind ≠ .revert ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreSuccessfulContractCallState
+            (.Ok yulParent parentStore)
+            (.Ok yulChild childStore)
+            restoreStore returnData inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall returnData
+                  inOffset inSize outOffset outSize with
+                gasAvailable := targetGas }
+            accountMap :=
+              if evmChild.accountMap.isEmpty then
+                evmParent.accountMap
+              else
+                evmChild.accountMap
+            substate :=
+              if evmChild.accountMap.isEmpty then
+                evmParent.substate
+              else
+                evmChild.substate
+            createdAccounts := evmChild.createdAccounts } := by
+  rcases hAgree with ⟨hNotRevert, hErase, _hOutput⟩
+  exact
+    ⟨hNotRevert,
+      restoreSuccessfulContractCallState_childMerge_rel
+        hParent hParentWorld hCfgAccountMap
+        parentStore childStore restoreStore
+        (hTargetChild.of_eraseGas_eq hErase)
+        returnData inOffset inSize outOffset outSize hGas⟩
+
 theorem sharedStateRel_freshExternalCallWithWorld
     {cfg : Reference.StateRelConfig}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.SharedState .EVM}
@@ -5016,9 +7314,11 @@ theorem sharedStateRel_callFrameFromFreshEvmFrame
     (weiValue : EvmYul.UInt256)
     (calldata : ByteArray)
     (gasPrice depth : Nat)
-    (header : EvmYul.BlockHeader)
-    (perm : Bool)
-    (blobVersionedHashes : List ByteArray) :
+      (header : EvmYul.BlockHeader)
+      (perm : Bool)
+      (blobVersionedHashes : List ByteArray)
+      (yulCodeBytes evmCodeBytes : ByteArray)
+      (hCodeBytes : yulCodeBytes = evmCode) :
     Reference.SharedStateRel cfg
       { yul with
         toMachineState := EvmYul.MachineState.freshExternalCall yulGas
@@ -5035,7 +7335,8 @@ theorem sharedStateRel_callFrameFromFreshEvmFrame
             header := header
             depth := depth
             perm := perm
-            blobVersionedHashes := blobVersionedHashes }
+            blobVersionedHashes := blobVersionedHashes
+            codeBytes := yulCodeBytes }
         createdAccounts := yulCreated }
       ({ (default : EvmYul.EVM.State) with
         accountMap := evmAccountMap
@@ -5054,7 +7355,8 @@ theorem sharedStateRel_callFrameFromFreshEvmFrame
             header := header
             depth := depth
             perm := perm
-            blobVersionedHashes := blobVersionedHashes }
+            blobVersionedHashes := blobVersionedHashes
+            codeBytes := evmCodeBytes }
         blocks := evm.blocks
         genesisBlockHeader := evm.genesisBlockHeader
         createdAccounts := evmCreated
@@ -5063,8 +7365,9 @@ theorem sharedStateRel_callFrameFromFreshEvmFrame
   exact
     sharedStateRel_freshExternalCallWithWorldFromFreshEvmFrame hShared
       hAccountMap hSubstate
-      (executionEnvRel_callFrame hCode codeOwner sender source weiValue
-        calldata gasPrice depth header perm blobVersionedHashes)
+        (executionEnvRel_callFrame hCode codeOwner sender source weiValue
+          calldata gasPrice depth header perm blobVersionedHashes
+          yulCodeBytes evmCodeBytes hCodeBytes)
       hCreated hGas
 
 def xiInitialState
@@ -5205,7 +7508,7 @@ theorem Xi_emptyCode_STOP_success
   rw [Xi_succ_eq_X]
   rw [EVM_X_emptyCode_STOP_success]
   · simp [EVM_stopState, xiInitialState,
-      EvmYul.MachineState.setReturnData]
+      EvmYul.MachineState.setReturnData, EvmYul.MachineState.setHReturn]
   · simp [xiInitialState, hCode]
   · rfl
 
@@ -5433,16 +7736,113 @@ theorem EVM_call_noCode_success_eq
     omega
   simp [evmCallTransfer_eq_thetaCallTransfer, hNotLt, hNotDepthEq]
 
+theorem EVM_call_existingDefaultCode_success_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {evmRecipient : EvmYul.Account .EVM}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFind :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = some evmRecipient)
+    (hCode : evmRecipient.code = default) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if callMap.isEmpty then evm.accountMap else callMap
+          substate :=
+            (EvmYul.State.addAccessedAccount charged.toState target).substate }) := by
+  dsimp
+  have hSource :
+      EvmYul.AccountAddress.ofUInt256
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) =
+        evm.executionEnv.codeOwner :=
+    AccountAddress_ofUInt256_ofNat evm.executionEnv.codeOwner
+  have hFuel : fuel + 4 = fuel.succ.succ.succ.succ := by
+    omega
+  simp [EvmYul.EVM.call, hEnough, hDepth, EvmYul.toExecute,
+    hNotPrecompile, hFind, hCode, hSource]
+  rw [hFuel]
+  rw [show
+    (Id.run (EvmYul.ToExecute.Code default) :
+      EvmYul.ToExecute .EVM) = EvmYul.ToExecute.Code default from rfl]
+  rw [Theta_emptyCode_STOP_success]
+  have hNotLt :
+      ¬ ((evm.accountMap.find? evm.executionEnv.codeOwner).elim
+          ⟨0⟩ fun account => account.balance) < value := by
+    intro hLt
+    cases hFindOwner : evm.accountMap.find? evm.executionEnv.codeOwner with
+    | none =>
+        simp [hFindOwner, Option.option] at hEnough hLt
+        change value.val ≤ 0 at hEnough
+        change 0 < value.val at hLt
+        omega
+    | some account =>
+        simp [hFindOwner, Option.option] at hEnough hLt
+        change value.val ≤ account.balance.val at hEnough
+        change account.balance.val < value.val at hLt
+        omega
+  have hNotDepthEq : ¬ evm.executionEnv.depth = 1024 := by
+    omega
+  simp [evmCallTransfer_eq_thetaCallTransfer, hNotLt, hNotDepthEq]
+
+theorem callDispatcher_defaultCode_ok
+    {fuel : Nat} {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hCode : shared.executionEnv.code = (default : AstContract)) :
+    EvmYul.Yul.callDispatcher fuel.succ.succ.succ.succ.succ
+        (some (default : AstContract)) (.Ok shared store) =
+      .ok (.Ok shared store, []) := by
+  rw [Reference.Imported.callDispatcher_succ]
+  simp [EvmYul.Yul.State.executionEnv, EvmYul.Yul.State.initcall,
+    EvmYul.Yul.State.mkOk, EvmYul.Yul.State.setStore,
+    EvmYul.Yul.State.zeroFill, EvmYul.Yul.State.multifill,
+    EvmYul.Yul.Ast.FunctionDefinition.params,
+    EvmYul.Yul.Ast.FunctionDefinition.rets,
+    EvmYul.Yul.Ast.FunctionDefinition.body, hCode]
+  rw [show (default : AstContract).dispatcher =
+    EvmYul.Yul.Ast.Stmt.Block [] from rfl]
+  have hFuel : fuel + 3 + 1 = fuel.succ.succ.succ.succ := by
+    omega
+  rw [hFuel]
+  rw [Reference.SourceBridgeFacts.exec_block_block_empty_succ_succ_succ_succ]
+  simp [EvmYul.Yul.State.reviveJump, EvmYul.Yul.State.overwrite?]
+
 theorem call_noCode_emptyReturn_rel
     {cfg : Reference.StateRelConfig}
     {fuel gasCost : Nat}
     {blobVersionedHashes : List ByteArray}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
-    (hChargedShared :
-      Reference.SharedStateRel cfg yul
-        ({ evm with
-          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
-          : EvmYul.EVM.State).toSharedState)
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
     (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
     (hCfgAccountMap :
       ∀ {yulMap : EvmYul.AccountMap .Yul}
@@ -5527,7 +7927,7 @@ theorem call_noCode_emptyReturn_rel
       EVM_call_noCode_success_eq hEnough hDepth hNotPrecompile hMissing
   · have hOwner :
         yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
-      rcases hChargedShared with ⟨hChain, _hMachine⟩
+      rcases hShared with ⟨hChain, _hMachine⟩
       simpa using hChain.executionEnv.codeOwner
     have hMissingYul :
         yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
@@ -5544,9 +7944,295 @@ theorem call_noCode_emptyReturn_rel
     · simpa [hOwner] using hCallMapRel
     · exact
         buildContractCallEmptyReturnState_afterAccess_some_rel
-          hChargedShared store (EvmYul.AccountAddress.ofUInt256 address)
+          hShared store (EvmYul.AccountAddress.ofUInt256 address)
           (hCfgAccountMap (by simpa [hOwner] using hCallMapRel))
           inOffset inSize outOffset outSize ⟨1⟩ hGas
+
+theorem primCall_CALL_noCode_emptyReturn_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hMissing :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if callMap.isEmpty then evm.accountMap else callMap
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  rcases
+      call_noCode_emptyReturn_rel hShared hParentWorld hCfgAccountMap store
+        hEnough hDepth hNotPrecompile hMissing hGas with
+    ⟨hEvm, yulCallMap, hTransfer, _hCallMapRel, hMissingYul,
+      hNotPrecompileYul, yulAfter, hBuild, hRel⟩
+  refine ⟨hEvm, yulAfter, ?_, hRel⟩
+  have hDepthEq :
+      yul.executionEnv.depth = evm.executionEnv.depth := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.depth
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hNotDepthLimit, hNotPrecompileYul, hMissingYul,
+    EvmYul.toExecute, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState, EvmYul.Yul.State.toMachineState] using
+    hBuild
+
+theorem primCall_CALL_noCode_emptyReturn_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hMissing :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if callMap.isEmpty then evm.accountMap else callMap
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  exact
+    primCall_CALL_noCode_emptyReturn_rel
+      (cfg :=
+        stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+      hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      (fun hRel => stateRelConfig_accountMapRel_of_compiledAccountMapRel hRel)
+      store hStaticAllowed hEnough hDepth hNotPrecompile hMissing hGas
+
+theorem CALLPrimitiveRel.noCode_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hMissing :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ fuel.succ.succ.succ.succ.succ gasCost
+      blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callMap :=
+    evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall ByteArray.empty
+      inOffset inSize outOffset outSize).gasAvailable +
+      EvmYul.UInt256.ofNat callGas
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if callMap.isEmpty then evm.accountMap else callMap
+      substate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate }
+  rcases
+      primCall_CALL_noCode_emptyReturn_rel_stateRelConfig
+        hShared store hStaticAllowed hEnough hDepth hNotPrecompile hMissing
+        hGas with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨1⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, charged, callGas, callMap, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, charged, callGas, callMap, target] using hRel
 
 theorem EVM_call_precompiled_success_eq
     {fuel gasCost : Nat}
@@ -5756,6 +8442,123 @@ theorem EVM_call_precompiled_failure_eq
     omega
   simpa [EvmYul.EVM.Θ, hNotLt, hNotDepthEq] using hFailure
 
+theorem EVM_call_ordinaryCode_of_theta_eq
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {calleeAccount : EvmYul.Account .EVM}
+    {target : Assembly.TargetProgram}
+    {createdAccounts' : Batteries.RBSet EvmYul.AccountAddress compare}
+    {accountMap' : EvmYul.AccountMap .EVM}
+    {returnedGas : EvmYul.UInt256}
+    {substate' : EvmYul.Substate}
+    {z : Bool}
+    {output : ByteArray}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFind :
+      evm.accountMap.find?
+        (EvmYul.AccountAddress.ofUInt256 address) = some calleeAccount)
+    (hCode : calleeAccount.code = Assembly.Bytecode.encodeTarget target)
+    (hTheta :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState callee).substate
+      EvmYul.EVM.Θ fuel blobVersionedHashes evm.createdAccounts
+          evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          accessedSubstate evm.executionEnv.codeOwner
+          evm.executionEnv.sender callee
+          (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat callGas)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm =
+        .ok (createdAccounts', accountMap', returnedGas, substate', z,
+          output)) :
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable + returnedGas
+    EvmYul.EVM.call fuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (if z then ⟨1⟩ else ⟨0⟩,
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap := accountMap'
+          substate := substate'
+          createdAccounts := createdAccounts' }) := by
+  dsimp at hTheta ⊢
+  have hSource :
+      EvmYul.AccountAddress.ofUInt256
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) =
+        evm.executionEnv.codeOwner :=
+    AccountAddress_ofUInt256_ofNat evm.executionEnv.codeOwner
+  have hNotLt :
+      ¬ ((evm.accountMap.find? evm.executionEnv.codeOwner).elim
+          ⟨0⟩ fun account => account.balance) < value := by
+    intro hLt
+    cases hOwner : evm.accountMap.find? evm.executionEnv.codeOwner with
+    | none =>
+        simp [hOwner, Option.option] at hEnough hLt
+        change value.val ≤ 0 at hEnough
+        change 0 < value.val at hLt
+        omega
+    | some account =>
+        simp [hOwner, Option.option] at hEnough hLt
+        change value.val ≤ account.balance.val at hEnough
+        change account.balance.val < value.val at hLt
+        omega
+  have hNotDepthEq : ¬ evm.executionEnv.depth = 1024 := by
+    omega
+  have hThetaRun :
+      EvmYul.EVM.Θ fuel blobVersionedHashes evm.createdAccounts
+          evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evm.toState
+            (EvmYul.AccountAddress.ofUInt256 address)).substate
+          evm.executionEnv.codeOwner evm.executionEnv.sender
+          (EvmYul.AccountAddress.ofUInt256 address)
+          (Id.run
+            (EvmYul.ToExecute.Code (Assembly.Bytecode.encodeTarget target)))
+          (EvmYul.UInt256.ofNat
+            (EvmYul.EVM.Ccallgas
+              (EvmYul.AccountAddress.ofUInt256 address)
+              (EvmYul.AccountAddress.ofUInt256 address)
+              value gas evm.accountMap evm.toMachineState evm.substate))
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm =
+        .ok (createdAccounts', accountMap', returnedGas, substate', z,
+          output) := by
+    simpa using hTheta
+  cases z <;>
+    simp [EvmYul.EVM.call, EvmYul.toExecute, hEnough, hDepth,
+      hNotPrecompile, hFind, hCode, hSource,
+      hThetaRun, hNotLt, hNotDepthEq]
+
 def thetaCodeRawInitialState
     (_target : Assembly.TargetProgram) (gasNat : Nat)
     (blobVersionedHashes : List ByteArray)
@@ -5818,14 +8621,16 @@ theorem sharedStateRel_callFrameFromThetaCodeXInitialState
     (header : EvmYul.BlockHeader)
     (perm : Bool)
     (blobVersionedHashes : List ByteArray)
+    (yulCodeBytes : ByteArray)
     (target : Assembly.TargetProgram) (gasNat : Nat)
     (hAccountMap :
       cfg.accountMapRel yulAccountMap
         (EvmYul.EVM.thetaCallTransfer evm.accountMap source recipient value))
     (hSubstate : yulSubstate = evmSubstate)
-    (hCode :
-      cfg.codeRel yulCode (Assembly.Bytecode.encodeTarget target))
-    (hCreated : yulCreated = evm.createdAccounts)
+      (hCode :
+        cfg.codeRel yulCode (Assembly.Bytecode.encodeTarget target))
+      (hCodeBytes : yulCodeBytes = Assembly.Bytecode.encodeTarget target)
+      (hCreated : yulCreated = evm.createdAccounts)
     (hGas :
       cfg.gasAvailableRel yulGas (EvmYul.UInt256.ofNat gasNat)) :
     Reference.SharedStateRel cfg
@@ -5844,7 +8649,8 @@ theorem sharedStateRel_callFrameFromThetaCodeXInitialState
             header := header
             depth := depth
             perm := perm
-            blobVersionedHashes := blobVersionedHashes }
+            blobVersionedHashes := blobVersionedHashes
+            codeBytes := yulCodeBytes }
         createdAccounts := yulCreated }
       (thetaCodeXInitialState target gasNat blobVersionedHashes
         evm.createdAccounts evm.genesisBlockHeader evm.blocks
@@ -5872,9 +8678,215 @@ theorem sharedStateRel_callFrameFromThetaCodeXInitialState
       (evmGas := EvmYul.UInt256.ofNat gasNat)
       (yulCode := yulCode)
       (evmCode := Assembly.Bytecode.encodeTarget target)
-      hAccountMap hSubstate hCode hCreated hGas
-      recipient origin source weiValue calldata gasPrice.toNat depth header
-      perm blobVersionedHashes
+        hAccountMap hSubstate hCode hCreated hGas
+        recipient origin source weiValue calldata gasPrice.toNat depth header
+        perm blobVersionedHashes yulCodeBytes default hCodeBytes
+
+theorem ordinaryCall_nondefault_initialChildFrame_rel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (hCfgCode :
+      ∀ {yulCode : AstContract} {evmCode : ByteArray},
+        CompiledCodeRel yulCode evmCode →
+          cfg.codeRel yulCode evmCode)
+    {gas address value inOffset inSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hFindRecipient :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeNondefault : yulRecipient.code ≠ default)
+    (hCallGas :
+      cfg.gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (EvmYul.EVM.Ccallgas
+            (EvmYul.AccountAddress.ofUInt256 address)
+            (EvmYul.AccountAddress.ofUInt256 address)
+            value gas yul.accountMap yul.toMachineState yul.substate))
+        (EvmYul.UInt256.ofNat
+          (EvmYul.EVM.Ccallgas
+            (EvmYul.AccountAddress.ofUInt256 address)
+            (EvmYul.AccountAddress.ofUInt256 address)
+            value gas evm.accountMap evm.toMachineState evm.substate)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice) :
+    ∃ (yulCallMap : EvmYul.AccountMap .Yul)
+      (evmRecipient : EvmYul.Account .EVM)
+      (program : Program) (asm : Assembly.Program)
+      (target : Assembly.TargetProgram),
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat
+                (EvmYul.EVM.Ccallgas callee callee value gas
+                  yul.accountMap yul.toMachineState yul.substate))
+          accountMap := yulCallMap }
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner callee value =
+        some yulCallMap ∧
+      yulCallMap.isEmpty = false ∧
+      (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+          callee value).isEmpty = false ∧
+      CompiledAccountMapRel yulCallMap
+        (evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+          callee value) ∧
+      evm.accountMap.find? callee = some evmRecipient ∧
+      CompiledAccountRel yulRecipient evmRecipient ∧
+      program.contract = yulRecipient.code ∧
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target) ∧
+      initialShared.executionEnv.code = program.contract ∧
+      Reference.SharedStateRel cfg initialShared
+        (thetaCodeXInitialState target
+          (EvmYul.EVM.Ccallgas callee callee value gas
+            evm.accountMap evm.toMachineState evm.substate)
+          yul.executionEnv.blobVersionedHashes evm.createdAccounts
+          evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          evm.executionEnv.codeOwner evm.executionEnv.sender callee
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+          calldata (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm).toSharedState := by
+  dsimp
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evm.toSharedState with
+      toState := EvmYul.State.addAccessedAccount evm.toState callee }
+  have hOwner :
+      yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.codeOwner
+  have hSender :
+      yul.executionEnv.sender = evm.executionEnv.sender := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.sender
+  have hGasPrice :
+      yul.executionEnv.gasPrice = evm.executionEnv.gasPrice := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.gasPrice
+  have hHeader :
+      yul.executionEnv.header = evm.executionEnv.header := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.header
+  have hDepth :
+      yul.executionEnv.depth = evm.executionEnv.depth := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.depth
+  have hPerm :
+      yul.executionEnv.perm = evm.executionEnv.perm := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.perm
+  rcases
+      hParentWorld.ordinaryCall_nondefault_transferCheckedFacts
+        (source := yul.executionEnv.codeOwner)
+        (recipient := callee)
+        (value := value)
+        hFindRecipient hCodeNondefault
+        (by simpa [hOwner] using hEnough) with
+    ⟨yulCallMap, evmRecipient, program, asm, target, hTransfer,
+      hYulCallMapNonempty, hEvmCallMapNonempty, hTransferRel,
+      hFindEvm, hRecipientRel, hContract, hCompile, _hStatic,
+      _hSourceAccepted, _hSourceCompileAccepted, _hCompileChecked,
+      _hBytecode, _hResources, _hDecode, _hJumpdest, hBytes⟩
+  refine
+    ⟨yulCallMap, evmRecipient, program, asm, target, ?_, ?_, ?_,
+      ?_, ?_, hRecipientRel, hContract, hCompile, ?_, ?_⟩
+  · simpa [callee] using hTransfer
+  · exact hYulCallMapNonempty
+  · simpa [hOwner] using hEvmCallMapNonempty
+  · simpa [hOwner] using hTransferRel
+  · simpa [callee] using hFindEvm
+  · simp [hContract]
+  · have hSharedAccessed :
+        Reference.SharedStateRel cfg yulAccessed evmAccessed := by
+      simpa [yulAccessed, evmAccessed, callee] using
+        sharedStateRel_addAccessedAccount hShared callee
+    have hCalldata :
+        calldata =
+          evm.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat := by
+      rcases hShared with ⟨_hChain, hMachine⟩
+      simpa [calldata] using
+        congrArg
+          (fun memory =>
+            memory.readWithPadding inOffset.toNat inSize.toNat)
+          hMachine.memory
+    have hCode :
+        cfg.codeRel yulRecipient.code
+          (Assembly.Bytecode.encodeTarget target) := by
+      simpa [hBytes] using hCfgCode hRecipientRel.code
+    have hAccountMap :
+        cfg.accountMapRel yulCallMap
+          (EvmYul.EVM.thetaCallTransfer evm.accountMap
+            evm.executionEnv.codeOwner callee value) := by
+      simpa [hOwner, evmCallTransfer_eq_thetaCallTransfer] using
+        hCfgAccountMap hTransferRel
+    simpa [callee, calldata, yulAccessed, evmAccessed, hOwner, hSender,
+      hGasPrice, hGasPriceFits, hHeader, hDepth, hPerm, hCalldata,
+      EvmYul.State.addAccessedAccount]
+      using
+        sharedStateRel_callFrameFromThetaCodeXInitialState
+          (cfg := cfg)
+          (yul := yulAccessed)
+          (evm := evmAccessed)
+          hSharedAccessed
+          (yulAccountMap := yulCallMap)
+          (evmSubstate := evmAccessed.substate)
+          (yulCreated := yulAccessed.createdAccounts)
+          (yulGas :=
+            EvmYul.UInt256.ofNat
+              (EvmYul.EVM.Ccallgas callee callee value gas
+                yul.accountMap yul.toMachineState yul.substate))
+          (yulCode := yulRecipient.code)
+          (yulSubstate := yulAccessed.substate)
+          evm.executionEnv.codeOwner evm.executionEnv.sender callee
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+          (evm.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm yul.executionEnv.blobVersionedHashes
+            yulRecipient.codeBytes
+            target
+            (EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+              evm.toMachineState evm.substate)
+            hAccountMap hSharedAccessed.chain.substate hCode
+            (hRecipientRel.codeBytes.trans hBytes)
+            hSharedAccessed.chain.createdAccounts hCallGas
 
 theorem Theta_code_succ_succ_eq_X_installedCode
     (fuel gasNat : Nat)
@@ -6102,6 +9114,139 @@ theorem ordinaryCodeCall_runningSuccessBranch_rel
         hTargetChild hTargetChildWorld hAgree hChildGas
         inOffset inSize outOffset outSize hGas⟩
 
+theorem ordinaryCodeCall_runningSuccessBranch_rel_afterAccess
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {targetChild evmChild : EVMState}
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata output : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild targetChild.toSharedState)
+    (hTargetChildWorld :
+      CompiledAccountMapRel yulChild.accountMap targetChild.accountMap)
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.success evmChild output))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.running targetChild)
+        (.success evmChild output))
+    (hChildGas :
+      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
+        evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+        evmParent.createdAccounts evmParent.genesisBlockHeader
+        evmParent.blocks evmParent.accountMap evmParent.σ₀
+        { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+          transactionReceipts := evmParent.transactionReceipts }
+        (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (evmChild.createdAccounts,
+        if evmChild.accountMap.isEmpty then evmParent.accountMap
+        else evmChild.accountMap,
+        evmChild.gasAvailable,
+        if evmChild.accountMap.isEmpty then
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+        else evmChild.substate,
+        true, output) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.restoreSuccessfulContractCallState
+            (EvmYul.Yul.addAccessedAccount (.Ok yulParent parentStore) addr)
+            (.Ok yulChild childStore)
+            restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+          .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter
+          { evmParent with
+            toMachineState :=
+              { evmParent.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize with
+                gasAvailable := targetGas }
+            accountMap :=
+              if evmChild.accountMap.isEmpty then
+                evmParent.accountMap
+              else
+                evmChild.accountMap
+            substate :=
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              else
+                evmChild.substate
+            createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel cfg yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hParentWorldAccessed :
+      CompiledAccountMapRel yulAccessed.accountMap evmAccessed.accountMap := by
+    simpa [yulAccessed, evmAccessed] using hParentWorld
+  have hXAccessed :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+            evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+            { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+              transactionReceipts := evmAccessed.transactionReceipts }
+            evmAccessed.substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok (.success evmChild output) := by
+    simpa [evmAccessed] using hX
+  have hGasAccessed :
+      cfg.gasAvailableRel
+        (yulAccessed.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [yulAccessed] using hGas
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_runningSuccessBranch_rel
+        hParentAccessed hParentWorldAccessed hCfgAccountMap
+        parentStore childStore restoreStore
+        hTargetChild hTargetChildWorld hXAccessed hAgree hChildGas
+        inOffset inSize outOffset outSize hGasAccessed
+
 theorem ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome
     {varStackRel : Reference.VarStackRel}
     {terminalCfgRel :
@@ -6256,7 +9401,7 @@ theorem ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome
             gasAvailableRel gasValueRel totalGasRel).accountMapRel
             yulMap evmMap := by
     intro yulMap evmMap hRel
-    simpa [stateRelConfig, accountMapRel] using hRel
+    exact stateRelConfig_accountMapRel_of_compiledAccountMapRel hRel
   rcases
       ordinaryCodeCall_runningSuccessBranch_rel
         (cfg :=
@@ -6267,6 +9412,358 @@ theorem ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome
         hTargetChild hTargetChildWorld hXSuccess hAgreeSuccess
         (hEvmChildGas hResult)
         inOffset inSize outOffset outSize hGas with
+    ⟨hTheta, hRestore⟩
+  exact ⟨targetChild, evmChild, output, hTargetOutcome, hResult,
+    hTheta, hRestore⟩
+
+theorem ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome_afterAccess
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (hTargetChildGas :
+      ∀ {targetChild}, targetOutcome = .running targetChild →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ targetChild evmChild output,
+      targetOutcome = .running targetChild ∧
+        evmResult = .success evmChild output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGas }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hXAccessed :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+            evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+            { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+              transactionReceipts := evmAccessed.transactionReceipts }
+            evmAccessed.substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok evmResult := by
+    simpa [evmAccessed] using hX
+  have hGasAccessed :
+      gasAvailableRel
+        (yulAccessed.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [yulAccessed] using hGas
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParentAccessed hOutcomeRel hWhole hXAccessed hAgree
+        hTargetChildGas hEvmChildGas inOffset inSize outOffset outSize
+        hGasAccessed
+
+theorem ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome_afterAccess_withTargetGas
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (hTargetChildGas :
+      ∀ {targetChild}, targetOutcome = .running targetChild →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (targetGasOf : EVMState → ByteArray → EvmYul.UInt256)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel
+            (yulParent.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            (targetGasOf evmChild output)) :
+    ∃ targetChild evmChild output,
+      targetOutcome = .running targetChild ∧
+        evmResult = .success evmChild output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGasOf evmChild output }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  rcases
+      dispatcherOutcomeRel_regular_ok_whole_childRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hOutcomeRel hWhole hTargetChildGas with
+    ⟨targetChild, hTargetOutcome, hTargetChild, hTargetChildWorld⟩
+  have hAgreeRunning :
+      Assembly.GasAware.XResultAgrees (.running targetChild) evmResult := by
+    simpa [hTargetOutcome] using hAgree
+  rcases XResultAgrees_running_success_shape hAgreeRunning with
+    ⟨evmChild, output, hResult, hAgreeSuccess⟩
+  have hXSuccess :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.success evmChild output) := by
+    simpa [hResult] using hX
+  have hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hParent
+  have hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel).accountMapRel
+            yulMap evmMap := by
+    intro yulMap evmMap hRel
+    exact stateRelConfig_accountMapRel_of_compiledAccountMapRel hRel
+  have hGasSuccess :
+      gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        (targetGasOf evmChild output) :=
+    hReturnedGas hWhole (by simpa [hTargetOutcome] using hAgreeSuccess)
+  rcases
+      ordinaryCodeCall_runningSuccessBranch_rel_afterAccess
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hParent hParentWorld hCfgAccountMap
+        parentStore childStore restoreStore addr
+        hTargetChild hTargetChildWorld hXSuccess hAgreeSuccess
+        (hEvmChildGas hResult)
+        inOffset inSize outOffset outSize hGasSuccess with
     ⟨hTheta, hRestore⟩
   exact ⟨targetChild, evmChild, output, hTargetOutcome, hResult,
     hTheta, hRestore⟩
@@ -6502,6 +9999,516 @@ theorem ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher
     ⟨evmFuel, targetChild, evmChild, output, hCall,
       by simpa [hTargetOutcome] using hWhole, hTheta, hRestore⟩
 
+theorem ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher_afterAccess
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gasNat : Nat}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {rets : List EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hInstalled : initialShared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .ok (.Ok yulChild childStore, rets))
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmParent.createdAccounts evmParent.genesisBlockHeader
+                evmParent.blocks evmParent.accountMap evmParent.σ₀
+                { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                  transactionReceipts := evmParent.transactionReceipts }
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+                source origin recipient gasPrice value weiValue calldata depth
+                header perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gasNat)
+    (hUInt256 : gasNat < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    ∃ (evmFuel : Nat) (targetChild evmChild : EVMState) (output : ByteArray),
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .ok (.Ok yulChild childStore, rets) ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome
+        (.running targetChild) ∧
+        EvmYul.EVM.Θ evmFuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGas }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hSourceRunAccessed :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice value
+              weiValue calldata depth header perm)) =
+        .ok sourceOutcome := by
+    simpa [evmAccessed] using hSourceRun
+  let hTargetGasForXAccessed :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice value
+              weiValue calldata depth header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice value
+              weiValue calldata depth header perm))
+          targetOutcome := by
+    intro targetFuel targetOutcome hTrace
+    exact hTargetGasForX (by simpa [evmAccessed] using hTrace)
+  have hGasBoundAccessed :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+                evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+                { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                  transactionReceipts := evmAccessed.transactionReceipts }
+                evmAccessed.substate source origin recipient gasPrice value
+                weiValue calldata depth header perm))
+            targetOutcome),
+        (hTargetGasForXAccessed hTrace).gasBound ≤ gasNat := by
+    intro targetFuel targetOutcome hTrace
+    exact hGasBound (by simpa [evmAccessed] using hTrace)
+  have hGasAccessed :
+      gasAvailableRel
+        (yulAccessed.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [yulAccessed] using hGas
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher
+        (prim := prim) hPrim
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParentAccessed hInstalled hCall hSourceRunAccessed hOutcomeRel
+        hCompileBoundary hTargetGasForXAccessed hGasBoundAccessed hUInt256
+        hTargetChildGas hEvmChildGas inOffset inSize outOffset outSize
+        hGasAccessed
+
+theorem ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gasNat : Nat}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {rets : List EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hInstalled : initialShared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .ok (.Ok yulChild childStore, rets))
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmParent.createdAccounts evmParent.genesisBlockHeader
+                evmParent.blocks evmParent.accountMap evmParent.σ₀
+                { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                  transactionReceipts := evmParent.transactionReceipts }
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+                source origin recipient gasPrice value weiValue calldata depth
+                header perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gasNat)
+    (hUInt256 : gasNat < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (targetGasOf : EVMState → ByteArray → EvmYul.UInt256)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel
+            (yulParent.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            (targetGasOf evmChild output)) :
+    ∃ (evmFuel : Nat) (targetChild evmChild : EVMState) (output : ByteArray),
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .ok (.Ok yulChild childStore, rets) ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome
+        (.running targetChild) ∧
+        EvmYul.EVM.Θ evmFuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              restoreStore ByteArray.empty inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGasOf evmChild output }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  rcases
+      compile_preserves_of_installed_callDispatcher_regular_sourceStaticBoundary_installedGas_XResult
+        (prim := prim) hPrim
+        (outcomeRel :=
+          Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            terminalRel revertRel program (.Ok initialShared initialStore))
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (gas := gasNat) (shared := initialShared)
+        (store := initialStore) (state' := .Ok yulChild childStore)
+        (rets := rets)
+        (rawInitial :=
+          thetaCodeRawInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm)
+        (sourceOutcome := sourceOutcome)
+        hInstalled hCall hSourceRun hOutcomeRel hCompileBoundary
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        hTargetGasForX hGasBound hUInt256 with
+    ⟨_targetFuel, targetOutcome, evmFuel, _gasBound, evmResult,
+      _hReferenceRun, _hTargetRun, _hOutcomeRel, hWhole, _hTrace,
+      _hGasBound, hX, hAgree, _hDecode, _hJumpdest⟩
+  have hXTheta :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult := by
+    simpa [thetaCodeXInitialState] using hX
+  rcases
+      ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome_afterAccess_withTargetGas
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParent hOutcomeRel hWhole hXTheta hAgree
+        (by
+          intro targetChild hTarget
+          exact hTargetChildGas (by simpa [hTarget] using hWhole))
+        (by
+          intro evmChild output hResult
+          exact hEvmChildGas hWhole (by simpa [hResult] using hAgree))
+        inOffset inSize outOffset outSize targetGasOf hReturnedGas with
+    ⟨targetChild, evmChild, output, hTargetOutcome, _hResult,
+      hTheta, hRestore⟩
+  exact
+    ⟨evmFuel, targetChild, evmChild, output, hCall,
+      by simpa [hTargetOutcome] using hWhole, hTheta, hRestore⟩
+
 theorem ordinaryCodeCall_haltedSuccessBranch_rel
     {cfg : Reference.StateRelConfig}
     {yulParent : EvmYul.SharedState .Yul}
@@ -6528,9 +10535,7 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel
     {header : EvmYul.BlockHeader}
     {perm : Bool}
     (hTargetChild :
-      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
-    (hTargetChildWorld :
-      CompiledAccountMapRel yulChild.accountMap halt.state.accountMap)
+      ExternalChildMergeRel yulChild halt.state.toSharedState)
     (hX :
       EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
           (thetaCodeXInitialState target gasNat blobVersionedHashes
@@ -6544,9 +10549,6 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel
     (hAgree :
       Assembly.GasAware.XResultAgrees (.halted halt)
         (.success evmChild output))
-    (hChildGas :
-      cfg.gasAvailableRel yulChild.toMachineState.gasAvailable
-        evmChild.gasAvailable)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
     (hGas :
@@ -6596,11 +10598,143 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel
               createdAccounts := evmChild.createdAccounts } := by
   exact
     ⟨Theta_code_success_of_X_installedCode hX,
-      restoreSuccessfulContractCallState_of_XResultAgrees_halted_success
+      restoreSuccessfulContractCallState_of_XResultAgrees_halted_success_merge
         hParent hParentWorld hCfgAccountMap
         parentStore childStore restoreStore
-        hTargetChild hTargetChildWorld hAgree hChildGas
+        hTargetChild hAgree
         inOffset inSize outOffset outSize hGas⟩
+
+theorem ordinaryCodeCall_haltedSuccessBranch_rel_afterAccess
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (hParentWorld :
+      CompiledAccountMapRel yulParent.accountMap evmParent.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (parentStore childStore restoreStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {evmChild : EVMState}
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata output : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hTargetChild :
+      ExternalChildMergeRel yulChild halt.state.toSharedState)
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.success evmChild output))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.success evmChild output))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+        evmParent.createdAccounts evmParent.genesisBlockHeader
+        evmParent.blocks evmParent.accountMap evmParent.σ₀
+        { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+          transactionReceipts := evmParent.transactionReceipts }
+        (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (evmChild.createdAccounts,
+        if evmChild.accountMap.isEmpty then evmParent.accountMap
+        else evmChild.accountMap,
+        evmChild.gasAvailable,
+        if evmChild.accountMap.isEmpty then
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+        else evmChild.substate,
+        true, output) ∧
+      halt.kind ≠ .revert ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreSuccessfulContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              restoreStore output inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+          Reference.SharedStateRel cfg yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGas }
+              accountMap :=
+                if evmChild.accountMap.isEmpty then
+                  evmParent.accountMap
+                else
+                  evmChild.accountMap
+              substate :=
+                if evmChild.accountMap.isEmpty then
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate
+                else
+                  evmChild.substate
+              createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel cfg yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hParentWorldAccessed :
+      CompiledAccountMapRel yulAccessed.accountMap evmAccessed.accountMap := by
+    simpa [yulAccessed, evmAccessed] using hParentWorld
+  have hXAccessed :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+            evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+            { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+              transactionReceipts := evmAccessed.transactionReceipts }
+            evmAccessed.substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok (.success evmChild output) := by
+    simpa [evmAccessed] using hX
+  have hGasAccessed :
+      cfg.gasAvailableRel
+        (yulAccessed.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [yulAccessed] using hGas
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_haltedSuccessBranch_rel
+        hParentAccessed hParentWorldAccessed hCfgAccountMap
+        parentStore childStore restoreStore
+        hTargetChild hXAccessed hAgree
+        inOffset inSize outOffset outSize hGasAccessed
 
 theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
     {varStackRel : Reference.VarStackRel}
@@ -6639,13 +10773,10 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
         (.yulHalt (.Ok yulChild childStore) value) sourceOutcome)
     (hWhole :
       SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
-    (hTerminalShared :
+    (hTerminalChild :
       ∀ {kind compiler},
         terminalRel kind value (.Ok yulChild childStore) compiler →
-          Reference.SharedStateRel
-            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
-              gasAvailableRel gasValueRel totalGasRel)
-            yulChild compiler.shared)
+          ExternalChildMergeRel yulChild compiler.shared)
     (hTerminalNonRevert :
       ∀ {kind compiler},
         terminalRel kind value (.Ok yulChild childStore) compiler →
@@ -6671,14 +10802,6 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
         .ok evmResult)
     (hAgree :
       Assembly.GasAware.XResultAgrees targetOutcome evmResult)
-    (hTargetChildGas :
-      ∀ {halt}, targetOutcome = .halted halt →
-        gasAvailableRel yulChild.toMachineState.gasAvailable
-          halt.state.gasAvailable)
-    (hEvmChildGas :
-      ∀ {evmChild output}, evmResult = .success evmChild output →
-        gasAvailableRel yulChild.toMachineState.gasAvailable
-          evmChild.gasAvailable)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
     (hReturnedGas :
@@ -6736,16 +10859,16 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
                     evmChild.substate
                 createdAccounts := evmChild.createdAccounts } := by
   rcases
-      dispatcherOutcomeRel_yulHalt_ok_whole_childRelations
+      dispatcherOutcomeRel_yulHalt_ok_whole_childMergeRelations
         (varStackRel := varStackRel)
         (terminalCfgRel := terminalCfgRel)
         (revertCfgRel := revertCfgRel)
         (gasAvailableRel := gasAvailableRel)
         (gasValueRel := gasValueRel)
         (totalGasRel := totalGasRel)
-        hOutcomeRel hWhole hTerminalShared hTargetChildGas with
+        hOutcomeRel hWhole hTerminalChild with
     ⟨kind, compiler, halt, hTerminal, _hSource, hTarget, hKind,
-      hTargetChild, hTargetChildWorld⟩
+      hTargetChild⟩
   have hNotRevert : halt.kind ≠ .revert := by
     intro hRevert
     exact hTerminalNonRevert hTerminal (hKind.symm.trans hRevert)
@@ -6778,7 +10901,7 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
             gasAvailableRel gasValueRel totalGasRel).accountMapRel
             yulMap evmMap := by
     intro yulMap evmMap hRel
-    simpa [stateRelConfig, accountMapRel] using hRel
+    exact stateRelConfig_accountMapRel_of_compiledAccountMapRel hRel
   have hGasSuccess :
       gasAvailableRel
         (yulParent.toMachineState.finishExternalCall output
@@ -6792,13 +10915,187 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
             gasAvailableRel gasValueRel totalGasRel)
         hParent hParentWorld hCfgAccountMap
         parentStore childStore restoreStore
-        hTargetChild hTargetChildWorld hXSuccess hAgreeSuccess
-        (hEvmChildGas hResult)
+        hTargetChild
+        hXSuccess hAgreeSuccess
         inOffset inSize outOffset outSize hGasSuccess with
     ⟨hTheta, hSuccess⟩
   exact
     ⟨kind, compiler, halt, evmChild, output, hTerminal, hTarget, hKind,
       hResult, hTheta, hSuccess⟩
+
+theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome_afterAccess
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {value : Word}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.yulHalt (.Ok yulChild childStore) value) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hTerminalChild :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          ExternalChildMergeRel yulChild compiler.shared)
+    (hTerminalNonRevert :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          kind ≠ .revert)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice valueWei weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice valueWei weiValue calldata depth
+            header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hReturnedGas :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel
+          (yulParent.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas) :
+    ∃ kind compiler halt evmChild output,
+      terminalRel kind value (.Ok yulChild childStore) compiler ∧
+        targetOutcome = .halted halt ∧
+        halt.kind = kind ∧
+        evmResult = .success evmChild output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice valueWei weiValue calldata
+          depth header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        halt.kind ≠ .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreSuccessfulContractCallState
+                (EvmYul.Yul.addAccessedAccount
+                  (.Ok yulParent parentStore) addr)
+                (.Ok yulChild childStore)
+                restoreStore output inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := targetGas }
+                accountMap :=
+                  if evmChild.accountMap.isEmpty then
+                    evmParent.accountMap
+                  else
+                    evmChild.accountMap
+                substate :=
+                  if evmChild.accountMap.isEmpty then
+                    (EvmYul.State.addAccessedAccount
+                      evmParent.toState addr).substate
+                  else
+                    evmChild.substate
+                createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hXAccessed :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+            evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+            { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+              transactionReceipts := evmAccessed.transactionReceipts }
+            evmAccessed.substate source origin recipient gasPrice valueWei
+            weiValue calldata depth header perm) =
+        .ok evmResult := by
+    simpa [evmAccessed] using hX
+  have hReturnedGasAccessed :
+      ∀ {evmChild output}, evmResult = .success evmChild output →
+        gasAvailableRel
+          (yulAccessed.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas := by
+    intro evmChild output hResult
+    simpa [yulAccessed] using hReturnedGas hResult
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParentAccessed hOutcomeRel hWhole hTerminalChild
+        hTerminalNonRevert hXAccessed hAgree
+        inOffset inSize outOffset outSize hReturnedGasAccessed
 
 theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
     {prim : Objects.Source.PrimitiveSemantics}
@@ -6860,13 +11157,10 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
           gasAvailableRel gasValueRel totalGasRel)
         terminalRel revertRel program (.Ok initialShared initialStore)
         (.yulHalt (.Ok yulChild childStore) value) sourceOutcome)
-    (hTerminalShared :
+    (hTerminalChild :
       ∀ {kind compiler},
         terminalRel kind value (.Ok yulChild childStore) compiler →
-          Reference.SharedStateRel
-            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
-              gasAvailableRel gasValueRel totalGasRel)
-            yulChild compiler.shared)
+          ExternalChildMergeRel yulChild compiler.shared)
     (hTerminalNonRevert :
       ∀ {kind compiler},
         terminalRel kind value (.Ok yulChild childStore) compiler →
@@ -6911,18 +11205,6 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
             targetOutcome),
         (hTargetGasForX hTrace).gasBound ≤ gasNat)
     (hUInt256 : gasNat < EvmYul.UInt256.size)
-    (hTargetChildGas :
-      ∀ {halt}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
-          (.halted halt) →
-        gasAvailableRel yulChild.toMachineState.gasAvailable
-          halt.state.gasAvailable)
-    (hEvmChildGas :
-      ∀ {targetOutcome evmChild output},
-        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
-          Assembly.GasAware.XResultAgrees targetOutcome
-            (.success evmChild output) →
-          gasAvailableRel yulChild.toMachineState.gasAvailable
-            evmChild.gasAvailable)
     (inOffset inSize outOffset outSize : EvmYul.UInt256)
     {targetGas : EvmYul.UInt256}
     (hReturnedGas :
@@ -7036,14 +11318,8 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
         (gasAvailableRel := gasAvailableRel)
         (gasValueRel := gasValueRel)
         (totalGasRel := totalGasRel)
-        hParent hOutcomeRel hWhole hTerminalShared hTerminalNonRevert
-        hXTheta hAgree
-        (by
-          intro halt hTarget
-          exact hTargetChildGas (by simpa [hTarget] using hWhole))
-        (by
-          intro evmChild output hResult
-          exact hEvmChildGas hWhole (by simpa [hResult] using hAgree))
+        hParent hOutcomeRel hWhole hTerminalChild
+        hTerminalNonRevert hXTheta hAgree
         inOffset inSize outOffset outSize
         (by
           intro evmChild output hResult
@@ -7054,6 +11330,280 @@ theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
     ⟨evmFuel, kind, compiler, halt, evmChild, output, hCall,
       hTerminal, by simpa [hTargetOutcome] using hWhole, hKind,
       hTheta, hRestore⟩
+
+theorem ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher_afterAccess
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gasNat : Nat}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore restoreStore :
+      EvmYul.Yul.VarStore}
+    {value : Word}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hInstalled : initialShared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .error (.YulHalt (.Ok yulChild childStore) value))
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {gasPrice valueWei weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice valueWei weiValue calldata depth
+              header perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.yulHalt (.Ok yulChild childStore) value) sourceOutcome)
+    (hTerminalChild :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          ExternalChildMergeRel yulChild compiler.shared)
+    (hTerminalNonRevert :
+      ∀ {kind compiler},
+        terminalRel kind value (.Ok yulChild childStore) compiler →
+          kind ≠ .revert)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice valueWei weiValue calldata depth
+              header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice valueWei weiValue calldata depth
+              header perm))
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmParent.createdAccounts evmParent.genesisBlockHeader
+                evmParent.blocks evmParent.accountMap evmParent.σ₀
+                { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                  transactionReceipts := evmParent.transactionReceipts }
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+                source origin recipient gasPrice valueWei weiValue calldata depth
+                header perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gasNat)
+    (hUInt256 : gasNat < EvmYul.UInt256.size)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel
+            (yulParent.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            targetGas) :
+    ∃ (evmFuel : Nat) (kind : Assembly.HaltKind)
+      (compiler : Objects.Source.State) (halt : Assembly.Halt)
+      (evmChild : EVMState) (output : ByteArray),
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .error (.YulHalt (.Ok yulChild childStore) value) ∧
+        terminalRel kind value (.Ok yulChild childStore) compiler ∧
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) ∧
+        halt.kind = kind ∧
+        EvmYul.EVM.Θ evmFuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice valueWei weiValue calldata
+          depth header perm =
+            .ok (evmChild.createdAccounts,
+              if evmChild.accountMap.isEmpty then evmParent.accountMap
+              else evmChild.accountMap,
+              evmChild.gasAvailable,
+              if evmChild.accountMap.isEmpty then
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+              else evmChild.substate,
+              true, output) ∧
+        halt.kind ≠ .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreSuccessfulContractCallState
+                (EvmYul.Yul.addAccessedAccount
+                  (.Ok yulParent parentStore) addr)
+                (.Ok yulChild childStore)
+                restoreStore output inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter restoreStore, [⟨1⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := targetGas }
+                accountMap :=
+                  if evmChild.accountMap.isEmpty then
+                    evmParent.accountMap
+                  else
+                    evmChild.accountMap
+                substate :=
+                  if evmChild.accountMap.isEmpty then
+                    (EvmYul.State.addAccessedAccount
+                      evmParent.toState addr).substate
+                  else
+                    evmChild.substate
+                createdAccounts := evmChild.createdAccounts } := by
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yulParent with
+      toState := EvmYul.State.addAccessedAccount yulParent.toState addr }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evmParent with
+      toState := EvmYul.State.addAccessedAccount evmParent.toState addr }
+  have hParentAccessed :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed] using
+      sharedStateRel_addAccessedAccount hParent addr
+  have hSourceRunAccessed :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice valueWei
+              weiValue calldata depth header perm)) =
+        .ok sourceOutcome := by
+    simpa [evmAccessed] using hSourceRun
+  let hTargetGasForXAccessed :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice valueWei
+              weiValue calldata depth header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+              evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+              { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                transactionReceipts := evmAccessed.transactionReceipts }
+              evmAccessed.substate source origin recipient gasPrice valueWei
+              weiValue calldata depth header perm))
+          targetOutcome := by
+    intro targetFuel targetOutcome hTrace
+    exact hTargetGasForX (by simpa [evmAccessed] using hTrace)
+  have hGasBoundAccessed :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmAccessed.createdAccounts evmAccessed.genesisBlockHeader
+                evmAccessed.blocks evmAccessed.accountMap evmAccessed.σ₀
+                { totalGasUsedInBlock := evmAccessed.totalGasUsedInBlock
+                  transactionReceipts := evmAccessed.transactionReceipts }
+                evmAccessed.substate source origin recipient gasPrice valueWei
+                weiValue calldata depth header perm))
+            targetOutcome),
+        (hTargetGasForXAccessed hTrace).gasBound ≤ gasNat := by
+    intro targetFuel targetOutcome hTrace
+    exact hGasBound (by simpa [evmAccessed] using hTrace)
+  have hReturnedGasAccessed :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel
+            (yulAccessed.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            targetGas := by
+    intro targetOutcome evmChild output hWhole hAgree
+    simpa [yulAccessed] using hReturnedGas hWhole hAgree
+  simpa [yulAccessed, evmAccessed, EvmYul.Yul.addAccessedAccount,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.State.addAccessedAccount]
+    using
+      ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher
+        (prim := prim) hPrim
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParentAccessed hInstalled hCall hSourceRunAccessed hOutcomeRel
+        hTerminalChild hTerminalNonRevert hCompileBoundary
+        hTargetGasForXAccessed hGasBoundAccessed hUInt256
+        inOffset inSize outOffset outSize
+        hReturnedGasAccessed
 
 theorem Theta_code_revert_of_X_installedCode
     {fuel gasNat : Nat}
@@ -7167,6 +11717,87 @@ theorem ordinaryCodeCall_revertBranch_rel
   exact
     ⟨Theta_code_revert_of_X_installedCode hX,
       restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace
+        hParent parentStore childStore addr hTargetChild hTrace hAgree
+        inOffset inSize outOffset outSize hGas⟩
+
+theorem ordinaryCodeCall_revertBranch_rel_withTargetGas
+    {cfg : Reference.StateRelConfig}
+    {yulParent : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    (hParent : Reference.SharedStateRel cfg yulParent evmParent)
+    (parentStore childStore : EvmYul.Yul.VarStore)
+    (addr : EvmYul.AccountAddress)
+    {yulChild : EvmYul.SharedState .Yul}
+    {halt : Assembly.Halt}
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata output : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    {returnedGas targetGas : EvmYul.UInt256}
+    {asm : Assembly.Program}
+    {targetFuel : Nat} {initial : EVMState}
+    (hTargetChild :
+      Reference.SharedStateRel cfg yulChild halt.state.toSharedState)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        (.halted halt))
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.revert returnedGas output))
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.halted halt)
+        (.revert returnedGas output))
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (hGas :
+      cfg.gasAvailableRel
+        (yulParent.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+        evmParent.createdAccounts evmParent.genesisBlockHeader
+        evmParent.blocks evmParent.accountMap evmParent.σ₀
+        { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+          transactionReceipts := evmParent.transactionReceipts }
+        (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (evmParent.createdAccounts, evmParent.accountMap, returnedGas,
+        (EvmYul.State.addAccessedAccount evmParent.toState addr).substate,
+        false, output) ∧
+      halt.kind = .revert ∧
+        ∃ yulAfter,
+          EvmYul.Yul.restoreRevertedContractCallState
+              (EvmYul.Yul.addAccessedAccount
+                (.Ok yulParent parentStore) addr)
+              (.Ok yulChild childStore)
+              inOffset inSize outOffset outSize =
+            .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+          Reference.SharedStateRel cfg yulAfter
+            { evmParent with
+              toMachineState :=
+                { evmParent.toMachineState.finishExternalCall output
+                    inOffset inSize outOffset outSize with
+                  gasAvailable := targetGas }
+              substate :=
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate } := by
+  exact
+    ⟨Theta_code_revert_of_X_installedCode hX,
+      restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace_targetGas
         hParent parentStore childStore addr hTargetChild hTrace hAgree
         inOffset inSize outOffset outSize hGas⟩
 
@@ -7325,6 +11956,167 @@ theorem ordinaryCodeCall_revertBranch_rel_of_childOutcome
         hParent parentStore childStore addr
         hTargetChild hTraceHalt hXRevert hAgreeRevert
         inOffset inSize outOffset outSize (hReturnedGas hResult) with
+    ⟨hTheta, hRestore⟩
+  exact
+    ⟨compiler, halt, returnedGas, output, hRevert, hTarget, hResult,
+      hTheta, hRestore⟩
+
+theorem ordinaryCodeCall_revertBranch_rel_of_childOutcome_withTargetGas
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    {evmResult : EvmYul.EVM.ExecutionResult EVMState}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.revert (.Ok yulChild childStore)) sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult)
+    (hAgree :
+      Assembly.GasAware.XResultAgrees targetOutcome evmResult)
+    (hTargetChildGas :
+      ∀ {halt}, targetOutcome = .halted halt →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    {asm : Assembly.Program} {targetFuel : Nat} {initial : EVMState}
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hTargetGas :
+      ∀ {returnedGas output}, evmResult = .revert returnedGas output →
+        gasAvailableRel
+          (yulParent.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas) :
+    ∃ compiler halt returnedGas output,
+      revertRel (.Ok yulChild childStore) compiler ∧
+        targetOutcome = .halted halt ∧
+        evmResult = .revert returnedGas output ∧
+        EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmParent.createdAccounts, evmParent.accountMap, returnedGas,
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate,
+              false, output) ∧
+        halt.kind = .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreRevertedContractCallState
+                (EvmYul.Yul.addAccessedAccount
+                  (.Ok yulParent parentStore) addr)
+                (.Ok yulChild childStore)
+                inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := targetGas }
+                substate :=
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate } := by
+  rcases
+      dispatcherOutcomeRel_revert_ok_whole_childRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hOutcomeRel hWhole hRevertShared hTargetChildGas with
+    ⟨compiler, halt, hRevert, _hSource, hTarget, hKind,
+      hTargetChild, _hTargetChildWorld⟩
+  have hAgreeHalted :
+      Assembly.GasAware.XResultAgrees (.halted halt) evmResult := by
+    simpa [hTarget] using hAgree
+  rcases XResultAgrees_halted_revert_shape hAgreeHalted hKind with
+    ⟨returnedGas, output, hResult, hAgreeRevert⟩
+  have hXRevert :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok (.revert returnedGas output) := by
+    simpa [hResult] using hX
+  have hTraceHalt :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        (.halted halt) := by
+    simpa [hTarget] using hTrace
+  rcases
+      ordinaryCodeCall_revertBranch_rel_withTargetGas
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hParent parentStore childStore addr
+        hTargetChild hTraceHalt hXRevert hAgreeRevert
+        inOffset inSize outOffset outSize (hTargetGas hResult) with
     ⟨hTheta, hRestore⟩
   exact
     ⟨compiler, halt, returnedGas, output, hRevert, hTarget, hResult,
@@ -7560,6 +12352,237 @@ theorem ordinaryCodeCall_revertBranch_rel_of_installed_childDispatcher
     ⟨evmFuel, compiler, halt, returnedGas, output, hCall, hRevert,
       by simpa [hTargetOutcome] using hWhole, hTheta, hRestore⟩
 
+theorem ordinaryCodeCall_revertBranch_rel_of_installed_childDispatcher_withTargetGas
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel sourceFuel gasNat : Nat}
+    {initialShared yulParent yulChild : EvmYul.SharedState .Yul}
+    {evmParent : EvmYul.SharedState .EVM}
+    {initialStore parentStore childStore : EvmYul.Yul.VarStore}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hParent :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulParent evmParent)
+    (hInstalled : initialShared.executionEnv.code = program.contract)
+    (hCall :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .error (.Revert (.Ok yulChild childStore)))
+    {blobVersionedHashes : List ByteArray}
+    {source origin recipient addr : EvmYul.AccountAddress}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    (hSourceRun :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared initialStore)
+        (.revert (.Ok yulChild childStore)) sourceOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hCompileBoundary :
+      compileCheckedAssemblyTargetBytecodeResourcesSourceStatic? program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target gasNat
+            (thetaCodeRawInitialState target gasNat blobVersionedHashes
+              evmParent.createdAccounts evmParent.genesisBlockHeader
+              evmParent.blocks evmParent.accountMap evmParent.σ₀
+              { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                transactionReceipts := evmParent.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+              source origin recipient gasPrice value weiValue calldata depth
+              header perm))
+          targetOutcome)
+    (hGasBound :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target gasNat
+              (thetaCodeRawInitialState target gasNat blobVersionedHashes
+                evmParent.createdAccounts evmParent.genesisBlockHeader
+                evmParent.blocks evmParent.accountMap evmParent.σ₀
+                { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+                  transactionReceipts := evmParent.transactionReceipts }
+                (EvmYul.State.addAccessedAccount
+                  evmParent.toState addr).substate
+                source origin recipient gasPrice value weiValue calldata depth
+                header perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ gasNat)
+    (hUInt256 : gasNat < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {halt}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.halted halt) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    (inOffset inSize outOffset outSize : EvmYul.UInt256)
+    {targetGas : EvmYul.UInt256}
+    (hTargetGas :
+      ∀ {targetOutcome returnedGas output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.revert returnedGas output) →
+          gasAvailableRel
+            (yulParent.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            targetGas) :
+    ∃ (evmFuel : Nat) (compiler : Objects.Source.State)
+      (halt : Assembly.Halt) (returnedGas : EvmYul.UInt256)
+      (output : ByteArray),
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared initialStore) =
+        .error (.Revert (.Ok yulChild childStore)) ∧
+        revertRel (.Ok yulChild childStore) compiler ∧
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) ∧
+        EvmYul.EVM.Θ evmFuel.succ.succ blobVersionedHashes
+          evmParent.createdAccounts evmParent.genesisBlockHeader
+          evmParent.blocks evmParent.accountMap evmParent.σ₀
+          { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+            transactionReceipts := evmParent.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+          source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+          header perm =
+            .ok (evmParent.createdAccounts, evmParent.accountMap, returnedGas,
+              (EvmYul.State.addAccessedAccount evmParent.toState addr).substate,
+              false, output) ∧
+        halt.kind = .revert ∧
+          ∃ yulAfter,
+            EvmYul.Yul.restoreRevertedContractCallState
+                (EvmYul.Yul.addAccessedAccount
+                  (.Ok yulParent parentStore) addr)
+                (.Ok yulChild childStore)
+                inOffset inSize outOffset outSize =
+              .ok (.Ok yulAfter parentStore, [⟨0⟩]) ∧
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulAfter
+              { evmParent with
+                toMachineState :=
+                  { evmParent.toMachineState.finishExternalCall output
+                      inOffset inSize outOffset outSize with
+                    gasAvailable := targetGas }
+                substate :=
+                  (EvmYul.State.addAccessedAccount
+                    evmParent.toState addr).substate } := by
+  rcases
+      compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundary_installedGas_XResult
+        (prim := prim) hPrim
+        (outcomeRel :=
+          Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            terminalRel revertRel program (.Ok initialShared initialStore))
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (gas := gasNat) (shared := initialShared)
+        (store := initialStore) (revertState := .Ok yulChild childStore)
+        (rawInitial :=
+          thetaCodeRawInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm)
+        (sourceOutcome := sourceOutcome)
+        hInstalled hCall hSourceRun hOutcomeRel hCompileBoundary
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        hTargetGasForX hGasBound hUInt256 with
+    ⟨targetFuel, targetOutcome, evmFuel, _gasBound, evmResult,
+      _hReferenceRun, _hTargetRun, _hOutcomeRel, hWhole, hTrace,
+      _hGasBound, hX, hAgree, _hDecode, _hJumpdest⟩
+  have hXTheta :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            evmParent.createdAccounts evmParent.genesisBlockHeader
+            evmParent.blocks evmParent.accountMap evmParent.σ₀
+            { totalGasUsedInBlock := evmParent.totalGasUsedInBlock
+              transactionReceipts := evmParent.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evmParent.toState addr).substate
+            source origin recipient gasPrice value weiValue calldata depth
+            header perm) =
+        .ok evmResult := by
+    simpa [thetaCodeXInitialState] using hX
+  rcases
+      ordinaryCodeCall_revertBranch_rel_of_childOutcome_withTargetGas
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hParent hOutcomeRel hWhole hRevertShared hXTheta hAgree
+        (by
+          intro halt hTarget
+          exact hTargetChildGas (by simpa [hTarget] using hWhole))
+        hTrace inOffset inSize outOffset outSize
+        (by
+          intro returnedGas output hResult
+          exact hTargetGas hWhole (by simpa [hResult] using hAgree)) with
+    ⟨compiler, halt, returnedGas, output, hRevert, hTargetOutcome,
+      _hResult, hTheta, hRestore⟩
+  exact
+    ⟨evmFuel, compiler, halt, returnedGas, output, hCall, hRevert,
+      by simpa [hTargetOutcome] using hWhole, hTheta, hRestore⟩
+
 theorem Theta_code_non_oog_error_of_X_installedCode
     {fuel gasNat : Nat}
     {blobVersionedHashes : List ByteArray}
@@ -7661,6 +12684,40 @@ theorem CompiledAccountMapRel.dead_eq_of_missing
   unfold EvmYul.State.dead
   rw [hMissing, hEvmMissing]
   rfl
+
+theorem CompiledAccountMapRel.dead_eq
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    (addr : EvmYul.AccountAddress) :
+    EvmYul.State.dead yul addr = EvmYul.State.dead evm addr := by
+  unfold EvmYul.State.dead
+  cases hYul : yul.find? addr with
+  | none =>
+      have hEvm := hWorld.not_find_evm_of_not_find_yul hYul
+      rw [hEvm]
+      rfl
+  | some yulAccount =>
+      rcases hWorld.find_yul hYul with
+        ⟨evmAccount, hEvm, hAccount⟩
+      rw [hEvm]
+      exact hAccount.emptyAccount
+
+theorem CompiledAccountMapRel.Ccallgas_eq
+    {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
+    (hWorld : CompiledAccountMapRel yul evm)
+    {yulMachine evmMachine : EvmYul.MachineState}
+    {yulSubstate evmSubstate : EvmYul.Substate}
+    {target recipient : EvmYul.AccountAddress}
+    {value gas : EvmYul.UInt256}
+    (hGas : yulMachine.gasAvailable = evmMachine.gasAvailable)
+    (hSubstate : yulSubstate = evmSubstate) :
+    EvmYul.EVM.Ccallgas target recipient value gas
+        yul yulMachine yulSubstate =
+      EvmYul.EVM.Ccallgas target recipient value gas
+        evm evmMachine evmSubstate := by
+  exact
+    Ccallgas_eq_of_dead_eq hGas hSubstate
+      (hWorld.dead_eq recipient)
 
 theorem CompiledAccountMapRel.Ccallgas_eq_of_missing_recipient
     {yul : EvmYul.AccountMap .Yul} {evm : EvmYul.AccountMap .EVM}
@@ -8470,11 +13527,7 @@ theorem call_precompiled_success_rel
     {fuel gasCost : Nat}
     {blobVersionedHashes : List ByteArray}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
-    (hChargedShared :
-      Reference.SharedStateRel cfg yul
-        ({ evm with
-          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
-          : EvmYul.EVM.State).toSharedState)
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
     (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
     (hCfgAccountMap :
       ∀ {yulMap : EvmYul.AccountMap .Yul}
@@ -8628,8 +13681,8 @@ theorem call_precompiled_success_rel
       { yul with
         toState := EvmYul.State.addAccessedAccount yul.toState target }
     let evmAccessed : EvmYul.SharedState .EVM :=
-      { charged.toSharedState with
-        toState := EvmYul.State.addAccessedAccount charged.toState target }
+      { evm.toSharedState with
+        toState := EvmYul.State.addAccessedAccount evm.toState target }
     let yulEnv : EvmYul.ExecutionEnv .Yul :=
       { yul.executionEnv with
         calldata :=
@@ -8651,8 +13704,8 @@ theorem call_precompiled_success_rel
         evm.executionEnv.perm
     have hOwner :
         yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
-      rcases hChargedShared with ⟨hChain, _hMachine⟩
-      simpa [charged] using hChain.executionEnv.codeOwner
+      rcases hShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.codeOwner
     rcases
         hParentWorld.callTransferAccountMap?_of_evm_enough
           (source := yul.executionEnv.codeOwner)
@@ -8663,9 +13716,9 @@ theorem call_precompiled_success_rel
     have hSharedAccessed :
         Reference.SharedStateRel cfg yulAccessed evmAccessed := by
       simpa [yulAccessed, evmAccessed, charged, target] using
-        sharedStateRel_addAccessedAccount hChargedShared target
+        sharedStateRel_addAccessedAccount hShared target
     have hCalldata : yulEnv.calldata = evmEnv.calldata := by
-      rcases hChargedShared with ⟨_hChain, hMachine⟩
+      rcases hShared with ⟨_hChain, hMachine⟩
       simpa [yulEnv, evmEnv, EvmYul.EVM.thetaCallExecutionEnv, charged] using
         congrArg
           (fun memory =>
@@ -8719,11 +13772,7 @@ theorem call_precompiled_failure_rel
     {fuel gasCost : Nat}
     {blobVersionedHashes : List ByteArray}
     {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
-    (hChargedShared :
-      Reference.SharedStateRel cfg yul
-        ({ evm with
-          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
-          : EvmYul.EVM.State).toSharedState)
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
     (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
     (store : EvmYul.Yul.VarStore)
     {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
@@ -8872,8 +13921,8 @@ theorem call_precompiled_failure_rel
       { yul with
         toState := EvmYul.State.addAccessedAccount yul.toState target }
     let evmAccessed : EvmYul.SharedState .EVM :=
-      { charged.toSharedState with
-        toState := EvmYul.State.addAccessedAccount charged.toState target }
+      { evm.toSharedState with
+        toState := EvmYul.State.addAccessedAccount evm.toState target }
     let yulEnv : EvmYul.ExecutionEnv .Yul :=
       { yul.executionEnv with
         calldata :=
@@ -8895,8 +13944,8 @@ theorem call_precompiled_failure_rel
         evm.executionEnv.perm
     have hOwner :
         yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
-      rcases hChargedShared with ⟨hChain, _hMachine⟩
-      simpa [charged] using hChain.executionEnv.codeOwner
+      rcases hShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.codeOwner
     rcases
         hParentWorld.callTransferAccountMap?_of_evm_enough
           (source := yul.executionEnv.codeOwner)
@@ -8907,9 +13956,9 @@ theorem call_precompiled_failure_rel
     have hSharedAccessed :
         Reference.SharedStateRel cfg yulAccessed evmAccessed := by
       simpa [yulAccessed, evmAccessed, charged, target] using
-        sharedStateRel_addAccessedAccount hChargedShared target
+        sharedStateRel_addAccessedAccount hShared target
     have hCalldata : yulEnv.calldata = evmEnv.calldata := by
-      rcases hChargedShared with ⟨_hChain, hMachine⟩
+      rcases hShared with ⟨_hChain, hMachine⟩
       simpa [yulEnv, evmEnv, EvmYul.EVM.thetaCallExecutionEnv, charged] using
         congrArg
           (fun memory =>
@@ -8960,6 +14009,7728 @@ theorem call_precompiled_failure_rel
         EvmYul.Yul.State.toState] using hBuild
     · simpa [target, callMap, callGas, charged, evmAccessed, evmEnv,
         hRunEmpty] using hRel
+
+theorem primCall_CALL_precompiled_success_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (hCfgAccountMap :
+      ∀ {yulMap : EvmYul.AccountMap .Yul}
+        {evmMap : EvmYul.AccountMap .EVM},
+        CompiledAccountMapRel yulMap evmMap →
+          cfg.accountMapRel yulMap evmMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hSuccess :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        true)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall
+          precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let _yulEnv : EvmYul.ExecutionEnv .Yul :=
+      { yul.executionEnv with
+        calldata :=
+          yul.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat
+        code := default
+        codeOwner := target
+        source := yul.executionEnv.codeOwner
+        weiValue := value
+        depth := yul.executionEnv.depth + 1 }
+    let evmEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall
+              precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if precompileResult.2.1.isEmpty then evm.accountMap
+          else precompileResult.2.1
+        substate :=
+          if precompileResult.2.1.isEmpty then accessedSubstate
+          else precompileResult.2.2.2.1 }
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  rcases
+      call_precompiled_success_rel hShared hParentWorld hCfgAccountMap store
+        hEnough hDepth hPrecompile hSuccess hGas with
+    ⟨hEvm, yulCallMap, hTransfer, _hCallMapRel, hPrecompileYul,
+      yulAfter, hBuild, hRel⟩
+  refine ⟨hEvm, yulAfter, ?_, hRel⟩
+  have hDepthEq :
+      yul.executionEnv.depth = evm.executionEnv.depth := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.depth
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  have hCallGasEq :
+      EvmYul.EVM.Ccallgas
+          (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address)
+          value gas yul.accountMap yul.toMachineState yul.substate =
+        EvmYul.EVM.Ccallgas
+          (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address)
+          value gas evm.accountMap evm.toMachineState evm.substate := by
+    rcases hShared with ⟨hChain, hMachine⟩
+    exact
+      hParentWorld.Ccallgas_eq
+        (machineStateRel_gasAvailable_eq hMachine) hChain.substate
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hCallGasEq,
+    hNotDepthLimit, hPrecompileYul, EvmYul.toExecute,
+    EvmYul.Yul.addAccessedAccount,
+    EvmYul.State.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hBuild
+
+theorem primCall_CALL_precompiled_success_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hSuccess :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        true)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall
+          precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let _yulEnv : EvmYul.ExecutionEnv .Yul :=
+      { yul.executionEnv with
+        calldata :=
+          yul.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat
+        code := default
+        codeOwner := target
+        source := yul.executionEnv.codeOwner
+        weiValue := value
+        depth := yul.executionEnv.depth + 1 }
+    let evmEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall
+              precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if precompileResult.2.1.isEmpty then evm.accountMap
+          else precompileResult.2.1
+        substate :=
+          if precompileResult.2.1.isEmpty then accessedSubstate
+          else precompileResult.2.2.2.1 }
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  exact
+    primCall_CALL_precompiled_success_rel
+      (cfg :=
+        stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+      hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      (fun hRel => stateRelConfig_accountMapRel_of_compiledAccountMapRel hRel)
+      store hStaticAllowed hEnough hDepth hPrecompile hSuccess hGas
+
+theorem primCall_CALL_precompiled_failure_rel
+    {cfg : Reference.StateRelConfig}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hParentWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hFailure :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        false)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      cfg.gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let _yulEnv : EvmYul.ExecutionEnv .Yul :=
+      { yul.executionEnv with
+        calldata :=
+          yul.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat
+        code := default
+        codeOwner := target
+        source := yul.executionEnv.codeOwner
+        weiValue := value
+        depth := yul.executionEnv.depth + 1 }
+    let evmEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall
+              precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if precompileResult.2.1.isEmpty then evm.accountMap
+          else precompileResult.2.1
+        substate :=
+          if precompileResult.2.1.isEmpty then accessedSubstate
+          else precompileResult.2.2.2.1 }
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  rcases
+      call_precompiled_failure_rel hShared hParentWorld store
+        hEnough hDepth hPrecompile hFailure hGas with
+    ⟨hEvm, yulCallMap, hTransfer, _hCallMapRel, hPrecompileYul,
+      yulAfter, hBuild, hRel⟩
+  refine ⟨hEvm, yulAfter, ?_, hRel⟩
+  have hDepthEq :
+      yul.executionEnv.depth = evm.executionEnv.depth := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.depth
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  have hCallGasEq :
+      EvmYul.EVM.Ccallgas
+          (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address)
+          value gas yul.accountMap yul.toMachineState yul.substate =
+        EvmYul.EVM.Ccallgas
+          (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address)
+          value gas evm.accountMap evm.toMachineState evm.substate := by
+    rcases hShared with ⟨hChain, hMachine⟩
+    exact
+      hParentWorld.Ccallgas_eq
+        (machineStateRel_gasAvailable_eq hMachine) hChain.substate
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hCallGasEq,
+    hNotDepthLimit, hPrecompileYul, EvmYul.toExecute,
+    EvmYul.Yul.addAccessedAccount,
+    EvmYul.State.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hBuild
+
+theorem primCall_CALL_precompiled_failure_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hFailure :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        false)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let accessedSubstate :=
+      (EvmYul.State.addAccessedAccount charged.toState target).substate
+    let _yulEnv : EvmYul.ExecutionEnv .Yul :=
+      { yul.executionEnv with
+        calldata :=
+          yul.toMachineState.memory.readWithPadding
+            inOffset.toNat inSize.toNat
+        code := default
+        codeOwner := target
+        source := yul.executionEnv.codeOwner
+        weiValue := value
+        depth := yul.executionEnv.depth + 1 }
+    let evmEnv :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+        evm.executionEnv.codeOwner evm.executionEnv.sender target
+        (.Precompiled precompiled)
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+        value
+        (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm
+    let precompileResult :=
+      runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+        inOffset inSize outOffset outSize).gasAvailable +
+        precompileResult.2.2.1
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall
+              precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if precompileResult.2.1.isEmpty then evm.accountMap
+          else precompileResult.2.1
+        substate :=
+          if precompileResult.2.1.isEmpty then accessedSubstate
+          else precompileResult.2.2.2.1 }
+    EvmYul.EVM.call fuel.succ.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  exact
+    primCall_CALL_precompiled_failure_rel
+      (cfg :=
+        stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+      hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      store hStaticAllowed hEnough hDepth hPrecompile hFailure hGas
+
+theorem CALLPrimitiveRel.precompiledSuccess_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hSuccess :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        true)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall
+          precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ fuel.succ.succ gasCost blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callMap :=
+    evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let accessedSubstate :=
+    (EvmYul.State.addAccessedAccount charged.toState target).substate
+  let evmEnv :=
+    EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+      evm.executionEnv.codeOwner evm.executionEnv.sender target
+      (.Precompiled precompiled)
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+      value
+      (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+      (evm.executionEnv.depth + 1) evm.executionEnv.header
+      evm.executionEnv.perm
+  let precompileResult :=
+    runPrecompiledContract precompiled callMap
+      (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+      inOffset inSize outOffset outSize).gasAvailable +
+      precompileResult.2.2.1
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if precompileResult.2.1.isEmpty then evm.accountMap
+        else precompileResult.2.1
+      substate :=
+        if precompileResult.2.1.isEmpty then accessedSubstate
+        else precompileResult.2.2.2.1 }
+  rcases
+      primCall_CALL_precompiled_success_rel_stateRelConfig
+        hShared store hStaticAllowed hEnough hDepth hPrecompile hSuccess hGas
+    with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨1⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, precompileResult, evmEnv,
+      accessedSubstate, charged, callGas, callMap, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, precompileResult, evmEnv,
+      accessedSubstate, charged, callGas, callMap, target] using hRel
+
+theorem CALLPrimitiveRel.precompiledFailure_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {precompiled : EvmYul.PrecompiledContract}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+    (hFailure :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount evm.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      (runPrecompiledContract precompiled callMap
+        (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+        false)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callMap :=
+        evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let accessedSubstate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate
+      let childEnv :=
+        EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+          evm.executionEnv.codeOwner evm.executionEnv.sender target
+          (.Precompiled precompiled)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value
+          (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm
+      let precompileResult :=
+        runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+          inOffset inSize outOffset outSize).gasAvailable +
+          precompileResult.2.2.1
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ fuel.succ.succ gasCost blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callMap :=
+    evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let accessedSubstate :=
+    (EvmYul.State.addAccessedAccount charged.toState target).substate
+  let evmEnv :=
+    EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes
+      evm.executionEnv.codeOwner evm.executionEnv.sender target
+      (.Precompiled precompiled)
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+      value
+      (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+      (evm.executionEnv.depth + 1) evm.executionEnv.header
+      evm.executionEnv.perm
+  let precompileResult :=
+    runPrecompiledContract precompiled callMap
+      (EvmYul.UInt256.ofNat callGas) accessedSubstate evmEnv
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall precompileResult.2.2.2.2
+      inOffset inSize outOffset outSize).gasAvailable +
+      precompileResult.2.2.1
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if precompileResult.2.1.isEmpty then evm.accountMap
+        else precompileResult.2.1
+      substate :=
+        if precompileResult.2.1.isEmpty then accessedSubstate
+        else precompileResult.2.2.2.1 }
+  rcases
+      primCall_CALL_precompiled_failure_rel_stateRelConfig
+        hShared store hStaticAllowed hEnough hDepth hPrecompile hFailure hGas
+    with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨0⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, precompileResult, evmEnv,
+      accessedSubstate, charged, callGas, callMap, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, precompileResult, evmEnv,
+      accessedSubstate, charged, callGas, callMap, target] using hRel
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_restore
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {rets : List EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store ByteArray.empty inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) := by
+  dsimp at hCall
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let callGas :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata := calldata
+          code := yulRecipient.code
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGas)
+      accountMap := yulCallMap }
+  have hCall' :
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets) := by
+    simpa [initialShared, yulAccessed, calldata, callGas, callee] using hCall
+  have hCallExpanded := hCall
+  simp [EvmYul.State.addAccessedAccount] at hCallExpanded
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  have hToExecute :
+      EvmYul.toExecute .Yul yul.accountMap callee =
+        .Code yulRecipient.code := by
+    rw [EvmYul.toExecute, hNotPrecompile, hFindYul]
+    rfl
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hNotDepthLimit, hToExecute, hFindYul, hCallExpanded,
+    initialShared, yulAccessed, calldata, callGas, callee,
+    EvmYul.Yul.addAccessedAccount,
+    EvmYul.State.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+      EvmYul.Yul.State.toSharedState,
+      EvmYul.Yul.State.toMachineState] using hRestore
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_restore_of_branchFacts
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {rets : List EvmYul.UInt256}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store ByteArray.empty inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) :=
+  primCall_CALL_ordinary_yul_of_dispatcher_restore
+    (fuel := fuel) store childStore hStaticAllowed hDepth hNotPrecompile
+    hFacts.findYul hFacts.transfer hCall hRestore
+
+theorem primCall_CALL_defaultCode_yul_of_restore
+    {fuel : Nat}
+    {yul yulAfter : EvmYul.SharedState .Yul}
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeDefault : yulRecipient.code = default)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hRestore :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount (.Ok yul store) callee)
+          (.Ok initialShared default)
+          store ByteArray.empty inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩])) :
+    EvmYul.Yul.primCall fuel.succ.succ.succ.succ.succ.succ
+        (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) := by
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let callGas :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata := calldata
+          code := yulRecipient.code
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGas)
+      accountMap := yulCallMap }
+  have hCall :
+      EvmYul.Yul.callDispatcher fuel.succ.succ.succ.succ.succ
+          (some yulRecipient.code) (.Ok initialShared default) =
+        .ok (.Ok initialShared default, []) := by
+    have hInitialCode :
+        initialShared.executionEnv.code = (default : AstContract) := by
+      simp [initialShared, hCodeDefault]
+    simpa [hCodeDefault] using
+      callDispatcher_defaultCode_ok
+        (fuel := fuel) (shared := initialShared)
+        (store := default) hInitialCode
+  exact
+    primCall_CALL_ordinary_yul_of_dispatcher_restore
+      (fuel := fuel.succ.succ.succ.succ.succ)
+      store default hStaticAllowed hDepth hNotPrecompile hFindYul
+      hTransfer
+      (by
+        dsimp [callee, calldata, callGas, yulAccessed, initialShared]
+          at hCall ⊢
+        simpa using hCall)
+      (by
+        dsimp [callee, calldata, callGas, yulAccessed, initialShared]
+          at hRestore ⊢
+        simpa using hRestore)
+
+theorem primCall_CALL_existingDefaultCode_emptyReturn_rel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeDefault : yulRecipient.code = default)
+    (hFindEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+    (hEvmCodeDefault : evmRecipient.code = default)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    let target := EvmYul.AccountAddress.ofUInt256 address
+    let callMap :=
+      evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+    let callGas :=
+      EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+        evm.toMachineState evm.substate
+    let charged : EvmYul.EVM.State :=
+      { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall ByteArray.empty
+        inOffset inSize outOffset outSize).gasAvailable +
+        EvmYul.UInt256.ofNat callGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if callMap.isEmpty then evm.accountMap else callMap
+        substate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate }
+    EvmYul.EVM.call fuel.succ.succ.succ.succ.succ.succ gasCost
+        blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+      ∃ yulAfter,
+        EvmYul.Yul.primCall fuel.succ.succ.succ.succ.succ.succ
+            (.Ok yul store) .CALL
+            [gas, address, value, inOffset, inSize, outOffset, outSize] =
+          .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+        Reference.SharedStateRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          yulAfter evmAfter.toSharedState := by
+  dsimp at hGas ⊢
+  let cfg :=
+    stateRelConfig varStackRel terminalCfgRel revertCfgRel
+      gasAvailableRel gasValueRel totalGasRel
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callMap :=
+    evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall ByteArray.empty
+      inOffset inSize outOffset outSize).gasAvailable +
+      EvmYul.UInt256.ofNat callGas
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState target }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evm.toSharedState with
+      toState := EvmYul.State.addAccessedAccount evm.toState target }
+  have hWorld :
+      CompiledAccountMapRel yul.accountMap evm.accountMap :=
+    compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared
+  have hOwner :
+      yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.codeOwner
+  rcases
+      hWorld.callTransferAccountMap?_of_evm_enough_find_yul_nonempty
+        (source := yul.executionEnv.codeOwner)
+        (recipient := target)
+        (value := value)
+        hFindYul (by simpa [hOwner] using hEnough) with
+    ⟨yulCallMap, hTransfer, hYulNonempty, hEvmNonempty, hTransferRel⟩
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let yulCallGas :=
+    EvmYul.EVM.Ccallgas target target value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata := calldata
+          code := yulRecipient.code
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := target
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat yulCallGas)
+      accountMap := yulCallMap }
+  have hEvmNonempty' : callMap.isEmpty = false := by
+    simpa [callMap, hOwner] using hEvmNonempty
+  have hTransferRel' : CompiledAccountMapRel yulCallMap callMap := by
+    simpa [callMap, target, hOwner] using hTransferRel
+  have hEvm :
+      EvmYul.EVM.call fuel.succ.succ.succ.succ.succ.succ gasCost
+          blobVersionedHashes gas
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+          value value inOffset inSize outOffset outSize evm.executionEnv.perm
+          evm =
+        .ok (⟨1⟩,
+          { charged with
+            toMachineState :=
+              { charged.toMachineState.finishExternalCall ByteArray.empty
+                  inOffset inSize outOffset outSize with
+                gasAvailable := targetGas }
+            accountMap :=
+              if callMap.isEmpty then evm.accountMap else callMap
+            substate :=
+              (EvmYul.State.addAccessedAccount charged.toState target).substate }) := by
+    simpa [target, callMap, callGas, charged, targetGas] using
+      EVM_call_existingDefaultCode_success_eq
+        (fuel := fuel.succ) (gasCost := gasCost)
+        (blobVersionedHashes := blobVersionedHashes)
+        (evm := evm) (gas := gas) (address := address)
+        (value := value) (inOffset := inOffset) (inSize := inSize)
+        (outOffset := outOffset) (outSize := outSize)
+        hEnough hDepth hNotPrecompile hFindEvm hEvmCodeDefault
+  have hParentRel :
+      Reference.SharedStateRel cfg yulAccessed evmAccessed := by
+    simpa [cfg, yulAccessed, evmAccessed, target] using
+      sharedStateRel_addAccessedAccount hShared target
+  have hAccountMap :
+      cfg.accountMapRel
+        (if initialShared.accountMap.isEmpty then yulAccessed.accountMap
+          else initialShared.accountMap)
+        (if callMap.isEmpty then evmAccessed.accountMap else callMap) := by
+    have hCfgTransfer :
+        cfg.accountMapRel yulCallMap callMap :=
+      stateRelConfig_accountMapRel_of_compiledAccountMapRel hTransferRel'
+    simpa [cfg, initialShared, yulAccessed, evmAccessed, hYulNonempty,
+      hEvmNonempty'] using hCfgTransfer
+  have hSubstate :
+      (if initialShared.accountMap.isEmpty then yulAccessed.substate
+        else initialShared.substate) =
+        if callMap.isEmpty then evmAccessed.substate
+        else evmAccessed.substate := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simp [initialShared, yulAccessed, evmAccessed, callMap, target,
+      hYulNonempty, hEvmNonempty', EvmYul.State.addAccessedAccount,
+      EvmYul.Substate.addAccessedAccount, hChain.substate]
+  have hCreated :
+      initialShared.createdAccounts = evm.createdAccounts := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa [initialShared, yulAccessed] using hChain.createdAccounts
+  have hGas' :
+      cfg.gasAvailableRel
+        (yulAccessed.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas := by
+    simpa [cfg, yulAccessed, targetGas, charged, callGas, callMap,
+      target] using hGas
+  rcases
+      restoreSuccessfulContractCallState_ok_rel
+        hParentRel store default store
+        (yulChild := initialShared)
+        (evmChildAccountMap := callMap)
+        (evmChildSubstate := evmAccessed.substate)
+        (evmChildCreated := evm.createdAccounts)
+        (targetGas := targetGas)
+        hAccountMap hSubstate hCreated ByteArray.empty
+        inOffset inSize outOffset outSize hGas' with
+    ⟨yulAfter, hRestore, hRel⟩
+  have hPrim :
+      EvmYul.Yul.primCall fuel.succ.succ.succ.succ.succ.succ
+          (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨1⟩]) := by
+    exact
+      primCall_CALL_defaultCode_yul_of_restore
+        (fuel := fuel) store hStaticAllowed (by
+          have hDepthEq :
+              yul.executionEnv.depth = evm.executionEnv.depth := by
+            rcases hShared with ⟨hChain, _hMachine⟩
+            simpa using hChain.executionEnv.depth
+          omega)
+        hNotPrecompile hFindYul hCodeDefault hTransfer
+        (by
+          dsimp [target, calldata, yulCallGas, yulAccessed, initialShared]
+            at hRestore ⊢
+          simpa using hRestore)
+  refine ⟨hEvm, yulAfter, hPrim, ?_⟩
+  simpa [cfg, target, callMap, charged, targetGas, evmAccessed,
+    EvmYul.State.addAccessedAccount, hEvmNonempty'] using hRel
+
+theorem CALLPrimitiveRel.existingDefaultCode_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hCodeDefault : yulRecipient.code = default)
+    (hFindEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+    (hEvmCodeDefault : evmRecipient.code = default)
+    (hGas :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas) :
+    CALLPrimitiveRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      fuel.succ.succ.succ.succ.succ.succ
+      fuel.succ.succ.succ.succ.succ.succ
+      gasCost blobVersionedHashes yul evm store
+      gas address value inOffset inSize outOffset outSize := by
+  let target := EvmYul.AccountAddress.ofUInt256 address
+  let callMap :=
+    evmCallTransfer evm.accountMap evm.executionEnv.codeOwner target value
+  let callGas :=
+    EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let charged : EvmYul.EVM.State :=
+    { evm with gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall ByteArray.empty
+      inOffset inSize outOffset outSize).gasAvailable +
+      EvmYul.UInt256.ofNat callGas
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if callMap.isEmpty then evm.accountMap else callMap
+      substate :=
+        (EvmYul.State.addAccessedAccount charged.toState target).substate }
+  rcases
+      primCall_CALL_existingDefaultCode_emptyReturn_rel_stateRelConfig
+        hShared store hStaticAllowed hEnough hDepth hNotPrecompile hFindYul
+        hCodeDefault hFindEvm hEvmCodeDefault hGas with
+    ⟨hEvm, yulAfter, hYul, hRel⟩
+  refine ⟨⟨1⟩, evmAfter, yulAfter, ?_, ?_, ?_⟩
+  · simpa [evmAfter, targetGas, charged, callGas, callMap, target] using hEvm
+  · exact hYul
+  · simpa [evmAfter, targetGas, charged, callGas, callMap, target] using hRel
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_yulHalt_restore
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {haltValue : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) := by
+  dsimp at hCall
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let callGas :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata := calldata
+          code := yulRecipient.code
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGas)
+      accountMap := yulCallMap }
+  have hCallExpanded := hCall
+  simp [EvmYul.State.addAccessedAccount] at hCallExpanded
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  have hToExecute :
+      EvmYul.toExecute .Yul yul.accountMap callee =
+        .Code yulRecipient.code := by
+    rw [EvmYul.toExecute, hNotPrecompile, hFindYul]
+    rfl
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hNotDepthLimit, hToExecute, hFindYul, hCallExpanded,
+    initialShared, yulAccessed, calldata, callGas, callee,
+    EvmYul.Yul.addAccessedAccount,
+    EvmYul.State.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hRestore
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_yulHalt_restore_of_branchFacts
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {haltValue : EvmYul.UInt256}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) :=
+  primCall_CALL_ordinary_yul_of_dispatcher_yulHalt_restore
+    (fuel := fuel) store childStore hStaticAllowed hDepth hNotPrecompile
+    hFacts.findYul hFacts.transfer hCall hRestore
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_revert
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)))
+    (hRestore :
+      EvmYul.Yul.restoreRevertedContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨0⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨0⟩]) := by
+  dsimp at hCall
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let callGas :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata := calldata
+          code := yulRecipient.code
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGas)
+      accountMap := yulCallMap }
+  have hCallExpanded := hCall
+  simp [EvmYul.State.addAccessedAccount] at hCallExpanded
+  have hNotDepthLimit : ¬ yul.executionEnv.depth ≥ 1024 := by
+    omega
+  have hStaticAllowed' :
+      ¬ (yul.executionEnv.perm = false ∧ ¬ value = ⟨0⟩) := by
+    intro hStatic
+    exact hStaticAllowed (by simpa using hStatic)
+  have hToExecute :
+      EvmYul.toExecute .Yul yul.accountMap callee =
+        .Code yulRecipient.code := by
+    rw [EvmYul.toExecute, hNotPrecompile, hFindYul]
+    rfl
+  simpa [EvmYul.Yul.primCall, hStaticAllowed', hTransfer,
+    hNotDepthLimit, hToExecute, hFindYul, hCallExpanded,
+    initialShared, yulAccessed, calldata, callGas, callee,
+    EvmYul.Yul.addAccessedAccount,
+    EvmYul.State.addAccessedAccount,
+    EvmYul.Yul.State.sharedState,
+    EvmYul.Yul.State.executionEnv,
+    EvmYul.Yul.State.setState, EvmYul.Yul.State.toState,
+    EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.toMachineState] using hRestore
+
+theorem primCall_CALL_ordinary_yul_of_dispatcher_revert_of_branchFacts
+    {fuel : Nat}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hDepth : yul.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher fuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)))
+    (hRestore :
+      EvmYul.Yul.restoreRevertedContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨0⟩])) :
+    EvmYul.Yul.primCall fuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨0⟩]) :=
+  primCall_CALL_ordinary_yul_of_dispatcher_revert
+    (fuel := fuel) store childStore hStaticAllowed hDepth hNotPrecompile
+    hFacts.findYul hFacts.transfer hCall hRestore
+
+theorem primCall_CALL_ordinary_runningSuccess_of_theta_restore
+    {cfg : Reference.StateRelConfig}
+    {referenceFuel evmThetaFuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm evmChild : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {target : Assembly.TargetProgram}
+    {rets : List EvmYul.UInt256}
+    {output : ByteArray}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hFindEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+    (hCode :
+      evmRecipient.code = Assembly.Bytecode.encodeTarget target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets))
+    (hTheta :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      EvmYul.EVM.Θ evmThetaFuel blobVersionedHashes
+          evm.createdAccounts evm.genesisBlockHeader evm.blocks
+          evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          evm.executionEnv.codeOwner evm.executionEnv.sender callee
+          (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat callGas)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm =
+        .ok (evmChild.createdAccounts,
+          if evmChild.accountMap.isEmpty then evm.accountMap
+          else evmChild.accountMap,
+          evmChild.gasAvailable,
+          if evmChild.accountMap.isEmpty then
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          else evmChild.substate,
+          true, output))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store ByteArray.empty inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩]))
+    (hRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      Reference.SharedStateRel cfg yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts } :
+          EvmYul.EVM.State).toSharedState) :
+    let callee := EvmYul.AccountAddress.ofUInt256 address
+    let charged : EvmYul.EVM.State :=
+      { evm with
+        gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        evmChild.gasAvailable
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if evmChild.accountMap.isEmpty then evm.accountMap
+          else evmChild.accountMap
+        substate :=
+          if evmChild.accountMap.isEmpty then
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          else evmChild.substate
+        createdAccounts := evmChild.createdAccounts }
+    EvmYul.EVM.call evmThetaFuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+    EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+    Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hTheta hRel ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall output
+      inOffset inSize outOffset outSize).gasAvailable +
+      evmChild.gasAvailable
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if evmChild.accountMap.isEmpty then evm.accountMap
+        else evmChild.accountMap
+      substate :=
+        if evmChild.accountMap.isEmpty then
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+        else evmChild.substate
+      createdAccounts := evmChild.createdAccounts }
+  have hYulDepth : yul.executionEnv.depth < 1024 := by
+    have hDepthEq :
+        yul.executionEnv.depth = evm.executionEnv.depth := by
+      rcases hShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.depth
+    omega
+  have hYulCall :
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨1⟩]) :=
+    primCall_CALL_ordinary_yul_of_dispatcher_restore
+      (fuel := referenceFuel) store childStore
+      hStaticAllowed hYulDepth hNotPrecompile hFindYul hTransfer hCall
+      hRestore
+  have hEvmCall :=
+    EVM_call_ordinaryCode_of_theta_eq
+      (fuel := evmThetaFuel)
+      (gasCost := gasCost)
+      (blobVersionedHashes := blobVersionedHashes)
+      (evm := evm)
+      (gas := gas) (address := address) (value := value)
+      (inOffset := inOffset) (inSize := inSize)
+      (outOffset := outOffset) (outSize := outSize)
+      (calleeAccount := evmRecipient) (target := target)
+      hEnough hDepth hNotPrecompile hFindEvm hCode hTheta
+  refine ⟨?_, hYulCall, ?_⟩
+  · simpa [callee, charged, targetGas, evmAfter] using hEvmCall
+  · simpa [callee, charged, targetGas, evmAfter] using hRel
+
+theorem primCall_CALL_ordinary_haltedSuccess_of_theta_restore
+    {cfg : Reference.StateRelConfig}
+    {referenceFuel evmThetaFuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm evmChild : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {target : Assembly.TargetProgram}
+    {haltValue : EvmYul.UInt256}
+    {output : ByteArray}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hFindEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+    (hCode :
+      evmRecipient.code = Assembly.Bytecode.encodeTarget target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue))
+    (hTheta :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      EvmYul.EVM.Θ evmThetaFuel blobVersionedHashes
+          evm.createdAccounts evm.genesisBlockHeader evm.blocks
+          evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          evm.executionEnv.codeOwner evm.executionEnv.sender callee
+          (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat callGas)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm =
+        .ok (evmChild.createdAccounts,
+          if evmChild.accountMap.isEmpty then evm.accountMap
+          else evmChild.accountMap,
+          evmChild.gasAvailable,
+          if evmChild.accountMap.isEmpty then
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          else evmChild.substate,
+          true, output))
+    (hRestore :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          store yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩]))
+    (hRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      Reference.SharedStateRel cfg yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts } :
+          EvmYul.EVM.State).toSharedState) :
+    let callee := EvmYul.AccountAddress.ofUInt256 address
+    let charged : EvmYul.EVM.State :=
+      { evm with
+        gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        evmChild.gasAvailable
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap :=
+          if evmChild.accountMap.isEmpty then evm.accountMap
+          else evmChild.accountMap
+        substate :=
+          if evmChild.accountMap.isEmpty then
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          else evmChild.substate
+        createdAccounts := evmChild.createdAccounts }
+    EvmYul.EVM.call evmThetaFuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨1⟩, evmAfter) ∧
+    EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+    Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hTheta hRel ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall output
+      inOffset inSize outOffset outSize).gasAvailable +
+      evmChild.gasAvailable
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap :=
+        if evmChild.accountMap.isEmpty then evm.accountMap
+        else evmChild.accountMap
+      substate :=
+        if evmChild.accountMap.isEmpty then
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+        else evmChild.substate
+      createdAccounts := evmChild.createdAccounts }
+  have hYulDepth : yul.executionEnv.depth < 1024 := by
+    have hDepthEq :
+        yul.executionEnv.depth = evm.executionEnv.depth := by
+      rcases hShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.depth
+    omega
+  have hYulCall :
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨1⟩]) :=
+    primCall_CALL_ordinary_yul_of_dispatcher_yulHalt_restore
+      (fuel := referenceFuel) store childStore
+      hStaticAllowed hYulDepth hNotPrecompile hFindYul hTransfer hCall
+      hRestore
+  have hEvmCall :=
+    EVM_call_ordinaryCode_of_theta_eq
+      (fuel := evmThetaFuel)
+      (gasCost := gasCost)
+      (blobVersionedHashes := blobVersionedHashes)
+      (evm := evm)
+      (gas := gas) (address := address) (value := value)
+      (inOffset := inOffset) (inSize := inSize)
+      (outOffset := outOffset) (outSize := outSize)
+      (calleeAccount := evmRecipient) (target := target)
+      hEnough hDepth hNotPrecompile hFindEvm hCode hTheta
+  refine ⟨?_, hYulCall, ?_⟩
+  · simpa [callee, charged, targetGas, evmAfter] using hEvmCall
+  · simpa [callee, charged, targetGas, evmAfter] using hRel
+
+theorem primCall_CALL_ordinary_revert_of_theta_restore
+    {cfg : Reference.StateRelConfig}
+    {referenceFuel evmThetaFuel gasCost : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {yul yulChild yulAfter : EvmYul.SharedState .Yul}
+    {evm : EvmYul.EVM.State}
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {target : Assembly.TargetProgram}
+    {returnedGas : EvmYul.UInt256}
+    {output : ByteArray}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFindYul :
+      yul.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some yulRecipient)
+    (hTransfer :
+      EvmYul.Yul.callTransferAccountMap? yul.accountMap
+          yul.executionEnv.codeOwner
+          (EvmYul.AccountAddress.ofUInt256 address) value =
+        some yulCallMap)
+    (hFindEvm :
+      evm.accountMap.find? (EvmYul.AccountAddress.ofUInt256 address) =
+        some evmRecipient)
+    (hCode :
+      evmRecipient.code = Assembly.Bytecode.encodeTarget target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)))
+    (hTheta :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      EvmYul.EVM.Θ evmThetaFuel blobVersionedHashes
+          evm.createdAccounts evm.genesisBlockHeader evm.blocks
+          evm.accountMap evm.σ₀
+          { totalGasUsedInBlock := evm.totalGasUsedInBlock
+            transactionReceipts := evm.transactionReceipts }
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          evm.executionEnv.codeOwner evm.executionEnv.sender callee
+          (.Code (Assembly.Bytecode.encodeTarget target))
+          (EvmYul.UInt256.ofNat callGas)
+          (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+          value value
+          (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+          (evm.executionEnv.depth + 1) evm.executionEnv.header
+          evm.executionEnv.perm =
+        .ok (evm.createdAccounts, evm.accountMap, returnedGas,
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate,
+          false, output))
+    (hRestore :
+      EvmYul.Yul.restoreRevertedContractCallState
+          (EvmYul.Yul.addAccessedAccount
+            (.Ok yul store) (EvmYul.AccountAddress.ofUInt256 address))
+          (.Ok yulChild childStore)
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨0⟩]))
+    (hRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          returnedGas
+      Reference.SharedStateRel cfg yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap := evm.accountMap
+          substate :=
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          createdAccounts := evm.createdAccounts } :
+          EvmYul.EVM.State).toSharedState) :
+    let callee := EvmYul.AccountAddress.ofUInt256 address
+    let charged : EvmYul.EVM.State :=
+      { evm with
+        gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+    let targetGas :=
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        returnedGas
+    let evmAfter : EvmYul.EVM.State :=
+      { charged with
+        toMachineState :=
+          { charged.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize with
+            gasAvailable := targetGas }
+        accountMap := evm.accountMap
+        substate :=
+          (EvmYul.State.addAccessedAccount evm.toState callee).substate
+        createdAccounts := evm.createdAccounts }
+    EvmYul.EVM.call evmThetaFuel.succ gasCost blobVersionedHashes gas
+        (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+        value value inOffset inSize outOffset outSize evm.executionEnv.perm
+        evm =
+      .ok (⟨0⟩, evmAfter) ∧
+    EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+        [gas, address, value, inOffset, inSize, outOffset, outSize] =
+      .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+    Reference.SharedStateRel cfg yulAfter evmAfter.toSharedState := by
+  dsimp at hTheta hRel ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGas :=
+    (charged.toMachineState.finishExternalCall output
+      inOffset inSize outOffset outSize).gasAvailable +
+      returnedGas
+  let evmAfter : EvmYul.EVM.State :=
+    { charged with
+      toMachineState :=
+        { charged.toMachineState.finishExternalCall output
+            inOffset inSize outOffset outSize with
+          gasAvailable := targetGas }
+      accountMap := evm.accountMap
+      substate :=
+        (EvmYul.State.addAccessedAccount evm.toState callee).substate
+      createdAccounts := evm.createdAccounts }
+  have hYulDepth : yul.executionEnv.depth < 1024 := by
+    have hDepthEq :
+        yul.executionEnv.depth = evm.executionEnv.depth := by
+      rcases hShared with ⟨hChain, _hMachine⟩
+      simpa using hChain.executionEnv.depth
+    omega
+  have hYulCall :
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨0⟩]) :=
+    primCall_CALL_ordinary_yul_of_dispatcher_revert
+      (fuel := referenceFuel) store childStore
+      hStaticAllowed hYulDepth hNotPrecompile hFindYul hTransfer hCall
+      hRestore
+  have hEvmCall :=
+    EVM_call_ordinaryCode_of_theta_eq
+      (fuel := evmThetaFuel)
+      (gasCost := gasCost)
+      (blobVersionedHashes := blobVersionedHashes)
+      (evm := evm)
+      (gas := gas) (address := address) (value := value)
+      (inOffset := inOffset) (inSize := inSize)
+      (outOffset := outOffset) (outSize := outSize)
+      (calleeAccount := evmRecipient) (target := target)
+      hEnough hDepth hNotPrecompile hFindEvm hCode hTheta
+  refine ⟨?_, hYulCall, ?_⟩
+  · simpa [callee, charged, targetGas, evmAfter] using hEvmCall
+  · simpa [callee, charged, targetGas, evmAfter] using hRel
+
+theorem primCall_CALL_ordinary_runningSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {rets : List EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    ∃ (evmFuel : Nat) (targetChild evmChild : EVMState)
+      (output : ByteArray) (yulAfter : EvmYul.SharedState .Yul),
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      let evmAfter : EvmYul.EVM.State :=
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts }
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome
+        (.running targetChild) ∧
+      EvmYul.EVM.call evmFuel.succ.succ.succ gasCost
+          yul.executionEnv.blobVersionedHashes gas
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+          value value inOffset inSize outOffset outSize
+          evm.executionEnv.perm evm =
+        .ok (⟨1⟩, evmAfter) ∧
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter evmAfter.toSharedState := by
+  dsimp at hCall hSourceRun hOutcomeRel hTargetGasForX hGasBound hReturnedGas ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let callGasYul :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let callGasEvm :=
+    EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata :=
+            yul.toMachineState.memory.readWithPadding
+              inOffset.toNat inSize.toNat
+          code := program.contract
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGasYul)
+      accountMap := yulCallMap }
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGasOf : EVMState → ByteArray → EvmYul.UInt256 :=
+    fun evmChild output =>
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        evmChild.gasAvailable
+  have hInstalled :
+      initialShared.executionEnv.code = program.contract := by
+    simp [initialShared]
+  have hCall' :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets) := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hCall
+  have hSourceRun' :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome := by
+    simpa [callGasEvm, callee] using hSourceRun
+  have hOutcomeRel' :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.regular (.Ok yulChild childStore)) sourceOutcome := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hOutcomeRel
+  let hTargetGasForX' :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome := by
+    intro targetFuel targetOutcome hTrace
+    exact hTargetGasForX (by simpa [callGasEvm, callee] using hTrace)
+  have hGasBound' :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGasEvm
+              (thetaCodeRawInitialState target callGasEvm
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX' hTrace).gasBound ≤ callGasEvm := by
+    intro targetFuel targetOutcome hTrace
+    dsimp [hTargetGasForX']
+    simpa [callGasEvm, callee] using
+      hGasBound (by simpa [callGasEvm, callee] using hTrace)
+  have hUInt256' : callGasEvm < EvmYul.UInt256.size := by
+    simpa [callGasEvm, callee] using hUInt256
+  have hReturnedGas' :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            (targetGasOf evmChild output) := by
+    intro targetOutcome evmChild output hWhole hAgree
+    simpa [targetGasOf, charged] using hReturnedGas hWhole hAgree
+  rcases
+      ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+        (prim := prim) hPrim
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hShared hInstalled hCall' hSourceRun' hOutcomeRel'
+        hFacts.compileBoundary hTargetGasForX' hGasBound' hUInt256'
+        hTargetChildGas hEvmChildGas inOffset inSize outOffset outSize
+        targetGasOf hReturnedGas' with
+    ⟨evmFuel, targetChild, evmChild, output, _hCall,
+      hWhole, hTheta, hRestore⟩
+  rcases hRestore with ⟨yulAfter, hRestoreRun, hRel⟩
+  have hCallYul :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets) := by
+    simpa [hFacts.contract] using hCall
+  have hRelAdapter :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts } :
+          EvmYul.EVM.State).toSharedState := by
+    simpa [callee, charged, targetGasOf] using hRel
+  rcases
+      primCall_CALL_ordinary_runningSuccess_of_theta_restore
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        (referenceFuel := referenceFuel)
+        (evmThetaFuel := evmFuel.succ.succ)
+        (gasCost := gasCost)
+        (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+        (yul := yul) (yulChild := yulChild) (yulAfter := yulAfter)
+        (evm := evm) (evmChild := evmChild)
+        store childStore
+        (gas := gas) (address := address) (value := value)
+        (inOffset := inOffset) (inSize := inSize)
+        (outOffset := outOffset) (outSize := outSize)
+        (yulRecipient := yulRecipient) (yulCallMap := yulCallMap)
+        (evmRecipient := evmRecipient) (target := target)
+        (rets := rets) (output := output)
+          hShared hStaticAllowed hEnough hDepth hNotPrecompile hFacts.findYul
+          hFacts.transfer hFacts.findEvm hFacts.code hCallYul hTheta
+          hRestoreRun
+          hRelAdapter with
+      ⟨hEvmCall, hYulCall, hFinalRel⟩
+  refine ⟨evmFuel, targetChild, evmChild, output, yulAfter, ?_⟩
+  dsimp
+  exact ⟨hWhole, hEvmCall, hYulCall, hFinalRel⟩
+
+theorem CALLPrimitiveRel.ordinaryRunningSuccess_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {rets : List EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .ok (.Ok yulChild childStore, rets))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.regular (.Ok yulChild childStore)) sourceOutcome)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    ∃ (evmFuel : Nat),
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        referenceFuel.succ evmFuel.succ.succ.succ gasCost
+        yul.executionEnv.blobVersionedHashes yul evm store
+        gas address value inOffset inSize outOffset outSize := by
+  rcases
+      primCall_CALL_ordinary_runningSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+        hPrim hShared store childStore hStaticAllowed hEnough hDepth
+        hNotPrecompile hFacts hCall hSourceRun hOutcomeRel hTargetGasForX
+        hGasBound hUInt256 hTargetChildGas hEvmChildGas hReturnedGas with
+    ⟨evmFuel, _targetChild, _evmChild, _output, yulAfter, _hWhole,
+      hEvmCall, hYulCall, hFinalRel⟩
+  exact ⟨evmFuel, ⟨⟨1⟩, _, yulAfter, hEvmCall, hYulCall, hFinalRel⟩⟩
+
+theorem primCall_CALL_ordinary_haltedSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {haltValue : EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        program (.Ok initialShared default)
+        (.yulHalt (.Ok yulChild childStore) haltValue) sourceOutcome)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    ∃ (evmFuel : Nat) (kind : Assembly.HaltKind)
+      (compiler : Objects.Source.State) (halt : Assembly.Halt)
+      (evmChild : EVMState) (output : ByteArray)
+      (yulAfter : EvmYul.SharedState .Yul),
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      let evmAfter : EvmYul.EVM.State :=
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts }
+      Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        kind haltValue (.Ok yulChild childStore) compiler ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) ∧
+      halt.kind = kind ∧
+      halt.kind ≠ .revert ∧
+      EvmYul.EVM.call evmFuel.succ.succ.succ gasCost
+          yul.executionEnv.blobVersionedHashes gas
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+          value value inOffset inSize outOffset outSize
+          evm.executionEnv.perm evm =
+        .ok (⟨1⟩, evmAfter) ∧
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨1⟩]) ∧
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter evmAfter.toSharedState := by
+  dsimp at hCall hSourceRun hOutcomeRel hTargetGasForX hGasBound hReturnedGas ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let callGasYul :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let callGasEvm :=
+    EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata :=
+            yul.toMachineState.memory.readWithPadding
+              inOffset.toNat inSize.toNat
+          code := program.contract
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGasYul)
+      accountMap := yulCallMap }
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGasOf : EVMState → ByteArray → EvmYul.UInt256 :=
+    fun evmChild output =>
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        evmChild.gasAvailable
+  have hInstalled :
+      initialShared.executionEnv.code = program.contract := by
+    simp [initialShared]
+  have hCall' :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue) := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hCall
+  have hSourceRun' :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome := by
+    simpa [callGasEvm, callee] using hSourceRun
+  have hOutcomeRel' :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        program (.Ok initialShared default)
+        (.yulHalt (.Ok yulChild childStore) haltValue) sourceOutcome := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hOutcomeRel
+  let hTargetGasForX' :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome := by
+    intro targetFuel targetOutcome hTrace
+    exact hTargetGasForX (by simpa [callGasEvm, callee] using hTrace)
+  have hGasBound' :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGasEvm
+              (thetaCodeRawInitialState target callGasEvm
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX' hTrace).gasBound ≤ callGasEvm := by
+    intro targetFuel targetOutcome hTrace
+    dsimp [hTargetGasForX']
+    simpa [callGasEvm, callee] using
+      hGasBound (by simpa [callGasEvm, callee] using hTrace)
+  have hUInt256' : callGasEvm < EvmYul.UInt256.size := by
+    simpa [callGasEvm, callee] using hUInt256
+  rcases
+      compile_preserves_of_installed_callDispatcher_yulHalt_sourceStaticBoundary_installedGas_XResult
+        (prim := prim) hPrim
+        (outcomeRel :=
+          Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel))
+            (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel))
+            program (.Ok initialShared default))
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (gas := callGasEvm) (shared := initialShared)
+        (store := default) (haltState := .Ok yulChild childStore)
+        (value := haltValue)
+        (rawInitial :=
+          thetaCodeRawInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm)
+        (sourceOutcome := sourceOutcome)
+        hInstalled hCall' hSourceRun' hOutcomeRel' hFacts.compileBoundary
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        hTargetGasForX' hGasBound' hUInt256' with
+    ⟨targetFuel, targetOutcome, evmFuel, _gasBound, evmResult,
+      _hReferenceRun, _hTargetRun, _hOutcomeRel, hWhole, hTrace,
+      _hGasBound, hX, hAgree, _hDecode, _hJumpdest⟩
+  have hXTheta :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm) =
+        .ok evmResult := by
+    simpa [thetaCodeXInitialState] using hX
+  rcases
+      dispatcherOutcomeRel_yulHalt_ok_whole_childMergeRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hOutcomeRel' hWhole
+        (by
+          intro kind compiler hRel
+          exact canonicalTerminalRel_externalChildMergeRel hRel) with
+    ⟨kind, compiler, halt, hTerminal, hSource, hTarget, hKind,
+      _hTargetChild⟩
+  have hNotRevert : halt.kind ≠ .revert := by
+    intro hRevert
+    exact
+      Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel_nonrevert
+        hTerminal (hKind.symm.trans hRevert)
+  have hAgreeHalted :
+      Assembly.GasAware.XResultAgrees (.halted halt) evmResult := by
+    simpa [hTarget] using hAgree
+  rcases XResultAgrees_halted_nonrevert_success_shape
+      hAgreeHalted hNotRevert with
+    ⟨evmChild, output, hResult, hAgreeSuccess⟩
+  have hXSuccess :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm) =
+        .ok (.success evmChild output) := by
+    simpa [hResult] using hXTheta
+  have hWholeHalted :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) := by
+    simpa [hTarget] using hWhole
+  have hWholeHaltSource :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind compiler) (.halted halt) := by
+    simpa [hSource, hTarget] using hWhole
+  have hTargetHReturn :
+      yulChild.toMachineState.H_return =
+        halt.state.toMachineState.H_return :=
+    wholeProgramOutcomeRel_halt_H_return
+      (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel_H_return
+        hTerminal)
+      hWholeHaltSource
+  have hTargetGas :
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        (targetGasOf evmChild output) := by
+    simpa [targetGasOf, charged] using
+      hReturnedGas hWholeHalted hAgreeSuccess
+  rcases
+      ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome_afterAccess
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+        (gasAvailableRel := gasAvailableRel)
+        (gasValueRel := gasValueRel)
+        (totalGasRel := totalGasRel)
+        hShared hOutcomeRel' hWholeHalted
+        (by
+          intro kind compiler hRel
+          exact canonicalTerminalRel_externalChildMergeRel hRel)
+        (by
+          intro kind compiler hRel
+          exact
+            Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel_nonrevert
+              hRel)
+        hXSuccess hAgreeSuccess
+        inOffset inSize outOffset outSize
+        (targetGas := targetGasOf evmChild output)
+        (by
+          intro evmChildA outputA hResultA
+          simpa [hResultA] using hTargetGas) with
+    ⟨kindTerm, compilerTerm, haltTerm, evmChildTerm, outputTerm,
+      hTerminalTerm, hTargetTerm, hKindTerm, hResultTerm, hTheta,
+      hNotRevertTerm,
+      yulAfter, hRestoreRun, hRel⟩
+  cases hResultTerm
+  have hWholeHaltedTerm :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome
+        (.halted haltTerm) := by
+    simpa [hTargetTerm] using hWholeHalted
+  have hHaltEq : haltTerm = halt := by
+    cases hTarget
+    cases hTargetTerm
+    rfl
+  have hTargetHReturnTerm :
+      yulChild.toMachineState.H_return =
+        haltTerm.state.toMachineState.H_return := by
+    simpa [hHaltEq] using hTargetHReturn
+  have hHaltOutputTerm :
+      haltTerm.output = haltTerm.kind.output haltTerm.state := by
+    have hHaltOutput : halt.output = halt.kind.output halt.state := by
+      have hTraceHalted := hTrace
+      rw [hTarget] at hTraceHalted
+      exact hTraceHalted.halted_output
+    simpa [hHaltEq] using hHaltOutput
+  have hNonReturnEmptyTerm :
+      haltTerm.kind ≠ .return →
+        yulChild.toMachineState.H_return = ByteArray.empty := by
+    intro hNotReturn
+    exact
+      Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel_nonreturn_H_return_empty
+        hTerminalTerm (by
+        intro hKindReturn
+        exact hNotReturn (hKindTerm.trans hKindReturn))
+  have hYulOutput :
+      yulChild.toMachineState.H_return = output :=
+    terminalReturnData_eq_of_halted_success_H_return
+      hTargetHReturnTerm hHaltOutputTerm
+      (by simpa [hTargetTerm] using hAgreeSuccess)
+      hNonReturnEmptyTerm
+  have hRestoreRunActual :
+      EvmYul.Yul.restoreSuccessfulContractCallState
+          (EvmYul.Yul.addAccessedAccount (.Ok yul store) callee)
+          (.Ok yulChild childStore) store
+          yulChild.toMachineState.H_return
+          inOffset inSize outOffset outSize =
+        .ok (.Ok yulAfter store, [⟨1⟩]) := by
+    simpa [hYulOutput] using hRestoreRun
+  have hCallYul :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue) := by
+    simpa [hFacts.contract] using hCall
+  have hRelAdapter :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          evmChild.gasAvailable
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap :=
+            if evmChild.accountMap.isEmpty then evm.accountMap
+            else evmChild.accountMap
+          substate :=
+            if evmChild.accountMap.isEmpty then
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            else evmChild.substate
+          createdAccounts := evmChild.createdAccounts } :
+          EvmYul.EVM.State).toSharedState := by
+    simpa [callee, charged, targetGasOf] using hRel
+  rcases
+      primCall_CALL_ordinary_haltedSuccess_of_theta_restore
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        (referenceFuel := referenceFuel)
+        (evmThetaFuel := evmFuel.succ.succ)
+        (gasCost := gasCost)
+        (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+        (yul := yul) (yulChild := yulChild) (yulAfter := yulAfter)
+        (evm := evm) (evmChild := evmChild)
+        store childStore
+        (gas := gas) (address := address) (value := value)
+        (inOffset := inOffset) (inSize := inSize)
+        (outOffset := outOffset) (outSize := outSize)
+        (yulRecipient := yulRecipient) (yulCallMap := yulCallMap)
+        (evmRecipient := evmRecipient) (target := target)
+        (haltValue := haltValue) (output := output)
+        hShared hStaticAllowed hEnough hDepth hNotPrecompile hFacts.findYul
+        hFacts.transfer hFacts.findEvm hFacts.code hCallYul hTheta
+        hRestoreRunActual
+        hRelAdapter with
+    ⟨hEvmCall, hYulCall, hFinalRel⟩
+  refine ⟨evmFuel, kindTerm, compilerTerm, haltTerm, evmChild, output,
+    yulAfter, ?_⟩
+  dsimp
+  exact ⟨hTerminalTerm, hWholeHaltedTerm, hKindTerm, hNotRevertTerm,
+    hEvmCall, hYulCall, hFinalRel⟩
+
+theorem CALLPrimitiveRel.ordinaryHaltedSuccess_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {haltValue : EvmYul.UInt256}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.YulHalt (.Ok yulChild childStore) haltValue))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        program (.Ok initialShared default)
+        (.yulHalt (.Ok yulChild childStore) haltValue) sourceOutcome)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hReturnedGas :
+      ∀ {targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    ∃ (evmFuel : Nat),
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        referenceFuel.succ evmFuel.succ.succ.succ gasCost
+        yul.executionEnv.blobVersionedHashes yul evm store
+        gas address value inOffset inSize outOffset outSize := by
+  rcases
+      primCall_CALL_ordinary_haltedSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+        hPrim hShared store childStore hStaticAllowed hEnough hDepth
+        hNotPrecompile hFacts hCall hSourceRun hOutcomeRel
+        hTargetGasForX hGasBound hUInt256 hReturnedGas with
+    ⟨evmFuel, _kind, _compiler, _halt, _evmChild, _output, yulAfter,
+      _hTerminal, _hWhole, _hKind, _hNonRevert, hEvmCall, hYulCall,
+      hFinalRel⟩
+  exact ⟨evmFuel, ⟨⟨1⟩, _, yulAfter, hEvmCall, hYulCall, hFinalRel⟩⟩
+
+theorem primCall_CALL_ordinary_revert_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.revert (.Ok yulChild childStore)) sourceOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {halt}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.halted halt) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    (hReturnedGas :
+      ∀ {targetOutcome returnedGas output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.revert returnedGas output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              returnedGas)) :
+    ∃ (evmFuel : Nat) (compiler : Objects.Source.State)
+      (halt : Assembly.Halt) (returnedGas : EvmYul.UInt256)
+      (output : ByteArray) (yulAfter : EvmYul.SharedState .Yul),
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          returnedGas
+      let evmAfter : EvmYul.EVM.State :=
+        { charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap := evm.accountMap
+          substate :=
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          createdAccounts := evm.createdAccounts }
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) ∧
+      halt.kind = .revert ∧
+      revertRel (.Ok yulChild childStore) compiler ∧
+      EvmYul.EVM.call evmFuel.succ.succ.succ gasCost
+          yul.executionEnv.blobVersionedHashes gas
+          (EvmYul.UInt256.ofNat evm.executionEnv.codeOwner) address address
+          value value inOffset inSize outOffset outSize
+          evm.executionEnv.perm evm =
+        .ok (⟨0⟩, evmAfter) ∧
+      EvmYul.Yul.primCall referenceFuel.succ (.Ok yul store) .CALL
+          [gas, address, value, inOffset, inSize, outOffset, outSize] =
+        .ok (.Ok yulAfter store, [⟨0⟩]) ∧
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter evmAfter.toSharedState := by
+  dsimp at hCall hSourceRun hOutcomeRel hTargetGasForX hGasBound hReturnedGas ⊢
+  let callee := EvmYul.AccountAddress.ofUInt256 address
+  let callGasYul :=
+    EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+      yul.toMachineState yul.substate
+  let callGasEvm :=
+    EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+      evm.toMachineState evm.substate
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let initialShared : EvmYul.SharedState .Yul :=
+    { yulAccessed with
+      executionEnv :=
+        { yulAccessed.executionEnv with
+          calldata :=
+            yul.toMachineState.memory.readWithPadding
+              inOffset.toNat inSize.toNat
+          code := program.contract
+          codeBytes := yulRecipient.codeBytes
+          codeOwner := callee
+          source := yul.executionEnv.codeOwner
+          weiValue := value
+          depth := yul.executionEnv.depth + 1 }
+      toMachineState :=
+        EvmYul.MachineState.freshExternalCall
+          (EvmYul.UInt256.ofNat callGasYul)
+      accountMap := yulCallMap }
+  let charged : EvmYul.EVM.State :=
+    { evm with
+      gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+  let targetGasOf : EvmYul.UInt256 → ByteArray → EvmYul.UInt256 :=
+    fun returnedGas output =>
+      (charged.toMachineState.finishExternalCall output
+        inOffset inSize outOffset outSize).gasAvailable +
+        returnedGas
+  have hInstalled :
+      initialShared.executionEnv.code = program.contract := by
+    simp [initialShared]
+  have hCall' :
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)) := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hCall
+  have hSourceRun' :
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome := by
+    simpa [callGasEvm, callee] using hSourceRun
+  have hOutcomeRel' :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.revert (.Ok yulChild childStore)) sourceOutcome := by
+    simpa [initialShared, yulAccessed, callGasYul, callee] using hOutcomeRel
+  let hTargetGasForX' :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGasEvm
+            (thetaCodeRawInitialState target callGasEvm
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome := by
+    intro targetFuel targetOutcome hTrace
+    exact hTargetGasForX (by simpa [callGasEvm, callee] using hTrace)
+  have hGasBound' :
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGasEvm
+              (thetaCodeRawInitialState target callGasEvm
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX' hTrace).gasBound ≤ callGasEvm := by
+    intro targetFuel targetOutcome hTrace
+    dsimp [hTargetGasForX']
+    simpa [callGasEvm, callee] using
+      hGasBound (by simpa [callGasEvm, callee] using hTrace)
+  have hUInt256' : callGasEvm < EvmYul.UInt256.size := by
+    simpa [callGasEvm, callee] using hUInt256
+  rcases
+      compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundary_installedGas_XResult
+        (prim := prim) hPrim
+        (outcomeRel :=
+          Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            terminalRel revertRel program (.Ok initialShared default))
+        (program := program) (asm := asm) (target := target)
+        (referenceFuel := referenceFuel) (sourceFuel := sourceFuel)
+        (gas := callGasEvm) (shared := initialShared)
+        (store := default) (revertState := .Ok yulChild childStore)
+        (rawInitial :=
+          thetaCodeRawInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm)
+        (sourceOutcome := sourceOutcome)
+        hInstalled hCall' hSourceRun' hOutcomeRel' hFacts.compileBoundary
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        (by
+          simp [thetaCodeRawInitialState, Assembly.GasAware.installCodeAndGas])
+        hTargetGasForX' hGasBound' hUInt256' with
+    ⟨targetFuel, targetOutcome, evmFuel, _gasBound, evmResult,
+      _hReferenceRun, _hTargetRun, _hOutcomeRel, hWhole, hTrace,
+      _hGasBound, hX, hAgree, _hDecode, _hJumpdest⟩
+  have hXTheta :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm) =
+        .ok evmResult := by
+    simpa [thetaCodeXInitialState] using hX
+  rcases
+      dispatcherOutcomeRel_revert_ok_whole_childRelations
+        (varStackRel := varStackRel)
+        (terminalCfgRel := terminalCfgRel)
+        (revertCfgRel := revertCfgRel)
+          (gasAvailableRel := gasAvailableRel)
+          (gasValueRel := gasValueRel)
+          (totalGasRel := totalGasRel)
+          hOutcomeRel' hWhole hRevertShared
+          (by
+            intro halt hTarget
+            exact hTargetChildGas (by simpa [hTarget] using hWhole)) with
+    ⟨compiler, halt, hRevert, _hSource, hTarget, hKind,
+      hTargetChild, _hTargetChildWorld⟩
+  have hAgreeHalted :
+      Assembly.GasAware.XResultAgrees (.halted halt) evmResult := by
+    simpa [hTarget] using hAgree
+  rcases XResultAgrees_halted_revert_shape hAgreeHalted hKind with
+    ⟨returnedGas, output, hResult, hAgreeRevert⟩
+  have hXRevert :
+      EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm) =
+        .ok (.revert returnedGas output) := by
+    simpa [hResult] using hXTheta
+  have hTraceHalt :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (Assembly.GasAware.installCodeAndGas target callGasEvm
+          (thetaCodeRawInitialState target callGasEvm
+            yul.executionEnv.blobVersionedHashes evm.createdAccounts
+            evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+            { totalGasUsedInBlock := evm.totalGasUsedInBlock
+              transactionReceipts := evm.transactionReceipts }
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+            evm.executionEnv.codeOwner evm.executionEnv.sender callee
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm))
+        (.halted halt) := by
+    simpa [hTarget] using hTrace
+  have hTargetGas :
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable
+        (targetGasOf returnedGas output) := by
+    simpa [targetGasOf, charged] using
+      hReturnedGas hWhole (by simpa [hResult] using hAgree)
+  rcases
+      ordinaryCodeCall_revertBranch_rel_withTargetGas
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        hShared store childStore callee hTargetChild hTraceHalt
+        hXRevert hAgreeRevert inOffset inSize outOffset outSize
+        hTargetGas with
+    ⟨hTheta, _hKind, yulAfter, hRestoreRun, hRel⟩
+  have hCallYul :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := yulRecipient.code
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some yulRecipient.code)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)) := by
+    simpa [hFacts.contract] using hCall
+  have hRelAdapter :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall output
+          inOffset inSize outOffset outSize).gasAvailable +
+          returnedGas
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAfter
+        ({ charged with
+          toMachineState :=
+            { charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize with
+              gasAvailable := targetGas }
+          accountMap := evm.accountMap
+          substate :=
+            (EvmYul.State.addAccessedAccount evm.toState callee).substate
+          createdAccounts := evm.createdAccounts } :
+          EvmYul.EVM.State).toSharedState := by
+    simpa [callee, charged, targetGasOf] using hRel
+  rcases
+      primCall_CALL_ordinary_revert_of_theta_restore
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        (referenceFuel := referenceFuel)
+        (evmThetaFuel := evmFuel.succ.succ)
+        (gasCost := gasCost)
+        (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+        (yul := yul) (yulChild := yulChild) (yulAfter := yulAfter)
+        (evm := evm)
+        store childStore
+        (gas := gas) (address := address) (value := value)
+        (inOffset := inOffset) (inSize := inSize)
+        (outOffset := outOffset) (outSize := outSize)
+        (yulRecipient := yulRecipient) (yulCallMap := yulCallMap)
+        (evmRecipient := evmRecipient) (target := target)
+        (returnedGas := returnedGas) (output := output)
+          hShared hStaticAllowed hEnough hDepth hNotPrecompile hFacts.findYul
+          hFacts.transfer hFacts.findEvm hFacts.code hCallYul hTheta hRestoreRun
+          hRelAdapter with
+    ⟨hEvmCall, hYulCall, hFinalRel⟩
+  refine ⟨evmFuel, compiler, halt, returnedGas, output, yulAfter, ?_⟩
+  dsimp
+  exact ⟨by simpa [hTarget] using hWhole, hKind, hRevert,
+    hEvmCall, hYulCall, hFinalRel⟩
+
+theorem CALLPrimitiveRel.ordinaryRevert_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel sourceFuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store childStore : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {yulChild : EvmYul.SharedState .Yul}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCall :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+          (.Ok initialShared default) =
+        .error (.Revert (.Ok yulChild childStore)))
+    (hSourceRun :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      SourceLowered.run prim sourceFuel program
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm)) =
+        .ok sourceOutcome)
+    (hOutcomeRel :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let calldata :=
+        yul.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+          yul.toMachineState yul.substate
+      let yulAccessed : EvmYul.SharedState .Yul :=
+        { yul with
+          toState := EvmYul.State.addAccessedAccount yul.toState callee }
+      let initialShared : EvmYul.SharedState .Yul :=
+        { yulAccessed with
+          executionEnv :=
+            { yulAccessed.executionEnv with
+              calldata := calldata
+              code := program.contract
+              codeBytes := yulRecipient.codeBytes
+              codeOwner := callee
+              source := yul.executionEnv.codeOwner
+              weiValue := value
+              depth := yul.executionEnv.depth + 1 }
+          toMachineState :=
+            EvmYul.MachineState.freshExternalCall
+              (EvmYul.UInt256.ofNat callGas)
+          accountMap := yulCallMap }
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel program (.Ok initialShared default)
+        (.revert (.Ok yulChild childStore)) sourceOutcome)
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hTargetGasForX :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (Assembly.GasAware.installCodeAndGas target callGas
+            (thetaCodeRawInitialState target callGas
+              yul.executionEnv.blobVersionedHashes evm.createdAccounts
+              evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+              { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                transactionReceipts := evm.transactionReceipts }
+              (EvmYul.State.addAccessedAccount evm.toState callee).substate
+              evm.executionEnv.codeOwner evm.executionEnv.sender callee
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm))
+          targetOutcome)
+    (hGasBound :
+      let callee := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+          evm.toMachineState evm.substate
+      ∀ {targetFuel targetOutcome}
+        (hTrace :
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (Assembly.GasAware.installCodeAndGas target callGas
+              (thetaCodeRawInitialState target callGas
+                yul.executionEnv.blobVersionedHashes evm.createdAccounts
+                evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+                { totalGasUsedInBlock := evm.totalGasUsedInBlock
+                  transactionReceipts := evm.transactionReceipts }
+                (EvmYul.State.addAccessedAccount evm.toState callee).substate
+                evm.executionEnv.codeOwner evm.executionEnv.sender callee
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm))
+            targetOutcome),
+        (hTargetGasForX hTrace).gasBound ≤ callGas)
+    (hUInt256 :
+      EvmYul.EVM.Ccallgas (EvmYul.AccountAddress.ofUInt256 address)
+          (EvmYul.AccountAddress.ofUInt256 address) value gas
+          evm.accountMap evm.toMachineState evm.substate <
+        EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {halt}, SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.halted halt) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          halt.state.gasAvailable)
+    (hReturnedGas :
+      ∀ {targetOutcome returnedGas output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.revert returnedGas output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              returnedGas)) :
+    ∃ (evmFuel : Nat),
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        referenceFuel.succ evmFuel.succ.succ.succ gasCost
+        yul.executionEnv.blobVersionedHashes yul evm store
+        gas address value inOffset inSize outOffset outSize := by
+  rcases
+      primCall_CALL_ordinary_revert_rel_of_installed_childDispatcher_afterAccess_withTargetGas
+        hPrim hShared store childStore hStaticAllowed hEnough hDepth
+        hNotPrecompile hFacts hCall hSourceRun hOutcomeRel hRevertShared
+        hTargetGasForX hGasBound hUInt256 hTargetChildGas hReturnedGas with
+    ⟨evmFuel, _compiler, _halt, _returnedGas, _output, yulAfter,
+      _hWhole, _hKind, _hRevert, hEvmCall, hYulCall, hFinalRel⟩
+  exact ⟨evmFuel, ⟨⟨0⟩, _, yulAfter, hEvmCall, hYulCall, hFinalRel⟩⟩
+
+def ordinaryCALLCallee (address : EvmYul.UInt256) :
+    EvmYul.AccountAddress :=
+  EvmYul.AccountAddress.ofUInt256 address
+
+def ordinaryCALLYulCallGas
+    (yul : EvmYul.SharedState .Yul)
+    (gas address value : EvmYul.UInt256) : Nat :=
+  let callee := ordinaryCALLCallee address
+  EvmYul.EVM.Ccallgas callee callee value gas yul.accountMap
+    yul.toMachineState yul.substate
+
+def ordinaryCALLEvmCallGas
+    (evm : EvmYul.EVM.State)
+    (gas address value : EvmYul.UInt256) : Nat :=
+  let callee := ordinaryCALLCallee address
+  EvmYul.EVM.Ccallgas callee callee value gas evm.accountMap
+    evm.toMachineState evm.substate
+
+theorem ordinaryCALLCallGas_eq_of_compiledAccountMapRel
+    {cfg : Reference.StateRelConfig}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared : Reference.SharedStateRel cfg yul evm.toSharedState)
+    (hWorld : CompiledAccountMapRel yul.accountMap evm.accountMap)
+    (gas address value : EvmYul.UInt256) :
+    ordinaryCALLYulCallGas yul gas address value =
+      ordinaryCALLEvmCallGas evm gas address value := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  simpa [ordinaryCALLYulCallGas, ordinaryCALLEvmCallGas,
+    ordinaryCALLCallee] using
+    hWorld.Ccallgas_eq
+      (machineStateRel_gasAvailable_eq hMachine) hChain.substate
+
+theorem ordinaryCALLCallGas_eq_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (gas address value : EvmYul.UInt256) :
+    ordinaryCALLYulCallGas yul gas address value =
+      ordinaryCALLEvmCallGas evm gas address value := by
+  exact
+    ordinaryCALLCallGas_eq_of_compiledAccountMapRel hShared
+      (compiledAccountMapRel_of_sharedStateRel_stateRelConfig hShared)
+      gas address value
+
+def ordinaryCALLYulInitialShared
+    (program : Program)
+    (calleeCodeBytes : ByteArray)
+    (yul : EvmYul.SharedState .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (gas address value inOffset inSize : EvmYul.UInt256) :
+    EvmYul.SharedState .Yul :=
+  let callee := ordinaryCALLCallee address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let callGas := ordinaryCALLYulCallGas yul gas address value
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  { yulAccessed with
+    executionEnv :=
+      { yulAccessed.executionEnv with
+        calldata := calldata
+        code := program.contract
+        codeBytes := calleeCodeBytes
+        codeOwner := callee
+        source := yul.executionEnv.codeOwner
+        weiValue := value
+        depth := yul.executionEnv.depth + 1 }
+    toMachineState :=
+      EvmYul.MachineState.freshExternalCall
+        (EvmYul.UInt256.ofNat callGas)
+    accountMap := yulCallMap }
+
+def ordinaryCALLReferenceInitialState
+    (program : Program)
+    (calleeCodeBytes : ByteArray)
+    (yul : EvmYul.SharedState .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (gas address value inOffset inSize : EvmYul.UInt256) :
+    Reference.State :=
+  .Ok (ordinaryCALLYulInitialShared program calleeCodeBytes yul yulCallMap
+        gas address value inOffset inSize) default
+
+def ordinaryCALLTargetInitialState
+    (target : Assembly.TargetProgram)
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256) : EVMState :=
+  let callee := ordinaryCALLCallee address
+  let callGas := ordinaryCALLEvmCallGas evm gas address value
+  Assembly.GasAware.installCodeAndGas target callGas
+    (thetaCodeRawInitialState target callGas
+      yul.executionEnv.blobVersionedHashes evm.createdAccounts
+      evm.genesisBlockHeader evm.blocks evm.accountMap evm.σ₀
+      { totalGasUsedInBlock := evm.totalGasUsedInBlock
+        transactionReceipts := evm.transactionReceipts }
+      (EvmYul.State.addAccessedAccount evm.toState callee).substate
+      evm.executionEnv.codeOwner evm.executionEnv.sender callee
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+      (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+      (evm.executionEnv.depth + 1) evm.executionEnv.header
+      evm.executionEnv.perm)
+
+theorem ordinaryCALLTargetInitialState_pc
+    (target : Assembly.TargetProgram)
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256) :
+    (ordinaryCALLTargetInitialState target yul evm gas address value
+      inOffset inSize).pc = Assembly.Program.pcAfter [] := by
+  simp [ordinaryCALLTargetInitialState, Assembly.GasAware.installCodeAndGas,
+    thetaCodeRawInitialState]
+
+theorem ordinaryCALLTargetInitialState_stack
+    (target : Assembly.TargetProgram)
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256) :
+    (ordinaryCALLTargetInitialState target yul evm gas address value
+      inOffset inSize).stack = [] := by
+  simp [ordinaryCALLTargetInitialState, Assembly.GasAware.installCodeAndGas,
+    thetaCodeRawInitialState]
+
+theorem OrdinaryCALLBranchFacts.initialSharedRel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    {gas address value inOffset inSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice) :
+    Reference.SharedStateRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+        yulCallMap gas address value inOffset inSize)
+      (ordinaryCALLTargetInitialState target yul evm gas address value
+        inOffset inSize).toSharedState := by
+  let callee := ordinaryCALLCallee address
+  let calldata :=
+    yul.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+  let yulAccessed : EvmYul.SharedState .Yul :=
+    { yul with
+      toState := EvmYul.State.addAccessedAccount yul.toState callee }
+  let evmAccessed : EvmYul.SharedState .EVM :=
+    { evm.toSharedState with
+      toState := EvmYul.State.addAccessedAccount evm.toState callee }
+  have hOwner :
+      yul.executionEnv.codeOwner = evm.executionEnv.codeOwner := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.codeOwner
+  have hSender :
+      yul.executionEnv.sender = evm.executionEnv.sender := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.sender
+  have hGasPrice :
+      yul.executionEnv.gasPrice = evm.executionEnv.gasPrice := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.gasPrice
+  have hHeader :
+      yul.executionEnv.header = evm.executionEnv.header := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.header
+  have hDepth :
+      yul.executionEnv.depth = evm.executionEnv.depth := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.depth
+  have hPerm :
+      yul.executionEnv.perm = evm.executionEnv.perm := by
+    rcases hShared with ⟨hChain, _hMachine⟩
+    simpa using hChain.executionEnv.perm
+  have hSharedAccessed :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yulAccessed evmAccessed := by
+    simpa [yulAccessed, evmAccessed, callee, ordinaryCALLCallee] using
+      sharedStateRel_addAccessedAccount hShared callee
+  have hCalldata :
+      calldata =
+        evm.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat := by
+    rcases hShared with ⟨_hChain, hMachine⟩
+    simpa [calldata] using
+      congrArg
+        (fun memory =>
+          memory.readWithPadding inOffset.toNat inSize.toNat)
+        hMachine.memory
+  have hCode :
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel).codeRel
+        yulRecipient.code (Assembly.Bytecode.encodeTarget target) := by
+    simpa [stateRelConfig, codeImageRel, hFacts.code] using
+      hFacts.accountRel.code
+  have hAccountMap :
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel).accountMapRel
+        yulCallMap
+        (EvmYul.EVM.thetaCallTransfer evm.accountMap
+          evm.executionEnv.codeOwner callee value) := by
+    simpa [stateRelConfig, accountMapRel, callee, ordinaryCALLCallee,
+      evmCallTransfer_eq_thetaCallTransfer] using
+      hFacts.transferRel
+  simpa [ordinaryCALLYulInitialShared, ordinaryCALLTargetInitialState,
+    ordinaryCALLYulCallGas, ordinaryCALLEvmCallGas, ordinaryCALLCallee,
+    callee, calldata, yulAccessed, evmAccessed, hFacts.contract, hOwner,
+    hSender, hGasPrice, hGasPriceFits, hHeader, hDepth, hPerm, hCalldata,
+    EvmYul.State.addAccessedAccount]
+    using
+      sharedStateRel_callFrameFromThetaCodeXInitialState
+        (cfg :=
+          stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+        (yul := yulAccessed)
+        (evm := evmAccessed)
+        hSharedAccessed
+        (yulAccountMap := yulCallMap)
+        (evmSubstate := evmAccessed.substate)
+        (yulCreated := yulAccessed.createdAccounts)
+        (yulGas :=
+          EvmYul.UInt256.ofNat
+            (ordinaryCALLYulCallGas yul gas address value))
+        (yulCode := yulRecipient.code)
+        (yulSubstate := yulAccessed.substate)
+        evm.executionEnv.codeOwner evm.executionEnv.sender callee
+        (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice) value value
+        (evm.toMachineState.memory.readWithPadding
+          inOffset.toNat inSize.toNat)
+        (evm.executionEnv.depth + 1) evm.executionEnv.header
+        evm.executionEnv.perm yul.executionEnv.blobVersionedHashes
+        yulRecipient.codeBytes target
+        (ordinaryCALLEvmCallGas evm gas address value)
+        hAccountMap hSharedAccessed.chain.substate hCode
+        (hFacts.accountRel.codeBytes.trans hFacts.code)
+        hSharedAccessed.chain.createdAccounts hCallGas
+
+def OrdinaryCALLTargetGasForX
+    (asm : Assembly.Program)
+    (target : Assembly.TargetProgram)
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256) : Type :=
+  ∀ {targetFuel targetOutcome},
+    Assembly.Preservation.BlockTraceResult asm target targetFuel
+      (ordinaryCALLTargetInitialState target yul evm gas address value
+        inOffset inSize)
+      targetOutcome →
+    Assembly.GasAware.XResultPreconditionAssumptions target
+      (ordinaryCALLTargetInitialState target yul evm gas address value
+        inOffset inSize)
+      targetOutcome
+
+def OrdinaryCALLGasBound
+    (asm : Assembly.Program)
+    (target : Assembly.TargetProgram)
+    (yul : EvmYul.SharedState .Yul)
+    (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256)
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize) : Prop :=
+  let callGas := ordinaryCALLEvmCallGas evm gas address value
+  ∀ {targetFuel targetOutcome}
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize)
+        targetOutcome),
+    (hTargetGasForX hTrace).gasBound ≤ callGas
+
+inductive OrdinaryCALLPrimitiveEvidence
+    (prim : Objects.Source.PrimitiveSemantics)
+    (varStackRel : Reference.VarStackRel)
+    (terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertCfgRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop)
+    (gasCost : Nat)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (evmRecipient : EvmYul.Account .EVM)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram) : Prop where
+  | running
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {rets : List EvmYul.UInt256}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hCall :
+        EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap
+              gas address value inOffset inSize) =
+          .ok (.Ok yulChild childStore, rets))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.regular (.Ok yulChild childStore)) sourceOutcome)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {targetChild},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome
+            (.running targetChild) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            targetChild.gasAvailable)
+      (hEvmChildGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              evmChild.gasAvailable)
+      (hReturnedGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLPrimitiveEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | haltedSuccess
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {haltValue : EvmYul.UInt256}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hCall :
+        EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap
+              gas address value inOffset inSize) =
+          .error (.YulHalt (.Ok yulChild childStore) haltValue))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.yulHalt (.Ok yulChild childStore) haltValue) sourceOutcome)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hReturnedGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLPrimitiveEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | reverted
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hCall :
+        EvmYul.Yul.callDispatcher referenceFuel (some program.contract)
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap
+              gas address value inOffset inSize) =
+          .error (.Revert (.Ok yulChild childStore)))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.revert (.Ok yulChild childStore)) sourceOutcome)
+      (hRevertShared :
+        ∀ {compiler},
+          revertRel (.Ok yulChild childStore) compiler →
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulChild compiler.shared)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {halt},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              halt.state.gasAvailable)
+      (hReturnedGas :
+        ∀ {targetOutcome returnedGas output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.revert returnedGas output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                returnedGas)) :
+      OrdinaryCALLPrimitiveEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+
+inductive OrdinaryCALLSourceStaticEvidence
+    (prim : Objects.Source.PrimitiveSemantics)
+    (varStackRel : Reference.VarStackRel)
+    (terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertCfgRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop)
+    (gasCost : Nat)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (evmRecipient : EvmYul.Account .EVM)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram) : Prop where
+  | running
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hReferenceRun :
+        Reference.runResult referenceFuel program
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap gas address value inOffset inSize) =
+          .ok (.regular (.Ok yulChild childStore)))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.regular (.Ok yulChild childStore)) sourceOutcome)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {targetChild},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome
+            (.running targetChild) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            targetChild.gasAvailable)
+      (hEvmChildGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              evmChild.gasAvailable)
+      (hReturnedGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | haltedSuccess
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {haltValue : EvmYul.UInt256}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hReferenceRun :
+        Reference.runResult referenceFuel program
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap gas address value inOffset inSize) =
+          .ok (.yulHalt (.Ok yulChild childStore) haltValue))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.yulHalt (.Ok yulChild childStore) haltValue) sourceOutcome)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hReturnedGas :
+        ∀ {targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | reverted
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel sourceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {sourceOutcome : Objects.Source.Outcome}
+      (hReferenceRun :
+        Reference.runResult referenceFuel program
+            (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+              yul yulCallMap gas address value inOffset inSize) =
+          .ok (.revert (.Ok yulChild childStore)))
+      (hSourceRun :
+        SourceLowered.run prim sourceFuel program
+            (ordinaryCALLTargetInitialState target yul evm gas address value
+              inOffset inSize) =
+          .ok sourceOutcome)
+      (hOutcomeRel :
+        Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap
+            gas address value inOffset inSize)
+          (.revert (.Ok yulChild childStore)) sourceOutcome)
+      (hRevertShared :
+        ∀ {compiler},
+          revertRel (.Ok yulChild childStore) compiler →
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulChild compiler.shared)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {halt},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              halt.state.gasAvailable)
+      (hReturnedGas :
+        ∀ {targetOutcome returnedGas output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.revert returnedGas output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                returnedGas)) :
+      OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+
+def OrdinaryCALLChildTopAssumptions
+    (prim : Objects.Source.PrimitiveSemantics)
+    (varStackRel : Reference.VarStackRel)
+    (terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertCfgRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram)
+    (referenceFuel : Nat)
+    (referenceResult : Reference.Result) : Prop :=
+  Program.RecursiveBridgeTopAssumptions
+    (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+      gasAvailableRel gasValueRel totalGasRel)
+    terminalRel revertRel prim
+    (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      terminalRel revertRel program
+      (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes yul
+        yulCallMap gas address value inOffset inSize))
+    program asm target
+    (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+      yulCallMap gas address value inOffset inSize)
+    default referenceFuel
+    (ordinaryCALLTargetInitialState target yul evm gas address value
+      inOffset inSize)
+    referenceResult
+
+theorem OrdinaryCALLChildTopAssumptions.of_branchFacts_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel : Nat} {referenceResult : Reference.Result}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice)
+    (hChildFeatureCoverage :
+      Program.RecursiveBridgeFeatureCoverage program)
+    (hChildSemantics :
+      Program.RecursiveBridgeSemanticContracts
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel prim
+        (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap gas address value inOffset inSize))
+        program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default)
+    (hChildSourceRun :
+      Program.RecursiveBridgeSourceRun program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default referenceFuel referenceResult)
+    (hChildRuntime :
+      Assembly.RuntimeAssumptions asm target
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize)) :
+    OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+      revertRel yul evm gas address value inOffset inSize yulRecipient
+      yulCallMap program asm target referenceFuel referenceResult := by
+  refine
+    { sourceAccepted :=
+        Program.RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+          hFacts.fullSourceAccepted hChildFeatureCoverage
+          hFacts.compileChecked
+      compileResources := hFacts.resources
+      semantics := hChildSemantics
+      initialShared := ?_
+      sourceRun := hChildSourceRun
+      compileTarget := ?_
+      targetRuntime := ?_ }
+  · have hInitial :=
+      OrdinaryCALLBranchFacts.initialSharedRel_stateRelConfig
+        (gas := gas) (address := address) (value := value)
+        (inOffset := inOffset) (inSize := inSize)
+        hShared hFacts hCallGas hGasPriceFits
+    simpa [ordinaryCALLYulInitialShared] using hInitial
+  · exact
+      (Program.compileCheckedAssemblyTargetBytecode?_eq_some
+        hFacts.bytecode).1
+  · exact
+      { runtime := hChildRuntime
+        initialPc :=
+          ordinaryCALLTargetInitialState_pc target yul evm gas address value
+            inOffset inSize
+        initialStack :=
+          ordinaryCALLTargetInitialState_stack target yul evm gas address
+            value inOffset inSize }
+
+def OrdinaryCALLChildCALLTopAssumptions
+    (prim : Objects.Source.PrimitiveSemantics)
+    (varStackRel : Reference.VarStackRel)
+    (terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertCfgRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop)
+    (terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop)
+    (revertRel : Reference.State → Objects.Source.State → Prop)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram)
+    (referenceFuel : Nat)
+    (referenceResult : Reference.Result) : Prop :=
+  Program.RecursiveBridgeCALLTopAssumptions
+    (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+      gasAvailableRel gasValueRel totalGasRel)
+    terminalRel revertRel prim
+    (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+      (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+        gasAvailableRel gasValueRel totalGasRel)
+      terminalRel revertRel program
+      (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes yul
+        yulCallMap gas address value inOffset inSize))
+    program asm target
+    (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+      yulCallMap gas address value inOffset inSize)
+    default referenceFuel
+    (ordinaryCALLTargetInitialState target yul evm gas address value
+      inOffset inSize)
+    referenceResult
+
+theorem OrdinaryCALLChildCALLTopAssumptions.of_branchFacts_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel : Nat} {referenceResult : Reference.Result}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice)
+    (hChildFeatureCoverage :
+      Program.RecursiveBridgeCALLFeatureCoverage program)
+    (hChildSemantics :
+      Program.RecursiveBridgeCALLSemanticContracts
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel prim
+        (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap gas address value inOffset inSize))
+        program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default)
+    (hChildSourceRun :
+      Program.RecursiveBridgeSourceRun program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default referenceFuel referenceResult)
+    (hChildRuntime :
+      Assembly.RuntimeAssumptions asm target
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize)) :
+    OrdinaryCALLChildCALLTopAssumptions prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+      revertRel yul evm gas address value inOffset inSize yulRecipient
+      yulCallMap program asm target referenceFuel referenceResult := by
+  refine
+    { fullSourceAccepted := hFacts.fullSourceAccepted
+      callFeatureCoverage := hChildFeatureCoverage
+      compileResources := hFacts.resources
+      semantics := hChildSemantics
+      initialShared := ?_
+      sourceRun := hChildSourceRun
+      compileTarget := ?_
+      targetRuntime := ?_ }
+  · have hInitial :=
+      OrdinaryCALLBranchFacts.initialSharedRel_stateRelConfig
+        (gas := gas) (address := address) (value := value)
+        (inOffset := inOffset) (inSize := inSize)
+        hShared hFacts hCallGas hGasPriceFits
+    simpa [ordinaryCALLYulInitialShared] using hInitial
+  · exact
+      (Program.compileCheckedAssemblyTargetBytecode?_eq_some
+        hFacts.bytecode).1
+  · exact
+      { runtime := hChildRuntime
+        initialPc :=
+          ordinaryCALLTargetInitialState_pc target yul evm gas address value
+            inOffset inSize
+        initialStack :=
+          ordinaryCALLTargetInitialState_stack target yul evm gas address
+            value inOffset inSize }
+
+theorem OrdinaryCALLSourceStaticEvidence.running_of_childTopAssumptions
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    (hTop :
+      OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+        revertRel yul evm gas address value inOffset inSize yulRecipient
+        yulCallMap program asm target referenceFuel
+        (.regular (.Ok yulChild childStore)))
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild sourceOutcome},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target := by
+  rcases
+      Program.compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+        (hTop := hTop) with
+    ⟨sourceOutcome, sourceFuel, _targetFuel, _targetOutcome,
+      hReferenceRun, hSourceRun, hOutcomeRel, _hWhole, _hAccepted,
+      _hCompileBytes, _hEncoding, _hGasOpcode, _hGasOracle,
+      _hOutOfGas, _hProjection, _hTrace⟩
+  exact
+    OrdinaryCALLSourceStaticEvidence.running
+      (by simpa [ordinaryCALLReferenceInitialState] using hReferenceRun)
+      hSourceRun hOutcomeRel hTargetGasForX hGasBound hUInt256
+      (by
+        intro targetChild hWhole
+        exact hTargetChildGas hWhole)
+      (by
+        intro targetOutcome evmChild output hWhole hAgree
+        exact hEvmChildGas hWhole hAgree)
+      (by
+        intro targetOutcome evmChild output hWhole hAgree
+        exact hReturnedGas hWhole hAgree)
+
+theorem OrdinaryCALLSourceStaticEvidence.haltedSuccess_of_childTopAssumptions
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    {haltValue : EvmYul.UInt256}
+    (hTop :
+      OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        yul evm gas address value inOffset inSize yulRecipient
+        yulCallMap program asm target referenceFuel
+        (.yulHalt (.Ok yulChild childStore) haltValue))
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target := by
+  rcases
+      Program.compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+        (hTop := hTop) with
+    ⟨sourceOutcome, sourceFuel, _targetFuel, _targetOutcome,
+      hReferenceRun, hSourceRun, hOutcomeRel, _hWhole, _hAccepted,
+      _hCompileBytes, _hEncoding, _hGasOpcode, _hGasOracle,
+      _hOutOfGas, _hProjection, _hTrace⟩
+  exact
+    OrdinaryCALLSourceStaticEvidence.haltedSuccess
+      (by simpa [ordinaryCALLReferenceInitialState] using hReferenceRun)
+      hSourceRun hOutcomeRel hTargetGasForX hGasBound hUInt256
+      (by
+        intro targetOutcome evmChild output hWhole hAgree
+        exact hReturnedGas hWhole hAgree)
+
+theorem OrdinaryCALLSourceStaticEvidence.reverted_of_childTopAssumptions
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    (hTop :
+      OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+        revertRel yul evm gas address value inOffset inSize yulRecipient
+        yulCallMap program asm target referenceFuel
+        (.revert (.Ok yulChild childStore)))
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {halt sourceOutcome},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            halt.state.gasAvailable)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome returnedGas output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.revert returnedGas output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              returnedGas)) :
+    OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target := by
+  rcases
+      Program.compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+        (hTop := hTop) with
+    ⟨sourceOutcome, sourceFuel, _targetFuel, _targetOutcome,
+      hReferenceRun, hSourceRun, hOutcomeRel, _hWhole, _hAccepted,
+      _hCompileBytes, _hEncoding, _hGasOpcode, _hGasOracle,
+      _hOutOfGas, _hProjection, _hTrace⟩
+  exact
+    OrdinaryCALLSourceStaticEvidence.reverted
+      (by simpa [ordinaryCALLReferenceInitialState] using hReferenceRun)
+      hSourceRun hOutcomeRel hRevertShared hTargetGasForX hGasBound
+      hUInt256
+      (by
+        intro halt hWhole
+        exact hTargetChildGas hWhole)
+      (by
+        intro targetOutcome returnedGas output hWhole hAgree
+        exact hReturnedGas hWhole hAgree)
+
+inductive OrdinaryCALLChildTopEvidence
+    (prim : Objects.Source.PrimitiveSemantics)
+    (varStackRel : Reference.VarStackRel)
+    (terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop)
+    (revertCfgRel : Reference.State → EVMState → Prop)
+    (gasAvailableRel : Word → Word → Prop)
+    (gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm)
+    (totalGasRel : Nat → Nat → Prop)
+    (gasCost : Nat)
+    (yul : EvmYul.SharedState .Yul) (evm : EvmYul.EVM.State)
+    (gas address value inOffset inSize outOffset outSize : EvmYul.UInt256)
+    (yulRecipient : EvmYul.Account .Yul)
+    (yulCallMap : EvmYul.AccountMap .Yul)
+    (evmRecipient : EvmYul.Account .EVM)
+    (program : Program) (asm : Assembly.Program)
+    (target : Assembly.TargetProgram) : Prop where
+  | running
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      (hTop :
+        OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+          revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+          revertRel yul evm gas address value inOffset inSize yulRecipient
+          yulCallMap program asm target referenceFuel
+          (.regular (.Ok yulChild childStore)))
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {targetChild sourceOutcome},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome
+            (.running targetChild) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            targetChild.gasAvailable)
+      (hEvmChildGas :
+        ∀ {sourceOutcome targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              evmChild.gasAvailable)
+      (hReturnedGas :
+        ∀ {sourceOutcome targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall ByteArray.empty
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | haltedSuccess
+      {referenceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      {haltValue : EvmYul.UInt256}
+      (hTop :
+        OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+          revertCfgRel gasAvailableRel gasValueRel totalGasRel
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          yul evm gas address value inOffset inSize yulRecipient
+          yulCallMap program asm target referenceFuel
+          (.yulHalt (.Ok yulChild childStore) haltValue))
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hReturnedGas :
+        ∀ {sourceOutcome targetOutcome evmChild output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.success evmChild output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                evmChild.gasAvailable)) :
+      OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+  | reverted
+      {terminalRel :
+        Assembly.HaltKind → Word → Reference.State →
+          Objects.Source.State → Prop}
+      {revertRel : Reference.State → Objects.Source.State → Prop}
+      {referenceFuel : Nat}
+      {childStore : EvmYul.Yul.VarStore}
+      {yulChild : EvmYul.SharedState .Yul}
+      (hTop :
+        OrdinaryCALLChildTopAssumptions prim varStackRel terminalCfgRel
+          revertCfgRel gasAvailableRel gasValueRel totalGasRel terminalRel
+          revertRel yul evm gas address value inOffset inSize yulRecipient
+          yulCallMap program asm target referenceFuel
+          (.revert (.Ok yulChild childStore)))
+      (hRevertShared :
+        ∀ {compiler},
+          revertRel (.Ok yulChild childStore) compiler →
+            Reference.SharedStateRel
+              (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+                gasAvailableRel gasValueRel totalGasRel)
+              yulChild compiler.shared)
+      (hTargetGasForX :
+        OrdinaryCALLTargetGasForX asm target yul evm gas address value
+          inOffset inSize)
+      (hGasBound :
+        OrdinaryCALLGasBound asm target yul evm gas address value
+          inOffset inSize hTargetGasForX)
+      (hUInt256 :
+        ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+      (hTargetChildGas :
+        ∀ {halt sourceOutcome},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) →
+            gasAvailableRel yulChild.toMachineState.gasAvailable
+              halt.state.gasAvailable)
+      (hReturnedGas :
+        ∀ {sourceOutcome targetOutcome returnedGas output},
+          SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+            Assembly.GasAware.XResultAgrees targetOutcome
+              (.revert returnedGas output) →
+            let charged : EvmYul.EVM.State :=
+              { evm with
+                gasAvailable :=
+                  evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+            gasAvailableRel
+              (yul.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable
+              ((charged.toMachineState.finishExternalCall output
+                  inOffset inSize outOffset outSize).gasAvailable +
+                returnedGas)) :
+      OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target
+
+theorem OrdinaryCALLChildTopEvidence.running_of_branchFacts_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice)
+    (hChildFeatureCoverage :
+      Program.RecursiveBridgeFeatureCoverage program)
+    (hChildSemantics :
+      Program.RecursiveBridgeSemanticContracts
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel prim
+        (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap gas address value inOffset inSize))
+        program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default)
+    (hChildSourceRun :
+      Program.RecursiveBridgeSourceRun program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default referenceFuel (.regular (.Ok yulChild childStore)))
+    (hChildRuntime :
+      Assembly.RuntimeAssumptions asm target
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize))
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {targetChild sourceOutcome},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome
+          (.running targetChild) →
+        gasAvailableRel yulChild.toMachineState.gasAvailable
+          targetChild.gasAvailable)
+    (hEvmChildGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            evmChild.gasAvailable)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall ByteArray.empty
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target :=
+    OrdinaryCALLChildTopEvidence.running
+    (OrdinaryCALLChildTopAssumptions.of_branchFacts_stateRelConfig
+      hShared hFacts hCallGas hGasPriceFits hChildFeatureCoverage
+      hChildSemantics hChildSourceRun hChildRuntime)
+    hTargetGasForX hGasBound hUInt256 hTargetChildGas hEvmChildGas
+    hReturnedGas
+
+theorem OrdinaryCALLChildTopEvidence.haltedSuccess_of_branchFacts_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    {haltValue : EvmYul.UInt256}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice)
+    (hChildFeatureCoverage :
+      Program.RecursiveBridgeFeatureCoverage program)
+    (hChildSemantics :
+      Program.RecursiveBridgeSemanticContracts
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel))
+        prim
+        (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          (Program.RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel))
+          program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap gas address value inOffset inSize))
+        program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default)
+    (hChildSourceRun :
+      Program.RecursiveBridgeSourceRun program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default referenceFuel (.yulHalt (.Ok yulChild childStore) haltValue))
+    (hChildRuntime :
+      Assembly.RuntimeAssumptions asm target
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize))
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome evmChild output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.success evmChild output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              evmChild.gasAvailable)) :
+    OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target :=
+    OrdinaryCALLChildTopEvidence.haltedSuccess
+    (OrdinaryCALLChildTopAssumptions.of_branchFacts_stateRelConfig
+      hShared hFacts hCallGas hGasPriceFits hChildFeatureCoverage
+      hChildSemantics hChildSourceRun hChildRuntime)
+    hTargetGasForX hGasBound hUInt256 hReturnedGas
+
+theorem OrdinaryCALLChildTopEvidence.reverted_of_branchFacts_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {referenceFuel : Nat}
+    {childStore : EvmYul.Yul.VarStore}
+    {yulChild : EvmYul.SharedState .Yul}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hCallGas :
+      gasAvailableRel
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLYulCallGas yul gas address value))
+        (EvmYul.UInt256.ofNat
+          (ordinaryCALLEvmCallGas evm gas address value)))
+    (hGasPriceFits :
+      (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice).toNat =
+        evm.executionEnv.gasPrice)
+    (hChildFeatureCoverage :
+      Program.RecursiveBridgeFeatureCoverage program)
+    (hChildSemantics :
+      Program.RecursiveBridgeSemanticContracts
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        terminalRel revertRel prim
+        (Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel
+          (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+            gasAvailableRel gasValueRel totalGasRel)
+          terminalRel revertRel program
+          (ordinaryCALLReferenceInitialState program yulRecipient.codeBytes
+            yul yulCallMap gas address value inOffset inSize))
+        program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default)
+    (hChildSourceRun :
+      Program.RecursiveBridgeSourceRun program
+        (ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul
+          yulCallMap gas address value inOffset inSize)
+        default referenceFuel (.revert (.Ok yulChild childStore)))
+    (hChildRuntime :
+      Assembly.RuntimeAssumptions asm target
+        (ordinaryCALLTargetInitialState target yul evm gas address value
+          inOffset inSize))
+    (hRevertShared :
+      ∀ {compiler},
+        revertRel (.Ok yulChild childStore) compiler →
+          Reference.SharedStateRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            yulChild compiler.shared)
+    (hTargetGasForX :
+      OrdinaryCALLTargetGasForX asm target yul evm gas address value
+        inOffset inSize)
+    (hGasBound :
+      OrdinaryCALLGasBound asm target yul evm gas address value
+        inOffset inSize hTargetGasForX)
+    (hUInt256 :
+      ordinaryCALLEvmCallGas evm gas address value < EvmYul.UInt256.size)
+    (hTargetChildGas :
+      ∀ {halt sourceOutcome},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome (.halted halt) →
+          gasAvailableRel yulChild.toMachineState.gasAvailable
+            halt.state.gasAvailable)
+    (hReturnedGas :
+      ∀ {sourceOutcome targetOutcome returnedGas output},
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+          Assembly.GasAware.XResultAgrees targetOutcome
+            (.revert returnedGas output) →
+          let charged : EvmYul.EVM.State :=
+            { evm with
+              gasAvailable :=
+                evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+          gasAvailableRel
+            (yul.toMachineState.finishExternalCall output
+              inOffset inSize outOffset outSize).gasAvailable
+            ((charged.toMachineState.finishExternalCall output
+                inOffset inSize outOffset outSize).gasAvailable +
+              returnedGas)) :
+    OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target :=
+    OrdinaryCALLChildTopEvidence.reverted
+    (OrdinaryCALLChildTopAssumptions.of_branchFacts_stateRelConfig
+      hShared hFacts hCallGas hGasPriceFits hChildFeatureCoverage
+      hChildSemantics hChildSourceRun hChildRuntime)
+    hRevertShared hTargetGasForX hGasBound hUInt256 hTargetChildGas
+    hReturnedGas
+
+theorem OrdinaryCALLSourceStaticEvidence.of_childTopEvidence
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hEvidence :
+      OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target := by
+  cases hEvidence with
+  | running hTop hTargetGasForX hGasBound hUInt256 hTargetChildGas
+      hEvmChildGas hReturnedGas =>
+      exact
+        OrdinaryCALLSourceStaticEvidence.running_of_childTopAssumptions
+          hTop hTargetGasForX hGasBound hUInt256 hTargetChildGas
+          hEvmChildGas hReturnedGas
+  | haltedSuccess hTop hTargetGasForX hGasBound hUInt256 hReturnedGas =>
+      exact
+        OrdinaryCALLSourceStaticEvidence.haltedSuccess_of_childTopAssumptions
+          hTop hTargetGasForX hGasBound hUInt256 hReturnedGas
+  | reverted hTop hRevertShared hTargetGasForX hGasBound hUInt256
+      hTargetChildGas hReturnedGas =>
+      exact
+        OrdinaryCALLSourceStaticEvidence.reverted_of_childTopAssumptions
+          hTop hRevertShared hTargetGasForX hGasBound hUInt256
+          hTargetChildGas hReturnedGas
+
+theorem OrdinaryCALLPrimitiveEvidence.of_sourceStaticEvidence
+    {prim : Objects.Source.PrimitiveSemantics}
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hEvidence :
+      OrdinaryCALLSourceStaticEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    OrdinaryCALLPrimitiveEvidence prim varStackRel terminalCfgRel
+      revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+      gas address value inOffset inSize outOffset outSize yulRecipient
+      yulCallMap evmRecipient program asm target := by
+  let initialShared :=
+    ordinaryCALLYulInitialShared program yulRecipient.codeBytes yul yulCallMap
+      gas address value inOffset inSize
+  have hInstalled :
+      initialShared.executionEnv.code = program.contract := by
+    simp [initialShared, ordinaryCALLYulInitialShared]
+  cases hEvidence with
+  | running hReferenceRun hSourceRun hOutcomeRel hTargetGasForX hGasBound
+      hUInt256 hTargetChildGas hEvmChildGas hReturnedGas =>
+      rcases
+          installed_callDispatcher_regular_of_runResult
+            (program := program) (fuel := _)
+            (shared := initialShared) (store := default)
+            (hCode := hInstalled)
+            (by
+              simpa [initialShared, ordinaryCALLReferenceInitialState]
+                using hReferenceRun) with
+        ⟨rets, hCall⟩
+      exact
+        OrdinaryCALLPrimitiveEvidence.running
+          (rets := rets)
+          (by
+            simpa [initialShared, ordinaryCALLReferenceInitialState]
+              using hCall)
+          hSourceRun hOutcomeRel hTargetGasForX hGasBound hUInt256
+          hTargetChildGas hEvmChildGas hReturnedGas
+  | haltedSuccess hReferenceRun hSourceRun hOutcomeRel hTargetGasForX
+      hGasBound hUInt256 hReturnedGas =>
+      have hCall :=
+        installed_callDispatcher_yulHalt_of_runResult
+          (program := program) (fuel := _)
+          (shared := initialShared) (store := default)
+          (hCode := hInstalled)
+          (by
+            simpa [initialShared, ordinaryCALLReferenceInitialState]
+              using hReferenceRun)
+      exact
+        OrdinaryCALLPrimitiveEvidence.haltedSuccess
+          (by
+            simpa [initialShared, ordinaryCALLReferenceInitialState]
+              using hCall)
+          hSourceRun hOutcomeRel hTargetGasForX hGasBound hUInt256
+          hReturnedGas
+  | reverted hReferenceRun hSourceRun hOutcomeRel hRevertShared hTargetGasForX
+      hGasBound hUInt256 hTargetChildGas hReturnedGas =>
+      have hCall :=
+        installed_callDispatcher_revert_of_runResult
+          (program := program) (fuel := _)
+          (shared := initialShared) (store := default)
+          (hCode := hInstalled)
+          (by
+            simpa [initialShared, ordinaryCALLReferenceInitialState]
+              using hReferenceRun)
+      exact
+        OrdinaryCALLPrimitiveEvidence.reverted
+          (by
+            simpa [initialShared, ordinaryCALLReferenceInitialState]
+              using hCall)
+          hSourceRun hOutcomeRel hRevertShared hTargetGasForX hGasBound
+          hUInt256 hTargetChildGas hReturnedGas
+
+theorem CALLPrimitiveRel.ordinaryEvidence_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hEvidence :
+      OrdinaryCALLPrimitiveEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    ∃ sourceFuel evmFuel,
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize := by
+  cases hEvidence with
+  | running hCall hSourceRun hOutcomeRel hTargetGasForX hGasBound hUInt256
+      hTargetChildGas hEvmChildGas hReturnedGas =>
+      rcases
+          CALLPrimitiveRel.ordinaryRunningSuccess_stateRelConfig
+            hPrim hShared store _ hStaticAllowed hEnough hDepth
+            hNotPrecompile hFacts hCall hSourceRun hOutcomeRel
+            hTargetGasForX hGasBound hUInt256 hTargetChildGas hEvmChildGas
+            hReturnedGas with
+        ⟨evmFuel, hRel⟩
+      exact ⟨_, _, hRel⟩
+  | haltedSuccess hCall hSourceRun hOutcomeRel hTargetGasForX hGasBound
+      hUInt256 hReturnedGas =>
+      rcases
+          CALLPrimitiveRel.ordinaryHaltedSuccess_stateRelConfig
+            hPrim hShared store _ hStaticAllowed hEnough hDepth
+            hNotPrecompile hFacts hCall hSourceRun hOutcomeRel
+            hTargetGasForX hGasBound hUInt256 hReturnedGas with
+        ⟨evmFuel, hRel⟩
+      exact ⟨_, _, hRel⟩
+  | reverted hCall hSourceRun hOutcomeRel hRevertShared hTargetGasForX hGasBound
+      hUInt256 hTargetChildGas hReturnedGas =>
+      rcases
+          CALLPrimitiveRel.ordinaryRevert_stateRelConfig
+            hPrim hShared store _ hStaticAllowed hEnough hDepth
+            hNotPrecompile hFacts hCall hSourceRun hOutcomeRel hRevertShared
+            hTargetGasForX hGasBound hUInt256 hTargetChildGas hReturnedGas with
+        ⟨evmFuel, hRel⟩
+      exact ⟨_, _, hRel⟩
+
+theorem CALLPrimitiveRel.ordinaryChildTopEvidence_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    {yulRecipient : EvmYul.Account .Yul}
+    {yulCallMap : EvmYul.AccountMap .Yul}
+    {evmRecipient : EvmYul.Account .EVM}
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hEnough :
+      value ≤
+        (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+          (·.balance)))
+    (hDepth : evm.executionEnv.depth < 1024)
+    (hNotPrecompile :
+      EvmYul.PrecompiledContract.ofAddress?
+        (EvmYul.AccountAddress.ofUInt256 address) = none)
+    (hFacts :
+      OrdinaryCALLBranchFacts yul evm address value yulRecipient
+        yulCallMap evmRecipient program asm target)
+    (hEvidence :
+      OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+        revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+        gas address value inOffset inSize outOffset outSize yulRecipient
+        yulCallMap evmRecipient program asm target) :
+    ∃ sourceFuel evmFuel,
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize := by
+  exact
+    CALLPrimitiveRel.ordinaryEvidence_stateRelConfig
+      hPrim hShared store hStaticAllowed hEnough hDepth hNotPrecompile hFacts
+      (OrdinaryCALLPrimitiveEvidence.of_sourceStaticEvidence
+        (OrdinaryCALLSourceStaticEvidence.of_childTopEvidence hEvidence))
+
+theorem CALLPrimitiveRel.of_branchFacts_withOrdinaryBranchRel_stateRelConfig
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hBranch : CALLBranchFacts yul evm address value)
+    (hGasEmpty :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas)
+    (hPrecompiledSuccessGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hSuccess :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            true),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hPrecompiledFailureGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hFailure :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            false),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hOrdinaryBranch :
+      ∀ {yulRecipient : EvmYul.Account .Yul}
+        {yulCallMap : EvmYul.AccountMap .Yul}
+        {evmRecipient : EvmYul.Account .EVM}
+        {program : Program} {asm : Assembly.Program}
+        {target : Assembly.TargetProgram}
+        (_hEnough :
+          value ≤
+            (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+              (·.balance)))
+        (_hDepth : evm.executionEnv.depth < 1024)
+        (_hNotPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = none)
+        (_hFacts :
+          OrdinaryCALLBranchFacts yul evm address value yulRecipient
+            yulCallMap evmRecipient program asm target),
+        ∃ sourceFuel evmFuel,
+          CALLPrimitiveRel
+            (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+              gasAvailableRel gasValueRel totalGasRel)
+            sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+            yul evm store gas address value inOffset inSize outOffset
+            outSize) :
+    ∃ sourceFuel evmFuel,
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize := by
+  cases hBranch with
+  | insufficientFunds hNotEnough =>
+      exact
+        ⟨fuel.succ, fuel.succ,
+          CALLPrimitiveRel.insufficientFunds_stateRelConfig
+            (fuel := fuel) (gasCost := gasCost)
+            (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+            hShared store hStaticAllowed hNotEnough hGasEmpty⟩
+  | depthLimit hEnough hDepthLimit =>
+      exact
+        ⟨fuel.succ, fuel.succ,
+          CALLPrimitiveRel.depthLimit_stateRelConfig
+            (fuel := fuel) (gasCost := gasCost)
+            (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+            hShared store hStaticAllowed hEnough hDepthLimit hGasEmpty⟩
+  | noCode hEnough hDepth hNotPrecompile _hMissingYul hMissingEvm =>
+      exact
+        ⟨fuel.succ, fuel.succ.succ.succ.succ.succ,
+          CALLPrimitiveRel.noCode_stateRelConfig
+            (fuel := fuel) (gasCost := gasCost)
+            (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+            hShared store hStaticAllowed hEnough hDepth hNotPrecompile
+            hMissingEvm hGasEmpty⟩
+  | precompiled precompiled hEnough hDepth hPrecompile =>
+      by_cases hSuccess :
+        (let target := EvmYul.AccountAddress.ofUInt256 address
+         let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+         let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+         let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount evm.toState target).substate
+         let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+         (runPrecompiledContract precompiled callMap
+          (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+          true)
+      · exact
+          ⟨fuel.succ, fuel.succ.succ,
+            CALLPrimitiveRel.precompiledSuccess_stateRelConfig
+              (fuel := fuel) (gasCost := gasCost)
+              (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+              hShared store hStaticAllowed hEnough hDepth hPrecompile
+              hSuccess
+              (hPrecompiledSuccessGas hPrecompile hSuccess)⟩
+      · let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount evm.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        have hNotSuccessRaw :
+            ¬(runPrecompiledContract precompiled callMap
+              (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+              true := by
+          intro hRaw
+          exact hSuccess (by
+            simpa [target, callMap, callGas, accessedSubstate, childEnv]
+              using hRaw)
+        have hFailureRaw :
+            (runPrecompiledContract precompiled callMap
+              (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+              false := by
+          cases hResult :
+              (runPrecompiledContract precompiled callMap
+                (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 <;>
+            simp [hResult] at hNotSuccessRaw ⊢
+        have hFailure :
+            (let target := EvmYul.AccountAddress.ofUInt256 address
+             let callMap :=
+              evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+                target value
+             let callGas :=
+              EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+                evm.toMachineState evm.substate
+             let accessedSubstate :=
+              (EvmYul.State.addAccessedAccount evm.toState target).substate
+             let childEnv :=
+              EvmYul.EVM.thetaCallExecutionEnv
+                yul.executionEnv.blobVersionedHashes
+                evm.executionEnv.codeOwner evm.executionEnv.sender target
+                (.Precompiled precompiled)
+                (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+                value
+                (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+                (evm.executionEnv.depth + 1) evm.executionEnv.header
+                evm.executionEnv.perm
+             (runPrecompiledContract precompiled callMap
+              (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+              false) := by
+          simpa [target, callMap, callGas, accessedSubstate, childEnv]
+            using hFailureRaw
+        exact
+          ⟨fuel.succ, fuel.succ.succ,
+            CALLPrimitiveRel.precompiledFailure_stateRelConfig
+              (fuel := fuel) (gasCost := gasCost)
+              (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+              hShared store hStaticAllowed hEnough hDepth hPrecompile
+              hFailure
+              (hPrecompiledFailureGas hPrecompile hFailure)⟩
+  | existingDefaultCode yulRecipient evmRecipient hEnough hDepth
+      hNotPrecompile hFindYul hCodeDefault hFindEvm _hAccountRel
+      hEvmCodeDefault =>
+      exact
+        ⟨fuel.succ.succ.succ.succ.succ.succ,
+          fuel.succ.succ.succ.succ.succ.succ,
+          CALLPrimitiveRel.existingDefaultCode_stateRelConfig
+            (fuel := fuel) (gasCost := gasCost)
+            (blobVersionedHashes := yul.executionEnv.blobVersionedHashes)
+            hShared store hStaticAllowed hEnough hDepth hNotPrecompile
+            hFindYul hCodeDefault hFindEvm hEvmCodeDefault hGasEmpty⟩
+  | ordinary yulRecipient yulCallMap evmRecipient program asm target
+      hEnough hDepth hNotPrecompile hFacts =>
+      exact
+        hOrdinaryBranch hEnough hDepth hNotPrecompile hFacts
+
+theorem CALLPrimitiveRel.of_branchFacts_withOrdinaryChildTopEvidence_stateRelConfig
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hBranch : CALLBranchFacts yul evm address value)
+    (hGasEmpty :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas)
+    (hPrecompiledSuccessGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hSuccess :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            true),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hPrecompiledFailureGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hFailure :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            false),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hOrdinaryEvidence :
+      ∀ {yulRecipient : EvmYul.Account .Yul}
+        {yulCallMap : EvmYul.AccountMap .Yul}
+        {evmRecipient : EvmYul.Account .EVM}
+        {program : Program} {asm : Assembly.Program}
+        {target : Assembly.TargetProgram}
+        (_hEnough :
+          value ≤
+            (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+              (·.balance)))
+        (_hDepth : evm.executionEnv.depth < 1024)
+        (_hNotPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = none)
+        (_hFacts :
+          OrdinaryCALLBranchFacts yul evm address value yulRecipient
+            yulCallMap evmRecipient program asm target),
+        OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+          revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+          gas address value inOffset inSize outOffset outSize yulRecipient
+          yulCallMap evmRecipient program asm target) :
+    ∃ sourceFuel evmFuel,
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize := by
+  exact
+    CALLPrimitiveRel.of_branchFacts_withOrdinaryBranchRel_stateRelConfig
+      (fuel := fuel)
+      hShared store hStaticAllowed hBranch hGasEmpty hPrecompiledSuccessGas
+      hPrecompiledFailureGas
+      (by
+        intro yulRecipient yulCallMap evmRecipient program asm target
+          hEnough hDepth hNotPrecompile hFacts
+        exact
+          CALLPrimitiveRel.ordinaryChildTopEvidence_stateRelConfig
+            hPrim hShared store hStaticAllowed hEnough hDepth hNotPrecompile
+            hFacts
+            (hOrdinaryEvidence hEnough hDepth hNotPrecompile hFacts))
+
+theorem CALLPrimitiveRel.of_stateRelConfig_withOrdinaryChildTopEvidence
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {varStackRel : Reference.VarStackRel}
+    {terminalCfgRel :
+      Assembly.HaltKind → Word → Reference.State → EVMState → Prop}
+    {revertCfgRel : Reference.State → EVMState → Prop}
+    {gasAvailableRel : Word → Word → Prop}
+    {gasValueRel :
+      ∀ {yul evm : EvmYul.MachineState},
+        gasAvailableRel yul.gasAvailable evm.gasAvailable →
+          EvmYul.MachineState.gas yul = EvmYul.MachineState.gas evm}
+    {totalGasRel : Nat → Nat → Prop}
+    {fuel gasCost : Nat}
+    {yul : EvmYul.SharedState .Yul} {evm : EvmYul.EVM.State}
+    (hShared :
+      Reference.SharedStateRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        yul evm.toSharedState)
+    (store : EvmYul.Yul.VarStore)
+    {gas address value inOffset inSize outOffset outSize : EvmYul.UInt256}
+    (hStaticAllowed :
+      ¬ (¬ yul.executionEnv.perm ∧ value ≠ ⟨0⟩))
+    (hGasEmpty :
+      let target := EvmYul.AccountAddress.ofUInt256 address
+      let callGas :=
+        EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+          evm.toMachineState evm.substate
+      let charged : EvmYul.EVM.State :=
+        { evm with
+          gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+      let targetGas :=
+        (charged.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable +
+          EvmYul.UInt256.ofNat callGas
+      gasAvailableRel
+        (yul.toMachineState.finishExternalCall ByteArray.empty
+          inOffset inSize outOffset outSize).gasAvailable
+        targetGas)
+    (hPrecompiledSuccessGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hSuccess :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            true),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hPrecompiledFailureGas :
+      ∀ {precompiled : EvmYul.PrecompiledContract}
+        (_hPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = some precompiled)
+        (_hFailure :
+          let target := EvmYul.AccountAddress.ofUInt256 address
+          let callMap :=
+            evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+              target value
+          let callGas :=
+            EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+              evm.toMachineState evm.substate
+          let accessedSubstate :=
+            (EvmYul.State.addAccessedAccount evm.toState target).substate
+          let childEnv :=
+            EvmYul.EVM.thetaCallExecutionEnv
+              yul.executionEnv.blobVersionedHashes
+              evm.executionEnv.codeOwner evm.executionEnv.sender target
+              (.Precompiled precompiled)
+              (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+              value
+              (evm.memory.readWithPadding inOffset.toNat inSize.toNat)
+              (evm.executionEnv.depth + 1) evm.executionEnv.header
+              evm.executionEnv.perm
+          (runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv).1 =
+            false),
+        let target := EvmYul.AccountAddress.ofUInt256 address
+        let callMap :=
+          evmCallTransfer evm.accountMap evm.executionEnv.codeOwner
+            target value
+        let callGas :=
+          EvmYul.EVM.Ccallgas target target value gas evm.accountMap
+            evm.toMachineState evm.substate
+        let charged : EvmYul.EVM.State :=
+          { evm with
+            gasAvailable := evm.gasAvailable - EvmYul.UInt256.ofNat gasCost }
+        let accessedSubstate :=
+          (EvmYul.State.addAccessedAccount charged.toState target).substate
+        let childEnv :=
+          EvmYul.EVM.thetaCallExecutionEnv
+            yul.executionEnv.blobVersionedHashes
+            evm.executionEnv.codeOwner evm.executionEnv.sender target
+            (.Precompiled precompiled)
+            (EvmYul.UInt256.ofNat evm.executionEnv.gasPrice)
+            value
+            (charged.memory.readWithPadding inOffset.toNat inSize.toNat)
+            (evm.executionEnv.depth + 1) evm.executionEnv.header
+            evm.executionEnv.perm
+        let precompileResult :=
+          runPrecompiledContract precompiled callMap
+            (EvmYul.UInt256.ofNat callGas) accessedSubstate childEnv
+        let targetGas :=
+          (charged.toMachineState.finishExternalCall
+            precompileResult.2.2.2.2 inOffset inSize outOffset outSize).gasAvailable +
+            precompileResult.2.2.1
+        gasAvailableRel
+          (yul.toMachineState.finishExternalCall ByteArray.empty
+            inOffset inSize outOffset outSize).gasAvailable
+          targetGas)
+    (hOrdinaryEvidence :
+      ∀ {yulRecipient : EvmYul.Account .Yul}
+        {yulCallMap : EvmYul.AccountMap .Yul}
+        {evmRecipient : EvmYul.Account .EVM}
+        {program : Program} {asm : Assembly.Program}
+        {target : Assembly.TargetProgram}
+        (_hEnough :
+          value ≤
+            (evm.accountMap.find? evm.executionEnv.codeOwner |>.option ⟨0⟩
+              (·.balance)))
+        (_hDepth : evm.executionEnv.depth < 1024)
+        (_hNotPrecompile :
+          EvmYul.PrecompiledContract.ofAddress?
+            (EvmYul.AccountAddress.ofUInt256 address) = none)
+        (_hFacts :
+          OrdinaryCALLBranchFacts yul evm address value yulRecipient
+            yulCallMap evmRecipient program asm target),
+        OrdinaryCALLChildTopEvidence prim varStackRel terminalCfgRel
+          revertCfgRel gasAvailableRel gasValueRel totalGasRel gasCost yul evm
+          gas address value inOffset inSize outOffset outSize yulRecipient
+          yulCallMap evmRecipient program asm target) :
+    ∃ sourceFuel evmFuel,
+      CALLPrimitiveRel
+        (stateRelConfig varStackRel terminalCfgRel revertCfgRel
+          gasAvailableRel gasValueRel totalGasRel)
+        sourceFuel evmFuel gasCost yul.executionEnv.blobVersionedHashes
+        yul evm store gas address value inOffset inSize outOffset outSize := by
+  exact
+    CALLPrimitiveRel.of_branchFacts_withOrdinaryChildTopEvidence_stateRelConfig
+      (fuel := fuel)
+      hPrim hShared store hStaticAllowed
+      (CALLBranchFacts_stateRelConfig hShared address value)
+      hGasEmpty hPrecompiledSuccessGas hPrecompiledFailureGas
+      hOrdinaryEvidence
 
 end World
 

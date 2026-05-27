@@ -118,19 +118,18 @@ if missing_primitives:
     )
 
 compatibility = runtime_summary.get("backendCompatibility", {})
+if compatibility.get("status") != "ready":
+    raise SystemExit(
+        f"unexpected SelfDestructBox backend compatibility: {compatibility!r}"
+    )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
 if "selfdestruct" in unsupported:
     raise SystemExit(
         f"SelfDestructBox incorrectly marked selfdestruct unsupported: {compatibility!r}"
     )
-if "sstore" not in unsupported:
+if "sstore" in unsupported:
     raise SystemExit(
-        f"SelfDestructBox summary missing current sstore blocker: {compatibility!r}"
-    )
-notes = compatibility.get("notes", [])
-if not any("storage writes" in note for note in notes):
-    raise SystemExit(
-        f"SelfDestructBox summary missing storage-write blocker note: {compatibility!r}"
+        f"SelfDestructBox incorrectly marked sstore unsupported: {compatibility!r}"
     )
 
 check = json.loads(check_path.read_text())
@@ -182,5 +181,5 @@ print("selfdestruct_decode_backend_check=pass")
 print(f"selfdestruct_decode_runtime_functions={len(functions)}")
 print(f"selfdestruct_decode_summary_calls={runtime_summary['counts']['calls']}")
 print("selfdestruct_decode_primitive=yes")
-print("selfdestruct_decode_backend_compatibility=blocked")
+print("selfdestruct_decode_backend_compatibility=ready")
 PY

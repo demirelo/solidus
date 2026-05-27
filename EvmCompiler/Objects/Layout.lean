@@ -19,6 +19,16 @@ the layout/image relation is backend evidence used by object/data builtin
 lowering and the bytecode-image lane.
 -/
 
+namespace Name
+
+def containsDot (name : Name) : Bool :=
+  name.toList.contains '.'
+
+def objectPathComponent? (name : Name) : Bool :=
+  !containsDot name
+
+end Name
+
 namespace DataSection
 
 def byteLength (sect : DataSection) : Nat :=
@@ -29,13 +39,21 @@ def size (sect : DataSection) : Word :=
 
 def namedSizeEntry? (sect : DataSection) : Option (Name × Word) :=
   match sect.name? with
-  | some name => some (name, sect.size)
+  | some name =>
+      if Name.objectPathComponent? name then
+        some (name, sect.size)
+      else
+        none
   | none => none
 
 def namedOffsetEntryFromNat? (base : Nat) (sect : DataSection) :
     Option (Name × Word) :=
   match sect.name? with
-  | some name => some (name, EvmYul.UInt256.ofNat base)
+  | some name =>
+      if Name.objectPathComponent? name then
+        some (name, EvmYul.UInt256.ofNat base)
+      else
+        none
   | none => none
 
 namespace Sections

@@ -1,4 +1,4 @@
-import EvmCompiler.Yul.Compiler
+import EvmCompiler.Yul.SolcValidation
 import EvmCompiler.Objects.Semantics
 import EvmCompiler.Objects.SourceSemantics
 import EvmYul.Yul.Interpreter
@@ -22,6 +22,19 @@ def installContract (program : Program) : ReferenceState → ReferenceState
         { shared with
           executionEnv :=
             { shared.executionEnv with code := program.contract } }
+        store
+  | .OutOfFuel => .OutOfFuel
+  | .Checkpoint jump => .Checkpoint jump
+
+def installContractWithCodeImage (program : Program) (codeImage : ByteArray) :
+    ReferenceState → ReferenceState
+  | .Ok shared store =>
+      .Ok
+        { shared with
+          executionEnv :=
+            { shared.executionEnv with
+              code := program.contract
+              codeBytes := codeImage } }
         store
   | .OutOfFuel => .OutOfFuel
   | .Checkpoint jump => .Checkpoint jump
@@ -50,6 +63,34 @@ def run (fuel : Nat) (program : Program) (state : ReferenceState) :
   | .error (.YulHalt state' value) => .ok (.yulHalt state' value)
   | .error (.Revert stateBeforeRevert) => .ok (.revert stateBeforeRevert)
   | .error exception => .error exception
+
+def runWithCodeImage (fuel : Nat) (program : Program)
+    (codeImage : ByteArray) (state : ReferenceState) :
+    Except ReferenceException ReferenceResult :=
+  match
+      EvmYul.Yul.callDispatcher fuel (some program.contract)
+        (installContractWithCodeImage program codeImage state) with
+  | .ok (state', _rets) => .ok (.regular state')
+  | .error (.YulHalt state' value) => .ok (.yulHalt state' value)
+  | .error (.Revert stateBeforeRevert) => .ok (.revert stateBeforeRevert)
+  | .error exception => .error exception
+
+noncomputable def runSolcChecked? (fuel : Nat) (program : Program)
+    (state : ReferenceState) :
+    Option (Except ReferenceException ReferenceResult) :=
+  if SolcValidation.ProgramOk? program then
+    some (run fuel program state)
+  else
+    none
+
+theorem runSolcChecked?_eq_some {fuel : Nat} {program : Program}
+    {state : ReferenceState} {result : Except ReferenceException ReferenceResult}
+    (hRun : runSolcChecked? fuel program state = some result) :
+    SolcValidation.ProgramOk program ∧
+      run fuel program state = result := by
+  unfold runSolcChecked? at hRun
+  cases hValid : SolcValidation.ProgramOk? program <;> simp [hValid] at hRun
+  exact ⟨hValid, hRun⟩
 
 end Program
 

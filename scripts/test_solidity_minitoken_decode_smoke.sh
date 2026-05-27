@@ -137,20 +137,16 @@ if missing_primitives:
     raise SystemExit(f"MiniToken summary missing primitives: {missing_primitives!r}")
 
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected MiniToken backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"log3", "sstore"} - unsupported)
-if missing_blockers:
+unexpected_blockers = sorted({"log3", "sstore"} & unsupported)
+if unexpected_blockers:
     raise SystemExit(
-        f"MiniToken summary missing backend blockers: {missing_blockers!r}"
-    )
-notes = compatibility.get("notes", [])
-if not any("storage writes and logs" in note for note in notes):
-    raise SystemExit(
-        f"MiniToken summary missing storage/log blocker note: {compatibility!r}"
+        f"MiniToken summary still marks supported primitives unsupported: "
+        f"{unexpected_blockers!r}"
     )
 
 check = json.loads(check_path.read_text())
@@ -215,5 +211,5 @@ print(f"minitoken_decode_runtime_functions={len(functions)}")
 print(f"minitoken_decode_summary_calls={runtime_summary['counts']['calls']}")
 print("minitoken_decode_frontend_metadata=yes")
 print("minitoken_decode_primitives=yes")
-print("minitoken_decode_backend_compatibility=blocked")
+print("minitoken_decode_backend_compatibility=ready")
 PY

@@ -2145,7 +2145,8 @@ theorem sourceResultBlockSoundWhenAt_stop_call
         SourceStateRel cfg layout source compiler →
         ∃ sharedAfter : EvmYul.SharedState .EVM,
           prim.terminal .stop compiler.shared [] = .ok sharedAfter ∧
-          terminalRel .stop (EvmYul.UInt256.ofNat 0) source
+          terminalRel .stop (EvmYul.UInt256.ofNat 0)
+            (Imported.stopTerminalSourceState source)
             (compiler.withShared sharedAfter))
     {allowed : Except Exception State → Prop} :
     SourceResultBlockSoundWhenAt cfg layout layout terminalRel revertRel
@@ -2177,7 +2178,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshAt_stop_call
         SourceStateRel cfg layout source compiler →
         ∃ sharedAfter : EvmYul.SharedState .EVM,
           prim.terminal .stop compiler.shared [] = .ok sharedAfter ∧
-          terminalRel .stop (EvmYul.UInt256.ofNat 0) source
+          terminalRel .stop (EvmYul.UInt256.ofNat 0)
+            (Imported.stopTerminalSourceState source)
             (compiler.withShared sharedAfter))
     {allowed : Except Exception State → Prop} :
     CheckedStmtBlockLoweringSoundWhenFreshAt cfg layout layout terminalRel

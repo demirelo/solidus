@@ -308,17 +308,18 @@ compatibility = bridge_summary.get("backendCompatibility", {})
 object_builtins = set(compatibility.get("objectBuiltinNames", []))
 required_builtins = {"dataoffset", "datasize"}
 missing_builtins = sorted(required_builtins - object_builtins)
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(f"unexpected OzToken backend compatibility: {compatibility!r}")
 if missing_builtins:
     raise SystemExit(
         f"OzToken summary missing object builtins: {missing_builtins!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_unsupported = sorted({"codecopy", "log3", "sstore"} - unsupported)
-if missing_unsupported:
+unexpected_unsupported = sorted({"codecopy", "log3", "sstore"} & unsupported)
+if unexpected_unsupported:
     raise SystemExit(
-        f"OzToken summary missing unsupported primitives: {missing_unsupported!r}"
+        f"OzToken summary still marks supported primitives unsupported: "
+        f"{unexpected_unsupported!r}"
     )
 runtime_summaries = [
     item
@@ -329,16 +330,16 @@ if len(runtime_summaries) != 1:
     raise SystemExit(f"expected one OzToken runtime summary, got {runtime_summaries!r}")
 runtime_summary = runtime_summaries[0]
 runtime_compatibility = runtime_summary.get("backendCompatibility", {})
-if runtime_compatibility.get("status") != "blocked":
+if runtime_compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected OzToken runtime backend compatibility: {runtime_compatibility!r}"
     )
 runtime_unsupported = set(runtime_compatibility.get("unsupportedPrimitiveNames", []))
-missing_runtime_unsupported = sorted({"log3", "sstore"} - runtime_unsupported)
-if missing_runtime_unsupported:
+unexpected_runtime_unsupported = sorted({"log3", "sstore"} & runtime_unsupported)
+if unexpected_runtime_unsupported:
     raise SystemExit(
-        "OzToken runtime summary missing unsupported primitives: "
-        f"{missing_runtime_unsupported!r}"
+        "OzToken runtime summary still marks supported primitives unsupported: "
+        f"{unexpected_runtime_unsupported!r}"
     )
 runtime_primitives = {
     entry.get("name")

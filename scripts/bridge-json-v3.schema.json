@@ -83,6 +83,22 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["node", "bytes"],
+          "properties": {
+            "node": {
+              "const": "bytesLiteral"
+            },
+            "bytes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/byte"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["node", "name"],
           "properties": {
             "node": {

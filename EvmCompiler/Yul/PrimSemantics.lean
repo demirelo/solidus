@@ -798,7 +798,10 @@ theorem primCall_stopArith_state_eq_of_ok
           change
             (match
               (Except.error
-                (EvmYul.Yul.Exception.YulHalt state ⟨0⟩) :
+                (EvmYul.Yul.Exception.YulHalt
+                  (state.setMachineState
+                    (state.toMachineState.setHReturn ByteArray.empty))
+                  ⟨0⟩) :
                 Except EvmYul.Yul.Exception
                   (EvmYul.Yul.State × Option Word)) with
             | Except.ok (s, lit) => Except.ok (s, lit.toList)
@@ -1446,8 +1449,6 @@ theorem primCall_returndatacopy_not_checkpoint_of_ok
                       simp at h
 
 def EnvCheckpointSafe : EvmYul.Operation.EOp .Yul → Prop
-  | .CODESIZE => False
-  | .CODECOPY => False
   | .EXTCODESIZE => False
   | .EXTCODECOPY => False
   | .EXTCODEHASH => False
@@ -1559,9 +1560,26 @@ theorem primCall_env_state_eq_of_ok_of_nonOk
           rw [hStep] at h
           exact wrapped_executionEnvOp_state_eq_of_ok (args := args) h
       | CODESIZE =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODESIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ ByteArray.size ∘
+                    EvmYul.ExecutionEnv.codeBytes) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_state_eq_of_ok (args := args) h
       | CODECOPY =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryCopyOp
+                  EvmYul.SharedState.codeBytesCopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryCopyOp_state_eq_of_ok_of_nonOk hNonOk h
       | EXTCODESIZE =>
           exact False.elim hSupported
       | EXTCODECOPY =>
@@ -1687,9 +1705,26 @@ theorem primCall_env_store_eq_of_ok
           rw [hStep] at h
           exact wrapped_executionEnvOp_store_eq_of_ok (args := args) h
       | CODESIZE =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODESIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ ByteArray.size ∘
+                    EvmYul.ExecutionEnv.codeBytes) := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_executionEnvOp_store_eq_of_ok (args := args) h
       | CODECOPY =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryCopyOp
+                  EvmYul.SharedState.codeBytesCopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryCopyOp_store_eq_of_ok h
       | EXTCODESIZE =>
           exact False.elim hSupported
       | EXTCODECOPY =>
@@ -1826,9 +1861,28 @@ theorem primCall_env_not_checkpoint_of_ok
             (args := args) h
           cases hEq
       | CODESIZE =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODESIZE : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.executionEnvOp
+                  (.ofNat ∘ ByteArray.size ∘
+                    EvmYul.ExecutionEnv.codeBytes) := by
+            rfl
+          rw [hStep] at h
+          have hEq := wrapped_executionEnvOp_state_eq_of_ok
+            (args := args) h
+          cases hEq
       | CODECOPY =>
-          exact False.elim hSupported
+          simp [EvmYul.Yul.primCall] at h
+          have hStep :
+              EvmYul.step
+                  ((.Env .CODECOPY : EvmYul.Operation .Yul)) none =
+                EvmYul.Yul.ternaryCopyOp
+                  EvmYul.SharedState.codeBytesCopy := by
+            rfl
+          rw [hStep] at h
+          exact wrapped_ternaryCopyOp_not_checkpoint_of_ok h
       | EXTCODESIZE =>
           exact False.elim hSupported
       | EXTCODECOPY =>
@@ -2192,51 +2246,7 @@ def SystemCheckpointSafe : EvmYul.Operation.SOp .Yul → Prop
 def selfdestructState
     (state : EvmYul.Yul.State) (recipient : Word) :
     EvmYul.Yul.State :=
-  state.setState
-    { state.toState with
-      accountMap :=
-        match state.toState.lookupAccount state.executionEnv.codeOwner with
-        | none =>
-            dbg_trace
-              "No 'self' found to be destructed; this should probably not be happening;"
-              state.toState.accountMap
-        | some selfAccount =>
-            match state.toState.lookupAccount
-                (EvmYul.AccountAddress.ofUInt256 recipient) with
-            | none =>
-                if selfAccount.balance == ⟨0⟩ then
-                  state.toState.accountMap
-                else
-                  (state.toState.accountMap.insert
-                    (EvmYul.AccountAddress.ofUInt256 recipient)
-                    { (default : EvmYul.Account .Yul) with
-                      balance := selfAccount.balance }).insert
-                    state.executionEnv.codeOwner
-                    { selfAccount with balance := ⟨0⟩ }
-            | some recipientAccount =>
-                if EvmYul.AccountAddress.ofUInt256 recipient ≠
-                    state.executionEnv.codeOwner then
-                  (state.toState.accountMap.insert
-                    (EvmYul.AccountAddress.ofUInt256 recipient)
-                    { recipientAccount with
-                      balance := recipientAccount.balance +
-                        selfAccount.balance }).insert
-                    state.executionEnv.codeOwner
-                    { selfAccount with balance := ⟨0⟩ }
-                else
-                  (state.toState.accountMap.insert
-                    (EvmYul.AccountAddress.ofUInt256 recipient)
-                    { recipientAccount with balance := ⟨0⟩ }).insert
-                    state.executionEnv.codeOwner
-                    { selfAccount with balance := ⟨0⟩ },
-      substate :=
-        { state.toState.substate with
-          selfDestructSet :=
-            state.toState.substate.selfDestructSet.insert
-              state.executionEnv.codeOwner,
-          accessedAccounts :=
-            state.toState.substate.accessedAccounts.insert
-              (EvmYul.AccountAddress.ofUInt256 recipient) } }
+  EvmYul.Yul.selfdestructState state recipient
 
 theorem step_selfdestruct_nil_eq (state : EvmYul.Yul.State) :
     EvmYul.step
@@ -2260,6 +2270,22 @@ theorem step_selfdestruct_cons_cons_eq
         (EvmYul.Operation.SELFDESTRUCT : EvmYul.Operation .Yul) none
         state (a :: b :: rest) =
       .error .InvalidArguments := by
+  rfl
+
+/--
+`STOP` ignores its argument list and halts with the zero return value.
+-/
+theorem primCall_stop_eq
+    (fuel : Nat) (state : EvmYul.Yul.State) (args : List Word) :
+    EvmYul.Yul.primCall fuel.succ state
+        ((.StopArith .STOP : EvmYul.Operation .Yul)) args =
+      .error
+        (.YulHalt
+          (state.setMachineState
+            (state.toMachineState.setHReturn ByteArray.empty))
+          (EvmYul.UInt256.ofNat 0)) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
   rfl
 
 theorem primCall_return_nil_eq
@@ -2324,6 +2350,36 @@ theorem primCall_return_cons_cons_cons_eq
   rw [hStep]
   simp [EvmYul.Yul.binaryMachineStateOp]
 
+/--
+`RETURN [offset, size]` halts. `binaryMachineStateOp evmReturn` is total on
+a two-element list (it pattern-matches `[a, b]` and returns `.ok` with no
+failure path).
+-/
+theorem primCall_return_lit_lit_yul_halt
+    (fuel : Nat) (state : EvmYul.Yul.State) (offset size : Word) :
+    ∃ haltState value,
+      EvmYul.Yul.primCall fuel.succ state
+          ((.System .RETURN : EvmYul.Operation .Yul)) [offset, size] =
+        .error (.YulHalt haltState value) := by
+  refine
+    ⟨state.setMachineState
+        (EvmYul.MachineState.evmReturn state.toMachineState offset size),
+      (Option.none : Option Word).getD ⟨1⟩, ?_⟩
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .RETURN : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmReturn yulState lits with
+          | .error e => .error e
+          | .ok (s, v) =>
+              .error (EvmYul.Yul.Exception.YulHalt s (v.getD ⟨1⟩))) := by
+    rfl
+  rw [hStep]
+  rfl
+
 theorem primCall_revert_nil_eq
     (fuel : Nat) (state : EvmYul.Yul.State) :
     EvmYul.Yul.primCall fuel.succ state
@@ -2382,6 +2438,33 @@ theorem primCall_revert_cons_cons_cons_eq
     rfl
   rw [hStep]
   simp [EvmYul.Yul.binaryMachineStateOp]
+
+/--
+`REVERT [offset, size]` reverts. `binaryMachineStateOp evmRevert` is total on
+a two-element list.
+-/
+theorem primCall_revert_lit_lit_revert
+    (fuel : Nat) (state : EvmYul.Yul.State) (offset size : Word) :
+    ∃ revertState,
+      EvmYul.Yul.primCall fuel.succ state
+          ((.System .REVERT : EvmYul.Operation .Yul)) [offset, size] =
+        .error (.Revert revertState) := by
+  refine
+    ⟨state.setMachineState
+        (EvmYul.MachineState.evmRevert state.toMachineState offset size), ?_⟩
+  simp [EvmYul.Yul.primCall]
+  have hStep :
+      EvmYul.step
+          ((.System .REVERT : EvmYul.Operation .Yul)) none =
+        (fun yulState lits =>
+          match
+            EvmYul.Yul.binaryMachineStateOp
+              EvmYul.MachineState.evmRevert yulState lits with
+          | .error e => .error e
+          | .ok (s, _) => .error (EvmYul.Yul.Exception.Revert s)) := by
+    rfl
+  rw [hStep]
+  rfl
 
 theorem primCall_selfdestruct_static_eq
     (fuel : Nat) (state : EvmYul.Yul.State) (args : List Word)
@@ -4636,6 +4719,27 @@ theorem primCall_calldatasize_ok
         [EvmYul.UInt256.ofNat shared.executionEnv.calldata.size])
   simp [EvmYul.Yul.executionEnvOp, EvmYul.Yul.State.executionEnv]
 
+theorem primCall_codesize_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .CODESIZE : EvmYul.Operation .Yul)) [] =
+      .ok (.Ok shared store,
+        [((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.codeBytes)
+          shared.executionEnv)]) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  change
+    (match
+      EvmYul.Yul.executionEnvOp
+        ((.ofNat ∘ ByteArray.size ∘ EvmYul.ExecutionEnv.codeBytes))
+        (.Ok shared store) [] with
+    | Except.ok (s, lit) => Except.ok (s, lit.toList)
+    | Except.error e => Except.error e) =
+      Except.ok (.Ok shared store,
+        [EvmYul.UInt256.ofNat shared.executionEnv.codeBytes.size])
+  simp [EvmYul.Yul.executionEnvOp, EvmYul.Yul.State.executionEnv]
+
 theorem primCall_calldatacopy_ok
     (fuel : Nat) (shared : EvmYul.SharedState .Yul)
     (store : EvmYul.Yul.VarStore)
@@ -4646,6 +4750,24 @@ theorem primCall_calldatacopy_ok
       .ok
         (.Ok
           (EvmYul.SharedState.calldatacopy shared memStart dataStart size)
+          store,
+        []) := by
+  simp [EvmYul.Yul.primCall]
+  unfold EvmYul.step
+  simp [EvmYul.Yul.ternaryCopyOp, EvmYul.Yul.State.toSharedState,
+    EvmYul.Yul.State.setSharedState]
+  rfl
+
+theorem primCall_codecopy_ok
+    (fuel : Nat) (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (memStart codeStart size : Word) :
+    EvmYul.Yul.primCall fuel.succ (.Ok shared store)
+        ((.Env .CODECOPY : EvmYul.Operation .Yul))
+          [memStart, codeStart, size] =
+      .ok
+        (.Ok
+          (EvmYul.SharedState.codeBytesCopy shared memStart codeStart size)
           store,
         []) := by
   simp [EvmYul.Yul.primCall]

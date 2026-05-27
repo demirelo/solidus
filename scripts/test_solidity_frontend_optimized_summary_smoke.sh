@@ -155,7 +155,7 @@ run_optimized_summary_case \
   EventMatrix \
   2 \
   log0,log1,log2,log3,log4 \
-  log0,log1,log2,log3,log4
+  ""
 
 run_optimized_summary_case \
   inline_assembly \
@@ -163,7 +163,7 @@ run_optimized_summary_case \
   InlineAssemblyBox \
   2 \
   calldataload,keccak256,log2,revert,sload,sstore \
-  log2,sstore
+  ""
 
 run_optimized_summary_case \
   mini_token \
@@ -171,7 +171,7 @@ run_optimized_summary_case \
   MiniToken \
   2 \
   caller,keccak256,log3,revert,sload,sstore \
-  log3,sstore
+  ""
 
 printf 'frontend_optimized_summary_smoke=pass\n'
 printf 'frontend_optimized_summary_smoke_count=4\n'

@@ -105,14 +105,14 @@ runtime_summary = summary_objects[0]
 if runtime_summary.get("selector") != "runtime":
     raise SystemExit(f"unexpected bridge summary selector: {runtime_summary!r}")
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected PackedStorageBox backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-if "sstore" not in unsupported:
+if "sstore" in unsupported:
     raise SystemExit(
-        f"PackedStorageBox summary missing static write blocker: {compatibility!r}"
+        f"PackedStorageBox incorrectly marked sstore unsupported: {compatibility!r}"
     )
 primitive_entries = runtime_summary.get("calls", {}).get("primitive", {}).get("names", [])
 primitives = {
@@ -165,6 +165,6 @@ print(f"frontend_decode_packed_lean_objects={check_counts['checkedObjects']}")
 print(f"frontend_decode_packed_runtime_functions={len(functions)}")
 print(f"frontend_decode_packed_summary_calls={runtime_summary['counts']['calls']}")
 print("frontend_decode_packed_primitives=yes")
-print("frontend_decode_packed_backend_compatibility=blocked")
+print("frontend_decode_packed_backend_compatibility=ready")
 print("frontend_decode_packed_backend_check=blocked")
 PY

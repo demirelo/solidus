@@ -1,4 +1,5 @@
 import EvmCompiler.Yul.Semantics
+import EvmCompiler.Yul.SolcValidation
 import EvmCompiler.Objects.Preservation
 
 namespace EvmCompiler
@@ -18,6 +19,22 @@ noncomputable def compileChecked? (program : Program) :
   let lower ← program.toExpressions?
   Structured.Preservation.ProcedurePreservation.compileChecked?
     lower.toStructured
+
+noncomputable def compileSolcChecked? (program : Program) :
+    Option Assembly.Program :=
+  if SolcValidation.ProgramOk? program then
+    compileChecked? program
+  else
+    none
+
+theorem compileSolcChecked?_eq_some {program : Program}
+    {asm : Assembly.Program}
+    (hCompile : compileSolcChecked? program = some asm) :
+    SolcValidation.ProgramOk program ∧
+      compileChecked? program = some asm := by
+  unfold compileSolcChecked? at hCompile
+  cases hValid : SolcValidation.ProgramOk? program <;> simp [hValid] at hCompile
+  exact ⟨hValid, hCompile⟩
 
 theorem compileChecked?_eq_some {program : Program} {asm : Assembly.Program}
     (hCompile : compileChecked? program = some asm) :
@@ -145,6 +162,19 @@ theorem compile_preserves_checked {program : Program}
         Objects.Program.compile_preserves_checked
           hObjCompile hInitialPc hObjRun
 
+theorem compileSolcChecked?_preserves {program : Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Outcome}
+    (hCompile : compileSolcChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : Lowered.run fuel program initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome := by
+  rcases compileSolcChecked?_eq_some hCompile with ⟨_hSolc, hCompileCore⟩
+  exact compile_preserves_checked hCompileCore hInitialPc hRun
+
 /--
 Source-facing compiler theorem for the compiler-facing Yul adapter.
 
@@ -224,6 +254,29 @@ theorem compile_source_preserves_checked
   exact
     compile_source_preserves hPrim hSourceAccepted hFrameBound hLower
       hStructuredCompile hInitialPc hInitialStack hRun
+
+theorem compileSolcChecked?_source_preserves
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Objects.Source.Outcome}
+    (hCompile : compileSolcChecked? program = some asm)
+    (hSourceAccepted : program.SourceAccepted)
+    (hFrameBound :
+      ∀ lowerObj : Objects.Program, program.toObjects? = some lowerObj →
+        Functions.SourceDirect.FrameBound.Program lowerObj.toFunctions)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      SourceLowered.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome := by
+  rcases compileSolcChecked?_eq_some hCompile with ⟨_hSolc, hCompileCore⟩
+  exact
+    compile_source_preserves_checked hPrim hCompileCore hSourceAccepted
+      hFrameBound hInitialPc hInitialStack hRun
 
 /--
 Source-facing compiler acceptance for the Yul adapter.
@@ -314,6 +367,26 @@ theorem compile_source_preserves_checked_of_compileAccepted
           (fuel := fuel) (initial := initial)
           (sourceOutcome := sourceOutcome) hObjCompile
           (hAccepted.objects obj hObj) hInitialPc hInitialStack hObjRun
+
+theorem compileSolcChecked?_source_preserves_of_compileAccepted
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Objects.Source.Outcome}
+    (hCompile : compileSolcChecked? program = some asm)
+    (hAccepted : SourceCompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      SourceLowered.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome := by
+  rcases compileSolcChecked?_eq_some hCompile with ⟨_hSolc, hCompileCore⟩
+  exact
+    compile_source_preserves_checked_of_compileAccepted hPrim hCompileCore
+      hAccepted hInitialPc hInitialStack hRun
 
 end Program
 

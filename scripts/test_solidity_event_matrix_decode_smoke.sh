@@ -137,20 +137,18 @@ if missing_primitives:
     raise SystemExit(f"EventMatrix summary missing primitives: {missing_primitives!r}")
 
 compatibility = runtime_summary.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected EventMatrix backend compatibility: {compatibility!r}"
     )
 unsupported = set(compatibility.get("unsupportedPrimitiveNames", []))
-missing_blockers = sorted({"log0", "log1", "log2", "log3", "log4"} - unsupported)
-if missing_blockers:
+unexpected_blockers = sorted(
+    {"log0", "log1", "log2", "log3", "log4"} & unsupported
+)
+if unexpected_blockers:
     raise SystemExit(
-        f"EventMatrix summary missing log blockers: {missing_blockers!r}"
-    )
-notes = compatibility.get("notes", [])
-if not any("storage writes and logs" in note for note in notes):
-    raise SystemExit(
-        f"EventMatrix summary missing log blocker note: {compatibility!r}"
+        f"EventMatrix summary still marks supported logs unsupported: "
+        f"{unexpected_blockers!r}"
     )
 
 check = json.loads(check_path.read_text())
@@ -212,5 +210,5 @@ print(f"event_matrix_decode_runtime_functions={len(functions)}")
 print(f"event_matrix_decode_summary_calls={runtime_summary['counts']['calls']}")
 print("event_matrix_decode_frontend_metadata=yes")
 print("event_matrix_decode_log_primitives=yes")
-print("event_matrix_decode_backend_compatibility=blocked")
+print("event_matrix_decode_backend_compatibility=ready")
 PY

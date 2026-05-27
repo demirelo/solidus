@@ -1,4 +1,5 @@
 import EvmCompiler.Yul.Compiler
+import EvmCompiler.Yul.SolcValidation
 import EvmCompiler.Objects.Layout
 import EvmCompiler.Objects.Preservation
 import EvmCompiler.Assembly.Bytecode
@@ -42,6 +43,7 @@ end CallKind
 inductive Expr where
   | lit (value : Word)
   | stringLit (value : String)
+  | bytesLit (bytes : List UInt8)
   | var (name : Name)
   | call (kind : CallKind) (callee : Name) (args : List Expr)
   deriving Inhabited, Repr
@@ -99,8 +101,7 @@ def maxBytes : Nat :=
 def packBytes (bytes : List UInt8) : Nat :=
   bytes.foldl (fun acc byte => acc * 256 + byte.toNat) 0
 
-def word? (value : String) : Option Word :=
-  let bytes := value.toUTF8.toList
+def wordBytes? (bytes : List UInt8) : Option Word :=
   if bytes.length <= maxBytes then
     some
       (EvmYul.UInt256.ofNat
@@ -108,7 +109,23 @@ def word? (value : String) : Option Word :=
   else
     none
 
+def word? (value : String) : Option Word :=
+  wordBytes? value.toUTF8.toList
+
 end StringLiteral
+
+namespace Name
+
+def containsDot (name : Name) : Bool :=
+  name.toList.contains '.'
+
+def objectPathComponent? (name : Name) : Bool :=
+  !containsDot name
+
+def objectPath (pathPrefix name : Name) : Name :=
+  pathPrefix ++ "." ++ name
+
+end Name
 
 /--
 A visible layout witness for Yul object/data pseudo-builtins.
@@ -143,6 +160,20 @@ def size? (layout : ObjectLayout) (name : Name) : Option Word := do
   let entry ← layout.findEntry? name
   some entry.size
 
+namespace Entry
+
+def addBase (base : Nat) (entry : ObjectLayout.Entry) :
+    ObjectLayout.Entry :=
+  { entry with offset := EvmYul.UInt256.ofNat (base + entry.offset.toNat) }
+
+def addBaseAndPrefix (base : Nat) (pathPrefix : Name)
+    (entry : ObjectLayout.Entry) : ObjectLayout.Entry :=
+  { name := Name.objectPath pathPrefix entry.name
+    offset := EvmYul.UInt256.ofNat (base + entry.offset.toNat)
+    size := entry.size }
+
+end Entry
+
 end ObjectLayout
 
 namespace DataSection
@@ -163,7 +194,11 @@ def size (dataSection : DataSection) : Word :=
 
 def sizeEntry? (dataSection : DataSection) : Option (Name × Word) :=
   match dataSection.name? with
-  | some name => some (name, dataSection.size)
+  | some name =>
+      if Name.objectPathComponent? name then
+        some (name, dataSection.size)
+      else
+        none
   | none => none
 
 def sizeEntries : List DataSection → List (Name × Word)
@@ -176,7 +211,11 @@ def sizeEntries : List DataSection → List (Name × Word)
 def offsetEntryFromNat? (base : Nat) (dataSection : DataSection) :
     Option (Name × Word) :=
   match dataSection.name? with
-  | some name => some (name, EvmYul.UInt256.ofNat base)
+  | some name =>
+      if Name.objectPathComponent? name then
+        some (name, EvmYul.UInt256.ofNat base)
+      else
+        none
   | none => none
 
 def offsetEntriesFromNat : Nat → List DataSection → List (Name × Word)
@@ -230,7 +269,10 @@ theorem toObjects_namedSizeEntries (sections : List DataSection) :
               DataSection.sizeEntries, DataSection.sizeEntry?,
               DataSection.size, Objects.DataSection.Sections.namedSizeEntries,
               Objects.DataSection.namedSizeEntry?, Objects.DataSection.size,
-              Objects.DataSection.byteLength, hRest]
+              Objects.DataSection.byteLength, Objects.Name.objectPathComponent?,
+              Objects.Name.containsDot, Name.objectPathComponent?,
+              Name.containsDot, hRest]
+          all_goals rfl
 
 theorem toObjects_namedOffsetEntriesFromNat
     (base : Nat) (sections : List DataSection) :
@@ -254,7 +296,10 @@ theorem toObjects_namedOffsetEntriesFromNat
               DataSection.offsetEntryFromNat?,
               Objects.DataSection.Sections.namedOffsetEntriesFromNat,
               Objects.DataSection.namedOffsetEntryFromNat?,
-              Objects.DataSection.byteLength, hRest]
+              Objects.DataSection.byteLength,
+              Objects.Name.objectPathComponent?, Objects.Name.containsDot,
+              Name.objectPathComponent?, Name.containsDot, hRest]
+          all_goals rfl
 
 end List
 
@@ -279,6 +324,7 @@ mutual
   def Expr.loweringFuel : Expr → Nat
     | .lit _ => 1
     | .stringLit _ => 1
+    | .bytesLit _ => 1
     | .var _ => 1
     | .call _ _ args => Expr.List.loweringFuel args + 1
 
@@ -413,7 +459,7 @@ def findSelfSize? (context : ObjectBuiltinContext) (name : Name) :
     Option Word :=
   match context.selfSize? with
   | some (selfName, size) =>
-      if selfName == name then
+      if selfName == name && Name.objectPathComponent? selfName then
         some size
       else
         none
@@ -431,6 +477,17 @@ def offset? (context : ObjectBuiltinContext) (name : Name) : Option Word :=
   match context.findDataOffset? name with
   | some offset => some offset
   | none => context.layout.offset? name
+
+def objectDataNames (context : ObjectBuiltinContext) : List Name :=
+  context.layout.entries.map (fun entry => entry.name) ++
+    context.dataSizes.map Prod.fst ++
+      match context.selfSize? with
+      | some (selfName, _size) =>
+          if Name.objectPathComponent? selfName then [selfName] else []
+      | none => []
+
+def objectDataNamesUnique? (context : ObjectBuiltinContext) : Bool :=
+  decide context.objectDataNames.Nodup
 
 end ObjectBuiltinContext
 
@@ -527,6 +584,7 @@ mutual
   def Expr.loadImmutableNames : Expr → List Name
     | .lit _ => []
     | .stringLit _ => []
+    | .bytesLit _ => []
     | .var _ => []
     | .call .objectBuiltin "loadimmutable" [.stringLit name] => [name]
     | .call _ _ args => Expr.List.loadImmutableNames args
@@ -654,6 +712,24 @@ def zeroEntries : List Name → List (Name × Word)
   | [] => []
   | name :: rest => (name, EvmYul.UInt256.ofNat 0) :: zeroEntries rest
 
+def shift (base : Nat) (reference : ImmutableReference) :
+    ImmutableReference :=
+  { reference with start := base + reference.start }
+
+def shiftReferences (base : Nat) : List ImmutableReference →
+    List ImmutableReference :=
+  List.map (shift base)
+
+def shiftEntry (base : Nat)
+    (entry : Name × List ImmutableReference) :
+    Name × List ImmutableReference :=
+  (entry.fst, shiftReferences base entry.snd)
+
+def shiftEntries (base : Nat) :
+    List (Name × List ImmutableReference) →
+      List (Name × List ImmutableReference) :=
+  List.map (shiftEntry base)
+
 end ImmutableReference
 
 namespace Bytecode
@@ -677,10 +753,21 @@ def findOccurrences (needle bytes : List UInt8) : List Nat :=
   | [] => []
   | _ :: _ => findOccurrencesAux needle bytes 0 (bytes.length + 1) []
 
+def zeroWord32 : List UInt8 :=
+  Assembly.Bytecode.encodeWord32 (EvmYul.UInt256.ofNat 0)
+
 def immutableReferencesForMarker (bytes : List UInt8) (value : Word) :
     List ImmutableReference :=
   (findOccurrences (Assembly.Bytecode.encodeWord32 value) bytes).map
     fun start => { start := start, length := ImmutableReference.patchLength }
+
+def immutableReferencesForMarkerFromCodes
+    (zeroBytes markerBytes : List UInt8) (value : Word) :
+    List ImmutableReference :=
+  (findOccurrences (Assembly.Bytecode.encodeWord32 value) markerBytes).filter
+      (fun start => startsWithAt zeroWord32 zeroBytes start)
+    |>.map
+      fun start => { start := start, length := ImmutableReference.patchLength }
 
 def immutableReferenceEntries (bytes : List UInt8) :
     List (Name × Word) → List (Name × List ImmutableReference)
@@ -689,6 +776,14 @@ def immutableReferenceEntries (bytes : List UInt8) :
       (name, immutableReferencesForMarker bytes value) ::
         immutableReferenceEntries bytes rest
 
+def immutableReferenceEntriesFromCodes
+    (zeroBytes markerBytes : List UInt8) :
+    List (Name × Word) → List (Name × List ImmutableReference)
+  | [] => []
+  | (name, value) :: rest =>
+      (name, immutableReferencesForMarkerFromCodes zeroBytes markerBytes value) ::
+        immutableReferenceEntriesFromCodes zeroBytes markerBytes rest
+
 end Bytecode
 
 mutual
@@ -696,6 +791,9 @@ mutual
     | .lit value => some (.Lit value)
     | .stringLit value => do
         let word ← StringLiteral.word? value
+        some (.Lit word)
+    | .bytesLit bytes => do
+        let word ← StringLiteral.wordBytes? bytes
         some (.Lit word)
     | .var name => some (.Var name)
     | .call .primitive callee args => do
@@ -783,6 +881,7 @@ mutual
     match expr with
     | .lit value => some (.lit value)
     | .stringLit value => some (.stringLit value)
+    | .bytesLit bytes => some (.bytesLit bytes)
     | .var name => some (.var name)
     | .call .objectBuiltin "datasize" [.stringLit name] => do
         let size ← context.size? name
@@ -965,7 +1064,8 @@ theorem resolveObjectBuiltins_datacopy_codecopy
   simp [Expr.resolveObjectBuiltinsIn?, hTarget, hOffset, hSize]
 
 theorem resolveObjectBuiltins_datasize_namedData
-    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} :
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout}
+    (hName : Name.objectPathComponent? name = true) :
     Expr.resolveObjectBuiltinsIn?
         (.call .objectBuiltin "datasize" [.stringLit name])
         { layout := layout
@@ -977,10 +1077,11 @@ theorem resolveObjectBuiltins_datasize_namedData
       some (.lit (EvmYul.UInt256.ofNat bytes.length)) := by
   simp [Expr.resolveObjectBuiltinsIn?, ObjectBuiltinContext.size?,
     ObjectBuiltinContext.findDataSize?, DataSection.sizeEntries,
-    DataSection.sizeEntry?, DataSection.size]
+    DataSection.sizeEntry?, DataSection.size, hName]
 
 theorem resolveObjectBuiltins_dataoffset_namedDataBase
-    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat} :
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat}
+    (hName : Name.objectPathComponent? name = true) :
     Expr.resolveObjectBuiltinsIn?
         (.call .objectBuiltin "dataoffset" [.stringLit name])
         { layout := layout
@@ -992,10 +1093,11 @@ theorem resolveObjectBuiltins_dataoffset_namedDataBase
       some (.lit (EvmYul.UInt256.ofNat base)) := by
   simp [Expr.resolveObjectBuiltinsIn?, ObjectBuiltinContext.offset?,
     ObjectBuiltinContext.findDataOffset?, DataSection.offsetEntriesFromNat,
-    DataSection.offsetEntryFromNat?]
+    DataSection.offsetEntryFromNat?, hName]
 
 theorem toYul_after_resolveObjectBuiltins_datasize_namedData
-    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} :
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout}
+    (hName : Name.objectPathComponent? name = true) :
     (Expr.resolveObjectBuiltinsIn?
         (.call .objectBuiltin "datasize" [.stringLit name])
         { layout := layout
@@ -1005,10 +1107,11 @@ theorem toYul_after_resolveObjectBuiltins_datasize_namedData
           dataOffsets := []
           linkerSymbols := [] } >>= Expr.toYul?) =
       some (.Lit (EvmYul.UInt256.ofNat bytes.length)) := by
-  simp [resolveObjectBuiltins_datasize_namedData, Expr.toYul?]
+  simp [resolveObjectBuiltins_datasize_namedData hName, Expr.toYul?]
 
 theorem toYul_after_resolveObjectBuiltins_dataoffset_namedDataBase
-    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat} :
+    {name : Name} {bytes : List UInt8} {layout : ObjectLayout} {base : Nat}
+    (hName : Name.objectPathComponent? name = true) :
     (Expr.resolveObjectBuiltinsIn?
         (.call .objectBuiltin "dataoffset" [.stringLit name])
         { layout := layout
@@ -1018,7 +1121,7 @@ theorem toYul_after_resolveObjectBuiltins_dataoffset_namedDataBase
           ]
           linkerSymbols := [] } >>= Expr.toYul?) =
       some (.Lit (EvmYul.UInt256.ofNat base)) := by
-  simp [resolveObjectBuiltins_dataoffset_namedDataBase, Expr.toYul?]
+  simp [resolveObjectBuiltins_dataoffset_namedDataBase hName, Expr.toYul?]
 
 theorem toYul_after_resolveObjectBuiltins_datacopy_codecopy
     {context : ObjectBuiltinContext} {target offset size : Expr}
@@ -1396,6 +1499,9 @@ structure ObjectImage where
   name : Name
   bytes : List UInt8
   immutableReferences : List (Name × List ImmutableReference) := []
+  layoutEntries : List ObjectLayout.Entry := []
+  dataSizeEntries : List (Name × Word) := []
+  dataOffsetEntries : List (Name × Word) := []
   deriving Inhabited, Repr
 
 namespace ObjectImage
@@ -1408,6 +1514,37 @@ def layoutEntryFromNat (base : Nat) (image : ObjectImage) :
   { name := image.name
     offset := EvmYul.UInt256.ofNat base
     size := EvmYul.UInt256.ofNat image.size }
+
+def layoutEntriesFromNatForPath (base : Nat) (image : ObjectImage) :
+    List ObjectLayout.Entry :=
+  if Name.objectPathComponent? image.name then
+    image.layoutEntryFromNat base ::
+      image.layoutEntries.map
+        (ObjectLayout.Entry.addBaseAndPrefix base image.name)
+  else
+    []
+
+def dataSizeEntriesForPath (image : ObjectImage) :
+    List (Name × Word) :=
+  if Name.objectPathComponent? image.name then
+    image.dataSizeEntries.map
+      (fun entry => (Name.objectPath image.name entry.fst, entry.snd))
+  else
+    []
+
+def dataOffsetEntriesFromNatForPath (base : Nat) (image : ObjectImage) :
+    List (Name × Word) :=
+  if Name.objectPathComponent? image.name then
+    image.dataOffsetEntries.map
+      (fun entry =>
+        ( Name.objectPath image.name entry.fst
+        , EvmYul.UInt256.ofNat (base + entry.snd.toNat) ))
+  else
+    []
+
+def immutableReferenceEntriesFromNat (base : Nat) (image : ObjectImage) :
+    List (Name × List ImmutableReference) :=
+  ImmutableReference.shiftEntries base image.immutableReferences
 
 def layoutEntriesFromNat : Nat → List ObjectImage → List ObjectLayout.Entry
   | _, [] => []
@@ -1431,6 +1568,18 @@ end ObjectImage
 
 namespace ObjectItemRef
 
+def inBounds? (dataSections : List DataSection)
+    (objectImages : List ObjectImage) : ObjectItemRef → Bool
+  | .data index => decide (index < dataSections.length)
+  | .object index => decide (index < objectImages.length)
+
+def isMetadata? (dataSections : List DataSection) : ObjectItemRef → Bool
+  | .data index =>
+      match dataSections[index]? with
+      | some dataSection => dataSection.name? == some ".metadata"
+      | none => false
+  | .object _ => false
+
 def payloadSize? (dataSections : List DataSection)
     (objectImages : List ObjectImage) : ObjectItemRef → Option Nat
   | .data index => do
@@ -1451,6 +1600,22 @@ def payloadBytes? (dataSections : List DataSection)
 
 namespace List
 
+def noDuplicates? : List ObjectItemRef → Bool
+  | [] => true
+  | item :: rest => !rest.contains item && noDuplicates? rest
+
+def sameMembers? (left right : List ObjectItemRef) : Bool :=
+  left.all (fun item => right.contains item) &&
+    right.all (fun item => left.contains item)
+
+def validFor? (expected items : List ObjectItemRef) : Bool :=
+  noDuplicates? items && sameMembers? expected items
+
+def moveMetadataLast (dataSections : List DataSection)
+    (items : List ObjectItemRef) : List ObjectItemRef :=
+  items.filter (fun item => !item.isMetadata? dataSections) ++
+    items.filter (fun item => item.isMetadata? dataSections)
+
 def objectLayoutEntriesFromNat? (dataSections : List DataSection)
     (objectImages : List ObjectImage) :
     Nat → List ObjectItemRef → Option (List ObjectLayout.Entry)
@@ -1464,7 +1629,23 @@ def objectLayoutEntriesFromNat? (dataSections : List DataSection)
       | .data _ => some tail
       | .object index => do
           let image ← objectImages[index]?
-          some (image.layoutEntryFromNat base :: tail)
+          some (image.layoutEntriesFromNatForPath base ++ tail)
+
+def dataSizeEntries? (dataSections : List DataSection)
+    (objectImages : List ObjectImage) :
+    List ObjectItemRef → Option (List (Name × Word))
+  | [] => some []
+  | item :: rest => do
+      let tail ← dataSizeEntries? dataSections objectImages rest
+      match item with
+      | .data index => do
+          let dataSection ← dataSections[index]?
+          match dataSection.sizeEntry? with
+          | some entry => some (entry :: tail)
+          | none => some tail
+      | .object index => do
+          let image ← objectImages[index]?
+          some (image.dataSizeEntriesForPath ++ tail)
 
 def dataOffsetEntriesFromNat? (dataSections : List DataSection)
     (objectImages : List ObjectImage) :
@@ -1476,7 +1657,9 @@ def dataOffsetEntriesFromNat? (dataSections : List DataSection)
         dataOffsetEntriesFromNat?
           dataSections objectImages (base + itemSize) rest
       match item with
-      | .object _ => some tail
+      | .object index => do
+          let image ← objectImages[index]?
+          some (image.dataOffsetEntriesFromNatForPath base ++ tail)
       | .data index => do
           let dataSection ← dataSections[index]?
           match dataSection.offsetEntryFromNat? base with
@@ -1492,8 +1675,36 @@ def payloadBytes? (dataSections : List DataSection)
       let tail ← payloadBytes? dataSections objectImages rest
       some (head ++ tail)
 
+def immutableReferenceEntriesFromNat? (dataSections : List DataSection)
+    (objectImages : List ObjectImage) :
+    Nat → List ObjectItemRef → Option (List (Name × List ImmutableReference))
+  | _, [] => some []
+  | base, item :: rest => do
+      let itemSize ← item.payloadSize? dataSections objectImages
+      let tail ←
+        immutableReferenceEntriesFromNat?
+          dataSections objectImages (base + itemSize) rest
+      match item with
+      | .data _ => some tail
+      | .object index => do
+          let image ← objectImages[index]?
+          some (image.immutableReferenceEntriesFromNat base ++ tail)
+
 end List
 end ObjectItemRef
+
+namespace Object
+
+def payloadItems? (object : Object) (_objectImages : List ObjectImage) :
+    Option (List ObjectItemRef) :=
+  let expected := object.defaultItems
+  let items := object.effectiveItems
+  if ObjectItemRef.List.validFor? expected items then
+    some (ObjectItemRef.List.moveMetadataLast object.data items)
+  else
+    none
+
+end Object
 
 namespace Object
 
@@ -1505,16 +1716,31 @@ def functionMap (entries : List (Name × AstFunctionDefinition)) :
     (∅ : Finmap (fun (_ : EvmYul.Yul.Ast.YulFunctionName) =>
       AstFunctionDefinition))
 
-def toYulContract? (object : Object) : Option AstContract := do
+def toYulContractWithFunctionEntries? (object : Object) :
+    Option (AstContract × List (Name × AstFunctionDefinition)) := do
   let dispatcher ← Stmt.toYul? (.block object.dispatcher)
   let functions ← FunctionDef.List.toYul? object.functions
   some
-    { dispatcher := dispatcher
-      functions := functionMap functions }
+    ( { dispatcher := dispatcher
+        functions := functionMap functions }
+    , functions )
+
+def toYulContract? (object : Object) : Option AstContract := do
+  let (contract, _functions) ← object.toYulContractWithFunctionEntries?
+  some contract
 
 def toYulProgram? (object : Object) : Option Yul.Program := do
   let contract ← Object.toYulContract? object
   some { contract := contract }
+
+def toSolcYulProgram? (object : Object) :
+    Option Yul.Program := do
+  let (contract, functions) ← object.toYulContractWithFunctionEntries?
+  if Yul.SolcValidation.ContractOkWithEntries?
+      Yul.SolcValidation.defaultDialectProfile contract functions then
+    some { contract := contract }
+  else
+    none
 
 def toYulProgramWithLayout? (object : Object) (layout : ObjectLayout) :
     Option Yul.Program := do
@@ -1528,9 +1754,59 @@ def toYulProgramWithLocalDataBase? (object : Object) (layout : ObjectLayout)
 
 noncomputable def lowerCode? (object : Object) :
     Option Functions.Program := do
-  let contract ← object.toYulContract?
-  let lower ← Yul.Contract.toObjects? contract
+  let program ← object.toSolcYulProgram?
+  let lower ← Yul.Contract.toObjects? program.contract
   some lower.root.code
+
+theorem toSolcYulProgram?_eq_some {object : Object}
+    {program : Yul.Program}
+    (hProgram : object.toSolcYulProgram? = some program) :
+    ∃ functions : List (Name × AstFunctionDefinition),
+      object.toYulProgram? = some program ∧
+        FunctionDef.List.toYul? object.functions = some functions ∧
+          Yul.SolcValidation.ContractOkWithEntries?
+            Yul.SolcValidation.defaultDialectProfile
+            program.contract functions = true := by
+  unfold toSolcYulProgram? toYulContractWithFunctionEntries? at hProgram
+  unfold toYulProgram? toYulContract? toYulContractWithFunctionEntries?
+  cases hDispatcher : Stmt.toYul? (.block object.dispatcher) with
+  | none =>
+      simp [hDispatcher] at hProgram
+  | some dispatcher =>
+      cases hFunctions : FunctionDef.List.toYul? object.functions with
+      | none =>
+          simp [hDispatcher, hFunctions] at hProgram
+      | some functions =>
+          cases hValid :
+              Yul.SolcValidation.ContractOkWithEntries?
+                Yul.SolcValidation.defaultDialectProfile
+                { dispatcher := dispatcher
+                  functions := functionMap functions }
+                functions <;>
+            simp [hDispatcher, hFunctions, hValid] at hProgram
+          subst program
+          exact
+            ⟨functions, by simp, rfl, hValid⟩
+
+theorem lowerCode?_some_solc_valid {object : Object}
+    {code : Functions.Program}
+    (hLower : object.lowerCode? = some code) :
+    ∃ yulProgram : Yul.Program, ∃ lower : Objects.Program,
+      object.toSolcYulProgram? = some yulProgram ∧
+        Yul.Contract.toObjects? yulProgram.contract = some lower ∧
+          lower.root.code = code := by
+  unfold lowerCode? at hLower
+  cases hYul : object.toSolcYulProgram? with
+  | none =>
+      simp [hYul] at hLower
+  | some yulProgram =>
+      cases hObjects : Yul.Contract.toObjects? yulProgram.contract with
+      | none =>
+          simp [hYul, hObjects] at hLower
+      | some lower =>
+          simp [hYul, hObjects] at hLower
+          subst code
+          exact ⟨yulProgram, lower, rfl, hObjects, rfl⟩
 
 def lowerCodeUnchecked? (object : Object) :
     Option Functions.Program := do
@@ -1573,6 +1849,47 @@ def codeBytesUncheckedIn? (object : Object)
     (context : ObjectBuiltinContext) : Option (List UInt8) := do
   let target ← object.compileCodeUncheckedIn? context
   some (Assembly.Bytecode.encodeTarget target).toList
+
+noncomputable def compileCodeCheckedIn? (object : Object)
+    (context : ObjectBuiltinContext) : Option Assembly.TargetProgram := do
+  let resolved ← object.resolveObjectBuiltinsIn? context
+  let code ← resolved.lowerCode?
+  let asm ← Functions.Source.Program.compileChecked? code
+  Assembly.compile? asm
+
+noncomputable def codeBytesCheckedIn? (object : Object)
+    (context : ObjectBuiltinContext) : Option (List UInt8) := do
+  let target ← object.compileCodeCheckedIn? context
+  some (Assembly.Bytecode.encodeTarget target).toList
+
+theorem compileCodeCheckedIn?_some_solc_valid
+    {object : Object} {context : ObjectBuiltinContext}
+    {target : Assembly.TargetProgram}
+    (hCompile :
+      object.compileCodeCheckedIn? context = some target) :
+    ∃ resolved : Object, ∃ code : Functions.Program,
+      object.resolveObjectBuiltinsIn? context = some resolved ∧
+        resolved.lowerCode? = some code ∧
+          ∃ asm : Assembly.Program,
+            Functions.Source.Program.compileChecked? code = some asm ∧
+              Assembly.compile? asm = some target := by
+  unfold compileCodeCheckedIn? at hCompile
+  cases hResolved : object.resolveObjectBuiltinsIn? context with
+  | none =>
+      simp [hResolved] at hCompile
+  | some resolved =>
+      cases hCode : resolved.lowerCode? with
+      | none =>
+          simp [hResolved, hCode] at hCompile
+      | some code =>
+          cases hAsm :
+              Functions.Source.Program.compileChecked? code with
+          | none =>
+              simp [hResolved, hCode, hAsm] at hCompile
+          | some asm =>
+              simp [hResolved, hCode, hAsm] at hCompile
+              exact
+                ⟨resolved, code, rfl, hCode, asm, hAsm, hCompile⟩
 
 mutual
   noncomputable def toObjects? (object : Object) :
@@ -1712,10 +2029,22 @@ def toObjectsUncheckedWithLocalDataBase? (object : Object)
       (Objects.Object.mk object.name code
         (DataSection.List.toObjects object.data) objects)
 
+structure ObjectComputedObjectData where
+  childImages : List ObjectImage
+  items : List ObjectItemRef
+  dataSizes : List (Name × Word)
+  dataOffsets : List (Name × Word)
+  payload : List UInt8
+  codeBase : Nat
+  context : ObjectBuiltinContext
+  code : List UInt8
+  markerCode : List UInt8
+  deriving Inhabited, Repr
+
 mutual
-  def bytecodeImageUncheckedWithLinkerSymbols?
+  def computedImageUncheckedWithLinkerSymbols?
       (object : Object) (linkerSymbols : List (Name × Word)) :
-      Option ObjectImage := do
+      Option (ObjectComputedObjectData × ObjectImage) := do
     let childImages ←
       List.bytecodeImagesUncheckedWithLinkerSymbols?
         object.objects linkerSymbols
@@ -1726,7 +2055,9 @@ mutual
       ImmutableReference.zeroEntries immutableNames
     let markerImmutableValues :=
       ImmutableReference.markerEntriesFromNat 0 immutableNames
-    let items := object.effectiveItems
+    let items ← object.payloadItems? childImages
+    let dataSizes ←
+      ObjectItemRef.List.dataSizeEntries? object.data childImages items
     let layout0 ←
       ObjectItemRef.List.objectLayoutEntriesFromNat?
         object.data childImages 0 items
@@ -1737,12 +2068,15 @@ mutual
     let placeholderLayout : ObjectLayout := { entries := layout0 }
     let placeholderContext : ObjectBuiltinContext :=
       { layout := placeholderLayout
-        dataSizes := object.dataSizeEntries
+        dataSizes := dataSizes
         dataOffsets := dataOffsets0
         linkerSymbols := linkerSymbols
         immutableValues := zeroImmutableValues
         immutableReferences := childImmutableReferences
         selfSize? := some (object.name, EvmYul.UInt256.ofNat 0) }
+    if !placeholderContext.objectDataNamesUnique? then
+      none
+    else
     let placeholderCode ← object.codeBytesUncheckedIn? placeholderContext
     let codeBase := placeholderCode.length
     let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
@@ -1754,22 +2088,51 @@ mutual
         object.data childImages codeBase items
     let context : ObjectBuiltinContext :=
       { layout := { entries := layout }
-        dataSizes := object.dataSizeEntries
+        dataSizes := dataSizes
         dataOffsets := dataOffsets
         linkerSymbols := linkerSymbols
         immutableValues := zeroImmutableValues
         immutableReferences := childImmutableReferences
         selfSize? := some (object.name, selfSize) }
+    if !context.objectDataNamesUnique? then
+      none
+    else
     let code ← object.codeBytesUncheckedIn? context
+    if code.length == codeBase then
     let markerContext : ObjectBuiltinContext :=
       { context with immutableValues := markerImmutableValues }
     let markerCode ← object.codeBytesUncheckedIn? markerContext
+    if markerCode.length == codeBase then
+    let ownImmutableReferences :=
+      Bytecode.immutableReferenceEntriesFromCodes
+        code markerCode markerImmutableValues
+    let payloadImmutableReferences ←
+      ObjectItemRef.List.immutableReferenceEntriesFromNat?
+        object.data childImages codeBase items
     let immutableReferences :=
-      Bytecode.immutableReferenceEntries markerCode markerImmutableValues
+      ownImmutableReferences ++ payloadImmutableReferences
+    let computed : ObjectComputedObjectData :=
+      { childImages := childImages
+        items := items
+        dataSizes := dataSizes
+        dataOffsets := dataOffsets
+        payload := payload
+        codeBase := codeBase
+        context := context
+        code := code
+        markerCode := markerCode }
     some
-      { name := object.name
-        bytes := code ++ payload
-        immutableReferences := immutableReferences }
+      ( computed
+      , { name := object.name
+          bytes := code ++ payload
+          immutableReferences := immutableReferences
+          layoutEntries := layout
+          dataSizeEntries := dataSizes
+          dataOffsetEntries := dataOffsets } )
+    else
+      none
+    else
+      none
   termination_by sizeOf object
   decreasing_by
     simp_wf
@@ -1784,20 +2147,170 @@ mutual
     | [] => some []
     | object :: rest => do
         let head ←
-          Object.bytecodeImageUncheckedWithLinkerSymbols?
+          Object.computedImageUncheckedWithLinkerSymbols?
             object linkerSymbols
         let tail ←
           List.bytecodeImagesUncheckedWithLinkerSymbols?
             rest linkerSymbols
-        some (head :: tail)
+        some (head.snd :: tail)
   termination_by sizeOf objects
   decreasing_by
     all_goals simp_wf
     all_goals omega
 end
 
+mutual
+  noncomputable def computedImageCheckedWithLinkerSymbols?
+      (object : Object) (linkerSymbols : List (Name × Word)) :
+      Option (ObjectComputedObjectData × ObjectImage) := do
+    let childImages ←
+      List.bytecodeImagesCheckedWithLinkerSymbols?
+        object.objects linkerSymbols
+    let childImmutableReferences :=
+      ObjectImage.immutableReferenceEntries childImages
+    let immutableNames := object.loadImmutableNames
+    let zeroImmutableValues :=
+      ImmutableReference.zeroEntries immutableNames
+    let markerImmutableValues :=
+      ImmutableReference.markerEntriesFromNat 0 immutableNames
+    let items ← object.payloadItems? childImages
+    let dataSizes ←
+      ObjectItemRef.List.dataSizeEntries? object.data childImages items
+    let layout0 ←
+      ObjectItemRef.List.objectLayoutEntriesFromNat?
+        object.data childImages 0 items
+    let dataOffsets0 ←
+      ObjectItemRef.List.dataOffsetEntriesFromNat?
+        object.data childImages 0 items
+    let payload ← ObjectItemRef.List.payloadBytes? object.data childImages items
+    let placeholderLayout : ObjectLayout := { entries := layout0 }
+    let placeholderContext : ObjectBuiltinContext :=
+      { layout := placeholderLayout
+        dataSizes := dataSizes
+        dataOffsets := dataOffsets0
+        linkerSymbols := linkerSymbols
+        immutableValues := zeroImmutableValues
+        immutableReferences := childImmutableReferences
+        selfSize? := some (object.name, EvmYul.UInt256.ofNat 0) }
+    if !placeholderContext.objectDataNamesUnique? then
+      none
+    else
+    let placeholderCode ← object.codeBytesCheckedIn? placeholderContext
+    let codeBase := placeholderCode.length
+    let selfSize := EvmYul.UInt256.ofNat (codeBase + payload.length)
+    let layout ←
+      ObjectItemRef.List.objectLayoutEntriesFromNat?
+        object.data childImages codeBase items
+    let dataOffsets ←
+      ObjectItemRef.List.dataOffsetEntriesFromNat?
+        object.data childImages codeBase items
+    let context : ObjectBuiltinContext :=
+      { layout := { entries := layout }
+        dataSizes := dataSizes
+        dataOffsets := dataOffsets
+        linkerSymbols := linkerSymbols
+        immutableValues := zeroImmutableValues
+        immutableReferences := childImmutableReferences
+        selfSize? := some (object.name, selfSize) }
+    if !context.objectDataNamesUnique? then
+      none
+    else
+    let code ← object.codeBytesCheckedIn? context
+    if code.length == codeBase then
+    let markerContext : ObjectBuiltinContext :=
+      { context with immutableValues := markerImmutableValues }
+    let markerCode ← object.codeBytesCheckedIn? markerContext
+    if markerCode.length == codeBase then
+    let ownImmutableReferences :=
+      Bytecode.immutableReferenceEntriesFromCodes
+        code markerCode markerImmutableValues
+    let payloadImmutableReferences ←
+      ObjectItemRef.List.immutableReferenceEntriesFromNat?
+        object.data childImages codeBase items
+    let immutableReferences :=
+      ownImmutableReferences ++ payloadImmutableReferences
+    let computed : ObjectComputedObjectData :=
+      { childImages := childImages
+        items := items
+        dataSizes := dataSizes
+        dataOffsets := dataOffsets
+        payload := payload
+        codeBase := codeBase
+        context := context
+        code := code
+        markerCode := markerCode }
+    some
+      ( computed
+      , { name := object.name
+          bytes := code ++ payload
+          immutableReferences := immutableReferences
+          layoutEntries := layout
+          dataSizeEntries := dataSizes
+          dataOffsetEntries := dataOffsets } )
+    else
+      none
+    else
+      none
+  termination_by sizeOf object
+  decreasing_by
+    simp_wf
+    cases object
+    simp_wf
+    omega
+
+  noncomputable def List.bytecodeImagesCheckedWithLinkerSymbols?
+      (objects : List Object) (linkerSymbols : List (Name × Word)) :
+      Option (List ObjectImage) :=
+    match objects with
+    | [] => some []
+    | object :: rest => do
+        let head ←
+          Object.computedImageCheckedWithLinkerSymbols?
+            object linkerSymbols
+        let tail ←
+          List.bytecodeImagesCheckedWithLinkerSymbols?
+            rest linkerSymbols
+        some (head.snd :: tail)
+  termination_by sizeOf objects
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+end
+
+def computedObjectDataWithLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option ObjectComputedObjectData := do
+  let computedAndImage ←
+    object.computedImageUncheckedWithLinkerSymbols? linkerSymbols
+  some computedAndImage.fst
+
+def bytecodeImageUncheckedWithLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option ObjectImage := do
+  let computedAndImage ←
+    object.computedImageUncheckedWithLinkerSymbols? linkerSymbols
+  some computedAndImage.snd
+
 def bytecodeImageUnchecked? (object : Object) : Option ObjectImage :=
   object.bytecodeImageUncheckedWithLinkerSymbols? []
+
+noncomputable def computedObjectDataCheckedWithLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option ObjectComputedObjectData := do
+  let computedAndImage ←
+    object.computedImageCheckedWithLinkerSymbols? linkerSymbols
+  some computedAndImage.fst
+
+noncomputable def bytecodeImageCheckedWithLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option ObjectImage := do
+  let computedAndImage ←
+    object.computedImageCheckedWithLinkerSymbols? linkerSymbols
+  some computedAndImage.snd
+
+noncomputable def bytecodeImageChecked? (object : Object) :
+    Option ObjectImage :=
+  object.bytecodeImageCheckedWithLinkerSymbols? []
 
 def bytecodeUncheckedImageWithLinkerSymbols?
     (object : Object) (linkerSymbols : List (Name × Word)) :
@@ -1807,6 +2320,165 @@ def bytecodeUncheckedImageWithLinkerSymbols?
 
 def bytecodeUncheckedImage? (object : Object) : Option ByteArray := do
   object.bytecodeUncheckedImageWithLinkerSymbols? []
+
+noncomputable def bytecodeCheckedImageWithLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option ByteArray := do
+  let image ← object.bytecodeImageCheckedWithLinkerSymbols? linkerSymbols
+  some (Assembly.Bytecode.ofList image.bytes)
+
+noncomputable def bytecodeCheckedImage? (object : Object) : Option ByteArray := do
+  object.bytecodeCheckedImageWithLinkerSymbols? []
+
+mutual
+  def resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      (object : Object) (linkerSymbols : List (Name × Word)) :
+      Option Object := do
+    let computed ← object.computedObjectDataWithLinkerSymbols? linkerSymbols
+    let dispatcher ←
+      Stmt.List.resolveObjectBuiltinsIn? object.dispatcher computed.context
+    let functions ←
+      FunctionDef.List.resolveObjectBuiltinsIn?
+        object.functions computed.context
+    let objects ←
+      List.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+        object.objects linkerSymbols
+    some
+      { name := object.name
+        dispatcher := dispatcher
+        functions := functions
+        data := object.data
+        objects := objects
+        items := object.items }
+  termination_by sizeOf object
+  decreasing_by
+    simp_wf
+    cases object
+    simp_wf
+    omega
+
+  def List.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      (objects : List Object) (linkerSymbols : List (Name × Word)) :
+      Option (List Object) :=
+    match objects with
+    | [] => some []
+    | object :: rest => do
+        let head ←
+          Object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+            object linkerSymbols
+        let tail ←
+          List.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+            rest linkerSymbols
+        some (head :: tail)
+  termination_by sizeOf objects
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+end
+
+def resolveObjectBuiltinsWithComputedObjectData? (object : Object) :
+    Option Object :=
+  object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols? []
+
+def toYulProgramWithComputedObjectDataAndLinkerSymbols?
+    (object : Object) (linkerSymbols : List (Name × Word)) :
+    Option Yul.Program := do
+  let resolved ←
+    object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      linkerSymbols
+  resolved.toYulProgram?
+
+def toYulProgramWithComputedObjectData? (object : Object) :
+    Option Yul.Program :=
+  object.toYulProgramWithComputedObjectDataAndLinkerSymbols? []
+
+mutual
+  noncomputable def toObjectsWithComputedObjectDataAndLinkerSymbols?
+      (object : Object) (linkerSymbols : List (Name × Word)) :
+      Option Objects.Object := do
+    let resolved ←
+      object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols
+    let code ← resolved.lowerCode?
+    let objects ←
+      List.toObjectsWithComputedObjectDataAndLinkerSymbols?
+        object.objects linkerSymbols
+    some
+      (Objects.Object.mk object.name code
+        (DataSection.List.toObjects object.data) objects)
+  termination_by sizeOf object
+  decreasing_by
+    simp_wf
+    cases object
+    simp_wf
+    omega
+
+  noncomputable def List.toObjectsWithComputedObjectDataAndLinkerSymbols?
+      (objects : List Object) (linkerSymbols : List (Name × Word)) :
+      Option (List Objects.Object) :=
+    match objects with
+    | [] => some []
+    | object :: rest => do
+        let head ←
+          Object.toObjectsWithComputedObjectDataAndLinkerSymbols?
+            object linkerSymbols
+        let tail ←
+          List.toObjectsWithComputedObjectDataAndLinkerSymbols?
+            rest linkerSymbols
+        some (head :: tail)
+  termination_by sizeOf objects
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+end
+
+noncomputable def toObjectsWithComputedObjectData? (object : Object) :
+    Option Objects.Object :=
+  object.toObjectsWithComputedObjectDataAndLinkerSymbols? []
+
+mutual
+  def toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+      (object : Object) (linkerSymbols : List (Name × Word)) :
+      Option Objects.Object := do
+    let resolved ←
+      object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols
+    let code ← resolved.lowerCodeUnchecked?
+    let objects ←
+      List.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+        object.objects linkerSymbols
+    some
+      (Objects.Object.mk object.name code
+        (DataSection.List.toObjects object.data) objects)
+  termination_by sizeOf object
+  decreasing_by
+    simp_wf
+    cases object
+    simp_wf
+    omega
+
+  def List.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+      (objects : List Object) (linkerSymbols : List (Name × Word)) :
+      Option (List Objects.Object) :=
+    match objects with
+    | [] => some []
+    | object :: rest => do
+        let head ←
+          Object.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+            object linkerSymbols
+        let tail ←
+          List.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+            rest linkerSymbols
+        some (head :: tail)
+  termination_by sizeOf objects
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+end
+
+def toObjectsUncheckedWithComputedObjectData? (object : Object) :
+    Option Objects.Object :=
+  object.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols? []
 
 end Object
 
@@ -1955,6 +2627,122 @@ def bytecodeUncheckedWithLocalDataBase? (program : Program)
   let target ← program.compileUncheckedWithLocalDataBase? layout base
   some (Assembly.Bytecode.encodeTarget target)
 
+def resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Program := do
+  let object ←
+    Object.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      program.object linkerSymbols
+  some { source := program.source, contract := program.contract, object := object }
+
+def resolveObjectBuiltinsWithComputedObjectData? (program : Program) :
+    Option Program :=
+  program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols? []
+
+def toYulProgramWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Yul.Program := do
+  let resolved ←
+    program.resolveObjectBuiltinsWithComputedObjectDataAndLinkerSymbols?
+      linkerSymbols
+  resolved.toYulProgram?
+
+def toYulProgramWithComputedObjectData? (program : Program) :
+    Option Yul.Program :=
+  program.toYulProgramWithComputedObjectDataAndLinkerSymbols? []
+
+noncomputable def toObjectsWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Objects.Program := do
+  let root ←
+    Object.toObjectsWithComputedObjectDataAndLinkerSymbols?
+      program.object linkerSymbols
+  some { root := root }
+
+noncomputable def toObjectsWithComputedObjectData? (program : Program) :
+    Option Objects.Program :=
+  program.toObjectsWithComputedObjectDataAndLinkerSymbols? []
+
+noncomputable def compileCheckedWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Assembly.Program := do
+  let lower ←
+    program.toObjectsWithComputedObjectDataAndLinkerSymbols? linkerSymbols
+  Objects.Source.Program.compileChecked? lower
+
+noncomputable def compileCheckedWithComputedObjectData?
+    (program : Program) : Option Assembly.Program :=
+  program.compileCheckedWithComputedObjectDataAndLinkerSymbols? []
+
+theorem compileCheckedWithComputedObjectDataAndLinkerSymbols?_eq_some
+    {program : Program} {linkerSymbols : List (Name × Word)}
+    {lower : Objects.Program} {asm : Assembly.Program}
+    (hLower :
+      program.toObjectsWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols = some lower)
+    (hCompile :
+      Objects.Source.Program.compileChecked? lower = some asm) :
+    program.compileCheckedWithComputedObjectDataAndLinkerSymbols?
+      linkerSymbols = some asm := by
+  simp [compileCheckedWithComputedObjectDataAndLinkerSymbols?,
+    hLower, hCompile]
+
+theorem compileCheckedWithComputedObjectDataAndLinkerSymbols?_some_lower
+    {program : Program} {linkerSymbols : List (Name × Word)}
+    {asm : Assembly.Program}
+    (hCompile :
+      program.compileCheckedWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols = some asm) :
+    ∃ lower : Objects.Program,
+      program.toObjectsWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols = some lower ∧
+        Objects.Source.Program.compileChecked? lower = some asm := by
+  unfold compileCheckedWithComputedObjectDataAndLinkerSymbols? at hCompile
+  cases hLower :
+      program.toObjectsWithComputedObjectDataAndLinkerSymbols?
+        linkerSymbols with
+  | none =>
+      simp [hLower] at hCompile
+  | some lower =>
+      simp [hLower] at hCompile
+      exact ⟨lower, rfl, hCompile⟩
+
+def toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Objects.Program := do
+  let root ←
+    Object.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+      program.object linkerSymbols
+  some { root := root }
+
+def toObjectsUncheckedWithComputedObjectData? (program : Program) :
+    Option Objects.Program :=
+  program.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols? []
+
+def compileUncheckedWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option Assembly.TargetProgram := do
+  let lower ←
+    program.toObjectsUncheckedWithComputedObjectDataAndLinkerSymbols?
+      linkerSymbols
+  Objects.Program.compile? lower
+
+def compileUncheckedWithComputedObjectData? (program : Program) :
+    Option Assembly.TargetProgram :=
+  program.compileUncheckedWithComputedObjectDataAndLinkerSymbols? []
+
+def bytecodeUncheckedWithComputedObjectDataAndLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option ByteArray := do
+  let target ←
+    program.compileUncheckedWithComputedObjectDataAndLinkerSymbols?
+      linkerSymbols
+  some (Assembly.Bytecode.encodeTarget target)
+
+def bytecodeUncheckedWithComputedObjectData? (program : Program) :
+    Option ByteArray :=
+  program.bytecodeUncheckedWithComputedObjectDataAndLinkerSymbols? []
+
 def bytecodeImageUnchecked? (program : Program) : Option ByteArray :=
   program.object.bytecodeUncheckedImage?
 
@@ -1962,6 +2750,15 @@ def bytecodeImageUncheckedWithLinkerSymbols?
     (program : Program) (linkerSymbols : List (Name × Word)) :
     Option ByteArray :=
   program.object.bytecodeUncheckedImageWithLinkerSymbols? linkerSymbols
+
+noncomputable def bytecodeImageChecked? (program : Program) :
+    Option ByteArray :=
+  program.object.bytecodeCheckedImage?
+
+noncomputable def bytecodeImageCheckedWithLinkerSymbols?
+    (program : Program) (linkerSymbols : List (Name × Word)) :
+    Option ByteArray :=
+  program.object.bytecodeCheckedImageWithLinkerSymbols? linkerSymbols
 
 end Program
 

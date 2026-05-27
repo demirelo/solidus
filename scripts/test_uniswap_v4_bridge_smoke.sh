@@ -721,12 +721,10 @@ if runtime.get("selector") != "runtime":
     raise SystemExit(f"unexpected Lock runtime selector: {runtime!r}")
 
 compatibility = runtime.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(f"unexpected Lock backend compatibility: {compatibility!r}")
-if compatibility.get("unsupportedPrimitiveNames") != ["tstore"]:
+if compatibility.get("unsupportedPrimitiveNames") != []:
     raise SystemExit(f"unexpected Lock unsupported primitives: {compatibility!r}")
-if "static-mode" not in " ".join(compatibility.get("notes", [])):
-    raise SystemExit(f"Lock compatibility missing static-mode note: {compatibility!r}")
 
 primitive_entries = runtime.get("calls", {}).get("primitive", {}).get("names", [])
 primitives = {
@@ -740,7 +738,7 @@ if missing:
     raise SystemExit(f"Lock summary missing primitives: {missing!r}")
 
 print("lock_runtime_summary_primitives=yes")
-print("lock_runtime_backend_compatibility=blocked")
+print("lock_runtime_backend_compatibility=ready")
 PY
 
 cat > "$CURRENCY_DELTA_FALLBACK_SOURCE" <<'SOL'
@@ -820,17 +818,13 @@ if runtime.get("selector") != "runtime":
     raise SystemExit(f"unexpected CurrencyDelta runtime selector: {runtime!r}")
 
 compatibility = runtime.get("backendCompatibility", {})
-if compatibility.get("status") != "blocked":
+if compatibility.get("status") != "ready":
     raise SystemExit(
         f"unexpected CurrencyDelta backend compatibility: {compatibility!r}"
     )
-if compatibility.get("unsupportedPrimitiveNames") != ["tstore"]:
+if compatibility.get("unsupportedPrimitiveNames") != []:
     raise SystemExit(
         f"unexpected CurrencyDelta unsupported primitives: {compatibility!r}"
-    )
-if "static-mode" not in " ".join(compatibility.get("notes", [])):
-    raise SystemExit(
-        f"CurrencyDelta compatibility missing static-mode note: {compatibility!r}"
     )
 
 primitive_entries = runtime.get("calls", {}).get("primitive", {}).get("names", [])
@@ -845,7 +839,7 @@ if missing:
     raise SystemExit(f"CurrencyDelta summary missing primitives: {missing!r}")
 
 print("currency_delta_runtime_summary_primitives=yes")
-print("currency_delta_runtime_backend_compatibility=blocked")
+print("currency_delta_runtime_backend_compatibility=ready")
 PY
 
 cat > "$PROTOCOL_FEE_FALLBACK_SOURCE" <<'SOL'
