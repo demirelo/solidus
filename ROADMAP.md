@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 12:21 PDT.
+Last updated: 2026-05-27 12:50 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -23,7 +23,9 @@ boundary for Yul argument lists and EVM stacks plus `OpenCallRel`, whose
 response preservation field is explicitly universal over all shared responses.
 The current checked hook also proves CALL-family argument/stack agreement over
 an arbitrary target stack suffix and derives the needed call-context relation
-from the existing compiler/source state relations.
+from the existing compiler/source state relations. The CALL-safe semantic
+contract boundary now exposes the constructed `OpenPrimitiveCallSound` hook
+from `SourceStateRel`; this is not a new caller-supplied assumption.
 Gas is abstracted at the open-call boundary: the request is gas-free, while
 the operand parser still records `requestedGas` only as syntax/arity data. The
 chain-specific forwarded `Ccallgas` calculation and `StateRelConfig.callGasRel`

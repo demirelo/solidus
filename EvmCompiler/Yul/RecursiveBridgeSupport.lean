@@ -175690,6 +175690,62 @@ structure RecursiveBridgeCALLSemanticContracts
       Reference.SourceBridgeFacts.ExprEvalResultOkAt cfg layout fuel expr
         (some program.contract)
 
+namespace RecursiveBridgeCALLSemanticContracts
+
+/--
+Constructed open-call contract for CALL-family primitives.
+
+This is deliberately not a field of `RecursiveBridgeCALLSemanticContracts`: the
+open request/response agreement follows from the existing source/compiler state
+relation, so future CALL consumers should use this theorem rather than asking
+callers for another semantic assumption.
+-/
+def OpenPrimitiveCallSound (cfg : Reference.StateRelConfig) : Prop :=
+  ∀ {Effect : Type} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State},
+    Reference.SourceBridgeFacts.SourceStateRel cfg layout
+      (.Ok sourceShared store) compiler →
+    ∀ (kind : OpenExternal.CallKind)
+      (operands : OpenExternal.CallOperands),
+      ∃ sourceCall :
+          OpenExternal.OpenCall Effect (Reference.State × List Word),
+      ∃ compilerCall :
+          OpenExternal.OpenCall Effect
+            (Objects.Source.State × List Word),
+        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+            (.Ok sourceShared store) kind (kind.args operands) =
+          some sourceCall ∧
+        Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+            (Effect := Effect) compiler kind (kind.args operands).reverse =
+          some compilerCall ∧
+        OpenExternal.OpenCallRel
+          (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
+            cfg layout) sourceCall compilerCall
+
+theorem openPrimitiveCallSound
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (_hContracts :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store) :
+    OpenPrimitiveCallSound cfg := by
+  intro Effect layout sourceShared sourceStore compiler hRel kind operands
+  exact
+    Reference.SourceBridgeFacts.SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
+      (Effect := Effect) hRel kind operands
+
+end RecursiveBridgeCALLSemanticContracts
+
 namespace RecursiveBridgeSemanticCoreContracts
 
 theorem ofBoundaries
@@ -176447,6 +176503,31 @@ structure RecursiveBridgeCALLTopAssumptions
   compileTarget :
     compileCheckedAssemblyTarget? program = some (asm, target)
   targetRuntime : RecursiveBridgeTargetRuntime asm target initial
+
+namespace RecursiveBridgeCALLTopAssumptions
+
+theorem openPrimitiveCallSound
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuel initial
+        referenceResult) :
+    RecursiveBridgeCALLSemanticContracts.OpenPrimitiveCallSound cfg :=
+  hTop.semantics.openPrimitiveCallSound
+
+end RecursiveBridgeCALLTopAssumptions
 
 /--
 Final bundled public theorem for the checked imported-Yul bridge into the
