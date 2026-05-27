@@ -3347,9 +3347,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   open recursive-consumer frontier now attaches those assignment/let heads to
   the existing closed tail proof as an open head-plus-tail continuation, without
   unfolding closed `primCall`; tail-aware checked assignment/let sequence
-  wrappers now compose CALL-safe lowering facts with that frontier. Remaining
-  work is to replace the recursive closed assignment/let consumers with this
-  open sequence frontier, discharge the remaining CALL-safe eval-args domain
-  facts, and then compose to the EVM stack boundary.
+  wrappers now compose CALL-safe lowering facts with that frontier, and
+  accepted CALL-bridge wrappers derive the checked argument-prelude package
+  from `ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved`.
+  Remaining work is to replace the recursive closed assignment/let consumers
+  with this open sequence frontier, prove the nested-CALL eval-args domain
+  obligation through the open argument/response semantics, and then compose to
+  the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

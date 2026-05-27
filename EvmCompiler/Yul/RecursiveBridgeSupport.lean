@@ -135855,6 +135855,181 @@ theorem toFunctionsListFuel?_let_prim_openPrimitiveCallSeqPreludeSoundAt_of_call
         hStmt hTail⟩
 
 /--
+Accepted CALL-bridge assignment wrapper for the open CALL sequence boundary.
+
+This discharges the checked CALL-safe argument-prelude package from the
+recursive CALL bridge.  The argument-domain premise remains explicit because
+CALL-safe arguments may themselves contain open external calls; that fact has to
+be proved by the open argument/response semantics, not by reusing the old
+closed primitive-family domain theorem.
+-/
+theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallSeqPreludeSoundAt_of_programCALLAccepted_lowerBound1?_toStackSeq
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program}
+    {bound sourceFuel tailFuel lowerFuel : Nat}
+    {ctx : Functions.Source.Ctx}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {rest : List AstStmt}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel ≤ bound)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk yulProgram.contract args)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hTargetMem : identName name ∈ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse
+            (some yulProgram.contract) (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxMid tailFuel rest
+          (some yulProgram.contract) lowerTail allowed) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Assign [name] (.Call (.inl yulPrim) args)) =
+      some
+        (pre ++
+          [Functions.Stmt.assign (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallAssignSeqPreludeSoundAt cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel tailFuel yulPrim op
+        kind args (some yulProgram.contract) pre seq name rest lowerTail
+        allowed := by
+  exact
+    toFunctionsListFuel?_assign_prim_openPrimitiveCallSeqPreludeSoundAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (contract := yulProgram.contract) (ctx := ctx)
+      (sourceFuel := sourceFuel) (tailFuel := tailFuel)
+      (lowerFuel := lowerFuel) (yulPrim := yulPrim) (op := op)
+      (kind := kind) (args := args) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) (rest := rest) (lowerTail := lowerTail)
+      (allowed := allowed) name hKind hBasic
+      (hRecursive.args (reserved := reserved) (layout := layout)
+        (sourceFuel := sourceFuel) hFuel)
+      hCovers hSafe hScoped hOk hLowerArgs hSeq hOutputs hTargetMem
+      hEvalArgsDomain hTail
+
+/--
+Accepted CALL-bridge declaration wrapper for the open CALL sequence boundary.
+
+This is the generated-`let` counterpart of
+`toFunctionsListFuel?_assign_prim_openPrimitiveCallSeqPreludeSoundAt_of_programCALLAccepted_lowerBound1?_toStackSeq`.
+-/
+theorem toFunctionsListFuel?_let_prim_openPrimitiveCallSeqPreludeSoundAt_of_programCALLAccepted_lowerBound1?_toStackSeq
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {context : ProgramCALLBridgeContext yulProgram program}
+    {bound sourceFuel tailFuel lowerFuel : Nat}
+    {ctx : Functions.Source.Ctx}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {rest : List AstStmt}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hRecursive :
+      ProgramCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg terminalRel revertRel prim yulProgram program context bound)
+    (hFuel : sourceFuel ≤ bound)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk yulProgram.contract args)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hFresh : identName name ∉ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse
+            (some yulProgram.contract) (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceResultSeqSoundWhenAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program ctxMid tailFuel rest
+          (some yulProgram.contract) lowerTail allowed) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Let [name] (some (.Call (.inl yulPrim) args))) =
+      some
+        (pre ++
+          [Functions.Stmt.let_ (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallLetSeqPreludeSoundAt cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel tailFuel yulPrim op
+        kind args (some yulProgram.contract) pre seq name rest lowerTail
+        allowed := by
+  exact
+    toFunctionsListFuel?_let_prim_openPrimitiveCallSeqPreludeSoundAt_of_callSafeCheckedAt_lowerBound1?_toStackSeq
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (contract := yulProgram.contract) (ctx := ctx)
+      (sourceFuel := sourceFuel) (tailFuel := tailFuel)
+      (lowerFuel := lowerFuel) (yulPrim := yulPrim) (op := op)
+      (kind := kind) (args := args) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (seq := seq) (rest := rest) (lowerTail := lowerTail)
+      (allowed := allowed) name hKind hBasic
+      (hRecursive.args (reserved := reserved) (layout := layout)
+        (sourceFuel := sourceFuel) hFuel)
+      hCovers hSafe hScoped hOk hLowerArgs hSeq hOutputs hFresh
+      hEvalArgsDomain hTail
+
+/--
 Checked hidden-context sequence constructor for a successful zero-result
 primitive expression statement, deriving the generated argument prelude from
 the recursive checked argument bundle.
