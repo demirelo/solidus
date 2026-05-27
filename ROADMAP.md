@@ -3028,6 +3028,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
            - [x] Connect that ordinary child entry state back to the already-proved fresh-call-frame `SharedStateRel`, and to the gas-aware `installCodeAndGas` state shape used by the bytecode theorem.
            - [x] Expose checked bytecode/resource facts directly from the compiled-code relation, so ordinary child-code preservation can unpack emitted account code without re-opening compiler checkers by hand.
            - [x] Factor the EVM `Θ` ordinary message-call prelude into named transfer/environment helpers and prove the `.Code` branch reduces exactly to the child `Ξ` success/revert/error result branches.
+           - [x] Combine the ordinary EVM `Θ` code branch with installed compiled bytecode `X`, exposing direct success/revert/non-out-of-gas/out-of-gas branch wrappers over `Assembly.GasAware.validJumps`.
            - [x] Add erase-gas transport from gasless child target states to actual gas-aware `X` success states, and package the nonempty successful child-map restore branch for running and non-reverting halted child results.
            - [x] Prove halted assembly traces expose the semantic halt output, then package the ordinary reverted child-result restore branch through `XResultAgrees` and the trace output invariant.
            - [x] Align ordinary Yul successful-call restore with EVM `Θ`'s conditional child-map/substate merge, and replace nonempty-only success wrappers with checked conditional success restore wrappers from `XResultAgrees`.

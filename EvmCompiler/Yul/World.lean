@@ -2824,6 +2824,262 @@ theorem Theta_code_succ_eq_Xi
       | revert returnedGas output =>
           simp
 
+def thetaCodeXInitialState
+    (target : Assembly.TargetProgram) (gasNat : Nat)
+    (blobVersionedHashes : List ByteArray)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (substate : EvmYul.Substate)
+    (source origin recipient : EvmYul.AccountAddress)
+    (gasPrice value weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool) : EVMState :=
+  Assembly.GasAware.installCodeAndGas target gasNat
+    { xiInitialState createdAccounts genesisBlockHeader blocks
+        (EvmYul.EVM.thetaCallTransfer accountMap source recipient value)
+        sigma0 chainContext (EvmYul.UInt256.ofNat gasNat) substate
+        (EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+          recipient (.Code default) gasPrice weiValue calldata depth header
+          perm) with
+      pc := Assembly.Program.pcAfter []
+      stack := [] }
+
+theorem Theta_code_succ_succ_eq_X_installedCode
+    (fuel gasNat : Nat)
+    (blobVersionedHashes : List ByteArray)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (substate : EvmYul.Substate)
+    (source origin recipient : EvmYul.AccountAddress)
+    (target : Assembly.TargetProgram)
+    (gasPrice value weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      match EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            createdAccounts genesisBlockHeader blocks accountMap sigma0
+            chainContext substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) with
+      | .error err =>
+          if err == EvmYul.EVM.ExecutionException.OutOfFuel then
+            .error EvmYul.EVM.ExecutionException.OutOfFuel
+          else
+            .ok (createdAccounts, accountMap, ⟨0⟩, substate, false,
+              ByteArray.empty)
+      | .ok (.revert returnedGas output) =>
+          .ok (createdAccounts, accountMap, returnedGas, substate, false,
+            output)
+      | .ok (.success evmState' output) =>
+          .ok (evmState'.createdAccounts,
+            if evmState'.accountMap.isEmpty then accountMap
+            else evmState'.accountMap,
+            evmState'.gasAvailable,
+            if evmState'.accountMap.isEmpty then substate
+            else evmState'.substate,
+            true, output) := by
+  rw [Theta_code_succ_eq_Xi (fuel := fuel.succ)]
+  have hEnv :
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+          recipient (.Code (Assembly.Bytecode.encodeTarget target)) gasPrice
+          weiValue calldata depth header perm =
+        { EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+            recipient (.Code default) gasPrice weiValue calldata depth header
+            perm with
+          code := Assembly.Bytecode.encodeTarget target } := by
+    simp [EvmYul.EVM.thetaCallExecutionEnv]
+  rw [hEnv]
+  rw [Xi_succ_eq_X_installedCode
+    (fuel := fuel)
+    (gasNat := gasNat)
+    (createdAccounts := createdAccounts)
+    (genesisBlockHeader := genesisBlockHeader)
+    (blocks := blocks)
+    (accountMap :=
+      EvmYul.EVM.thetaCallTransfer accountMap source recipient value)
+    (sigma0 := sigma0)
+    (chainContext := chainContext)
+    (initialGas := EvmYul.UInt256.ofNat gasNat)
+    (substate := substate)
+    (env :=
+      EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+        recipient (.Code default) gasPrice weiValue calldata depth header perm)
+    (target := target)]
+  unfold thetaCodeXInitialState
+  cases hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+        (Assembly.GasAware.installCodeAndGas target gasNat
+          { xiInitialState createdAccounts genesisBlockHeader blocks
+              (EvmYul.EVM.thetaCallTransfer accountMap source recipient value)
+              sigma0 chainContext (EvmYul.UInt256.ofNat gasNat) substate
+              (EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source
+                origin recipient (.Code default) gasPrice weiValue calldata
+                depth header perm) with
+            pc := Assembly.Program.pcAfter []
+            stack := [] }) with
+  | error err =>
+      simp
+  | ok result =>
+      cases result with
+      | success evmState output =>
+          simp
+      | revert returnedGas output =>
+          simp
+
+theorem Theta_code_success_of_X_installedCode
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare}
+    {genesisBlockHeader : EvmYul.BlockHeader}
+    {blocks : EvmYul.ProcessedBlocks}
+    {accountMap sigma0 : EvmYul.AccountMap .EVM}
+    {chainContext : EvmYul.EVM.ChildFrameChainContext}
+    {substate : EvmYul.Substate}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    {evmChild : EVMState} {output : ByteArray}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            createdAccounts genesisBlockHeader blocks accountMap sigma0
+            chainContext substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok (.success evmChild output)) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (evmChild.createdAccounts,
+        if evmChild.accountMap.isEmpty then accountMap else evmChild.accountMap,
+        evmChild.gasAvailable,
+        if evmChild.accountMap.isEmpty then substate else evmChild.substate,
+        true, output) := by
+  rw [Theta_code_succ_succ_eq_X_installedCode]
+  simp [hX]
+
+theorem Theta_code_revert_of_X_installedCode
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare}
+    {genesisBlockHeader : EvmYul.BlockHeader}
+    {blocks : EvmYul.ProcessedBlocks}
+    {accountMap sigma0 : EvmYul.AccountMap .EVM}
+    {chainContext : EvmYul.EVM.ChildFrameChainContext}
+    {substate : EvmYul.Substate}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata output : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    {returnedGas : EvmYul.UInt256}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            createdAccounts genesisBlockHeader blocks accountMap sigma0
+            chainContext substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .ok (.revert returnedGas output)) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (createdAccounts, accountMap, returnedGas, substate, false,
+        output) := by
+  rw [Theta_code_succ_succ_eq_X_installedCode]
+  simp [hX]
+
+theorem Theta_code_non_oog_error_of_X_installedCode
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare}
+    {genesisBlockHeader : EvmYul.BlockHeader}
+    {blocks : EvmYul.ProcessedBlocks}
+    {accountMap sigma0 : EvmYul.AccountMap .EVM}
+    {chainContext : EvmYul.EVM.ChildFrameChainContext}
+    {substate : EvmYul.Substate}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    {err : EvmYul.EVM.ExecutionException}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            createdAccounts genesisBlockHeader blocks accountMap sigma0
+            chainContext substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .error err)
+    (hErr : (err == EvmYul.EVM.ExecutionException.OutOfFuel) = false) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .ok (createdAccounts, accountMap, ⟨0⟩, substate, false,
+        ByteArray.empty) := by
+  rw [Theta_code_succ_succ_eq_X_installedCode]
+  simp [hX, hErr]
+
+theorem Theta_code_oog_error_of_X_installedCode
+    {fuel gasNat : Nat}
+    {blobVersionedHashes : List ByteArray}
+    {createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare}
+    {genesisBlockHeader : EvmYul.BlockHeader}
+    {blocks : EvmYul.ProcessedBlocks}
+    {accountMap sigma0 : EvmYul.AccountMap .EVM}
+    {chainContext : EvmYul.EVM.ChildFrameChainContext}
+    {substate : EvmYul.Substate}
+    {source origin recipient : EvmYul.AccountAddress}
+    {target : Assembly.TargetProgram}
+    {gasPrice value weiValue : EvmYul.UInt256}
+    {calldata : ByteArray}
+    {depth : Nat}
+    {header : EvmYul.BlockHeader}
+    {perm : Bool}
+    {err : EvmYul.EVM.ExecutionException}
+    (hX :
+      EvmYul.EVM.X fuel (Assembly.GasAware.validJumps target)
+          (thetaCodeXInitialState target gasNat blobVersionedHashes
+            createdAccounts genesisBlockHeader blocks accountMap sigma0
+            chainContext substate source origin recipient gasPrice value
+            weiValue calldata depth header perm) =
+        .error err)
+    (hErr : (err == EvmYul.EVM.ExecutionException.OutOfFuel) = true) :
+    EvmYul.EVM.Θ fuel.succ.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code (Assembly.Bytecode.encodeTarget target))
+        (EvmYul.UInt256.ofNat gasNat) gasPrice value weiValue calldata depth
+        header perm =
+      .error EvmYul.EVM.ExecutionException.OutOfFuel := by
+  rw [Theta_code_succ_succ_eq_X_installedCode]
+  simp [hX, hErr]
+
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}
     {yulAccountMap : EvmYul.AccountMap τ}
