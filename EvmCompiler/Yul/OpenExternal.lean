@@ -143,6 +143,26 @@ namespace CallContext
 
 variable {τ : EvmYul.OperationType}
 
+def ofYulSharedState (state : EvmYul.SharedState .Yul) :
+    CallContext .Yul where
+  accountMap := state.accountMap
+  machine := state.toMachineState
+  substate := state.substate
+  codeOwner := state.executionEnv.codeOwner
+  source := state.executionEnv.source
+  weiValue := state.executionEnv.weiValue
+  permission := state.executionEnv.perm
+
+def ofEVMSharedState (state : EvmYul.SharedState .EVM) :
+    CallContext .EVM where
+  accountMap := state.accountMap
+  machine := state.toMachineState
+  substate := state.substate
+  codeOwner := state.executionEnv.codeOwner
+  source := state.executionEnv.source
+  weiValue := state.executionEnv.weiValue
+  permission := state.executionEnv.perm
+
 def ofYulState (state : EvmYul.Yul.State) : CallContext .Yul where
   accountMap := state.toState.accountMap
   machine := state.toMachineState
@@ -231,7 +251,7 @@ state relation, not assume it at the public theorem boundary.
 -/
 structure CallContextRel
     (source : CallContext .Yul) (target : CallContext .EVM) : Prop where
-  machine : source.machine = target.machine
+  memory : source.machine.memory = target.machine.memory
   codeOwner : source.codeOwner = target.codeOwner
   sourceAddress : source.source = target.source
   weiValue : source.weiValue = target.weiValue
@@ -251,7 +271,7 @@ theorem callSite_eq {source : CallContext .Yul}
   cases kind <;>
     simp [CallContext.callSite, CallContext.caller, CallContext.recipient,
       CallContext.transferValue, CallContext.apparentValue,
-      CallContext.effectivePermission, CallContext.calldata, hRel.machine,
+      CallContext.effectivePermission, CallContext.calldata, hRel.memory,
       hRel.codeOwner, hRel.sourceAddress, hRel.weiValue, hRel.permission,
       hRel.callGas]
 

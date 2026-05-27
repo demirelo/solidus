@@ -1,6 +1,7 @@
 import EvmCompiler.Yul.Preservation
 import EvmCompiler.Yul.ArgSlots
 import EvmCompiler.Yul.PrimSemantics
+import EvmCompiler.Yul.OpenExternal
 import EvmCompiler.Locals.StackLowering
 import EvmCompiler.Assembly.TopLevel
 import EvmYul.Yul.Interpreter
@@ -5932,6 +5933,28 @@ structure SharedStateRel (cfg : StateRelConfig)
   machine : MachineStateRel cfg yul.toMachineState evm.toMachineState
 
 namespace SharedStateRel
+
+theorem openExternalCallContextRel_withCallGasRel
+    {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    (hShared : SharedStateRel cfg sourceShared targetShared)
+    (hCallGas :
+      ∀ codeAddress recipient value requestedGas,
+        (OpenExternal.CallContext.ofYulSharedState sourceShared).callGas
+          codeAddress recipient value requestedGas =
+        (OpenExternal.CallContext.ofEVMSharedState targetShared).callGas
+          codeAddress recipient value requestedGas) :
+    OpenExternal.CallContextRel
+      (OpenExternal.CallContext.ofYulSharedState sourceShared)
+      (OpenExternal.CallContext.ofEVMSharedState targetShared) := by
+  exact
+    { memory := hShared.machine.memory
+      codeOwner := hShared.chain.executionEnv.codeOwner
+      sourceAddress := hShared.chain.executionEnv.source
+      weiValue := hShared.chain.executionEnv.weiValue
+      permission := hShared.chain.executionEnv.perm
+      callGas := hCallGas }
 
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
