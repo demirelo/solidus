@@ -31608,6 +31608,148 @@ theorem openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
       hRelArgs, hSourceCall, hCompilerCall, hStmtRel⟩
 
 /--
+Checked assignment lowering for a CALL-family primitive into the open
+statement-continuation contract.
+
+This is the statement-level analogue of
+`lower1?_prim_openPrimitiveCallExprPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind`:
+the compiler lowering is the ordinary generated argument prelude followed by
+the source-visible assignment, while the semantic contract stops at the open
+CALL boundary and quantifies over every shared response.
+-/
+theorem toFunctionsListFuel?_assign_prim_openPrimitiveCallStmtPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel lowerFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hTargetMem : identName name ∈ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Assign [name] (.Call (.inl yulPrim) args)) =
+      some
+        (pre ++
+          [Functions.Stmt.assign (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallAssignStmtPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args codeOverride pre seq name := by
+  rcases
+      lower1?_prim_openPrimitiveCallExprPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+        (cfg := cfg) (layout := layout) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (freshState := freshState)
+        (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+        (seq := seq) hKind hBasic hLowerArgs hSeq hOutputs hArgs with
+    ⟨hLowerExpr, hExprPrelude⟩
+  constructor
+  · simp [Stmt.toFunctionsListFuel?, hLowerExpr]
+  · exact
+      openPrimitiveCallAssignStmtPreludeSoundAt_of_exprPrelude
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (lowerArgs := seq)
+        (name := name) hExprPrelude hTargetMem hEvalArgsDomain
+
+/--
+Checked declaration lowering for a CALL-family primitive into the open
+statement-continuation contract.
+
+The regular continuation extends only the source-visible layout with the newly
+declared name; generated argument temporaries remain hidden in the compiler
+context carried by the open continuation.
+-/
+theorem toFunctionsListFuel?_let_prim_openPrimitiveCallStmtPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel lowerFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq)
+    (hFresh : identName name ∉ layout)
+    (hEvalArgsDomain :
+      ∀ {shared store sharedAfter storeAfter values},
+        StoreDomainExact layout store →
+        EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+            (.Ok shared store) =
+          .ok (.Ok sharedAfter storeAfter, values) →
+        StoreDomainExact layout storeAfter) :
+    Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+        (.Let [name] (some (.Call (.inl yulPrim) args))) =
+      some
+        (pre ++
+          [Functions.Stmt.let_ (identName name)
+            (Expr.cast hOutputs (.prim op seq))],
+          freshState') ∧
+      OpenPrimitiveCallLetStmtPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args codeOverride pre seq name := by
+  rcases
+      lower1?_prim_openPrimitiveCallExprPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+        (cfg := cfg) (layout := layout) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (freshState := freshState)
+        (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+        (seq := seq) hKind hBasic hLowerArgs hSeq hOutputs hArgs with
+    ⟨hLowerExpr, hExprPrelude⟩
+  constructor
+  · simp [Stmt.toFunctionsListFuel?, hLowerExpr]
+  · exact
+      openPrimitiveCallLetStmtPreludeSoundAt_of_exprPrelude
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (lowerArgs := seq)
+        (name := name) hExprPrelude hFresh hEvalArgsDomain
+
+/--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
 -/
