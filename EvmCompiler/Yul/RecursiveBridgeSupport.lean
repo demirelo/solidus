@@ -31065,6 +31065,154 @@ theorem evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
   simpa [List.length_reverse, hArgsLen] using hEvalLen
 
 /--
+Open CALL-family expression bridge for generated argument preludes.
+
+`ExprValuePreludeSound` is intentionally a closed-expression contract: it
+starts from imported `evalValues`, so it cannot describe a CALL boundary
+without first asking Nethermind's closed `primCall` semantics for a result.
+This open counterpart stops at the successful imported argument evaluation,
+runs the generated compiler prelude, and exposes the same source/compiler
+open-call site for every possible shared response.
+-/
+def OpenPrimitiveCallExprPreludeSoundAt
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (op : Structured.BasicOp) (kind : OpenExternal.CallKind)
+    (args : List AstExpr) (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt)
+    (lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)) : Prop :=
+  ∀ {Effect : Type}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State} {values : List Word},
+    SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler →
+    EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+        (.Ok sourceShared sourceStore) =
+      .ok (.Ok sourceSharedAfter sourceStoreAfter, values) →
+    values.length = Expressions.Structured.BasicOp.inputs op →
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∃ sourceCall :
+          OpenExternal.OpenCall Effect (State × List Word),
+      ∃ compilerCall :
+          OpenExternal.OpenCall Effect
+            (Objects.Source.State × List Word),
+        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+            (.Ok sourceSharedAfter sourceStoreAfter) kind
+              (kind.args operands) =
+          some sourceCall ∧
+        SourceStateRel.compilerPrimitiveOpenCall?
+            (Effect := Effect) compilerAfterArgs kind values =
+          some compilerCall ∧
+        OpenExternal.OpenCallRel
+          (SourceStateRel.OpenPrimitiveResultRel cfg layout)
+            sourceCall compilerCall
+
+theorem openPrimitiveCallExprPreludeSoundAt_of_arg_stack_preludeRegularAt_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre lowerArgs) :
+    OpenPrimitiveCallExprPreludeSoundAt cfg layout prim program ctx
+      sourceFuel yulPrim op kind args codeOverride pre lowerArgs := by
+  intro Effect sourceShared sourceSharedAfter sourceStore sourceStoreAfter
+    compiler values hInitial hEvalArgs hValuesArity
+  have hInputs :
+      Expressions.Structured.BasicOp.inputs op = kind.inputArity :=
+    OpenExternal.CallKind.inputArity_eq_inputs_ofYulOperation?
+      hKind hBasic
+  have hLength : values.length = kind.inputArity :=
+    hValuesArity.trans hInputs
+  rcases
+      OpenExternal.CallKind.exists_operands_of_reverse_args_length
+        kind hLength with
+    ⟨operands, hValues⟩
+  subst values
+  rcases hArgs hInitial hEvalArgs with
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs⟩
+  rcases
+      SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
+        (Effect := Effect) hRelArgs kind operands with
+    ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
+  exact
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs, sourceCall, compilerCall, hSourceCall,
+      hCompilerCall, hCallRel⟩
+
+/--
+Checked one-result CALL-family primitive lowering into the open expression
+boundary.
+
+This is the CALL-specific analogue of the closed `lower1?` primitive theorem
+below.  It proves the compiler-generated expression shape and returns an open
+request/response contract instead of a closed `ExprValuePreludeSound`.
+-/
+theorem lower1?_prim_openPrimitiveCallExprPreludeSoundAt_of_lowerBound1?_preludeRegularAt_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel args
+        codeOverride pre seq) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      OpenPrimitiveCallExprPreludeSoundAt cfg layout prim program ctx
+        sourceFuel yulPrim op kind args codeOverride pre seq := by
+  constructor
+  · exact
+      Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      openPrimitiveCallExprPreludeSoundAt_of_arg_stack_preludeRegularAt_callKind
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (yulPrim := yulPrim)
+        (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (lowerArgs := seq)
+        hKind hBasic hArgs
+
+/--
 Checked `lower1?` primitive-call expression soundness through the hidden
 stack-order argument prelude.
 -/
