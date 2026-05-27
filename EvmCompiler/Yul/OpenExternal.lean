@@ -930,6 +930,196 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_ok
             ⟨sharedAfter, hResume⟩
           exact ⟨sharedAfter, by simp [hResume]⟩
 
+end CallKind
+
+/--
+Result of evaluating imported Yul while leaving external CALL-family
+interactions open.
+
+`done` matches the ordinary imported evaluator result. `call` records a visible
+external request and a continuation for every possible response. This is the
+small interaction tree used by the open CALL proof: the outside world is not
+interpreted here.
+-/
+inductive YulOpenResult (α : Type u) where
+  | done : Except EvmYul.Yul.Exception α → YulOpenResult α
+  | call : OpenCall (YulOpenResult α) → YulOpenResult α
+
+namespace YulOpenResult
+
+def ok {α : Type u} (value : α) : YulOpenResult α :=
+  .done (.ok value)
+
+def error {α : Type u} (err : EvmYul.Yul.Exception) : YulOpenResult α :=
+  .done (.error err)
+
+def bind {α : Type u} {β : Type v} (result : YulOpenResult α)
+    (next : α → YulOpenResult β) : YulOpenResult β :=
+  match result with
+  | .done (.ok value) => next value
+  | .done (.error err) => .done (.error err)
+  | .call externalCall =>
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            bind (externalCall.resume response) next }
+
+def map {α : Type u} {β : Type v}
+    (f : α → β) (result : YulOpenResult α) : YulOpenResult β :=
+  bind result (fun value => .ok (f value))
+
+def liftExceptCall {α : Type u}
+    (call : OpenCall (Except EvmYul.Yul.Exception α)) :
+    OpenCall (YulOpenResult α) where
+  site := call.site
+  resume := fun response => .done (call.resume response)
+
+end YulOpenResult
+
+namespace YulOpen
+
+abbrev State := EvmYul.Yul.State
+abbrev Expr := EvmYul.Yul.Ast.Expr
+abbrev Contract := EvmYul.Yul.Ast.YulContract
+abbrev Exception := EvmYul.Yul.Exception
+
+def headResult
+    (result : YulOpenResult (State × List Word)) :
+    YulOpenResult (State × Word) :=
+  YulOpenResult.bind result fun pair =>
+    .done (EvmYul.Yul.head' (.ok pair))
+
+def reverseResult
+    (result : YulOpenResult (State × List Word)) :
+    YulOpenResult (State × List Word) :=
+  YulOpenResult.map
+    (fun pair => (pair.1, pair.2.reverse))
+    result
+
+def consResult (arg : Word)
+    (result : YulOpenResult (State × List Word)) :
+    YulOpenResult (State × List Word) :=
+  YulOpenResult.map
+    (fun pair => (pair.1, arg :: pair.2))
+    result
+
+mutual
+
+/--
+Open analogue of imported `Yul.evalArgs`.
+
+Evaluation follows the imported fuel/list order, but any nested CALL-family
+primitive reached by `eval` can suspend and expose an open request before the
+tail arguments are evaluated.
+-/
+def evalArgs (fuel : Nat) (args : List Expr)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult (State × List Word) :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | .succ fuel' =>
+      match args with
+      | [] => .ok (state, [])
+      | arg :: rest =>
+          evalTail fuel' rest codeOverride
+            (eval fuel' arg codeOverride state)
+
+/-- Open analogue of imported `Yul.evalTail`. -/
+def evalTail (fuel : Nat) (args : List Expr)
+    (codeOverride : Option Contract)
+    (head : YulOpenResult (State × Word)) :
+    YulOpenResult (State × List Word) :=
+  YulOpenResult.bind head fun headPair =>
+    match fuel with
+    | 0 => .error .OutOfFuel
+    | .succ fuel' =>
+        consResult headPair.2
+          (evalArgs fuel' args codeOverride headPair.1)
+
+/--
+Open analogue of imported `Yul.evalValues`.
+
+Non-external primitive calls and user calls still delegate to the imported
+closed semantics after their arguments are evaluated. CALL-family primitive
+calls instead suspend at `CallKind.yulPrimitiveEvalValuesOpenCall?`.
+-/
+def evalValues (fuel : Nat) (expr : Expr)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult (State × List Word) :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | .succ fuel' =>
+      match expr with
+      | .Call (.inl prim) args =>
+          YulOpenResult.bind
+            (reverseResult (evalArgs fuel' args.reverse codeOverride state))
+            fun pair =>
+              match CallKind.yulPrimitiveEvalValuesOpenCall?
+                  pair.1 prim pair.2 with
+              | some call =>
+                  .call (YulOpenResult.liftExceptCall call)
+              | none => .done (EvmYul.Yul.primCall fuel' pair.1 prim pair.2)
+      | .Call (.inr functionName) args =>
+          YulOpenResult.bind
+            (reverseResult (evalArgs fuel' args.reverse codeOverride state))
+            fun pair =>
+              .done (EvmYul.Yul.call fuel' pair.2 functionName
+                codeOverride pair.1)
+      | .Var id =>
+          match state.lookup? id with
+          | some value => .ok (state, [value])
+          | none => .error (.UnknownIdentifier id)
+      | .Lit value =>
+          .ok (state, [value])
+
+/-- Open analogue of imported `Yul.eval`. -/
+def eval (fuel : Nat) (expr : Expr)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult (State × Word) :=
+  headResult (evalValues fuel expr codeOverride state)
+
+end
+
+theorem evalValues_prim_call_suspends_of_evalArgs_done
+    {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
+    {codeOverride : Option Contract} {state stateAfterArgs : State}
+    {rawValues : List Word}
+    {call :
+      OpenCall
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hArgs :
+      evalArgs fuel args.reverse codeOverride state =
+        .done (.ok (stateAfterArgs, rawValues)))
+    (hCall :
+      CallKind.yulPrimitiveEvalValuesOpenCall?
+          stateAfterArgs prim rawValues.reverse =
+        some call) :
+    evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+      .call (YulOpenResult.liftExceptCall call) := by
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
+    YulOpenResult.ok, YulOpenResult.liftExceptCall, hArgs, hCall]
+
+theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
+    {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
+    {codeOverride : Option Contract} {state stateAfterArgs : State}
+    {rawValues : List Word}
+    (hArgs :
+      evalArgs fuel args.reverse codeOverride state =
+        .done (.ok (stateAfterArgs, rawValues)))
+    (hCall :
+      CallKind.yulPrimitiveEvalValuesOpenCall?
+          stateAfterArgs prim rawValues.reverse =
+        none) :
+    evalValues fuel.succ (.Call (.inl prim) args) codeOverride state =
+      .done
+        (EvmYul.Yul.primCall fuel stateAfterArgs prim rawValues.reverse) := by
+  simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
+    YulOpenResult.ok, hArgs, hCall]
+
+end YulOpen
+
+namespace CallKind
+
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
     (shared : EvmYul.SharedState .EVM)
     (kind : CallKind) (operands : CallOperands) :

@@ -3217,7 +3217,11 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   theorem; the open Yul CALL response continuation now also has checked
   local-frame and `evalValues`-shaped lemmas showing that arbitrary response
   mutations preserve the suspended varstore/domain and resume with exactly the
-  response status word. The stale closed CALL branch that split precompile and
+  response status word. A first checked Yul-side `YulOpenResult`/`YulOpen.eval*`
+  skeleton now mirrors imported Yul argument/expression evaluation while
+  suspending at CALL-family primitive requests, giving the nested-CALL argument
+  proof an honest open source semantics to target. The stale closed CALL branch
+  that split precompile and
   child-code execution in `RecursiveBridgeSupport` has been deleted so the live
   proof no longer points back at a concrete callee/chain interpreter.
   Remaining work is to replace the recursive closed assignment/let
