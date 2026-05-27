@@ -175744,6 +175744,93 @@ theorem openPrimitiveCallSound
     Reference.SourceBridgeFacts.SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
       (Effect := Effect) hRel kind operands
 
+/--
+Consumes the regular argument-prelude proof at a CALL-family primitive boundary.
+
+After the imported Yul arguments have evaluated to the CALL-family operands and
+the structured backend has replayed the generated argument prelude, the
+gas-free open request/response relation follows from the post-argument state
+relation.  Gas and source/target fuel remain internal resource obligations of
+the prelude proof; the outside-world request identity starts here.
+-/
+theorem openPrimitiveCallSound_of_argStackPrelude
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContracts :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store)
+    {Effect : Type} {layout : List Name}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerProgram : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {results : Nat}
+    {lower : Locals.ExprSeq results}
+    (hArgsRegular :
+      Reference.SourceBridgeFacts.SourceArgStackPreludeRegularAt cfg layout
+        prim lowerProgram ctx sourceFuel args codeOverride pre lower)
+    (hInitial :
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceShared sourceStore) compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .ok (.Ok sourceSharedAfter sourceStoreAfter,
+          (kind.args operands).reverse)) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim lowerProgram ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, (kind.args operands).reverse) ∧
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∃ sourceCall :
+          OpenExternal.OpenCall Effect (Reference.State × List Word),
+      ∃ compilerCall :
+          OpenExternal.OpenCall Effect
+            (Objects.Source.State × List Word),
+        OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+            (.Ok sourceSharedAfter sourceStoreAfter) kind
+              (kind.args operands) =
+          some sourceCall ∧
+        Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+            (Effect := Effect) compilerAfterArgs kind
+              (kind.args operands).reverse =
+          some compilerCall ∧
+        OpenExternal.OpenCallRel
+          (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
+            cfg layout) sourceCall compilerCall := by
+  rcases hArgsRegular hInitial hEvalArgs with
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs⟩
+  have hOpen : OpenPrimitiveCallSound cfg :=
+    openPrimitiveCallSound hContracts
+  rcases hOpen (Effect := Effect) hRelArgs kind operands with
+    ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
+  exact
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs, sourceCall, compilerCall, hSourceCall,
+      hCompilerCall, hCallRel⟩
+
 end RecursiveBridgeCALLSemanticContracts
 
 namespace RecursiveBridgeSemanticCoreContracts
