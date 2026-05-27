@@ -68,10 +68,14 @@ The request that is visible to the external environment.
 `recipient` is the account whose balance/call frame is targeted, while
 `codeAddress` is the account whose code is executed. These differ for
 `CALLCODE` and `DELEGATECALL`.
+
+Gas is intentionally not part of this request identity. The CALL-family gas
+operand is still parsed by `CallOperands` so the compiler must line up the
+source/target operand boundary, but chain-specific gas feasibility and
+forwarding are abstracted into the response/resource side of the theorem.
 -/
 structure CallRequest where
   kind : CallKind
-  requestedGas : Word
   caller : Address
   recipient : Address
   codeAddress : Address
@@ -101,7 +105,8 @@ structure CallSite where
 The syntactic operand bundle shared by Yul call arguments and EVM stack
 operands. `valueArg` is meaningful for `CALL`/`CALLCODE`; for
 `DELEGATECALL`/`STATICCALL` the semantic transfer and apparent value are
-derived from the current context instead.
+derived from the current context instead. `requestedGas` is syntactic operand
+data only for the open external boundary.
 -/
 structure CallOperands where
   requestedGas : Word
@@ -126,7 +131,7 @@ end CallOperands
 The caller-local state needed to form a CALL-family request.
 
 The relation below records exactly the cross-semantics facts needed to show
-both computed requests are equal. Chain-specific gas forwarding and account-map
+both computed requests are equal. Gas forwarding/feasibility and account-map
 resource behavior live outside this request identity.
 -/
 structure CallContext (τ : EvmYul.OperationType) where
@@ -213,7 +218,6 @@ def callSite (context : CallContext τ)
   let transferValue := context.transferValue operands kind
   { request :=
       { kind := kind
-        requestedGas := operands.requestedGas
         caller := context.caller kind
         recipient := recipient
         codeAddress := target
@@ -434,6 +438,31 @@ def evmCallSite?
   | some (rest, operands) =>
       some (rest, (CallContext.ofEVMState state).callSite kind operands)
   | none => none
+
+/--
+Call site observed by the stack-free primitive semantics.
+
+The primitive source tower receives values in source order. Its structured
+backend runs the EVM primitive on `values.reverse`, so a CALL-family primitive
+site is extracted from that reconstructed stack and accepted only at exact
+arity.
+-/
+def primitiveCallSite?
+    (shared : EvmYul.SharedState .EVM) (kind : CallKind)
+    (values : List Word) : Option CallSite :=
+  match kind.evmOperands? values.reverse with
+  | some ([], operands) =>
+      some ((CallContext.ofEVMSharedState shared).callSite kind operands)
+  | _ => none
+
+@[simp] theorem primitiveCallSite?_args_reverse
+    (shared : EvmYul.SharedState .EVM)
+    (kind : CallKind) (operands : CallOperands) :
+    primitiveCallSite? shared kind (kind.args operands).reverse =
+      some
+        ((CallContext.ofEVMSharedState shared).callSite kind
+          (kind.canonicalOperands operands)) := by
+  cases kind <;> rfl
 
 theorem callSite_eq_of_yul_evm_operands
     {yulState : EvmYul.Yul.State} {evmState : EvmYul.EVM.State}

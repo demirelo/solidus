@@ -5584,8 +5584,8 @@ pure control/stack compiler proof:
   (`YulHalt`/`Revert`) to compiler halt states; and
 * `gasAvailableRel`, `gasValueRel`, and `totalGasRel` make the gas-erasure
   boundary explicit. `gasValueRel` is the extra oracle agreement needed for the
-  visible Yul `gas()` primitive; CALL-family open requests keep the requested
-  gas operand but abstract the chain-specific forwarded-gas calculation.
+  visible Yul `gas()` primitive; CALL-family open requests abstract gas from
+  their external request identity.
 -/
 structure StateRelConfig where
   accountMapRel : AccountMapRel
@@ -7171,6 +7171,21 @@ theorem openExternalCallContextRel
   | ok hShared _hVars =>
       simpa [OpenExternal.CallContext.ofYulState]
         using hShared.openExternalCallContextRel
+
+theorem openExternalPrimitiveCallSite_eq_of_args
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateRel cfg layout source compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands) :
+    kind.yulCallSite? source (kind.args operands) =
+      OpenExternal.CallKind.primitiveCallSite? compiler.shared kind
+        (kind.args operands).reverse := by
+  have hContext := hRel.openExternalCallContextRel
+  rw [OpenExternal.CallKind.primitiveCallSite?_args_reverse]
+  cases kind <;>
+    simp [OpenExternal.CallKind.yulCallSite?,
+      OpenExternal.CallContextRel.callSite_eq hContext]
 
 end SourceStateRel
 
