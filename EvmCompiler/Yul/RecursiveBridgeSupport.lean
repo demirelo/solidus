@@ -22701,6 +22701,25 @@ theorem yulOpenCall?_resume_ok_domain_exact
     ⟨sharedAfter, hResume⟩
   exact ⟨sharedAfter, hResume, hDomain⟩
 
+theorem yulOpenCall?_resume_ok_domain_exact_status
+    {layout : List Name} {kind : OpenExternal.CallKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {call : OpenExternal.OpenCall (State × List Word)}
+    (hDomain : StoreDomainExact layout store)
+    (hCall :
+      OpenExternal.CallKind.yulOpenCall? (.Ok shared store) kind args =
+        some call)
+    (response : OpenExternal.CallResponse) :
+    ∃ sharedAfter,
+      call.resume response =
+        (.Ok sharedAfter store, [response.statusWord]) ∧
+        StoreDomainExact layout store := by
+  rcases
+      OpenExternal.CallKind.yulOpenCall?_resume_ok hCall response with
+    ⟨sharedAfter, hResume⟩
+  exact ⟨sharedAfter, hResume, hDomain⟩
+
 theorem sourceAssignTargets_contains_of_checkAssignment_evalArgs_domain
     {cfg : StateRelConfig} {layout : List Name}
     {fuel : Nat} {args : List AstExpr} {codeOverride : Option AstContract}

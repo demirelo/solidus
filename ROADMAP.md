@@ -3356,7 +3356,8 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   old no-CALL primitive-family theorem and from a generic per-expression domain
   theorem; the open Yul CALL response continuation now also has a checked
   local-frame lemma showing that arbitrary response mutations preserve the
-  suspended varstore/domain. Remaining work is to replace the recursive closed assignment/let
+  suspended varstore/domain and resume with exactly the response status word.
+  Remaining work is to replace the recursive closed assignment/let
   consumers with this open sequence frontier, construct the CALL-safe
   `EvalArgsReverseOkDomainExactContract` from an open argument/response
   semantics that can suspend on nested CALLs, and then compose to the EVM stack

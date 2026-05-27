@@ -864,6 +864,25 @@ theorem yulOpenCall?_resume_ok_store
       cases hCall
       exact ⟨site.finishShared shared response, by simp⟩
 
+theorem yulOpenCall?_resume_ok
+    {kind : CallKind} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {call : OpenCall (EvmYul.Yul.State × List Word)}
+    (hCall : yulOpenCall? (.Ok shared store) kind args = some call)
+    (response : CallResponse) :
+    ∃ sharedAfter,
+      call.resume response =
+        (.Ok sharedAfter store, [response.statusWord]) := by
+  unfold yulOpenCall? at hCall
+  cases hSite : kind.yulCallSite? (.Ok shared store) args with
+  | none =>
+      simp [hSite] at hCall
+  | some site =>
+      simp [hSite] at hCall
+      cases hCall
+      exact ⟨site.finishShared shared response, by simp⟩
+
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
     (shared : EvmYul.SharedState .EVM)
     (kind : CallKind) (operands : CallOperands) :
