@@ -556,6 +556,24 @@ def ReturnWindow.finishMachine
   machine.finishExternalCall returnData
     window.inOffset window.inSize window.outOffset window.outSize
 
+namespace CallSite
+
+def finishShared {Effect : Type u} {τ : EvmYul.OperationType}
+    (site : CallSite) (shared : EvmYul.SharedState τ)
+    (response : CallResponse Effect) : EvmYul.SharedState τ :=
+  { shared with
+    toMachineState :=
+      site.returnWindow.finishMachine shared.toMachineState
+        response.returnData }
+
+def finishYulState {Effect : Type u}
+    (site : CallSite) (state : EvmYul.Yul.State)
+    (response : CallResponse Effect) : EvmYul.Yul.State :=
+  state.setSharedState
+    (site.finishShared state.toSharedState response)
+
+end CallSite
+
 /--
 An open external call: a visible request plus a continuation for every possible
 response.
@@ -566,6 +584,52 @@ function from a concrete blockchain world.
 structure OpenCall (Effect : Type u) (State : Type v) where
   site : CallSite
   resume : CallResponse Effect → State
+
+namespace CallKind
+
+def yulOpenCall?
+    {Effect : Type u} (state : EvmYul.Yul.State) (kind : CallKind)
+    (args : List Word) :
+    Option (OpenCall Effect (EvmYul.Yul.State × List Word)) :=
+  match kind.yulCallSite? state args with
+  | some site =>
+      some
+        { site := site
+          resume := fun response =>
+            (site.finishYulState state response,
+              [response.statusWord]) }
+  | none => none
+
+def primitiveSharedOpenCall?
+    {Effect : Type u} (shared : EvmYul.SharedState .EVM)
+    (kind : CallKind) (values : List Word) :
+    Option (OpenCall Effect (EvmYul.SharedState .EVM × List Word)) :=
+  match primitiveCallSite? shared kind values with
+  | some site =>
+      some
+        { site := site
+          resume := fun response =>
+            (site.finishShared shared response,
+              [response.statusWord]) }
+  | none => none
+
+@[simp] theorem primitiveSharedOpenCall?_args_reverse
+    {Effect : Type u} (shared : EvmYul.SharedState .EVM)
+    (kind : CallKind) (operands : CallOperands) :
+    primitiveSharedOpenCall? (Effect := Effect) shared kind
+        (kind.args operands).reverse =
+      some
+        { site :=
+            (CallContext.ofEVMSharedState shared).callSite kind
+              (kind.canonicalOperands operands)
+          resume := fun response =>
+            (((CallContext.ofEVMSharedState shared).callSite kind
+                (kind.canonicalOperands operands)).finishShared shared
+                response,
+              [response.statusWord]) } := by
+  cases kind <;> rfl
+
+end CallKind
 
 /--
 The theorem shape for the open external boundary.

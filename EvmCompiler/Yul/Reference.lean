@@ -5806,6 +5806,26 @@ theorem keccak256 {cfg : StateRelConfig}
   · simpa [EvmYul.MachineState.keccak256] using hReturn
   · simpa [EvmYul.MachineState.keccak256] using hHReturn
 
+theorem finishExternalCall {cfg : StateRelConfig}
+    {source target : EvmYul.MachineState}
+    {window : OpenExternal.ReturnWindow} {returnData : ByteArray}
+    (hMachine : MachineStateRel cfg source target) :
+    MachineStateRel cfg
+      (window.finishMachine source returnData)
+      (window.finishMachine target returnData) := by
+  rcases hMachine with ⟨hGas, hActive, hMemory, _hReturn, _hHReturn⟩
+  constructor
+  · simpa [OpenExternal.ReturnWindow.finishMachine,
+      EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes] using hGas
+  · simp [OpenExternal.ReturnWindow.finishMachine,
+      EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes, hActive]
+  · simpa [OpenExternal.ReturnWindow.finishMachine,
+      EvmYul.MachineState.finishExternalCall, EvmYul.writeBytes, hMemory]
+  · simp [OpenExternal.ReturnWindow.finishMachine,
+      EvmYul.MachineState.finishExternalCall]
+  · simp [OpenExternal.ReturnWindow.finishMachine,
+      EvmYul.MachineState.finishExternalCall]
+
 end MachineStateRel
 
 namespace StateFacts
@@ -5949,6 +5969,18 @@ theorem openExternalCallContextRel
       sourceAddress := hShared.chain.executionEnv.source
       weiValue := hShared.chain.executionEnv.weiValue
       permission := hShared.chain.executionEnv.perm }
+
+theorem finishExternalCall {Effect : Type} {cfg : StateRelConfig}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {targetShared : EvmYul.SharedState .EVM}
+    {site : OpenExternal.CallSite}
+    {response : OpenExternal.CallResponse Effect}
+    (hShared : SharedStateRel cfg sourceShared targetShared) :
+    SharedStateRel cfg
+      (site.finishShared sourceShared response)
+      (site.finishShared targetShared response) := by
+  rcases hShared with ⟨hChain, hMachine⟩
+  exact ⟨hChain, MachineStateRel.finishExternalCall hMachine⟩
 
 theorem codeBytes {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
@@ -7186,6 +7218,101 @@ theorem openExternalPrimitiveCallSite_eq_of_args
   cases kind <;>
     simp [OpenExternal.CallKind.yulCallSite?,
       OpenExternal.CallContextRel.callSite_eq hContext]
+
+def compilerPrimitiveOpenCall?
+    {Effect : Type} (compiler : Objects.Source.State)
+    (kind : OpenExternal.CallKind) (values : List Word) :
+    Option
+      (OpenExternal.OpenCall Effect (Objects.Source.State × List Word)) :=
+  match OpenExternal.CallKind.primitiveSharedOpenCall?
+      (Effect := Effect) compiler.shared kind values with
+  | some call =>
+      some
+        { site := call.site
+          resume := fun response =>
+            (compiler.withShared (call.resume response).1,
+              (call.resume response).2) }
+  | none => none
+
+def OpenPrimitiveResultRel
+    (cfg : StateRelConfig) (layout : List Name) :
+    State × List Word → Objects.Source.State × List Word → Prop :=
+  fun sourceResult compilerResult =>
+    SourceStateRel cfg layout sourceResult.1 compilerResult.1 ∧
+      sourceResult.2 = compilerResult.2
+
+theorem finishOpenExternalCall
+    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {site : OpenExternal.CallSite}
+    {response : OpenExternal.CallResponse Effect}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler) :
+    SourceStateRel cfg layout
+      (.Ok (site.finishShared sourceShared response) store)
+      (compiler.withShared (site.finishShared compiler.shared response)) := by
+  cases hRel with
+  | ok hShared hVars =>
+      exact SourceStateRel.ok
+        (SharedStateRel.finishExternalCall hShared) hVars
+
+theorem openExternalPrimitiveOpenCallRel_of_args
+    {Effect : Type} {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands) :
+    ∃ sourceCall :
+        OpenExternal.OpenCall Effect (State × List Word),
+    ∃ compilerCall :
+        OpenExternal.OpenCall Effect (Objects.Source.State × List Word),
+      OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+          (.Ok sourceShared store) kind (kind.args operands) =
+        some sourceCall ∧
+      compilerPrimitiveOpenCall? (Effect := Effect) compiler kind
+          (kind.args operands).reverse =
+        some compilerCall ∧
+      OpenExternal.OpenCallRel
+        (OpenPrimitiveResultRel cfg layout) sourceCall compilerCall := by
+  let site :=
+    (OpenExternal.CallContext.ofEVMSharedState compiler.shared).callSite
+      kind (kind.canonicalOperands operands)
+  let sourceCall :
+      OpenExternal.OpenCall Effect (State × List Word) :=
+    { site := site
+      resume := fun response =>
+        (site.finishYulState (.Ok sourceShared store) response,
+          [response.statusWord]) }
+  let compilerCall :
+      OpenExternal.OpenCall Effect
+        (Objects.Source.State × List Word) :=
+    { site := site
+      resume := fun response =>
+        (compiler.withShared (site.finishShared compiler.shared response),
+          [response.statusWord]) }
+  refine ⟨sourceCall, compilerCall, ?_, ?_, ?_⟩
+  · have hSite :=
+      hRel.openExternalPrimitiveCallSite_eq_of_args kind operands
+    rw [OpenExternal.CallKind.primitiveCallSite?_args_reverse] at hSite
+    simp [OpenExternal.CallKind.yulOpenCall?, sourceCall, site, hSite]
+  · simp [compilerPrimitiveOpenCall?, compilerCall, site]
+  · constructor
+    · rfl
+    · intro response
+      constructor
+      · simpa [sourceCall, compilerCall, OpenExternal.CallSite.finishYulState,
+          OpenPrimitiveResultRel, site]
+          using
+            (finishOpenExternalCall
+              (cfg := cfg) (layout := layout)
+              (compiler := compiler) (site := site)
+              (response := response) hRel)
+      · rfl
 
 end SourceStateRel
 

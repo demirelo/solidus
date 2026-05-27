@@ -13,7 +13,7 @@ Last updated: 2026-05-27 12:21 PDT.
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
 prove that imported Yul and compiled EVM reach the same external call site
-(same call kind, gas, caller/recipient/code address, value, calldata, static
+(same call kind, caller/recipient/code address, value, calldata, static
 permission, and local return-copy window), then quantify universally over an
 arbitrary shared response. The response may encode state-altering outside-world
 effects through an abstract effect type; the compiler theorem must not assume
@@ -24,9 +24,10 @@ response preservation field is explicitly universal over all shared responses.
 The current checked hook also proves CALL-family argument/stack agreement over
 an arbitrary target stack suffix and derives the needed call-context relation
 from the existing compiler/source state relations.
-Gas is abstracted at the open-call boundary: the request keeps the source
-`requestedGas` operand, but no longer includes the chain-specific forwarded
-`Ccallgas` calculation or a `StateRelConfig.callGasRel` proof obligation.
+Gas is abstracted at the open-call boundary: the request is gas-free, while
+the operand parser still records `requestedGas` only as syntax/arity data. The
+chain-specific forwarded `Ccallgas` calculation and `StateRelConfig.callGasRel`
+proof obligation have been removed.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
