@@ -286,6 +286,37 @@ def toBasicOp : CallKind → Structured.BasicOp
     Prim.toBasicOp? kind.toYulOperation = some kind.toBasicOp := by
   cases kind <;> rfl
 
+set_option linter.unusedSimpArgs false in
+theorem toBasicOp_eq_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CallKind}
+    {op : Structured.BasicOp}
+    (hKind : CallKind.ofYulOperation? yulOp = some kind)
+    (hBasic : Prim.toBasicOp? yulOp = some op) :
+    op = kind.toBasicOp := by
+  cases kind <;> cases yulOp <;>
+    simp [CallKind.ofYulOperation?, Prim.toBasicOp?,
+      CallKind.toBasicOp] at hKind hBasic
+  all_goals
+    try rename_i subop
+    try cases subop <;>
+      simp [CallKind.ofYulOperation?, Prim.toBasicOp?,
+        CallKind.toBasicOp] at hKind hBasic
+  all_goals
+    cases hKind
+    cases hBasic
+    rfl
+
+theorem inputArity_eq_inputs_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CallKind}
+    {op : Structured.BasicOp}
+    (hKind : CallKind.ofYulOperation? yulOp = some kind)
+    (hBasic : Prim.toBasicOp? yulOp = some op) :
+    Expressions.Structured.BasicOp.inputs op = kind.inputArity := by
+  have hOp : op = kind.toBasicOp :=
+    toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst op
+  simp
+
 @[simp] theorem terminal?_toYulOperation (kind : CallKind) :
     Prim.terminal? kind.toYulOperation = none := by
   cases kind <;> rfl
@@ -432,6 +463,135 @@ def evmOperands? : CallKind → Stack → Option (Stack × CallOperands)
     kind.evmOperands? (kind.args operands ++ stackRest) =
       some (stackRest, kind.canonicalOperands operands) := by
   cases kind <;> rfl
+
+theorem exists_operands_of_reverse_args_length
+    (kind : CallKind) {values : List Word}
+    (hLength : values.length = kind.inputArity) :
+    ∃ operands : CallOperands,
+      values = (kind.args operands).reverse := by
+  cases kind
+  · cases values with
+    | nil => simp [CallKind.inputArity] at hLength
+    | cons outSize values =>
+      cases values with
+      | nil => simp [CallKind.inputArity] at hLength
+      | cons outOffset values =>
+        cases values with
+        | nil => simp [CallKind.inputArity] at hLength
+        | cons inSize values =>
+          cases values with
+          | nil => simp [CallKind.inputArity] at hLength
+          | cons inOffset values =>
+            cases values with
+            | nil => simp [CallKind.inputArity] at hLength
+            | cons value values =>
+              cases values with
+              | nil => simp [CallKind.inputArity] at hLength
+              | cons address values =>
+                cases values with
+                | nil => simp [CallKind.inputArity] at hLength
+                | cons requestedGas values =>
+                  cases values with
+                  | nil =>
+                    exact
+                      ⟨{ requestedGas := requestedGas
+                         address := address
+                         valueArg := value
+                         inOffset := inOffset
+                         inSize := inSize
+                         outOffset := outOffset
+                         outSize := outSize }, rfl⟩
+                  | cons _ _ => simp [CallKind.inputArity] at hLength
+  · cases values with
+    | nil => simp [CallKind.inputArity] at hLength
+    | cons outSize values =>
+      cases values with
+      | nil => simp [CallKind.inputArity] at hLength
+      | cons outOffset values =>
+        cases values with
+        | nil => simp [CallKind.inputArity] at hLength
+        | cons inSize values =>
+          cases values with
+          | nil => simp [CallKind.inputArity] at hLength
+          | cons inOffset values =>
+            cases values with
+            | nil => simp [CallKind.inputArity] at hLength
+            | cons value values =>
+              cases values with
+              | nil => simp [CallKind.inputArity] at hLength
+              | cons address values =>
+                cases values with
+                | nil => simp [CallKind.inputArity] at hLength
+                | cons requestedGas values =>
+                  cases values with
+                  | nil =>
+                    exact
+                      ⟨{ requestedGas := requestedGas
+                         address := address
+                         valueArg := value
+                         inOffset := inOffset
+                         inSize := inSize
+                         outOffset := outOffset
+                         outSize := outSize }, rfl⟩
+                  | cons _ _ => simp [CallKind.inputArity] at hLength
+  · cases values with
+    | nil => simp [CallKind.inputArity] at hLength
+    | cons outSize values =>
+      cases values with
+      | nil => simp [CallKind.inputArity] at hLength
+      | cons outOffset values =>
+        cases values with
+        | nil => simp [CallKind.inputArity] at hLength
+        | cons inSize values =>
+          cases values with
+          | nil => simp [CallKind.inputArity] at hLength
+          | cons inOffset values =>
+            cases values with
+            | nil => simp [CallKind.inputArity] at hLength
+            | cons address values =>
+              cases values with
+              | nil => simp [CallKind.inputArity] at hLength
+              | cons requestedGas values =>
+                cases values with
+                | nil =>
+                  exact
+                    ⟨{ requestedGas := requestedGas
+                       address := address
+                       valueArg := EvmYul.UInt256.ofNat 0
+                       inOffset := inOffset
+                       inSize := inSize
+                       outOffset := outOffset
+                       outSize := outSize }, rfl⟩
+                | cons _ _ => simp [CallKind.inputArity] at hLength
+  · cases values with
+    | nil => simp [CallKind.inputArity] at hLength
+    | cons outSize values =>
+      cases values with
+      | nil => simp [CallKind.inputArity] at hLength
+      | cons outOffset values =>
+        cases values with
+        | nil => simp [CallKind.inputArity] at hLength
+        | cons inSize values =>
+          cases values with
+          | nil => simp [CallKind.inputArity] at hLength
+          | cons inOffset values =>
+            cases values with
+            | nil => simp [CallKind.inputArity] at hLength
+            | cons address values =>
+              cases values with
+              | nil => simp [CallKind.inputArity] at hLength
+              | cons requestedGas values =>
+                cases values with
+                | nil =>
+                  exact
+                    ⟨{ requestedGas := requestedGas
+                       address := address
+                       valueArg := EvmYul.UInt256.ofNat 0
+                       inOffset := inOffset
+                       inSize := inSize
+                       outOffset := outOffset
+                       outSize := outSize }, rfl⟩
+                | cons _ _ => simp [CallKind.inputArity] at hLength
 
 def yulCallSite?
     (state : EvmYul.Yul.State) (kind : CallKind) (args : List Word) :
