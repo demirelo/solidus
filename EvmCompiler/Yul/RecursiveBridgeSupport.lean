@@ -176761,6 +176761,102 @@ theorem openPrimitiveCallSound
     RecursiveBridgeCALLSemanticContracts.OpenPrimitiveCallSound cfg :=
   hTop.semantics.openPrimitiveCallSound
 
+theorem openPrimitiveEVMCallSound
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuel initial
+        referenceResult) :
+    RecursiveBridgeCALLSemanticContracts.OpenPrimitiveEVMCallSound cfg :=
+  hTop.semantics.openPrimitiveEVMCallSound
+
+theorem openPrimitiveEVMCallSound_of_argStackPrelude
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuelTop : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuelTop initial
+        referenceResult)
+    {Effect : Type} {layout : List Name}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerProgram : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {results : Nat}
+    {lower : Locals.ExprSeq results}
+    (hArgsRegular :
+      Reference.SourceBridgeFacts.SourceArgStackPreludeRegularAt cfg layout
+        prim lowerProgram ctx sourceFuel args codeOverride pre lower)
+    (hInitial :
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceShared sourceStore) compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .ok (.Ok sourceSharedAfter sourceStoreAfter,
+          (kind.args operands).reverse)) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim lowerProgram ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, (kind.args operands).reverse) ∧
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∀ {evmState : EvmYul.EVM.State},
+        evmState.toSharedState = compilerAfterArgs.shared →
+        ∀ (baseStack : OpenExternal.Stack),
+          ∃ sourceCall :
+              OpenExternal.OpenCall Effect (Reference.State × List Word),
+          ∃ evmCall : OpenExternal.OpenCall Effect EvmYul.EVM.State,
+            OpenExternal.CallKind.yulOpenCall? (Effect := Effect)
+                (.Ok sourceSharedAfter sourceStoreAfter) kind
+                  (kind.args operands) =
+              some sourceCall ∧
+            OpenExternal.CallKind.evmOpenCall? (Effect := Effect)
+                ({ evmState with
+                    stack := kind.args operands ++ baseStack }
+                  : EvmYul.EVM.State) kind =
+              some evmCall ∧
+            OpenExternal.OpenCallRel
+              (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
+                cfg layout baseStack) sourceCall evmCall :=
+  hTop.semantics.openPrimitiveEVMCallSound_of_argStackPrelude
+    hArgsRegular hInitial kind operands hEvalArgs
+
 end RecursiveBridgeCALLTopAssumptions
 
 /--
