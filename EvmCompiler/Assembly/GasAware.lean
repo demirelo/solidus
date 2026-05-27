@@ -39,16 +39,18 @@ def XRunsSuccessfullyAbove (target : TargetProgram) (initial sourceFinal : EVMSt
 /--
 Result-level agreement for the gas-aware `X` runner.
 
-The running case compares gas-erased states. Terminal success compares both the
-gas-erased halted state and output. Revert in EVMYulLean does not carry the
-final state, so the result-level contract compares the revert output and halt
-kind only.
+The running case compares gas-erased states and requires the eventual EVM
+success output to be empty, matching ordinary non-terminal completion as seen by
+message-call return data. Terminal success compares both the gas-erased halted
+state and output. Revert in EVMYulLean does not carry the final state, so the
+result-level contract compares the revert output and halt kind only.
 -/
 def XResultAgrees (targetResult : StepResult) :
     EvmYul.EVM.ExecutionResult EVMState → Prop
   | .success evmFinal output =>
       match targetResult with
-      | .running state => eraseGas evmFinal = eraseGas state
+      | .running state =>
+          eraseGas evmFinal = eraseGas state ∧ output = ByteArray.empty
       | .halted halt =>
           halt.kind ≠ .revert ∧
             eraseGas evmFinal = eraseGas halt.state ∧

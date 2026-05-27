@@ -2031,7 +2031,15 @@ theorem sharedStateRel_of_XResultAgrees_running_success
       cfg.gasAvailableRel yul.toMachineState.gasAvailable
         evm.gasAvailable) :
     Reference.SharedStateRel cfg yul evm.toSharedState :=
-  sharedStateRel_of_eraseGas_eq hShared hAgree hGas
+  sharedStateRel_of_eraseGas_eq hShared hAgree.1 hGas
+
+theorem XResultAgrees_running_success_output_empty
+    {target evm : EVMState} {output : ByteArray}
+    (hAgree :
+      Assembly.GasAware.XResultAgrees (.running target)
+        (.success evm output)) :
+    output = ByteArray.empty :=
+  hAgree.2
 
 theorem sharedStateRel_of_XResultAgrees_halted_success
     {cfg : Reference.StateRelConfig}
@@ -2341,7 +2349,7 @@ theorem restoreSuccessfulContractCallState_of_XResultAgrees_running_success
               evmChild.substate
           createdAccounts := evmChild.createdAccounts } := by
   have hErase : Assembly.eraseGas evmChild = Assembly.eraseGas targetChild := by
-    simpa [Assembly.GasAware.XResultAgrees] using hAgree
+    exact hAgree.1
   exact
     restoreSuccessfulContractCallState_childEvm_rel
       hParent hParentWorld hCfgAccountMap
