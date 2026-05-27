@@ -1185,6 +1185,193 @@ theorem compile_preserves_of_installed_callDispatcher_revert_sourceStaticBoundar
       hSourceRun hOutcomeRel hCompileBoundary hInitialPc hInitialStack
       hTargetGasForX hGasBound hUInt256
 
+theorem wholeProgramOutcomeRel_regular_running
+    {source : Objects.Source.State} {targetOutcome : Assembly.StepResult}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.regular source) targetOutcome) :
+    ∃ target, targetOutcome = .running target := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases targetOutcome with
+      | running target => exact ⟨target, rfl⟩
+      | halted halt =>
+          cases directMode <;>
+            simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+              Functions.SourceDirect.StmtOutcomeRel,
+              Structured.Preservation.WholeProgramOutcomeRel,
+              Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular] at hBlock hStructured
+
+theorem wholeProgramOutcomeRel_halt_halted
+    {kind : Assembly.HaltKind} {source : Objects.Source.State}
+    {targetOutcome : Assembly.StepResult}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.halt kind source) targetOutcome) :
+    ∃ halt, targetOutcome = .halted halt ∧ halt.kind = kind := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases targetOutcome with
+      | running target =>
+          cases directMode <;>
+            simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+              Functions.SourceDirect.StmtOutcomeRel,
+              Structured.Preservation.WholeProgramOutcomeRel,
+              Functions.Source.Outcome.halt,
+              Locals.Source.Outcome.halt] at hBlock hStructured
+      | halted halt =>
+          cases directMode <;>
+            simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+              Functions.SourceDirect.StmtOutcomeRel,
+              Structured.Preservation.WholeProgramOutcomeRel,
+              Functions.Source.Outcome.halt,
+              Locals.Source.Outcome.halt] at hBlock hStructured
+          · rename_i directKind
+            rcases hStructured with ⟨hKind, _hState⟩
+            exact ⟨halt, rfl, by simpa [hBlock] using hKind.symm⟩
+
+theorem wholeProgramOutcomeRel_brk_false
+    {source : Objects.Source.State} {targetOutcome : Assembly.StepResult}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.brk source) targetOutcome) :
+    False := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases targetOutcome <;> cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.brk,
+          Locals.Source.Outcome.brk] at hBlock hStructured
+
+theorem wholeProgramOutcomeRel_cont_false
+    {source : Objects.Source.State} {targetOutcome : Assembly.StepResult}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.cont source) targetOutcome) :
+    False := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases targetOutcome <;> cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.cont,
+          Locals.Source.Outcome.cont] at hBlock hStructured
+
+theorem wholeProgramOutcomeRel_leave_false
+    {source : Objects.Source.State} {targetOutcome : Assembly.StepResult}
+    (hRel :
+      SourceLowered.WholeProgramOutcomeRel
+        (Functions.Source.Outcome.leave source) targetOutcome) :
+    False := by
+  rcases hRel with ⟨direct, hBlock, hStructured⟩
+  cases direct with
+  | mk directState directMode =>
+      cases targetOutcome <;> cases directMode <;>
+        simp [Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.leave,
+          Locals.Source.Outcome.leave] at hBlock hStructured
+
+theorem dispatcherOutcomeRel_regular_whole_running
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {referenceInitial final : Reference.State}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        terminalRel revertRel program referenceInitial (.regular final)
+        sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome) :
+    ∃ bodyState target,
+      final =
+        EvmYul.Yul.State.setStore
+          (EvmYul.Yul.State.overwrite?
+            (EvmYul.Yul.State.reviveJump bodyState)
+            (Program.installContract program referenceInitial))
+          (Program.installContract program referenceInitial) ∧
+      Reference.SourceBridgeFacts.SourceOkOutcomeRel cfg [] bodyState
+        sourceOutcome ∧
+      targetOutcome = .running target := by
+  rcases hOutcomeRel with ⟨bodyState, hFinal, hSourceRel⟩
+  cases hSourceRel with
+  | regular hRel =>
+      rcases wholeProgramOutcomeRel_regular_running hWhole with
+        ⟨target, hTarget⟩
+      exact
+        ⟨bodyState, target, hFinal,
+          Reference.SourceBridgeFacts.SourceOkOutcomeRel.regular hRel,
+          hTarget⟩
+  | brk hRel =>
+      exact False.elim (wholeProgramOutcomeRel_brk_false hWhole)
+  | cont hRel =>
+      exact False.elim (wholeProgramOutcomeRel_cont_false hWhole)
+  | leave hRel =>
+      exact False.elim (wholeProgramOutcomeRel_leave_false hWhole)
+
+theorem dispatcherOutcomeRel_yulHalt_whole_halted
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {referenceInitial haltState : Reference.State}
+    {value : Word} {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        terminalRel revertRel program referenceInitial (.yulHalt haltState value)
+        sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome) :
+    ∃ kind compiler halt,
+      terminalRel kind value haltState compiler ∧
+      sourceOutcome = Functions.Source.Outcome.halt kind compiler ∧
+      targetOutcome = .halted halt ∧
+      halt.kind = kind := by
+  rcases hOutcomeRel with ⟨kind, compiler, hTerminal, rfl⟩
+  rcases wholeProgramOutcomeRel_halt_halted hWhole with
+    ⟨halt, hTarget, hKind⟩
+  exact ⟨kind, compiler, halt, hTerminal, rfl, hTarget, hKind⟩
+
+theorem dispatcherOutcomeRel_revert_whole_halted
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {program : Program} {referenceInitial revertState : Reference.State}
+    {sourceOutcome : Objects.Source.Outcome}
+    {targetOutcome : Assembly.StepResult}
+    (hOutcomeRel :
+      Program.RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        terminalRel revertRel program referenceInitial (.revert revertState)
+        sourceOutcome)
+    (hWhole :
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome) :
+    ∃ compiler halt,
+      revertRel revertState compiler ∧
+      sourceOutcome = Functions.Source.Outcome.halt .revert compiler ∧
+      targetOutcome = .halted halt ∧
+      halt.kind = .revert := by
+  rcases hOutcomeRel with ⟨compiler, hRevert, rfl⟩
+  rcases wholeProgramOutcomeRel_halt_halted hWhole with
+    ⟨halt, hTarget, hKind⟩
+  exact ⟨compiler, halt, hRevert, rfl, hTarget, hKind⟩
+
 noncomputable def codeImageRel : Reference.CodeImageRel :=
   CompiledCodeRel
 
