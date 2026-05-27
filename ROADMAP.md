@@ -161,79 +161,19 @@ actual modules rather than preserved through audit aliases.
      `CALL`/`CALLCODE`/`DELEGATECALL`/`STATICCALL` and `CREATE`/`CREATE2`, or
      state and prove an explicit external-interaction oracle relation that is
      part of the full source/target semantics rather than a safety rejection.
-     - [x] For `CALL`, factor the early non-ordinary primitive branches through
-       `stateRelConfig`: insufficient funds, depth limit, no-code success, and
-       precompile success/failure now construct the compiled-world account-map
-       evidence from `SharedStateRel` instead of taking it as branch-local
-       proof input. The remaining `CALL` work is the checked branch bundle and
-       public bridge admission.
-     - [x] For ordinary compiled-code `CALL`, add a `stateRelConfig` branch
-       fact package deriving the Yul transfer map, nonempty transferred worlds,
-       EVM recipient lookup, checked callee compile boundary, source/static
-       facts, bytecode target properties, and final recipient bytecode equality
-       from `SharedStateRel`, callee lookup, non-default callee code, and
-       sufficient funds.
-     - [x] Name the ordinary branch package as `OrdinaryCALLBranchFacts` and
-       add regular, terminal-success, and revert Yul dispatcher adapters that
-       consume that package instead of separate Yul lookup/transfer premises.
-     - [x] Retarget the installed-child ordinary `CALL` running-success,
-       terminal-success, and revert primitive wrappers to consume
-       `OrdinaryCALLBranchFacts`, removing their separate callee lookup,
-       transfer, bytecode, contract, and checked-compile-boundary premises.
-     - [x] Add the checked top-level `CALLBranchFacts` classifier from
-       `SharedStateRel`, splitting insufficient funds, depth limit, missing
-       account/no-code, precompile, existing default-code account, and ordinary
-       nondefault compiled-code branches.
-     - [x] Close the existing default-code account branch by proving exact EVM
-       empty-code STOP behavior, exact Yul dispatcher-on-default-code behavior,
-       and the `stateRelConfig` primitive relation for that branch.
-     - [x] Bundle the checked non-ordinary/non-recursive branches into
-       `CALLPrimitiveRel`: insufficient funds, depth limit, no-code,
-       precompile success, precompile failure, and existing default-code account
-       now share one primitive result shape.
-     - [x] Bundle the ordinary compiled-code running-success, terminal-success,
-       and revert branches into `CALLPrimitiveRel`, reusing their checked
-       installed child-dispatcher proofs.
-     - [x] Add the checked intermediate dispatcher
-       `CALLPrimitiveRel.of_branchFacts_withOrdinaryBranchRel_stateRelConfig`,
-       which consumes `CALLBranchFacts` for every non-ordinary/default branch
-       and leaves only an explicit ordinary-branch relation hook.
-     - [x] Replace that opaque ordinary relation hook with source-static
-       ordinary child-execution evidence:
-       `OrdinaryCALLSourceStaticEvidence`,
-       `OrdinaryCALLPrimitiveEvidence.of_sourceStaticEvidence`,
-       `OrdinaryCALLChildTopEvidence`,
-       `CALLPrimitiveRel.ordinaryChildTopEvidence_stateRelConfig`, and
-       `CALLPrimitiveRel.of_branchFacts_withOrdinaryChildTopEvidence_stateRelConfig`.
-       The remaining ordinary premise is now a recursive child-top proof plus
-       explicit gas/resource facts, not a prebuilt `CALLPrimitiveRel` or
-       separately supplied source-run/outcome facts.
-     - [x] Consume `CALLBranchFacts` in one public `CALL` primitive theorem:
-     `CALLPrimitiveRel.of_stateRelConfig_withOrdinaryChildTopEvidence`
-      constructs the branch split from `SharedStateRel` and dispatches every
-      checked branch, leaving only recursive ordinary child-top evidence plus
-      gas facts.
-     - [x] Start deriving ordinary child evidence from the recursive bridge:
-       `Program.compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted`,
-       `Program.compile_whole_program_result_sound_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted`,
-       and
-       `Program.compile_whole_program_result_sound_with_source_run_of_checked_recursive_dispatcher_run_bridge_compileAccepted`
-       expose the `SourceLowered.run` equality that the recursive dispatcher
-       proof already constructs internally.
-     - [x] Retire the concrete child-top evidence route with the deleted
-       `World` module. The replacement route is the open CALL-family
-       request/response boundary in `EvmCompiler.Yul.OpenExternal`, plus
-       source/target call-site extraction from the existing state relations.
-     - [x] Construct ordinary child full source acceptedness from branch
-       facts: `World.OrdinaryCALLBranchFacts.fullSourceAccepted` combines the
-       checked source-static facts with `Program.SourceAccepted` and
-       `Program.compileChecked?`, so the ordinary CALL path no longer asks for
-       broad `RecursiveBridgeSourceAccepted` as caller evidence.
+     - [x] Retire the concrete child/world route with the deleted `World`
+       module and the removed closed precompile/child-dispatch support branch.
+       The replacement route is the open CALL-family request/response boundary
+       in `EvmCompiler.Yul.OpenExternal`, with source/compiler/EVM call-site
+       extraction from existing state relations.
      - [x] Add CALL-admitting feature coverage for the next recursive bridge
        surface: `Reference.Safe.FeatureCoverage.externalBoundaryExceptCALL*`
        and `Program.RecursiveBridgeCALLFeatureCoverage` admit ordinary `CALL`
        while still checking out `CALLCODE`, `DELEGATECALL`, `STATICCALL`,
        external account-code inspection, and `CREATE`/`CREATE2`.
+     - [ ] Finish the open argument semantics so nested CALL-family expression
+       evaluation suspends at the same request/response boundary instead of
+       using closed `evalArgs`/`primCall` branches.
    - [ ] Update the public acceptedness theorem so these operations are either
      supported directly or covered by the explicit full-semantics oracle
      contract.
@@ -2750,7 +2690,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
     `Prim.toBasicOp?` now maps `CREATE`, `CALL`, `CALLCODE`,
     `DELEGATECALL`, `CREATE2`, and `STATICCALL` to the corresponding
     structured/basic EVM opcodes. The accepted bridge still rejects them until
-    the external-world/static-mode result contracts are proved.
+    the open external-call/create and static-mode result contracts are proved.
   - [x] Admit `LOG0` through `LOG4` in `Reference.Safe.primitive` with checked primitive
     contracts for varstore preservation, non-`Ok` state preservation, and
     non-checkpoint/nonrelatable error behavior.
@@ -3115,93 +3055,13 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - [x] Add the target-runtime no-call/create constructor, so programs whose
      emitted assembly syntactically contains no call/create opcodes discharge
      `ExternalInteractionAssumption` without a separate agreement premise.
-   - [ ] Add explicit external-world/account-code call semantics and state relation before re-admitting `CREATE`, `CREATE2`, `CALL`, `CALLCODE`, `DELEGATECALL`, or `STATICCALL`.
-     - [x] Add a concrete compiled-code/account/account-map relation for external worlds, plus a total `toExecute` relation covering precompiled addresses, ordinary compiled-account code, and missing/default-code accounts.
-     - [x] Correct the imported-interpreter precompile dispatch mismatch: Yul `CALL`, `STATICCALL`, `CALLCODE`, and `DELEGATECALL` now dispatch through `toExecute`, so precompile addresses 1-10 execute shared precompile bodies instead of account-map Yul code.
-     - [x] Correct EVM precompile result merging so `Θ` preserves the current child `createdAccounts` set instead of replacing it with `∅`, matching the shared Yul/EVM precompile behavior and avoiding a hidden world-relation mismatch.
-     - [ ] Audit the remaining gas/frame differences around external calls: Yul still has fuel/erased parent-gas accounting, while EVM updates `gasAvailable`; the proof should express or narrow this relation explicitly instead of treating it as a call oracle.
-     - [ ] Prove ordinary `CALL` preservation over the compiled-world relation, including transfer/balance/account-map preservation and callee entry-state construction.
-       - [x] Prove compiled-world preservation for account insertion, balance increase/decrease, and source-successful balance transfer, including default empty accounts materialized by balance increases.
-       - [x] Prove concrete compiled-world `StateRelConfig` hooks for `SELFBALANCE`, `BALANCE`, `SLOAD`, `SSTORE`, `TLOAD`, and `TSTORE`, including `SSTORE` refund/substate agreement.
-       - [x] Define the EVM `Θ` CALL transfer order and prove exact compiled-world preservation for the corrected shared CALL-family transfer helper. The imported Yul semantics now matches the EVM/chain behavior for absent zero-value recipients: it does not materialize a default account.
-       - [x] Correct imported-Yul CALL-family account warming so `CALL`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL` all add the target to `accessedAccounts` before dispatch/failure handling, matching EVM's substate update shape.
-       - [x] Align imported-Yul static-call behavior with EVM: `STATICCALL` is allowed from an already-static context, and `CALLCODE` follows the current EVM model's writable/static check instead of adding a stricter Yul-only rejection.
-       - [ ] Prove callee entry-state construction and result/world merge for the ordinary compiled-account `CALL` path.
-         - [x] Package callee entry-frame construction: related selected Yul/EVM code images now construct related child `ExecutionEnv`s, and the fresh-child-frame/world relation consumes that frame proof directly.
-           - [x] Package `toExecute` dispatch into child-frame construction, covering both precompile/default-code frames and ordinary selected account code frames from a single `CompiledToExecuteRel`.
-           - [x] Package the `CALL` value-transfer branch hinge: the compiled account-map relation now turns EVM's `value <= balance` check into Yul `callTransferAccountMap? = some ...`, and turns EVM insufficient funds into the Yul `none` branch.
-           - [x] Specialize call-gas agreement for the missing-recipient/no-contract branch by deriving matching `dead` facts from the compiled account-map relation.
-           - [x] Package imported-Yul empty-return helper branches after caller warming, covering both `none` account-map early failures and `some` transferred-account-map empty successes under the explicit returned target-gas relation.
-         - [ ] Prove the result/world merge after the child call returns or reverts, including account-map, substate, created-account, return-data, and success-bit agreement.
-           - [x] Add target-gas-aware external-call finish/merge lemmas, so EVM's returned-child-gas update is explicit in the proof obligation instead of hidden inside the generic finish-call relation.
-           - [x] Package the successful nonempty-child-account-map branch of EVM `Θ` result merge: when the returned EVM child account map is not empty, the restored Yul caller state relates to the EVM caller state using the child account map/substate/created-account set.
-           - [x] Add the exact conditional `Θ` result-merge shape: the proof can now consume a relation to `if childMap.isEmpty then parentMap else childMap`, rather than forcing the nonempty branch as the only possible success shape.
-           - [x] Package the warmed-caller finish relation used by revert and early-failure branches after account access.
-           - [x] Package imported-Yul successful and reverted restore helpers against the EVM `Θ` conditional result merge and warmed-parent revert shape, leaving only the child-result/gas-return proof obligations explicit.
-           - [x] Package imported-Yul return-state and precompile success/failure builders against explicit account-map merge, substate, return-data, and target-gas obligations.
-           - [x] Replace the imported child-map `== ∅` sentinel with `isEmpty` in both Yul and EVM semantics, then prove emptiness agreement from the compiled account-map relation.
-           - [x] Package precompile result preservation through the Yul precompile call-state builders: the proof now consumes the EVM precompile success bit and produces the matching Yul success/failure return state with EVM `Θ`'s conditional account-map/substate merge shape.
-           - [x] Name the ordinary EVM child-code entry state and prove `Ξ (fuel + 1)` is exactly `X fuel` over that state, packaged into EVM success/revert child results.
-           - [x] Connect that ordinary child entry state back to the already-proved fresh-call-frame `SharedStateRel`, and to the gas-aware `installCodeAndGas` state shape used by the bytecode theorem.
-           - [x] Expose checked bytecode/resource facts directly from the compiled-code relation, so ordinary child-code preservation can unpack emitted account code without re-opening compiler checkers by hand.
-           - [x] Strengthen external compiled-code images with a checked source-static/resource boundary that exposes `Program.SourceAccepted`, `Program.SourceCompileAccepted`, checked bytecode facts, and frame resources while deliberately omitting the old feature-coverage checker that rejects CALL-family code.
-           - [x] Factor the EVM `Θ` ordinary message-call prelude into named transfer/environment helpers and prove the `.Code` branch reduces exactly to the child `Ξ` success/revert/error result branches.
-           - [x] Combine the ordinary EVM `Θ` code branch with installed compiled bytecode `X`, exposing direct success/revert/non-out-of-gas/out-of-gas branch wrappers over `Assembly.GasAware.validJumps`.
-           - [x] Add erase-gas transport from gasless child target states to actual gas-aware `X` success states, and package the nonempty successful child-map restore branch for running and non-reverting halted child results.
-           - [x] Prove halted assembly traces expose the semantic halt output, then package the ordinary reverted child-result restore branch through `XResultAgrees` and the trace output invariant.
-           - [x] Align ordinary Yul successful-call restore with EVM `Θ`'s conditional child-map/substate merge, and replace nonempty-only success wrappers with checked conditional success restore wrappers from `XResultAgrees`.
-           - [x] Tighten `Assembly.GasAware.XResultAgrees` so a gas-aware `X` success corresponding to a gasless `.running` target state must return empty output, matching Yul's regular child-dispatcher return-data shape.
-           - [x] Package the exact installed-code ordinary child frame: the Yul fresh child shared state now relates directly to `thetaCodeXInitialState`, and the regular-child success restore wrapper rewrites EVM's named child output to Yul's empty dispatcher return data through `XResultAgrees`.
-           - [x] Package ordinary compiled-account running-success and revert branch wrappers: the proof now combines the installed-code `Θ`/`X` equations with the Yul restore-state relations for regular child success and reverted child calls, while keeping the child-run/gas premises explicit.
-           - [x] Align child dispatcher entry with the fixed-code model: imported Yul `CALL`/`STATICCALL` now pass the selected callee code as the dispatcher override, `CALLCODE`/`DELEGATECALL` spell the same override explicitly, and `World` packages installed child dispatcher branches as `Reference.runResult` runs.
-           - [x] Package the source-static child compiler bridge from installed dispatcher regular/halt/revert branches to gasless assembly traces and bytecode decode/jumpdest facts, stopping before the gas-aware call/create boundary instead of using the external-interaction oracle.
-           - [x] Lift the installed child compiler bridge through assembly block traces and the explicit result-level gas precondition, so regular/halt/revert child dispatcher branches now expose `EVM.X` result agreement without using `Assembly.RuntimeAssumptions.externalInteraction`.
-           - [x] Add the installed-gas specialization for result-level `X` preconditions, so exact child-gas CALL branches can reuse the gas/resource contract without double-install rewrites.
-           - [x] Add exact-installed-gas source-static wrappers for installed dispatcher regular, terminal-halt, and revert branches, yielding the concrete child `EVM.X` result at the CALL gas from the explicit gas/resource certificate.
-           - [x] Package the ordinary compiled-account halted-success branch, so non-reverting terminal child results use the same EVM `Θ` conditional account-map/substate merge as regular child success.
-           - [x] Expose whole-program outcome inversion lemmas and dispatcher branch-shape wrappers, so regular child dispatcher/compiler results force running target outcomes while terminal/revert child results force halted target outcomes with the expected halt kind.
-           - [x] Recover regular child target shared-state agreement from the canonical dispatcher relation and hidden whole-program compiler relation, keeping only the actual returned target gas relation explicit.
-           - [x] Recover regular child compiled-account-map agreement from `World.stateRelConfig`, add halted whole-program shared/account-map transport, and expose a regular child-relations wrapper that returns the concrete running target child with both relations.
-           - [x] Compose the regular child outcome into the ordinary `CALL` running-success branch: `World.ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome` derives the concrete running target child, `X` success shape, target shared-state relation, and compiled account-map relation internally, leaving the returned-gas relations explicit.
-           - [x] Compose terminal and reverted child outcomes into the ordinary `CALL` halted-success and revert branches: the new wrappers derive halted target child relations and `X` success/revert shapes from the dispatcher/whole-program relation, while keeping terminal/revert shared-state observation and returned-gas premises explicit.
-           - [x] Splice the exact-gas installed child dispatcher proof into the ordinary `CALL` regular success branch: `World.ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher` now consumes the actual child `callDispatcher` run plus the source-static compiler boundary and produces the ordinary conditional-merge branch result.
-           - [x] Splice exact-gas installed child dispatcher proofs into the ordinary `CALL` terminal non-revert and revert branches: `World.ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher` and `World.ordinaryCodeCall_revertBranch_rel_of_installed_childDispatcher` now consume the actual child `callDispatcher` run plus the source-static compiler boundary and produce the matching success/revert branch result.
-	           - [x] Start the outer imported `CALL` primitive alignment with checked insufficient-funds and depth-limit empty-return branches: `World.EVM_call_insufficientFunds_eq`, `World.call_insufficientFunds_emptyReturn_rel`, `World.EVM_call_depthLimit_eq`, and `World.call_depthLimit_emptyReturn_rel` expose the exact `EVM.call` result and matching Yul empty-return state relation without invoking the child dispatcher.
-	           - [x] Compose the no-child-code `CALL` paths through the imported Yul primitive entry: `World.primCall_CALL_insufficientFunds_emptyReturn_rel`, `World.primCall_CALL_depthLimit_emptyReturn_rel`, and `World.primCall_CALL_noCode_emptyReturn_rel` now prove exact `primCall .CALL` results and matching EVM `call` results for insufficient-funds, depth-limit, and missing-recipient/non-precompile branches. The empty-return wrappers now use the precharge shared-state relation, exposing the remaining precharge/postcharge bridge needed by precompile and ordinary child branches.
-	           - [x] Compose the precompiled `CALL` paths through the imported Yul primitive entry: `World.CompiledAccountRel.codeEmpty` now expresses the needed compiled-world dead-account invariant, `World.CompiledAccountMapRel.Ccallgas_eq` derives matching Yul/EVM call gas, and `World.primCall_CALL_precompiled_success_rel` / `World.primCall_CALL_precompiled_failure_rel` prove exact `primCall .CALL` alignment for precompile success and failure.
-	           - [x] Split the ordinary compiled-account `CALL` branch honestly: `World.CompiledAccountRel.checkedCodeResourcesSourceStatic_of_yul_code_ne_default` and `World.CompiledAccountMapRel.checkedCodeResourcesSourceStatic_of_find_yul_ne_default` extract the checked child compiler boundary from non-default callee code, while the default-code side exposes EVM code emptiness for the separate empty-code child path.
-	           - [x] Construct the ordinary non-default child-frame facts from the world relation: `World.CompiledAccountMapRel.ordinaryCall_nondefault_transferCheckedFacts` packages the nonempty transfer map plus checked callee compiler boundary, and `World.ordinaryCall_nondefault_initialChildFrame_rel` relates the imported Yul fresh child frame to the EVM installed-code child frame, exposing the real `gasPrice` UInt256-fit premise instead of hiding it.
-	           - [x] Add the exact outer EVM ordinary-code `CALL` equation: `World.EVM_call_ordinaryCode_of_theta_eq` proves that once the selected ordinary-code `Θ` result is known, `EVM.call` returns the matching final state and derives the success bit from the child `z` flag, without a Yul/source oracle.
-	           - [x] Lift reverted ordinary-code `CALL` restoration to an explicit final-gas target: `World.restoreRevertedContractCallState_of_XResultAgrees_halted_revert_trace_targetGas`, `World.ordinaryCodeCall_revertBranch_rel_withTargetGas`, `World.ordinaryCodeCall_revertBranch_rel_of_childOutcome_withTargetGas`, and `World.ordinaryCodeCall_revertBranch_rel_of_installed_childDispatcher_withTargetGas` separate child returned gas from the outer `EVM.call` final-gas relation.
-	           - [x] Align ordinary CALL-family success restoration with warmed-account chain semantics: imported Yul now restores successful ordinary `CALL`, `STATICCALL`, `CALLCODE`, and `DELEGATECALL` child returns from the warmed parent state, and `World.ordinaryCodeCall_runningSuccessBranch_rel_afterAccess` / `World.ordinaryCodeCall_haltedSuccessBranch_rel_afterAccess` prove the corresponding EVM `Θ` success merge from the accessed substate.
-	           - [x] Lift after-access success restoration through child-outcome and installed child-dispatcher wrappers: `World.ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome_afterAccess`, `World.ordinaryCodeCall_haltedSuccessBranch_rel_of_childOutcome_afterAccess`, `World.ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher_afterAccess`, and `World.ordinaryCodeCall_haltedSuccessBranch_rel_of_installed_childDispatcher_afterAccess` now expose the warmed-substate success branches at the ordinary child-dispatcher composition boundary.
-	           - [x] Add the final-gas-shaped regular success child-outcome wrapper, `World.ordinaryCodeCall_runningSuccessBranch_rel_of_childOutcome_afterAccess_withTargetGas`, so ordinary `CALL` success can compute the parent final gas from the actual EVM child state/output instead of fixing it before the child result is known.
-	           - [x] Lift the final-gas-shaped regular success wrapper through installed child-dispatcher composition: `World.ordinaryCodeCall_runningSuccessBranch_rel_of_installed_childDispatcher_afterAccess_withTargetGas` now combines the real child dispatcher run, checked source-static compiler boundary, warmed-parent merge, and child-result-dependent final gas without introducing a callee oracle.
-		           - [x] Compose the ordinary compiled-code Yul branch through `primCall .CALL`: `World.primCall_CALL_ordinary_yul_of_dispatcher_restore` proves that the imported primitive entry follows the selected child dispatcher success and successful parent restore path.
-		           - [x] Compose the outer ordinary-code success adapter: `World.primCall_CALL_ordinary_runningSuccess_of_theta_restore` combines the concrete `Θ` success result, the exact outer `EVM.call` equation, the Yul primitive dispatcher/restore path, and the final shared-state relation.
-		           - [x] Compose the ordinary-code revert primitive adapters: `World.primCall_CALL_ordinary_yul_of_dispatcher_revert` proves the imported Yul `CALL` reverts through `restoreRevertedContractCallState`, and `World.primCall_CALL_ordinary_revert_of_theta_restore` combines the concrete reverted `Θ` result, outer `EVM.call`, Yul `primCall .CALL`, and final shared-state relation.
-		           - [x] Compose the installed child-dispatcher ordinary `CALL` running-success path through the primitive boundary: `World.primCall_CALL_ordinary_runningSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas` now connects the checked callee compiler boundary, actual child dispatcher run, warmed parent merge, outer `EVM.call`, and Yul `primCall .CALL`; the child-frame relation also now carries the explicit proof that source `codeBytes` is the installed target code image.
-		           - [x] Lift the installed child-dispatcher ordinary `CALL` revert path through the primitive boundary: `World.primCall_CALL_ordinary_revert_rel_of_installed_childDispatcher_afterAccess_withTargetGas` now combines the real child dispatcher revert, checked source-static compiler boundary, result-dependent final gas, outer `EVM.call`, Yul `primCall .CALL`, and final shared-state relation.
-		           - [x] Add the ordinary terminal non-revert primitive adapters in the exact imported-interpreter shape: `World.primCall_CALL_ordinary_yul_of_dispatcher_yulHalt_restore`, `World.primCall_CALL_ordinary_haltedSuccess_of_theta_restore`, and `World.primCall_CALL_ordinary_haltedSuccess_rel_of_installed_childDispatcher_afterAccess_withTargetGas` now route terminal child success through Yul's actual `H_return` restore path, outer `EVM.call`, and the final shared-state relation. `World.terminalReturnData_eq_of_halted_success` removes the direct EVM-output oracle from the installed wrapper: `RETURN` terminal output is derived from halt-output semantics plus shared-state `H_return`.
-		           - [x] Prove the non-`RETURN` terminal child-frame invariant (`STOP`/`SELFDESTRUCT` ordinary child success leaves `H_return = ByteArray.empty`) from canonical terminal observations/imported terminal semantics, and use it to remove the `hTerminalNonReturnEmpty` premise from the ordinary halted-success primitive wrapper.
-		           - [x] Close the existing-account default-code `CALL` branch with `World.EVM_call_existingDefaultCode_success_eq`, `World.callDispatcher_defaultCode_ok`, `World.primCall_CALL_defaultCode_yul_of_restore`, and `World.primCall_CALL_existingDefaultCode_emptyReturn_rel_stateRelConfig`.
-		           - [x] Bundle the checked insufficient-funds, depth-limit, no-code, precompile, and existing-default-code branches into the shared `World.CALLPrimitiveRel` result shape.
-		           - [x] Bundle the ordinary running-success, ordinary terminal-success, and ordinary-revert branches into the shared `World.CALLPrimitiveRel` result shape.
-		           - [x] Add the checked intermediate branch dispatcher `World.CALLPrimitiveRel.of_branchFacts_withOrdinaryBranchRel_stateRelConfig`, consuming `World.CALLBranchFacts` for non-ordinary/default-code branches and leaving the ordinary branch as an explicit hook to be constructed from the ordinary adapters.
-		           - [x] Replace the ordinary `CALLPrimitiveRel` hook with source-static ordinary child evidence: `World.OrdinaryCALLSourceStaticEvidence` carries the `Reference.runResult` child shape plus source-run/outcome/gas facts, `World.OrdinaryCALLPrimitiveEvidence.of_sourceStaticEvidence` derives the lower dispatcher packet, and the checked adapters construct the ordinary relation through this internal evidence layer.
-		           - [x] Bundle branch-condition construction and the `World.CALLPrimitiveRel` branch adapters into the public `CALL` theorem shape: `World.CALLPrimitiveRel.of_stateRelConfig_withOrdinaryChildTopEvidence` derives `World.CALLBranchFacts` from `SharedStateRel` and dispatches through the checked non-ordinary/default-code branches plus recursive ordinary child-top evidence.
-		           - [x] Expose the exact ordinary child entry relation from branch facts: `World.ordinaryCALLCallGas_eq_of_compiledAccountMapRel`, `World.ordinaryCALLCallGas_eq_stateRelConfig`, and `World.OrdinaryCALLBranchFacts.initialSharedRel_stateRelConfig` now derive call-gas equality and the named source/target child `SharedStateRel` from the parent world relation plus explicit gas/gas-price resource premises.
-		           - [x] Add direct source-static evidence constructors from the bundled recursive child proof: `World.OrdinaryCALLChildTopAssumptions` names the exact child top package, and `World.OrdinaryCALLSourceStaticEvidence.*_of_childTopAssumptions` derives the running, terminal-success, and revert evidence facts from the recursive bridge theorem while leaving only the gas-aware `X` and returned-gas premises explicit.
-		           - [x] Replace the exposed source-static ordinary callback with recursive child-top evidence. This was the concrete-world route before the open external-call pivot; it has now been superseded by `OpenExternal`.
-		           - [x] Expose the child compiler-source run constructed by the recursive dispatcher proof: the new `Program.*with_source_run*` bridge theorems return the exact `SourceLowered.run` equality alongside the existing `Reference.runResult`, `outcomeRel`, whole-program relation, and target trace outputs.
-		           - [x] Lift the source-run witness through the bundled recursive bridge top boundary with `Program.compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top`, and add inverse installed-dispatcher lemmas in `World` so ordinary `CALL` evidence can derive running, terminal, and revert child dispatcher branches from `Reference.runResult` instead of taking `hCall` directly.
-		           - [x] Add and then remove the temporary recursive-top constructors for `World.OrdinaryCALLPrimitiveEvidence` after they proved the child result-shape facts needed by the ordinary branch. The checked inverse dispatcher lemmas remain available, but the live ordinary `CALL` path no longer depends on the older recursive-top package.
-		           - [x] Thread account-level source code bytes into external-call child frames: Yul accounts now carry `codeBytes`, CALL-family child environments install the callee account byte image, `CompiledAccountRel` relates source account bytes to EVM bytecode, and `OrdinaryCALLBranchFacts.sourceCodeBytes_eq_target` exposes the exact byte image for recursive child bridges.
-		           - [x] Derive ordinary child dispatcher branches from recursive child bridge results using inverse installed-dispatcher lemmas, while keeping the long-term public path on source-static child evidence rather than the older accepted-recursive bridge route.
-		           - [x] Derive ordinary terminal-success side conditions from canonical observations: nonreversion, `H_return`, and the child world merge now come from the canonical terminal relation, with `SELFDESTRUCT` account-map/substate effects handled by shared selfdestruct semantics lemmas.
-		           - [x] Remove the temporary recursive-top ordinary `CALL` route. This checkpoint is now historical; the active path is the open call-site/response theorem rather than concrete child-world evidence.
-		           - [x] Split `Reference.Safe.NoShadowing` back to a lexical-only predicate and add `Program.RecursiveBridgeCALLTopAssumptions` / `World.OrdinaryCALLChildCALLTopAssumptions`, so the next recursive child route can use CALL-admitting feature coverage instead of reconstructing the old no-external-call `Reference.Accepted` package.
-		           - [x] Add the CALL-admitting recursive bridge context surface: `Reference.Safe.CallSafe` proves the checked source surface is old-safe plus ordinary `CALL`, `ProgramCALLBridgeContext` is constructible from full source acceptedness plus `RecursiveBridgeCALLFeatureCoverage` and `compileChecked?`, and `Program.checkedRecursiveDispatcherRunBridge_of_programCALLAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_actual` avoids old `Safe.program` while leaving checkpoint freedom as the next explicit semantic obligation.
+   - [x] Retire the explicit concrete account-code route for `CALL`.
+     The old concrete `World` module and remaining precompile/child-dispatch
+     support branch are gone; live `CALL` work now stops at the `OpenExternal`
+     request/response boundary with arbitrary account/substate mutation, plus
+     the pending open argument semantics for nested `CALL`s. `CREATE`,
+     `CREATE2`, `CALLCODE`, `DELEGATECALL`, and `STATICCALL` remain future
+     external-operation coverage.
    - [ ] Continue the primitive bridge table for remaining state/machine/environment reads and memory/storage/code/external primitives using family-specific semantic relations, rather than treating them all as pure bound-argument stack operators.
    - [x] Change Yul expression lowering for primitive/function/terminal argument lists to bind each argument immediately after its own prelude (`Expr.List.lowerBound1?`), matching imported Yul's right-to-left argument evaluation and avoiding delayed reads across later argument effects.
    - [x] Add checked lowering decomposition for bound binary primitive arguments and a compiler-output-aware `add(left, right)` bridge theorem that composes the generated hidden-argument prelude with generic `toStackSeq?` target replay and the target `ADD` proof.
@@ -3293,7 +3153,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Compose the bridge with the existing lowering tower and gas-aware EVM theorem.
    - Current checked composition points: `Yul.Program.compile_source_preserves_checked_of_compileAccepted`, `Yul.Program.compile_preserves_of_reference_source_runs_compileAccepted`, `Yul.Program.compile_whole_program_result_sound_of_reference_source_runs_compileAccepted`, the dispatcher/root-block bridge theorems, and the legacy backend-only `Yul.Program.compile_whole_program_result_sound_of_lowered_bridge_with_result_rel`.
    - Remaining blocker: the active theorem spine now has a direct imported-run/source-run/bytecode composition target, but the fully general imported-Yul bridge still needs per-construct source-tower proofs from `Yul.Program.run`/`Reference.runResult` into `Yul.SourceLowered.runState` without packaging the run as `Reference.SourceBridge`. The separate `Reference.SourceBridge` and `Reference.LoweredBridge` facts remain legacy compatibility routes.
-   - Active external-call checkpoint: the concrete `World` route has been retired in favor of `OpenExternal`. The live gap is to route CALL-family primitive preservation through same-site open requests plus universally quantified shared responses. Gas mechanics are abstracted at this boundary: request equality keeps the requested-gas operand but does not require a concrete forwarded-gas calculation.
+   - Active external-call checkpoint: the concrete `World` route has been retired in favor of `OpenExternal`, and the leftover closed precompile/child-dispatch support branch has been removed from the recursive bridge support file. The live gap is to route CALL-family primitive preservation through same-site open requests plus universally quantified shared responses that may arbitrarily mutate account/substate data. Gas mechanics are abstracted at this boundary: request equality keeps the requested-gas operand but does not require a concrete forwarded-gas calculation.
    - Semantic blockers fixed in the target fork: selected-branch switch execution, omitted default notation, and halting `SELFDESTRUCT` behavior. Argument-lowering now binds each argument before later argument effects. Remaining bridge blockers are proof-side: replacing `Reference.SourceBridge.sourceRun` with recursive per-construct source-tower theorems, proving source-to-direct function-call preservation, proving object/data/code-image relations, generalizing primitive bridges beyond the current checked arithmetic/comparison/bitwise-shift/modular-arithmetic/nullary-environment/state/machine-state/first one-argument read/state-update and `KECCAK256` slice (`ADD`/`MUL`/`SUB`/`DIV`/`SDIV`/`MOD`/`SMOD`/`ADDMOD`/`MULMOD`/`EXP`/`SIGNEXTEND`/`LT`/`GT`/`SLT`/`SGT`/`EQ`/`AND`/`OR`/`XOR`/`BYTE`/`SHL`/`SHR`/`SAR`/`KECCAK256`/`ADDRESS`/`ORIGIN`/`CALLER`/`CALLVALUE`/`CALLDATALOAD`/`CALLDATASIZE`/`GASPRICE`/`PREVRANDAO`/`BASEFEE`/`BLOCKHASH`/`BLOBHASH`/`BLOBBASEFEE`/`COINBASE`/`TIMESTAMP`/`NUMBER`/`GASLIMIT`/`CHAINID`/`SELFBALANCE`/`BALANCE`/`MLOAD`/`SLOAD`/`TLOAD`/`RETURNDATASIZE`/`MSIZE`/`GAS`), handling compiler-only temporaries emitted by expression preludes via scoped cleanup or an explicit hidden-local relation, and discharging code-size, remaining account-map-dependent reads, memory-write/storage-write, external-call/create, revert, selfdestruct-result/static-mode, and out-of-gas resource contracts.
 
 ## Layer Standard
@@ -3354,9 +3214,12 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   The formerly raw nested-CALL argument-domain premise is now named as
   `EvalArgsReverseOkDomainExactContract`, with checked constructors from the
   old no-CALL primitive-family theorem and from a generic per-expression domain
-  theorem; the open Yul CALL response continuation now also has a checked
-  local-frame lemma showing that arbitrary response mutations preserve the
-  suspended varstore/domain and resume with exactly the response status word.
+  theorem; the open Yul CALL response continuation now also has checked
+  local-frame and `evalValues`-shaped lemmas showing that arbitrary response
+  mutations preserve the suspended varstore/domain and resume with exactly the
+  response status word. The stale closed CALL branch that split precompile and
+  child-code execution in `RecursiveBridgeSupport` has been deleted so the live
+  proof no longer points back at a concrete callee/chain interpreter.
   Remaining work is to replace the recursive closed assignment/let
   consumers with this open sequence frontier, construct the CALL-safe
   `EvalArgsReverseOkDomainExactContract` from an open argument/response

@@ -12906,7 +12906,7 @@ Result relation for the imported-Yul-to-source-tower bridge.
 Terminal imported Yul results are exceptions (`YulHalt`/`Revert`), while the
 source tower represents EVM-level exits as `Outcome.halt`. The terminal and
 revert relations are parameters because the exact agreement contract belongs to
-the final shared-state/external-world boundary, not to the structural block
+the final shared-state/external-call boundary, not to the structural block
 bridge itself.
 -/
 inductive SourceResultOutcomeRel (cfg : StateRelConfig) (layout : List Name)

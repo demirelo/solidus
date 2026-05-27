@@ -798,7 +798,7 @@ An open external call: a visible request plus a continuation for every possible
 response.
 
 The continuation consumes the response as data. It is intentionally not a
-function from a concrete external-world interpreter.
+function from a concrete callee/chain interpreter.
 -/
 structure OpenCall (State : Type v) where
   site : CallSite
@@ -882,6 +882,53 @@ theorem yulOpenCall?_resume_ok
       simp [hSite] at hCall
       cases hCall
       exact ⟨site.finishShared shared response, by simp⟩
+
+def yulPrimitiveEvalValuesOpenCall?
+    (state : EvmYul.Yul.State) (prim : EvmYul.Operation .Yul)
+    (args : List Word) :
+    Option
+      (OpenCall
+        (Except EvmYul.Yul.Exception
+          (EvmYul.Yul.State × List Word))) :=
+  match CallKind.ofYulOperation? prim with
+  | some kind =>
+      match yulOpenCall? state kind args with
+      | some sourceCall =>
+          some
+            { site := sourceCall.site
+              resume := fun response => .ok (sourceCall.resume response) }
+      | none => none
+  | none => none
+
+theorem yulPrimitiveEvalValuesOpenCall?_resume_ok
+    {prim : EvmYul.Operation .Yul} {args : List Word}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {call :
+      OpenCall
+        (Except EvmYul.Yul.Exception
+          (EvmYul.Yul.State × List Word))}
+    (hCall :
+      yulPrimitiveEvalValuesOpenCall? (.Ok shared store) prim args =
+        some call)
+    (response : CallResponse) :
+    ∃ sharedAfter,
+      call.resume response =
+        .ok (.Ok sharedAfter store, [response.statusWord]) := by
+  unfold yulPrimitiveEvalValuesOpenCall? at hCall
+  cases hKind : CallKind.ofYulOperation? prim with
+  | none =>
+      simp [hKind] at hCall
+  | some kind =>
+      cases hOpen : yulOpenCall? (.Ok shared store) kind args with
+      | none =>
+          simp [hKind, hOpen] at hCall
+      | some sourceCall =>
+          simp [hKind, hOpen] at hCall
+          cases hCall
+          rcases yulOpenCall?_resume_ok hOpen response with
+            ⟨sharedAfter, hResume⟩
+          exact ⟨sharedAfter, by simp [hResume]⟩
 
 @[simp] theorem primitiveSharedOpenCall?_args_reverse
     (shared : EvmYul.SharedState .EVM)
