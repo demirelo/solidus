@@ -974,6 +974,13 @@ def liftExceptCall {α : Type u}
   site := call.site
   resume := fun response => .done (call.resume response)
 
+@[simp] theorem liftExceptCall_resume {α : Type u}
+    (call : OpenCall (Except EvmYul.Yul.Exception α))
+    (response : CallResponse) :
+    (liftExceptCall call).resume response =
+      .done (call.resume response) :=
+  rfl
+
 end YulOpenResult
 
 namespace YulOpen

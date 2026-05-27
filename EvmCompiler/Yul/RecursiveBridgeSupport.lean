@@ -22138,6 +22138,58 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_ok_domain_exact_status
     ⟨sharedAfter, hResume⟩
   exact ⟨sharedAfter, hResume, hDomain⟩
 
+/--
+`YulOpen.evalValues`-shaped CALL suspension/resume preservation.
+
+Once open argument evaluation has reached a CALL-family primitive site with a
+domain-exact caller store, every response to the suspended request resumes the
+lifted open evaluator with the same varstore, the exact returned status word,
+and the same local domain.
+-/
+theorem yulOpenEvalValues_prim_call_resume_ok_domain_exact_status
+    {layout : List Name} {fuel : Nat} {prim : EvmYul.Operation .Yul}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {shared sharedAfterArgs : EvmYul.SharedState .Yul}
+    {store storeAfterArgs : EvmYul.Yul.VarStore}
+    {rawValues : List Word}
+    {call :
+      OpenExternal.OpenCall
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hDomainAfterArgs : StoreDomainExact layout storeAfterArgs)
+    (hArgs :
+      OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store) =
+        .done (.ok (.Ok sharedAfterArgs storeAfterArgs, rawValues)))
+    (hCall :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          (.Ok sharedAfterArgs storeAfterArgs) prim rawValues.reverse =
+        some call)
+    (response : OpenExternal.CallResponse) :
+    ∃ sharedAfter,
+      OpenExternal.YulOpen.evalValues fuel.succ (.Call (.inl prim) args)
+          codeOverride (.Ok shared store) =
+        .call (OpenExternal.YulOpenResult.liftExceptCall call) ∧
+      (OpenExternal.YulOpenResult.liftExceptCall call).resume response =
+        .done (.ok
+          (.Ok sharedAfter storeAfterArgs, [response.statusWord])) ∧
+      StoreDomainExact layout storeAfterArgs := by
+  have hSuspend :
+      OpenExternal.YulOpen.evalValues fuel.succ (.Call (.inl prim) args)
+          codeOverride (.Ok shared store) =
+        .call (OpenExternal.YulOpenResult.liftExceptCall call) :=
+    OpenExternal.YulOpen.evalValues_prim_call_suspends_of_evalArgs_done
+      (fuel := fuel) (prim := prim) (args := args)
+      (codeOverride := codeOverride) (state := .Ok shared store)
+      (stateAfterArgs := .Ok sharedAfterArgs storeAfterArgs)
+      (rawValues := rawValues) (call := call) hArgs hCall
+  rcases
+      yulPrimitiveEvalValuesOpenCall?_resume_ok_domain_exact_status
+        (layout := layout) (prim := prim) (args := rawValues.reverse)
+        (shared := sharedAfterArgs) (store := storeAfterArgs)
+        (call := call) hDomainAfterArgs hCall response with
+    ⟨sharedAfter, hResume, hDomainAfter⟩
+  exact ⟨sharedAfter, hSuspend, by simp [hResume], hDomainAfter⟩
+
 theorem sourceAssignTargets_contains_of_checkAssignment_evalArgs_domain
     {cfg : StateRelConfig} {layout : List Name}
     {fuel : Nat} {args : List AstExpr} {codeOverride : Option AstContract}

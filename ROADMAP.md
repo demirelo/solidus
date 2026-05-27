@@ -3220,7 +3220,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   response status word. A first checked Yul-side `YulOpenResult`/`YulOpen.eval*`
   skeleton now mirrors imported Yul argument/expression evaluation while
   suspending at CALL-family primitive requests, giving the nested-CALL argument
-  proof an honest open source semantics to target. The stale closed CALL branch
+  proof an honest open source semantics to target; the support bridge now also
+  packages primitive CALL suspension/resume for `YulOpen.evalValues` with exact
+  status-word and local-domain preservation. The stale closed CALL branch
   that split precompile and
   child-code execution in `RecursiveBridgeSupport` has been deleted so the live
   proof no longer points back at a concrete callee/chain interpreter.
