@@ -2264,6 +2264,71 @@ theorem Xi_succ_eq_X_installedCode
   have hZero : (⟨0⟩ : EvmYul.UInt256) = EvmYul.UInt256.ofNat 0 := rfl
   simp [Assembly.GasAware.validJumps, hZero]
 
+theorem Theta_code_succ_eq_Xi
+    (fuel : Nat)
+    (blobVersionedHashes : List ByteArray)
+    (createdAccounts : Batteries.RBSet EvmYul.AccountAddress compare)
+    (genesisBlockHeader : EvmYul.BlockHeader)
+    (blocks : EvmYul.ProcessedBlocks)
+    (accountMap sigma0 : EvmYul.AccountMap .EVM)
+    (chainContext : EvmYul.EVM.ChildFrameChainContext)
+    (substate : EvmYul.Substate)
+    (source origin recipient : EvmYul.AccountAddress)
+    (code : ByteArray)
+    (gas gasPrice value weiValue : EvmYul.UInt256)
+    (calldata : ByteArray)
+    (depth : Nat)
+    (header : EvmYul.BlockHeader)
+    (perm : Bool) :
+    EvmYul.EVM.Θ fuel.succ blobVersionedHashes createdAccounts
+        genesisBlockHeader blocks accountMap sigma0 chainContext substate
+        source origin recipient (.Code code) gas gasPrice value weiValue
+        calldata depth header perm =
+      match EvmYul.EVM.Ξ fuel createdAccounts genesisBlockHeader blocks
+          (EvmYul.EVM.thetaCallTransfer accountMap source recipient value)
+          sigma0 chainContext gas substate
+          (EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+            recipient (.Code code) gasPrice weiValue calldata depth header
+            perm) with
+      | .error err =>
+          if err == EvmYul.EVM.ExecutionException.OutOfFuel then
+            .error EvmYul.EVM.ExecutionException.OutOfFuel
+          else
+            .ok (createdAccounts, accountMap, ⟨0⟩, substate, false,
+              ByteArray.empty)
+      | .ok (.revert returnedGas output) =>
+          .ok (createdAccounts, accountMap, returnedGas, substate, false,
+            output)
+      | .ok (.success (createdAccounts', accountMap', returnedGas,
+          substate') output) =>
+          .ok (createdAccounts',
+            if accountMap'.isEmpty then accountMap else accountMap',
+            returnedGas,
+            if accountMap'.isEmpty then substate else substate',
+            true, output) := by
+  simp only [EvmYul.EVM.Θ]
+  generalize hChild :
+    EvmYul.EVM.Ξ fuel createdAccounts genesisBlockHeader blocks
+      (EvmYul.EVM.thetaCallTransfer accountMap source recipient value)
+      sigma0 chainContext gas substate
+      (EvmYul.EVM.thetaCallExecutionEnv blobVersionedHashes source origin
+        recipient (EvmYul.ToExecute.Code code) gasPrice weiValue calldata
+        depth header perm) = child
+  cases child with
+  | error err =>
+      by_cases hErr : err == EvmYul.EVM.ExecutionException.OutOfFuel
+      · simp [hErr]
+        rfl
+      · simp [hErr]
+  | ok result =>
+      cases result with
+      | success data output =>
+          rcases data with
+            ⟨createdAccounts', accountMap', returnedGas, substate'⟩
+          simp
+      | revert returnedGas output =>
+          simp
+
 theorem Ccallgas_eq_of_dead_eq
     {τ υ : EvmYul.OperationType}
     {yulAccountMap : EvmYul.AccountMap τ}
