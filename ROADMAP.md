@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 17:09 PDT.
+Last updated: 2026-05-27 21:06 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -37,10 +37,11 @@ caller-supplied assumptions.
 Gas mechanics are abstracted at the open-call boundary: request equality keeps
 the opaque requested-gas operand, but the chain-specific forwarded `Ccallgas`
 calculation and `StateRelConfig.callGasRel` proof obligation have been removed.
-The open Yul argument-domain contract now has a checked no-external-call
-constructor from the existing `Safe.exprs`/`Safe.primitive` family: safe
-primitives cannot suspend as open CALL-family requests, while the open result
-invariant still propagates through every possible nested suspension/resume.
+The open Yul argument-domain contract now has checked constructors for both
+the existing no-external-call `Safe.exprs`/`Safe.primitive` family and the
+CALL-admitting `Safe.CallSafe.exprs` family: safe primitives cannot suspend as
+open CALL-family requests, while ordinary `CALL` suspensions propagate the
+local-domain invariant through every possible shared response.
 The remaining CALL-capable step is to replace expression-prelude consumers that
 still expect the old closed `EvmYul.Yul.evalArgs` result with open prelude
 contracts.

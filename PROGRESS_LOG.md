@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 21:06 PDT - proof/open-yul-callsafe-domain-constructor - Added the `Safe.CallSafe` constructor for `YulOpenEvalArgsReverseStateDomainExactContract`, including nested ordinary `CALL` suspension/resume handling and the fallback proof that a `.CALL` with no open request cannot successfully change the local store-domain shape. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
+
+- 2026-05-27 17:22 PDT - compaction resume/proof/open-call-prelude - Resumed after compaction on the open external-call goal; current checkpoint is to replace the remaining expression-prelude consumers of closed Yul argument evaluation with open prelude contracts.
+
 - 2026-05-27 17:11 PDT - compaction resume/cleanup/account-state-boundary - Resumed after compaction while checking the account-state boundary cleanup; current checkpoint is to keep Nethermind `accountMap` local, finish the full Yul build, and commit if green.
 
 - 2026-05-27 17:09 PDT - cleanup/chain-relation-account-state-boundary - Kept Nethermind's `accountMap` as the internal local-state representation, but decoupled `SELFBALANCE`/`BALANCE` result agreement from the account-map relation and removed `createdAccounts` from `ChainStateRel` while CREATE/CREATE2 remain outside the live CALL proof. Verification: `lake env lean EvmCompiler/Yul/Reference.lean`, `lake build EvmCompiler.Yul`, scoped stale-world scan, scoped proof-escape scan, and `git diff --check` passed.

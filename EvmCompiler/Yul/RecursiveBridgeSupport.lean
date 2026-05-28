@@ -4012,6 +4012,33 @@ theorem family_exprs_reverse
         family_exprs_append (ih hSafe.2)
           (by simp [Safe.FeatureCoverage.Family.exprs, hSafe.1])
 
+theorem family_exprs_mem
+    {primitive : EvmYul.Operation .Yul → Prop}
+    {userCall : Name → Prop}
+    {args : List AstExpr} {expr : AstExpr}
+    (hSafe : Safe.FeatureCoverage.Family.exprs primitive userCall args)
+    (hMem : expr ∈ args) :
+    Safe.FeatureCoverage.Family.expr primitive userCall expr := by
+  induction args with
+  | nil =>
+      simp at hMem
+  | cons head tail ih =>
+      simp [Safe.FeatureCoverage.Family.exprs] at hSafe
+      simp at hMem
+      rcases hMem with hEq | hTail
+      · simpa [hEq] using hSafe.1
+      · exact ih hSafe.2 hTail
+
+theorem callSafe_exprs_reverse {args : List AstExpr}
+    (hSafe : Safe.CallSafe.exprs args) :
+    Safe.CallSafe.exprs args.reverse := by
+  exact family_exprs_reverse hSafe
+
+theorem callSafe_exprs_mem {args : List AstExpr} {expr : AstExpr}
+    (hSafe : Safe.CallSafe.exprs args) (hMem : expr ∈ args) :
+    Safe.CallSafe.expr expr := by
+  exact family_exprs_mem hSafe hMem
+
 theorem safe_exprs_of_safe_exprStmt_user_call
     {functionName : Name} {args : List AstExpr}
     (hSafe :
@@ -22673,6 +22700,358 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_ok_domain_exact_status
         hCall response with
     ⟨sharedAfter, hResume⟩
   exact ⟨sharedAfter, hResume, hDomain⟩
+
+theorem yulPrimitiveEvalValuesOpenCall?_resume_state_domain_exact_status
+    {layout : List Name} {prim : EvmYul.Operation .Yul}
+    {args : List Word} {state : State}
+    {call :
+      OpenExternal.OpenCall
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hDomain : StateStoreDomainExact layout state)
+    (hCall :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state prim args =
+        some call)
+    (response : OpenExternal.CallResponse) :
+    ∃ stateAfter,
+      call.resume response =
+        .ok (stateAfter, [response.statusWord]) ∧
+        StateStoreDomainExact layout stateAfter := by
+  unfold OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall? at hCall
+  cases hKind : OpenExternal.CallKind.ofYulOperation? prim with
+  | none =>
+      simp [hKind] at hCall
+  | some kind =>
+      cases hOpen :
+          OpenExternal.CallKind.yulOpenCall? state kind args with
+      | none =>
+          simp [hKind, hOpen] at hCall
+      | some sourceCall =>
+          simp [hKind, hOpen] at hCall
+          cases hCall
+          unfold OpenExternal.CallKind.yulOpenCall? at hOpen
+          cases hSite :
+              OpenExternal.CallKind.yulCallSite? state kind args with
+          | none =>
+              simp [hSite] at hOpen
+          | some site =>
+              simp [hSite] at hOpen
+              cases hOpen
+              refine
+                ⟨site.finishYulState state response, by simp, ?_⟩
+              cases state with
+              | Ok shared store =>
+                  simpa [OpenExternal.CallSite.finishYulState,
+                    EvmYul.Yul.State.setSharedState,
+                    StateStoreDomainExact] using hDomain
+              | OutOfFuel =>
+                  simp [OpenExternal.CallSite.finishYulState,
+                    EvmYul.Yul.State.setSharedState,
+                    StateStoreDomainExact]
+              | Checkpoint jump =>
+                  cases jump <;>
+                    simpa [OpenExternal.CallSite.finishYulState,
+                      EvmYul.Yul.State.setSharedState,
+                      StateStoreDomainExact] using hDomain
+
+theorem primCall_yul_call_state_domain_exact_of_no_open_ok
+    {layout : List Name} {fuel : Nat} {state stateAfter : State}
+    {args values : List Word}
+    (_hDomain : StateStoreDomainExact layout state)
+    (hNoOpen :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state (.System .CALL) args =
+        none)
+    (hCall :
+      EvmYul.Yul.primCall fuel state (.System .CALL) args =
+        .ok (stateAfter, values)) :
+    StateStoreDomainExact layout stateAfter := by
+  cases fuel with
+  | zero =>
+      simp [EvmYul.Yul.primCall] at hCall
+  | succ fuel' =>
+      cases args with
+      | nil =>
+          simp [EvmYul.Yul.primCall] at hCall
+      | cons gas args =>
+          cases args with
+          | nil =>
+              simp [EvmYul.Yul.primCall] at hCall
+          | cons address args =>
+              cases args with
+              | nil =>
+                  simp [EvmYul.Yul.primCall] at hCall
+              | cons value args =>
+                  cases args with
+                  | nil =>
+                      simp [EvmYul.Yul.primCall] at hCall
+                  | cons inOffset args =>
+                      cases args with
+                      | nil =>
+                          simp [EvmYul.Yul.primCall] at hCall
+                      | cons inSize args =>
+                          cases args with
+                          | nil =>
+                              simp [EvmYul.Yul.primCall] at hCall
+                          | cons outOffset args =>
+                              cases args with
+                              | nil =>
+                                  simp [EvmYul.Yul.primCall] at hCall
+                              | cons outSize rest =>
+                                  simp [
+                                    OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?,
+                                    OpenExternal.CallKind.yulOpenCall?,
+                                    OpenExternal.CallKind.yulCallSite?,
+                                    OpenExternal.CallKind.yulOperands?,
+                                    OpenExternal.CallKind.ofYulOperation?]
+                                    at hNoOpen
+
+theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
+    (fuel : Nat) :
+    (∀ {layout : List Name} {expr : AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.CallSafe.expr expr →
+      StateStoreDomainExact layout state →
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalValues fuel expr codeOverride state)) ∧
+    (∀ {layout : List Name} {args : List AstExpr}
+      {codeOverride : Option AstContract} {state : State},
+      Safe.CallSafe.exprs args →
+      StateStoreDomainExact layout state →
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs fuel args codeOverride state)) := by
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro layout expr codeOverride state _hSafe _hDomain
+        simp [OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpenResult.error]
+        exact YulOpenResultStateStoreDomainExact.done (by
+          intro stateAfter values hOk
+          cases hOk)
+      · intro layout args codeOverride state _hSafe _hDomain
+        simp [OpenExternal.YulOpen.evalArgs,
+          OpenExternal.YulOpenResult.error]
+        exact YulOpenResultStateStoreDomainExact.done (by
+          intro stateAfter values hOk
+          cases hOk)
+  | succ fuel' =>
+      have ihFuel := ih fuel' (Nat.lt_succ_self fuel')
+      constructor
+      · intro layout expr codeOverride state hSafe hDomain
+        cases expr with
+        | Lit value =>
+            simp [OpenExternal.YulOpen.evalValues,
+              OpenExternal.YulOpenResult.ok]
+            exact YulOpenResultStateStoreDomainExact.done (by
+              intro stateAfter values hOk
+              cases hOk
+              exact hDomain)
+        | Var name =>
+            cases hLookup : EvmYul.Yul.State.lookup? name state with
+            | none =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.error, hLookup]
+                exact YulOpenResultStateStoreDomainExact.done (by
+                  intro stateAfter values hOk
+                  cases hOk)
+            | some value =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.ok, hLookup]
+                exact YulOpenResultStateStoreDomainExact.done (by
+                  intro stateAfter values hOk
+                  cases hOk
+                  exact hDomain)
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                have hSafePrim : Safe.CallSafe.primitive prim := hSafe.1
+                have hSafeArgs : Safe.CallSafe.exprs args := hSafe.2
+                have hArgsDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                        codeOverride state) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (callSafe_exprs_reverse hSafeArgs) hDomain
+                have hArgsReverseDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.reverseResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  YulOpenResultStateStoreDomainExact.reverseResult hArgsDomain
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenResultStateStoreDomainExact.bind
+                    hArgsReverseDomain
+                    (by
+                      intro stateArgs argValues hArgsStateDomain
+                      have hSplit :
+                          Safe.primitive prim ∨ prim = .System .CALL :=
+                        (Safe.CallSafe.primitive_iff_safe_or_call prim).mp
+                          hSafePrim
+                      cases hSplit with
+                      | inl hSafePrimOld =>
+                          have hNoOpen :
+                              OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                                  stateArgs prim argValues =
+                                none :=
+                            yulPrimitiveEvalValuesOpenCall?_none_of_safe_primitive
+                              hSafePrimOld
+                          simp [hNoOpen]
+                          exact YulOpenResultStateStoreDomainExact.done (by
+                            intro stateAfter values hOk
+                            exact
+                              primCall_safe_state_domain_exact_of_ok
+                                hSafePrimOld hArgsStateDomain hOk)
+                      | inr hCallPrim =>
+                          subst prim
+                          cases hOpen :
+                              OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                                  stateArgs (.System .CALL) argValues with
+                          | none =>
+                              simp [hOpen]
+                              exact YulOpenResultStateStoreDomainExact.done (by
+                                intro stateAfter values hOk
+                                exact
+                                  primCall_yul_call_state_domain_exact_of_no_open_ok
+                                    hArgsStateDomain hOpen hOk)
+                          | some call =>
+                              simp [hOpen]
+                              exact YulOpenResultStateStoreDomainExact.call (by
+                                intro response
+                                exact
+                                  YulOpenResultStateStoreDomainExact.done (by
+                                    intro stateAfter values hOk
+                                    rcases
+                                        yulPrimitiveEvalValuesOpenCall?_resume_state_domain_exact_status
+                                          (layout := layout)
+                                          (state := stateArgs)
+                                          hArgsStateDomain hOpen response with
+                                    ⟨stateAfter', hResume, hDomainAfter⟩
+                                    simp [OpenExternal.YulOpenResult.liftExceptCall,
+                                      hResume] at hOk
+                                    rcases hOk with ⟨hStateEq, _hValuesEq⟩
+                                    subst stateAfter
+                                    exact hDomainAfter)))
+            | inr functionName =>
+                have hSafeArgs : Safe.CallSafe.exprs args := hSafe.2
+                have hArgsDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                        codeOverride state) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (callSafe_exprs_reverse hSafeArgs) hDomain
+                have hArgsReverseDomain :
+                    YulOpenResultStateStoreDomainExact layout (List Word)
+                      (OpenExternal.YulOpen.reverseResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  YulOpenResultStateStoreDomainExact.reverseResult hArgsDomain
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenResultStateStoreDomainExact.bind
+                    hArgsReverseDomain
+                    (by
+                      intro stateArgs argValues hArgsStateDomain
+                      exact YulOpenResultStateStoreDomainExact.done (by
+                        intro stateAfter values hOk
+                        exact
+                          call_ok_state_domain_exact_of_state
+                            hArgsStateDomain hOk))
+      · intro layout args codeOverride state hSafe hDomain
+        cases args with
+        | nil =>
+            simp [OpenExternal.YulOpen.evalArgs,
+              OpenExternal.YulOpenResult.ok]
+            exact YulOpenResultStateStoreDomainExact.done (by
+              intro stateAfter values hOk
+              cases hOk
+              exact hDomain)
+        | cons head tail =>
+            have hHeadSafe : Safe.CallSafe.expr head := hSafe.1
+            have hTailSafe : Safe.CallSafe.exprs tail := hSafe.2
+            have hHeadDomain :
+                YulOpenResultStateStoreDomainExact layout Word
+                  (OpenExternal.YulOpen.eval fuel' head codeOverride state) :=
+              by
+                simpa [OpenExternal.YulOpen.eval] using
+                  YulOpenResultStateStoreDomainExact.headResult
+                    (ihFuel.1 (layout := layout) (expr := head)
+                      (codeOverride := codeOverride) (state := state)
+                      hHeadSafe hDomain)
+            simp [OpenExternal.YulOpen.evalArgs]
+            exact
+              YulOpenResultStateStoreDomainExact.evalTail_of_head
+                (layout := layout) (fuel := fuel') (args := tail)
+                (codeOverride := codeOverride)
+                (head :=
+                  OpenExternal.YulOpen.eval fuel' head codeOverride state)
+                hHeadDomain
+                (by
+                  intro fuelTail stateTail hFuel hDomainTail
+                  cases hFuel
+                  exact
+                    (ih fuelTail (by omega)).2
+                      (layout := layout) (args := tail)
+                      (codeOverride := codeOverride) (state := stateTail)
+                      hTailSafe hDomainTail)
+
+theorem yulOpenEvalValues_state_domain_exact_of_callSafe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalValues fuel expr codeOverride state) :=
+  (yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
+    fuel).1 hSafe hDomain
+
+theorem yulOpenEval_state_domain_exact_of_callSafe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hDomain : StateStoreDomainExact layout state) :
+  YulOpenResultStateStoreDomainExact layout Word
+      (OpenExternal.YulOpen.eval fuel expr codeOverride state) :=
+  by
+    simpa [OpenExternal.YulOpen.eval] using
+      YulOpenResultStateStoreDomainExact.headResult
+        (yulOpenEvalValues_state_domain_exact_of_callSafe_primitiveFamilies
+          (fuel := fuel) hSafe hDomain)
+
+theorem yulOpenEvalArgsReverse_state_domain_exact_of_callSafe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.exprs args)
+    (hDomain : StateStoreDomainExact layout state) :
+    YulOpenResultStateStoreDomainExact layout (List Word)
+      (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state) :=
+  YulOpenResultStateStoreDomainExact.evalArgs_reverse_of_eval
+    (layout := layout) (fuel := fuel) (args := args)
+    (codeOverride := codeOverride) (state := state)
+    (hEach := by
+      intro evalFuel expr state₀ hMem hDomain₀
+      exact
+        yulOpenEval_state_domain_exact_of_callSafe_primitiveFamilies
+          (layout := layout) (fuel := evalFuel) (expr := expr)
+          (codeOverride := codeOverride) (state := state₀)
+          (callSafe_exprs_mem hSafe hMem) hDomain₀)
+    hDomain
+
+theorem YulOpenEvalArgsReverseStateDomainExactContract.of_callSafe_primitiveFamilies
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    (hSafe : Safe.CallSafe.exprs args) :
+    YulOpenEvalArgsReverseStateDomainExactContract layout fuel args
+      codeOverride where
+  evalArgsResult := by
+    intro state hDomain
+    exact
+      yulOpenEvalArgsReverse_state_domain_exact_of_callSafe_primitiveFamilies
+        (layout := layout) (fuel := fuel) (args := args)
+        (codeOverride := codeOverride) (state := state) hSafe hDomain
 
 /--
 `YulOpen.evalValues`-shaped CALL suspension/resume preservation.
