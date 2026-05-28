@@ -43063,6 +43063,213 @@ theorem compilerOpen_let_prim_openSeq_eq_of_arg_prelude_done
   simp [hRun, OpenExternal.OpenResult.bind]
 
 /--
+Actual open Yul assignment-CALL sequence head, paired with the actual emitted
+compiler-open assignment statement and open tail.
+-/
+theorem yulOpen_execSeq_assign_call_compilerOpen_openSeqOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel targetTailFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hCheck :
+      EvmYul.Yul.checkAssignment (.Ok sourceShared sourceStore) [name] =
+        .ok ())
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hTargetMem : identName name ∈ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxMid sourceFuel.succ.succ rest
+          codeOverride lowerTail targetTailFuel allowed
+          (fun _sourceCall _targetCall response =>
+            Reference.SharedStateRel.OpenExternalResponseRel
+              cfg sourceSharedAfter compilerAfterArgs.shared response)) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+          codeOverride (.Ok sourceShared sourceStore)))
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre) := by
+  rw [compilerOpen_assign_prim_openSeq_eq_of_arg_prelude_done
+    (prim := prim) (program := program) (ctx := ctx)
+    (ctxAfter := ctxAfter) (targetFuel := targetFuel)
+    (targetTailFuel := targetTailFuel) (op := op) (pre := pre)
+    (lowerArgs := lowerArgs) (compiler := compiler)
+    (compilerAfterPre := compilerAfterPre)
+    (compilerAfterArgs := compilerAfterArgs) (values := values)
+    (lowerTail := lowerTail) name hOutputs hContains hPre hArgs]
+  exact
+    yulOpen_execSeq_assign_call_openSeqOpenResultRel_of_arg_prelude_done_callKind
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (targetTailFuel := targetTailFuel)
+      (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (sourceShared := sourceShared)
+      (sourceSharedAfter := sourceSharedAfter)
+      (sourceStore := sourceStore)
+      (sourceStoreAfter := sourceStoreAfter) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values)
+      (rest := rest) (lowerTail := lowerTail) (allowed := allowed)
+      name hCheck hKind hBasic hOpenEvalArgs hPre hArgs hRelArgs
+      hDomainAfter hTargetMem hValuesArity hTail
+
+/--
+Actual open Yul declaration-CALL sequence head, paired with the actual emitted
+compiler-open declaration statement and open tail.
+-/
+theorem yulOpen_execSeq_let_call_compilerOpen_openSeqOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel targetTailFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hCheck :
+      EvmYul.Yul.checkDeclaration (.Ok sourceShared sourceStore) [name] =
+        .ok ())
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hFresh : identName name ∉ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel prim
+          program ctxMid sourceFuel.succ.succ rest codeOverride lowerTail
+          targetTailFuel allowed
+          (fun _sourceCall _targetCall response =>
+            Reference.SharedStateRel.OpenExternalResponseRel
+              cfg sourceSharedAfter compilerAfterArgs.shared response)) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Let [name] (some (.Call (.inl yulPrim) args)) :: rest)
+          codeOverride (.Ok sourceShared sourceStore)))
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre) := by
+  rw [compilerOpen_let_prim_openSeq_eq_of_arg_prelude_done
+    (prim := prim) (program := program) (ctx := ctx)
+    (ctxAfter := ctxAfter) (targetFuel := targetFuel)
+    (targetTailFuel := targetTailFuel) (op := op) (pre := pre)
+    (lowerArgs := lowerArgs) (compiler := compiler)
+    (compilerAfterPre := compilerAfterPre)
+    (compilerAfterArgs := compilerAfterArgs) (values := values)
+    (lowerTail := lowerTail) name hOutputs hPre hArgs]
+  exact
+    yulOpen_execSeq_let_call_openSeqOpenResultRel_of_arg_prelude_done_callKind
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (targetTailFuel := targetTailFuel)
+      (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (sourceShared := sourceShared)
+      (sourceSharedAfter := sourceSharedAfter)
+      (sourceStore := sourceStore)
+      (sourceStoreAfter := sourceStoreAfter) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values)
+      (rest := rest) (lowerTail := lowerTail) (allowed := allowed)
+      name hCheck hKind hBasic hOpenEvalArgs hPre hArgs hRelArgs
+      hDomainAfter hFresh hValuesArity hTail
+
+/--
 Open sequence-level CALL-family continuation for assignment heads.
 
 This packages the existing statement-level open CALL proof together with the
@@ -181575,6 +181782,116 @@ theorem compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_compi
   exact (compileCheckedAssemblyTarget?_eq_some hTarget).1
 
 /--
+CALL-admitting checked compiler/source boundary.
+
+This is the CALL-capable counterpart of
+`compileCheckedAssemblyTargetBytecodeResourcesFeatures?`: it admits ordinary
+`CALL` while still checking out external code-inspection primitives, CREATE,
+CREATE2, and the remaining call-family members not yet in the open CALL spine.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTargetBytecodeResources? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeCALLFeatureCoverage.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures? program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResources? program =
+        some (asm, target) ∧
+      RecursiveBridgeCALLFeatureCoverage program := by
+  unfold compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures?
+    at hCompileTarget
+  cases hBase : compileCheckedAssemblyTargetBytecodeResources? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hCoverage :
+          RecursiveBridgeCALLFeatureCoverage.checked? program <;>
+        simp [hCoverage] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeCALLFeatureCoverage.of_checked?
+            (by simpa using hCoverage)⟩
+
+/--
+CALL-admitting checked compiler/source boundary that also validates the
+source-static bridge facts.
+-/
+noncomputable def compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeSourceStaticFacts.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures? program =
+        some (asm, target) ∧
+      RecursiveBridgeSourceStaticFacts program := by
+  unfold compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
+    at hCompileTarget
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hFacts :
+          RecursiveBridgeSourceStaticFacts.checked? program <;>
+        simp [hFacts] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeSourceStaticFacts.of_checked?
+            (by simpa using hFacts)⟩
+
+theorem compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_compileChecked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    compileChecked? program = some asm := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_eq_some
+        hCompileTarget with
+    ⟨hFeatures, _hStatic⟩
+  rcases compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures?_eq_some
+      hFeatures with
+    ⟨hResources, _hCoverage⟩
+  rcases compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResources with
+    ⟨hBytecode, _hFrameResources⟩
+  rcases compileCheckedAssemblyTargetBytecode?_eq_some hBytecode with
+    ⟨hTarget, _hDecodeWindow, _hJumpdest⟩
+  exact (compileCheckedAssemblyTarget?_eq_some hTarget).1
+
+/--
 Public theorem using one checked compile-and-assemble success premise.
 -/
 theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_compiledTarget
@@ -181917,6 +182234,68 @@ structure RecursiveBridgeCALLTopAssumptions
   targetRuntime : RecursiveBridgeTargetRuntime asm target initial
 
 namespace RecursiveBridgeCALLTopAssumptions
+
+def of_checkedCALLFeaturesSourceStatic
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSemantics :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store)
+    (hInitialSharedRel :
+      Reference.SharedStateRel cfg
+        { shared with
+          executionEnv :=
+            { shared.executionEnv with code := program.contract } }
+        initial.toSharedState)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetRuntime : RecursiveBridgeTargetRuntime asm target initial) :
+    RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim outcomeRel
+      program asm target shared store sourceFuel initial referenceResult := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_eq_some
+        hCheckedCompileTarget with
+    ⟨hCALLFeaturesStatic, hStatic⟩
+  rcases compileCheckedAssemblyTargetBytecodeResourcesCALLFeatures?_eq_some
+      hCALLFeaturesStatic with
+    ⟨hResourcesChecked, hCALLCoverage⟩
+  rcases compileCheckedAssemblyTargetBytecodeResources?_eq_some
+      hResourcesChecked with
+    ⟨hBytecodeChecked, hResources⟩
+  rcases compileCheckedAssemblyTargetBytecode?_eq_some hBytecodeChecked with
+    ⟨hCompileTarget, _hDecodeWindow, _hJumpdest⟩
+  let hProgramSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.sourceAcceptedCore hStatic.supported
+  let hProgramAccepted : Program.Accepted program :=
+    accepted_of_sourceAccepted_compileChecked? hProgramSourceAccepted
+      (compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?_compileChecked
+        hCheckedCompileTarget)
+  exact
+    { fullSourceAccepted :=
+        hStatic.toFullSourceAccepted hProgramAccepted
+      callFeatureCoverage := hCALLCoverage
+      compileResources := hResources
+      semantics := hSemantics
+      initialShared := hInitialSharedRel
+      sourceRun := hSourceRun
+      compileTarget := hCompileTarget
+      targetRuntime := hTargetRuntime }
 
 theorem openPrimitiveCallSound
     {cfg : Reference.StateRelConfig}
