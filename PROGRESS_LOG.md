@@ -1,5 +1,7 @@
 # Progress Log
 
+- 2026-05-27 21:54 PDT - proof/open-result-bind-and-compiler-call-suspension - Added the generic `OpenExternal.OpenResultRel.bind` theorem for composing related open computations through continuations, plus `CompilerOpen.Primitive` suspension lemmas showing CALL-family lowered primitives suspend when `SourceStateRel.compilerPrimitiveOpenCall?` produces the matching request. Verification: `lake env lean EvmCompiler/Yul/OpenExternal.lean`, `lake env lean EvmCompiler/Yul/CompilerOpen.lean`, and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
+
 - 2026-05-27 21:47 PDT - proof/compiler-open-target-semantics - Added `CompilerOpen`, a source-side open interpreter for compiler-generated code that mirrors `Locals.Source`/`Functions.Source` while suspending at CALL-family primitives, plus `SourceArgPreludeOpen.run` as the generated argument-prelude target computation. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
 
 - 2026-05-27 21:45 PDT - compaction resume/proof/compiler-open-target - Resumed after compaction with the compiler-side open interpreter added locally; current checkpoint is to verify and document `CompilerOpen` plus `SourceArgPreludeOpen.run`.

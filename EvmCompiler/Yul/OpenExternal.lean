@@ -1300,6 +1300,59 @@ inductive OpenResultRel
       OpenResultRel callResponseRel doneRel
         (.call sourceCall) (.call targetCall)
 
+namespace OpenResultRel
+
+theorem bind
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {source : OpenResult ε₁ α} {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel : OpenResultRel callResponseRel doneRel source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          OpenResultRel callResponseRel' doneRel'
+            (match sourceDone with
+            | .ok value => sourceNext value
+            | .error err => .done (.error err))
+            (match targetDone with
+            | .ok value => targetNext value
+            | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenResult.bind (sourceCall.resume response) sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenResult.bind (targetCall.resume response) targetNext }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenResultRel callResponseRel' doneRel'
+      (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        exact hDone hDoneRel
+  | call hSite _hResume ih =>
+      simp [OpenResult.bind]
+      exact OpenResultRel.call hSite (by
+        intro response hResponse
+        exact ih response (hCallResponse hResponse))
+
+end OpenResultRel
+
 /--
 Result relation between the stack-free primitive CALL continuation and the
 EVM-stack continuation at the same primitive boundary.

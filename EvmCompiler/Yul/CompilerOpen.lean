@@ -59,6 +59,64 @@ def eval (prim : Objects.Source.PrimitiveSemantics)
           .ok (state.withShared sharedAfter, valuesAfter)
       | .error err => .error err
 
+theorem openCall?_of_basicOp
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind} {values : List Word}
+    {call : OpenExternal.OpenCall (Objects.Source.State × List Word)}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hCall :
+      SourceStateRel.compilerPrimitiveOpenCall? state kind values =
+        some call) :
+    openCall? state op values =
+      some
+        { site := call.site
+          resume := fun response => .ok (call.resume response) } := by
+  simp [openCall?, hKind, hCall]
+
+theorem eval_suspends_of_basicOp
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind} {values : List Word}
+    {call : OpenExternal.OpenCall (Objects.Source.State × List Word)}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hCall :
+      SourceStateRel.compilerPrimitiveOpenCall? state kind values =
+        some call) :
+    eval prim op state values =
+      .call
+        { site := call.site
+          resume := fun response => .done (.ok (call.resume response)) } := by
+  simp [eval, openCall?_of_basicOp hKind hCall]
+
+theorem openCall?_toBasicOp
+    {state : Objects.Source.State} (kind : OpenExternal.CallKind)
+    {values : List Word}
+    {call : OpenExternal.OpenCall (Objects.Source.State × List Word)}
+    (hCall :
+      SourceStateRel.compilerPrimitiveOpenCall? state kind values =
+        some call) :
+    openCall? state kind.toBasicOp values =
+      some
+        { site := call.site
+          resume := fun response => .ok (call.resume response) } :=
+  openCall?_of_basicOp
+    (kind := kind) (OpenExternal.CallKind.ofBasicOp?_toBasicOp kind) hCall
+
+theorem eval_suspends_toBasicOp
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} (kind : OpenExternal.CallKind)
+    {values : List Word}
+    {call : OpenExternal.OpenCall (Objects.Source.State × List Word)}
+    (hCall :
+      SourceStateRel.compilerPrimitiveOpenCall? state kind values =
+        some call) :
+    eval prim kind.toBasicOp state values =
+      .call
+        { site := call.site
+          resume := fun response => .done (.ok (call.resume response)) } :=
+  eval_suspends_of_basicOp
+    (kind := kind) (OpenExternal.CallKind.ofBasicOp?_toBasicOp kind) hCall
+
 end Primitive
 
 namespace LocalsExpr
