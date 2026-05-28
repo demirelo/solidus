@@ -33786,6 +33786,60 @@ theorem yulOpen_toOpenResult_execSeq_cons_succ
   intro state'
   cases state' <;> rfl
 
+theorem yulOpen_toOpenResult_execSeq_assign_single_eq_bind_evalValues
+    {fuel : Nat} {name : EvmYul.Identifier} {expr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {state : State}
+    (hCheck : EvmYul.Yul.checkAssignment state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel.succ.succ
+          (.Assign [name] expr :: rest) codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues fuel expr codeOverride state))
+        (fun result =>
+          let state' := EvmYul.Yul.State.multifill [name] result.2 result.1
+          match state' with
+          | .Ok _ _ =>
+              OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.execSeq fuel.succ rest codeOverride state')
+          | .OutOfFuel => .done (.ok state')
+          | .Checkpoint _ => .done (.ok state')) := by
+  rw [yulOpen_toOpenResult_execSeq_cons_succ]
+  simp [OpenExternal.YulOpen.exec, hCheck, OpenExternal.YulOpenResult.toOpenResult_bind,
+    EvmYul.Yul.multifill']
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro result
+  cases result.1 <;> rfl
+
+theorem yulOpen_toOpenResult_execSeq_let_single_eq_bind_evalValues
+    {fuel : Nat} {name : EvmYul.Identifier} {expr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {state : State}
+    (hCheck : EvmYul.Yul.checkDeclaration state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel.succ.succ
+          (.Let [name] (some expr) :: rest) codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues fuel expr codeOverride state))
+        (fun result =>
+          let state' := EvmYul.Yul.State.multifill [name] result.2 result.1
+          match state' with
+          | .Ok _ _ =>
+              OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.execSeq fuel.succ rest codeOverride state')
+          | .OutOfFuel => .done (.ok state')
+          | .Checkpoint _ => .done (.ok state')) := by
+  rw [yulOpen_toOpenResult_execSeq_cons_succ]
+  simp [OpenExternal.YulOpen.exec, hCheck, OpenExternal.YulOpenResult.toOpenResult_bind,
+    EvmYul.Yul.multifill']
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro result
+  cases result.1 <;> rfl
+
 theorem compilerOpen_block_runOpen_nil_succ
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
