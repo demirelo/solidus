@@ -30863,6 +30863,95 @@ def run
       | .brk | .cont | .leave | .halt _ =>
           CompilerOpen.invalid
 
+theorem run_done_regular
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.ExprSeq results}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lower compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values))) :
+    run prim program ctx targetFuel pre lower compiler =
+      .done (.ok
+        { state := compilerAfterArgs
+          ctx := ctxAfter
+          values := values }) := by
+  simp [run, hPre, hArgs, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+    Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+
+theorem run_call_of_pre
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.ExprSeq results}
+    {compiler : Objects.Source.State}
+    {preCall :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Functions.EVMException
+          (Functions.Source.Outcome × Functions.Source.Ctx))}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .call preCall) :
+    run prim program ctx targetFuel pre lower compiler =
+      .call
+        { site := preCall.site
+          resume := fun response =>
+            OpenExternal.OpenResult.bind (preCall.resume response)
+              fun preResult =>
+                match preResult.1.mode with
+                | .regular =>
+                    OpenExternal.OpenResult.map
+                      (fun argResult =>
+                        { state := argResult.1
+                          ctx := preResult.2
+                          values := argResult.2 })
+                      (CompilerOpen.LocalsExpr.evalSeq prim lower
+                        preResult.1.state)
+                | .brk | .cont | .leave | .halt _ =>
+                    CompilerOpen.invalid } := by
+  simp [run, hPre, OpenExternal.OpenResult.bind]
+
+theorem run_call_of_args
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.ExprSeq results}
+    {compiler compilerAfterPre : Objects.Source.State}
+    {argCall :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Functions.EVMException
+          (Objects.Source.State × List Word))}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lower compilerAfterPre =
+        .call argCall) :
+    run prim program ctx targetFuel pre lower compiler =
+      .call
+        { site := argCall.site
+          resume := fun response =>
+            OpenExternal.OpenResult.map
+              (fun argResult =>
+                { state := argResult.1
+                  ctx := ctxAfter
+                  values := argResult.2 })
+              (argCall.resume response) } := by
+  simp [run, hPre, hArgs, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, Functions.Source.Outcome.regular,
+    Locals.Source.Outcome.regular]
+
 end SourceArgPreludeOpen
 
 def SourceArgStackPreludeOpenDoneRel
@@ -30993,6 +31082,56 @@ theorem done_ok_of_regularAt_open
   exact
     ⟨compilerAfterPre, targetFuel, target, hPreRun, hArgEval,
       by simpa [hOpenEvalArgs] using hRel⟩
+
+theorem done_ok_of_open_parts
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.ExprSeq results}
+    {responseRel : OpenExternal.CallResponse → Prop}
+    {source sourceAfter : State}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word} {targetFuel : Nat}
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          source =
+        .done (.ok (sourceAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lower compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelAfter : SourceStateRel cfg layout sourceAfter compilerAfterArgs) :
+    SourceArgStackPreludeOpenResultRel cfg layout responseRel
+      (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+        source)
+      (SourceArgPreludeOpen.run prim program ctx targetFuel pre lower
+        compiler) := by
+  have hRun :
+      SourceArgPreludeOpen.run prim program ctx targetFuel pre lower
+          compiler =
+        .done (.ok
+          { state := compilerAfterArgs
+            ctx := ctxAfter
+            values := values }) :=
+    SourceArgPreludeOpen.run_done_regular
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (targetFuel := targetFuel) (pre := pre)
+      (lower := lower) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values)
+      hPre hArgs
+  rw [hOpenEvalArgs, hRun]
+  dsimp [SourceArgStackPreludeOpenResultRel,
+    SourceArgStackPreludeOpenDoneRel,
+    OpenExternal.YulOpenResult.toOpenResult]
+  exact OpenExternal.OpenResultRel.done ⟨hRelAfter, rfl⟩
 
 theorem done_ok_of_regular
     {cfg : StateRelConfig} {layout : List Name}

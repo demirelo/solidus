@@ -55,6 +55,10 @@ being represented only by the old closed `EvmYul.Yul.evalArgs` evidence.
 Completed open Yul argument evaluation now feeds the generated-prelude proof via
 checked open-done-to-closed evaluator agreement lemmas and an adapter from
 `YulOpen.evalArgs = .done ...` to `SourceArgPreludeOpenResultRel`. The
+`SourceArgPreludeOpen.run` wrapper now has checked structural equations for
+regular completion, prelude suspension, and final argument-sequence suspension,
+plus a completed-run relation against the actual wrapper rather than only a
+hand-built target value. The
 remaining CALL-capable step is the true suspending case: prove open Yul
 argument evaluation relates to `SourceArgPreludeOpen.run` when it reaches a
 CALL-family site, then replace expression-prelude consumers that still expect
