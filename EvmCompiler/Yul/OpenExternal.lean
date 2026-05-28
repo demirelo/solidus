@@ -851,6 +851,33 @@ def map {ε : Type u} {α : Type v} {β : Type w}
     (f : α → β) (result : OpenResult ε α) : OpenResult ε β :=
   bind result (fun value => .ok (f value))
 
+theorem bind_congr_next {ε : Type u} {α : Type v} {β : Type w}
+    (result : OpenResult ε α) {next next' : α → OpenResult ε β}
+    (hNext : ∀ value, next value = next' value) :
+    bind result next = bind result next' := by
+  exact
+    (OpenResult.rec
+      (motive_1 := fun result =>
+        ∀ {next next' : α → OpenResult ε β},
+          (∀ value, next value = next' value) →
+            bind result next = bind result next')
+      (motive_2 := fun externalCall =>
+        ∀ {next next' : α → OpenResult ε β},
+          (∀ value, next value = next' value) →
+            bind (.call externalCall) next = bind (.call externalCall) next')
+      (done := by
+        intro result next next' hNext
+        cases result <;> simp [bind, hNext])
+      (call := by
+        intro _ hCall next next' hNext
+        exact hCall hNext)
+      (mk := by
+        intro _ _ ih next next' hNext
+        simp [bind]
+        funext response
+        exact ih response hNext)
+      result) hNext
+
 end OpenResult
 
 namespace CallKind
@@ -1031,6 +1058,36 @@ def toOpenResult {α : Type u} :
         { site := externalCall.site
           resume := fun response =>
             toOpenResult (externalCall.resume response) }
+
+theorem toOpenResult_bind {α : Type u} {β : Type v}
+    (result : YulOpenResult α) (next : α → YulOpenResult β) :
+    toOpenResult (bind result next) =
+      OpenResult.bind (toOpenResult result) (fun value =>
+        toOpenResult (next value)) := by
+  exact
+    (YulOpenResult.rec
+      (motive_1 := fun result =>
+        ∀ next : α → YulOpenResult β,
+          toOpenResult (bind result next) =
+            OpenResult.bind (toOpenResult result) (fun value =>
+              toOpenResult (next value)))
+      (motive_2 := fun externalCall =>
+        ∀ next : α → YulOpenResult β,
+          toOpenResult (bind (.call externalCall) next) =
+            OpenResult.bind (toOpenResult (.call externalCall)) (fun value =>
+              toOpenResult (next value)))
+      (done := by
+        intro result next
+        cases result <;> rfl)
+      (call := by
+        intro _ hCall next
+        exact hCall next)
+      (mk := by
+        intro _ _ ih next
+        simp [bind, toOpenResult, OpenResult.bind]
+        funext response
+        exact ih response next)
+      result) next
 
 @[simp] theorem liftExceptCall_resume {α : Type u}
     (call : OpenCall (Except EvmYul.Yul.Exception α))
