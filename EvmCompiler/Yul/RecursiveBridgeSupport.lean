@@ -32893,6 +32893,154 @@ theorem openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_done_toYulOperation
             (name := identName name) (value := response.statusWord)
             hVars hFresh)
 
+/-- Wrapper for assignment open-result continuation using checked CALL facts. -/
+theorem openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hTargetMem : identName name ∈ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (OpenRegularStmtOpenResultDoneRel cfg layout)
+      (openPrimitiveCallAssignSourceStmtResult name
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel.succ
+            (.Call (.inl yulPrim) args) codeOverride
+            (.Ok sourceShared sourceStore))))
+      (openPrimitiveCallAssignCompilerStmtResult ctxAfter name
+        (OpenExternal.OpenResult.bind
+          (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+            compiler)
+          fun target =>
+            CompilerOpen.Primitive.eval prim op target.state
+              target.values)) := by
+  have hYul : yulPrim = kind.toYulOperation :=
+    OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+  have hOp : op = kind.toBasicOp :=
+    OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst yulPrim
+  subst op
+  have hArity : values.length = kind.inputArity := by
+    simpa using hValuesArity
+  exact
+    openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_done_toYulOperation
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (sourceShared := sourceShared) (sourceSharedAfter := sourceSharedAfter)
+      (sourceStore := sourceStore) (sourceStoreAfter := sourceStoreAfter)
+      (compiler := compiler) (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) name
+      hOpenEvalArgs hPre hArgs hRelArgs hDomainAfter hTargetMem hArity
+
+/-- Wrapper for declaration open-result continuation using checked CALL facts. -/
+theorem openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hFresh : identName name ∉ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (OpenRegularStmtOpenResultDoneRel cfg (identName name :: layout))
+      (openPrimitiveCallLetSourceStmtResult name
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel.succ
+            (.Call (.inl yulPrim) args) codeOverride
+            (.Ok sourceShared sourceStore))))
+      (openPrimitiveCallLetCompilerStmtResult ctxAfter name
+        (OpenExternal.OpenResult.bind
+          (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+            compiler)
+          fun target =>
+            CompilerOpen.Primitive.eval prim op target.state
+              target.values)) := by
+  have hYul : yulPrim = kind.toYulOperation :=
+    OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+  have hOp : op = kind.toBasicOp :=
+    OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst yulPrim
+  subst op
+  have hArity : values.length = kind.inputArity := by
+    simpa using hValuesArity
+  exact
+    openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_done_toYulOperation
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (sourceShared := sourceShared) (sourceSharedAfter := sourceSharedAfter)
+      (sourceStore := sourceStore) (sourceStoreAfter := sourceStoreAfter)
+      (compiler := compiler) (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) name
+      hOpenEvalArgs hPre hArgs hRelArgs hDomainAfter hFresh hArity
+
 /--
 Open statement-level CALL-family continuation for assignment heads.
 
