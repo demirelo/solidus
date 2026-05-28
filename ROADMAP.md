@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 21:06 PDT.
+Last updated: 2026-05-27 21:23 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -42,9 +42,11 @@ the existing no-external-call `Safe.exprs`/`Safe.primitive` family and the
 CALL-admitting `Safe.CallSafe.exprs` family: safe primitives cannot suspend as
 open CALL-family requests, while ordinary `CALL` suspensions propagate the
 local-domain invariant through every possible shared response.
-The remaining CALL-capable step is to replace expression-prelude consumers that
-still expect the old closed `EvmYul.Yul.evalArgs` result with open prelude
-contracts.
+There is now a generic `OpenExternal.OpenResult` carrier/relation and a first
+checked stack-argument prelude open-result surface for completed `.done` runs.
+The remaining CALL-capable step is to make generated preludes actually produce
+this open result in the suspending case, then replace expression-prelude
+consumers that still expect the old closed `EvmYul.Yul.evalArgs` result.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -3250,10 +3252,13 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   proof no longer points back at a concrete callee/chain interpreter. The
   open Yul argument-domain layer now follows nested CALL suspensions through
   every response and recovers exact local-domain preservation for completed
-  reversed-argument evaluation. Remaining work is to replace the recursive
-  closed assignment/let consumers with this open sequence frontier, construct
-  expression-level instances of the open argument-domain contract, remove the
-  old closed argument-domain premise from accepted CALL wrappers, and then
-  compose to the EVM stack boundary.
+  reversed-argument evaluation. The first generic compiler-side
+  `OpenResult`/`OpenResultRel` surface now relates imported Yul open argument
+  results to generated stack-argument preludes in the completed `.done` case.
+  Remaining work is to make generated preludes produce that open result in the
+  suspending case, replace the recursive closed assignment/let consumers with
+  this open sequence frontier, construct expression-level instances of the open
+  argument-domain contract, remove the old closed argument-domain premise from
+  accepted CALL wrappers, and then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.

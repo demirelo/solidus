@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 21:23 PDT - proof/open-arg-prelude-result-surface - Added generic `OpenExternal.OpenResult`, `OpenResultRel`, `YulOpenResult.toOpenResult`, and the stack-argument prelude open-result surface with checked `.done` constructors from the existing regular prelude contracts. Verification: `lake env lean EvmCompiler/Yul/OpenExternal.lean`, `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
+
+- 2026-05-27 21:11 PDT - compaction resume/proof/open-call-prelude-open-contract - Resumed after compaction on the abstract external-call goal; current checkpoint is to introduce an honest suspension-aware argument-prelude contract so generated preludes no longer rely only on closed `EvmYul.Yul.evalArgs`.
+
 - 2026-05-27 21:06 PDT - proof/open-yul-callsafe-domain-constructor - Added the `Safe.CallSafe` constructor for `YulOpenEvalArgsReverseStateDomainExactContract`, including nested ordinary `CALL` suspension/resume handling and the fallback proof that a `.CALL` with no open request cannot successfully change the local store-domain shape. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
 
 - 2026-05-27 17:22 PDT - compaction resume/proof/open-call-prelude - Resumed after compaction on the open external-call goal; current checkpoint is to replace the remaining expression-prelude consumers of closed Yul argument evaluation with open prelude contracts.

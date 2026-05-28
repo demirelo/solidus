@@ -30823,6 +30823,139 @@ def SourceArgStackPreludeRegularAt
         .ok (compilerAfterArgs, values.reverse) ∧
       SourceStateRel cfg layout sourceAfter compilerAfterArgs
 
+/--
+Compiler-side result payload for an external-call-open argument prelude.
+
+This records the state/context after the generated prelude and the lowered
+argument expression sequence have both finished. Suspended executions will use
+`OpenExternal.OpenResult` around this payload.
+-/
+structure SourceArgPreludeOpenTarget where
+  state : Objects.Source.State
+  ctx : Functions.Source.Ctx
+  values : List Word
+
+abbrev SourceArgPreludeOpenResult :=
+  OpenExternal.OpenResult Functions.EVMException SourceArgPreludeOpenTarget
+
+def SourceArgStackPreludeOpenDoneRel
+    (cfg : StateRelConfig) (layout : List Name) :
+    Except EvmYul.Yul.Exception (State × List Word) →
+      Except Functions.EVMException SourceArgPreludeOpenTarget → Prop
+  | .ok sourceResult, .ok target =>
+      SourceStateRel cfg layout sourceResult.1 target.state ∧
+        sourceResult.2 = target.values
+  | _, _ => False
+
+/--
+Open result relation for stack-order generated argument preludes.
+
+The source side is the imported Yul open evaluator. The compiler side is the
+matching open result that a compiler-open evaluator for generated preludes must
+produce. The `call` branch is inherited from `OpenExternal.OpenResultRel`, so a
+nested external call cannot be hidden as an ordinary closed prelude run.
+-/
+def SourceArgStackPreludeOpenResultRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (responseRel : OpenExternal.CallResponse → Prop)
+    (source : OpenExternal.YulOpenResult (State × List Word))
+    (target : SourceArgPreludeOpenResult) : Prop :=
+  OpenExternal.OpenResultRel responseRel
+    (SourceArgStackPreludeOpenDoneRel cfg layout)
+    (OpenExternal.YulOpenResult.toOpenResult source) target
+
+namespace SourceArgStackPreludeOpenResultRel
+
+theorem done_ok_of_regularAt
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.ExprSeq results}
+    {responseRel : OpenExternal.CallResponse → Prop}
+    (hRegular :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args codeOverride pre lower)
+    {source sourceAfter : State} {compiler : Objects.Source.State}
+    {values : List Word}
+    (hInitial : SourceStateRel cfg layout source compiler)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfter, values)) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ targetFuel : Nat,
+    ∃ target : SourceArgPreludeOpenTarget,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre,
+          target.ctx) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (target.state, target.values) ∧
+      SourceArgStackPreludeOpenResultRel cfg layout responseRel
+        (.done (.ok (sourceAfter, values))) (.done (.ok target)) := by
+  have hEvalForRegular :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfter, values.reverse.reverse) := by
+    simpa using hEvalArgs
+  rcases hRegular (values := values.reverse) hInitial hEvalForRegular with
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelAfter⟩
+  have hArgEvalValues :
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, values) := by
+    simpa using hArgEval
+  let target : SourceArgPreludeOpenTarget :=
+    { state := compilerAfterArgs
+      ctx := ctxAfter
+      values := values }
+  refine ⟨compilerAfterPre, targetFuel, target, ?_, ?_, ?_⟩
+  · simpa [target] using hPreRun
+  · simpa [target] using hArgEvalValues
+  · dsimp [SourceArgStackPreludeOpenResultRel,
+      SourceArgStackPreludeOpenDoneRel, OpenExternal.YulOpenResult.toOpenResult,
+      target]
+    exact OpenExternal.OpenResultRel.done ⟨hRelAfter, rfl⟩
+
+theorem done_ok_of_regular
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.ExprSeq results}
+    {responseRel : OpenExternal.CallResponse → Prop}
+    (hRegular :
+      SourceArgStackPreludeRegular cfg layout prim program ctx sourceFuel args
+        codeOverride pre lower)
+    {source sourceAfter : State} {compiler : Objects.Source.State}
+    {values : List Word}
+    (hInitial : SourceStateRel cfg layout source compiler)
+    (hEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfter, values)) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ targetFuel : Nat,
+    ∃ target : SourceArgPreludeOpenTarget,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre,
+          target.ctx) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (target.state, target.values) ∧
+      SourceArgStackPreludeOpenResultRel cfg layout responseRel
+        (.done (.ok (sourceAfter, values))) (.done (.ok target)) :=
+  done_ok_of_regularAt
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
+    (codeOverride := codeOverride) (pre := pre) (results := results)
+    (lower := lower) (responseRel := responseRel) hRegular.2
+    hInitial hEvalArgs
+
+end SourceArgStackPreludeOpenResultRel
+
 theorem exprSeq_eval_seqCast
     {prim : Objects.Source.PrimitiveSemantics}
     {m n : Nat} (h : m = n) (exprs : Locals.ExprSeq m)

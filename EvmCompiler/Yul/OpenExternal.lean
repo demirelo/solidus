@@ -790,6 +790,43 @@ structure OpenCall (State : Type v) where
   site : CallSite
   resume : CallResponse → State
 
+/--
+Generic open result for interpreters that may suspend at an external call.
+
+`YulOpenResult` below predates this generic carrier and is kept as the imported
+Yul-facing result shape. New compiler-side open semantics can use this type
+directly and relate to Yul through `YulOpenResult.toOpenResult`.
+-/
+inductive OpenResult (ε : Type u) (α : Type v) : Type (max u v) where
+  | done : Except ε α → OpenResult ε α
+  | call : OpenCall (OpenResult ε α) → OpenResult ε α
+
+namespace OpenResult
+
+def ok {ε : Type u} {α : Type v} (value : α) : OpenResult ε α :=
+  .done (.ok value)
+
+def error {ε : Type u} {α : Type v} (err : ε) : OpenResult ε α :=
+  .done (.error err)
+
+def bind {ε : Type u} {α : Type v} {β : Type w}
+    (result : OpenResult ε α) (next : α → OpenResult ε β) :
+    OpenResult ε β :=
+  match result with
+  | .done (.ok value) => next value
+  | .done (.error err) => .done (.error err)
+  | .call externalCall =>
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            bind (externalCall.resume response) next }
+
+def map {ε : Type u} {α : Type v} {β : Type w}
+    (f : α → β) (result : OpenResult ε α) : OpenResult ε β :=
+  bind result (fun value => .ok (f value))
+
+end OpenResult
+
 namespace CallKind
 
 def yulOpenCall?
@@ -959,6 +996,15 @@ def liftExceptCall {α : Type u}
     OpenCall (YulOpenResult α) where
   site := call.site
   resume := fun response => .done (call.resume response)
+
+def toOpenResult {α : Type u} :
+    YulOpenResult α → OpenResult EvmYul.Yul.Exception α
+  | .done result => .done result
+  | .call externalCall =>
+      .call
+        { site := externalCall.site
+          resume := fun response =>
+            toOpenResult (externalCall.resume response) }
 
 @[simp] theorem liftExceptCall_resume {α : Type u}
     (call : OpenCall (Except EvmYul.Yul.Exception α))
@@ -1211,6 +1257,32 @@ theorem trans
         hRight.preservesAllResponses response hResponse.2⟩
 
 end OpenCallRel
+
+/--
+Pointwise relation between two open results.
+
+The `call` branch is intentionally visible: a proof cannot relate suspended
+computations without same-site equality and a continuation proof for every
+admissible shared response.
+-/
+inductive OpenResultRel
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    (responseRel : CallResponse → Prop)
+    (doneRel : Except ε₁ α → Except ε₂ β → Prop) :
+    OpenResult ε₁ α → OpenResult ε₂ β → Prop where
+  | done {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β} :
+      doneRel sourceDone targetDone →
+      OpenResultRel responseRel doneRel
+        (.done sourceDone) (.done targetDone)
+  | call
+      {sourceCall : OpenCall (OpenResult ε₁ α)}
+      {targetCall : OpenCall (OpenResult ε₂ β)} :
+      sourceCall.site = targetCall.site →
+      (∀ response, responseRel response →
+        OpenResultRel responseRel doneRel
+          (sourceCall.resume response) (targetCall.resume response)) →
+      OpenResultRel responseRel doneRel
+        (.call sourceCall) (.call targetCall)
 
 /--
 Result relation between the stack-free primitive CALL continuation and the
