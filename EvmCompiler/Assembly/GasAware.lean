@@ -171,8 +171,6 @@ structure XBridgeCertificate
   accepted : Accepted program
   compileBytes_eq : Bytecode.compileBytes? program = some (Bytecode.encodeTarget target)
   encodingCorrect : Bytecode.EncodingCorrect target (Bytecode.encodeTarget target)
-  gasOpcodeBoundary : target.GasOpcodeBoundary
-  gasOracle : GasOracleAssumption program initial
   outOfGasPolicy : OutOfGasPolicyAssumption program initial
   currentContractProjection : CurrentContractProjectionAssumption program initial
   externalInteraction : ExternalInteractionAssumption program target initial
@@ -232,16 +230,13 @@ theorem compile_whole_program_X_bridge {program : Program}
     (hPreconditions : XPreconditionAssumptions target initial sourceFinal) :
     XBridgeCertificate program target fuel initial sourceFinal := by
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasOpcode,
-      hGasOracle, hOutOfGas, hProjection,
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection,
       targetFinal, hTrace, hErase⟩ :=
     compile_whole_program_sound hCompile hRuntime hRun
   exact
     { accepted := hAccepted
       compileBytes_eq := hBytes
       encodingCorrect := hEncoding
-      gasOpcodeBoundary := hGasOpcode
-      gasOracle := hGasOracle
       outOfGasPolicy := hOutOfGas
       currentContractProjection := hProjection
       externalInteraction := hRuntime.externalInteraction

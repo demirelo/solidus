@@ -228,18 +228,6 @@ def compile? (program : Program) : Option TargetProgram :=
     none
 
 /--
-Gas boundary for the source language.
-
-The source semantics may execute `GAS`, but it does not model target-side gas
-deduction.  The value returned by `GAS` is therefore part of the explicit
-agreement with the gas-aware `X` runner rather than a fact derived from the
-gasless block trace alone.
--/
-structure GasOracleAssumption (_program : Program) (_initial : EvmYul.EVM.State) :
-    Prop where
-  gasAccountingIsOutsideSourceSemantics : True
-
-/--
 Out-of-gas policy boundary for the full EVM runner.
 
 The checked gasless theorem proves preservation for successful source runs.
@@ -309,14 +297,6 @@ def withAgreement {program : Program} {target : TargetProgram}
 
 end ExternalInteractionAssumption
 
-namespace GasOracleAssumption
-
-def trivial {program : Program} {initial : EvmYul.EVM.State} :
-    GasOracleAssumption program initial where
-  gasAccountingIsOutsideSourceSemantics := True.intro
-
-end GasOracleAssumption
-
 namespace OutOfGasPolicyAssumption
 
 def trivial {program : Program} {initial : EvmYul.EVM.State} :
@@ -346,7 +326,6 @@ agreement boundary.
 -/
 structure EVMExecutionAssumptions (program : Program) (initial : EvmYul.EVM.State) : Prop where
   accepted : Accepted program
-  gasOracle : GasOracleAssumption program initial
   outOfGasPolicy : OutOfGasPolicyAssumption program initial
   currentContractProjection : CurrentContractProjectionAssumption program initial
 
@@ -355,7 +334,6 @@ namespace EVMExecutionAssumptions
 def noExtraAssumptions {program : Program} {initial : EvmYul.EVM.State}
     (accepted : Accepted program) : EVMExecutionAssumptions program initial where
   accepted := accepted
-  gasOracle := GasOracleAssumption.trivial
   outOfGasPolicy := OutOfGasPolicyAssumption.trivial
   currentContractProjection := CurrentContractProjectionAssumption.trivial
 

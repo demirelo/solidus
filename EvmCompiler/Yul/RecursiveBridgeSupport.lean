@@ -179542,8 +179542,6 @@ theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_succe
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -179635,8 +179633,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -179738,8 +179734,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -179843,8 +179837,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -179947,8 +179939,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180042,8 +180032,6 @@ theorem compile_whole_program_result_sound_of_programRecursiveSourceBridgeWhenUp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180150,8 +180138,6 @@ theorem compile_whole_program_result_sound_of_programRecursiveSourceBridgeWhenUp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180243,8 +180229,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveSourceBrid
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180350,8 +180334,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveSourceBrid
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180444,8 +180426,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveSourceBrid
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180551,8 +180531,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveSourceBrid
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180690,8 +180668,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180845,8 +180821,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -180998,8 +180972,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -181136,8 +181108,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -181288,8 +181258,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -181458,8 +181426,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -181591,8 +181557,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -181719,8 +181683,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -182352,8 +182314,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -182469,8 +182429,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -185018,8 +184976,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -185084,8 +185040,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -185479,8 +185433,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -185519,7 +185471,6 @@ def withNoCallCreate {asm : Assembly.Program}
     {target : Assembly.TargetProgram} {initial : EVMState}
     (decodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
     (jumpdestCorrect : Assembly.Bytecode.JumpdestCorrect target)
-    (gasOracle : Assembly.GasOracleAssumption asm initial)
     (outOfGasPolicy : Assembly.OutOfGasPolicyAssumption asm initial)
     (currentContractProjection :
       Assembly.CurrentContractProjectionAssumption asm initial)
@@ -185529,7 +185480,7 @@ def withNoCallCreate {asm : Assembly.Program}
     RecursiveBridgeTargetRuntime asm target initial where
   runtime :=
     Assembly.RuntimeAssumptions.withNoCallCreate decodeWindow jumpdestCorrect
-      gasOracle outOfGasPolicy currentContractProjection hNoCallCreate
+      outOfGasPolicy currentContractProjection hNoCallCreate
   initialPc := hInitialPc
   initialStack := hInitialStack
 
@@ -185581,8 +185532,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -185676,8 +185625,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186074,8 +186021,6 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186129,8 +186074,6 @@ theorem compile_whole_program_result_sound_with_source_run_of_programAcceptedRec
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186309,8 +186252,6 @@ theorem compile_whole_program_result_sound_of_programRecursiveSourceBridgeWhenUp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186402,8 +186343,6 @@ theorem compile_whole_program_result_sound_of_programRecursiveSourceBridgeWhenUp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186489,8 +186428,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186577,8 +186514,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186667,8 +186602,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186758,8 +186691,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186848,8 +186779,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -186941,8 +186870,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -187030,8 +186957,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -187119,8 +187044,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAt_sc
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -187214,8 +187137,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAtExa
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult

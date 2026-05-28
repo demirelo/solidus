@@ -71932,8 +71932,6 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_result_bridge
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -71950,13 +71948,12 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_result_bridge
     ⟨dispatcherAfter, cleaned, loweredFuel, targetFuel, targetOutcome,
       hReference, hSource, hLowered, hRel, hReturns, hRun, hOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound hAssemble hRuntime hRun
   exact
     ⟨dispatcherAfter, cleaned, loweredFuel, targetFuel, targetOutcome,
       hReference, hSource, hLowered, hRel, hReturns, hOutcome, hAccepted,
-      hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas, hProjection,
+      hBytes, hEncoding, hOutOfGas, hProjection,
       hTrace⟩
 
 theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridge_error
@@ -72024,8 +72021,6 @@ theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridg
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -72043,13 +72038,12 @@ theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridg
       hReference, hSource, hLowered, hRel, hReturns, hNonregular, hRun,
       hOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound hAssemble hRuntime hRun
   exact
     ⟨sourceResult, outcome, loweredFuel, targetFuel, targetOutcome,
       hReference, hSource, hLowered, hRel, hReturns, hNonregular, hOutcome,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridge_checkpoint
@@ -72117,8 +72111,6 @@ theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridg
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -72136,13 +72128,12 @@ theorem compile_whole_program_result_sound_of_nonregular_dispatcher_result_bridg
       hReference, hSource, hLowered, hRel, hReturns, hNonregular, hRun,
       hOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound hAssemble hRuntime hRun
   exact
     ⟨sourceResult, outcome, loweredFuel, targetFuel, targetOutcome,
       hReference, hSource, hLowered, hRel, hReturns, hNonregular, hOutcome,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_preserves_of_lowered_bridge
@@ -72420,8 +72411,6 @@ theorem compile_preserves_result_to_bytecode
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -72430,13 +72419,12 @@ theorem compile_preserves_result_to_bytecode
     ⟨targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun, hOutcomeRel, hWholeRel,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_preserves_source_exists_to_bytecode
@@ -72467,8 +72455,6 @@ theorem compile_preserves_source_exists_to_bytecode
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -72477,13 +72463,12 @@ theorem compile_preserves_source_exists_to_bytecode
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hOutcomeRel,
-      hWholeRel, hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle,
+      hWholeRel, hAccepted, hBytes, hEncoding,
       hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_preserves_of_dispatcher_stop_call_compileAccepted
@@ -72707,8 +72692,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_stop_call_compileAccept
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -72726,13 +72709,12 @@ theorem compile_whole_program_result_sound_of_dispatcher_stop_call_compileAccept
     ⟨targetFuel, targetOutcome, hReferenceRun, hTargetRun, hOutcome,
       hWhole⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun, hOutcome, hWhole,
-      hAsmAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAsmAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_preserves_of_dispatcher_return_zero_zero_call_compileAccepted
@@ -73554,8 +73536,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_zero_zero_call_c
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -73677,8 +73657,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_zero_zero_call_c
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -73798,8 +73776,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_lit_lit_call_com
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -73916,8 +73892,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_call_com
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -74037,8 +74011,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_selfdestruct_zero_call_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -74961,8 +74933,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75112,8 +75082,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75267,8 +75235,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_selfdestruct_lit_prelud
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75843,8 +75809,6 @@ theorem compile_whole_program_result_sound_of_source_bridge
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75861,14 +75825,12 @@ theorem compile_whole_program_result_sound_of_source_bridge
     ⟨targetFuel, targetOutcome, hReferenceRun, hTargetRun, hReferenceOutcome,
       hSourceOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun, hReferenceOutcome,
-      hSourceOutcome, hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hSourceOutcome, hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_source_bridge_compileAccepted
     {prim : Objects.Source.PrimitiveSemantics}
@@ -75903,8 +75865,6 @@ theorem compile_whole_program_result_sound_of_source_bridge_compileAccepted
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75921,14 +75881,12 @@ theorem compile_whole_program_result_sound_of_source_bridge_compileAccepted
     ⟨targetFuel, targetOutcome, hReferenceRun, hTargetRun, hReferenceOutcome,
       hSourceOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun, hReferenceOutcome,
-      hSourceOutcome, hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hSourceOutcome, hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_assembly_preservation
     {outcomeRel : Reference.OutcomeRel}
@@ -75959,8 +75917,6 @@ theorem compile_whole_program_result_sound_of_assembly_preservation
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -75969,13 +75925,12 @@ theorem compile_whole_program_result_sound_of_assembly_preservation
     ⟨targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun, hOutcomeRel, hWholeRel,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_reference_source_runs
@@ -76014,8 +75969,6 @@ theorem compile_whole_program_result_sound_of_reference_source_runs
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76068,8 +76021,6 @@ theorem compile_whole_program_result_sound_of_reference_source_runs_compileAccep
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76128,8 +76079,6 @@ theorem compile_whole_program_result_sound_of_source_bridge_nonempty_compileAcce
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76146,13 +76095,13 @@ theorem compile_whole_program_result_sound_of_source_bridge_nonempty_compileAcce
         hInitialStack
         (by rw [hBridgeInitial, hSourceInitial]) with
     ⟨targetFuel, targetOutcome, hReferenceRun, hOutcomeRel, hWholeRel,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
   exact
     ⟨targetFuel, targetOutcome, hReferenceRun,
       by simpa [hBridgeOutcome] using hOutcomeRel,
       by simpa [hBridgeOutcome] using hWholeRel,
-      hAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hAccepted, hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_regular_dispatcher_scoped_source_bridge
@@ -76233,8 +76182,6 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_scoped_source_b
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76252,14 +76199,13 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_scoped_source_b
     ⟨sourceAfter, compilerAfter, targetFuel, targetOutcome, hReferenceRun,
       hTargetRun, hReferenceOutcome, hSourceOutcome⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceAfter, compilerAfter, targetFuel, targetOutcome, hReferenceRun,
       hReferenceOutcome, hSourceOutcome, hAsmAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge
     {prim : Objects.Source.PrimitiveSemantics}
@@ -76327,8 +76273,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76346,14 +76290,13 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hReferenceOutcome, hSourceOutcome⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun,
       hReferenceOutcome, hSourceOutcome, hAsmAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bridge
     {cfg : Reference.StateRelConfig} {layout : List Name}
@@ -76429,8 +76372,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bri
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -76449,14 +76390,13 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bri
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hReferenceOutcome, hSourceOutcome⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun,
       hReferenceOutcome, hSourceOutcome, hAsmAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_sound
     {cfg : Reference.StateRelConfig} {layout : List Name}
@@ -76531,8 +76471,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_sou
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -77982,8 +77920,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -78130,8 +78066,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -78270,8 +78204,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_return_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -78874,8 +78806,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -79018,8 +78948,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -79154,8 +79082,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_revert_lit_lit_prelude_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -79797,8 +79723,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_selfdestruct_lit_prelud
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -79949,8 +79873,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_selfdestruct_lit_prelud
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80094,8 +80016,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_selfdestruct_lit_prelud
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80198,8 +80118,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bri
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80218,13 +80136,12 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_bri
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hOutcomeRel,
-      hWholeRel, hAsmAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle,
+      hWholeRel, hAsmAccepted, hBytes, hEncoding,
       hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_with_source_run_of_dispatcher_source_result_block_bridge_compileAccepted
@@ -80301,8 +80218,6 @@ theorem compile_whole_program_result_sound_with_source_run_of_dispatcher_source_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80321,14 +80236,13 @@ theorem compile_whole_program_result_sound_with_source_run_of_dispatcher_source_
     ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
       hReferenceRun, hSourceRun, hTargetRun, hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
       hReferenceRun, hSourceRun, hOutcomeRel, hWholeRel, hAsmAccepted,
-      hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas, hProjection,
+      hBytes, hEncoding, hOutOfGas, hProjection,
       hTrace⟩
 
 theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_run_bridge_compileAccepted
@@ -80382,8 +80296,6 @@ theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_run_b
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80488,8 +80400,6 @@ theorem compile_whole_program_result_sound_with_source_run_of_checked_recursive_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80600,8 +80510,6 @@ theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_succe
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80690,8 +80598,6 @@ theorem compile_whole_program_result_sound_of_checked_dispatcher_lowering_sound_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80782,8 +80688,6 @@ theorem compile_whole_program_result_sound_of_initial_stmtBlockLoweringSoundWhen
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80869,8 +80773,6 @@ theorem compile_whole_program_result_sound_of_recursiveDispatcherSuccessfulBridg
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -80957,8 +80859,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpTo_comp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81051,8 +80951,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeWhenUpToAt_co
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81143,8 +81041,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_result_block_sou
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81253,8 +81149,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_sound_compileAcc
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81342,8 +81236,6 @@ theorem compile_whole_program_result_sound_of_checked_dispatcher_lowering_sound_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81431,8 +81323,6 @@ theorem compile_whole_program_result_sound_of_checked_dispatcher_run_sound_compi
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81530,8 +81420,6 @@ theorem compile_whole_program_result_sound_of_checked_dispatcher_run_observation
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81613,8 +81501,6 @@ theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_sound
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81695,8 +81581,6 @@ theorem compile_whole_program_result_sound_of_initial_stmt_block_lowering_fresh_
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81781,8 +81665,6 @@ theorem compile_whole_program_result_sound_of_recursiveDispatcherBridgeUpTo_comp
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81866,8 +81748,6 @@ theorem compile_whole_program_result_sound_of_recursiveDispatcherBridge_compileA
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -81948,8 +81828,6 @@ theorem compile_whole_program_result_sound_of_recursiveSourceBridgeUpTo_compileA
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -82289,8 +82167,6 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_scoped_source_b
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -82308,14 +82184,13 @@ theorem compile_whole_program_result_sound_of_regular_dispatcher_scoped_source_b
     ⟨sourceAfter, compilerAfter, targetFuel, targetOutcome, hReferenceRun,
       hTargetRun, hReferenceOutcome, hWholeRel⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceAfter, compilerAfter, targetFuel, targetOutcome, hReferenceRun,
       hReferenceOutcome, hWholeRel, hAsmAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge_compileAccepted
     {prim : Objects.Source.PrimitiveSemantics}
@@ -82381,8 +82256,6 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge_com
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm initial ∧
                 Assembly.OutOfGasPolicyAssumption asm initial ∧
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
@@ -82400,13 +82273,12 @@ theorem compile_whole_program_result_sound_of_dispatcher_source_block_bridge_com
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hTargetRun,
       hOutcomeRel, hWholeRel⟩
   obtain
-    ⟨hAsmAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hTargetRun
   exact
     ⟨sourceOutcome, targetFuel, targetOutcome, hReferenceRun, hOutcomeRel,
-      hWholeRel, hAsmAccepted, hBytes, hEncoding, hGasBoundary, hGasOracle,
+      hWholeRel, hAsmAccepted, hBytes, hEncoding,
       hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_lowered_bridge
@@ -82432,8 +82304,6 @@ theorem compile_whole_program_result_sound_of_lowered_bridge
           some (Assembly.Bytecode.encodeTarget target) ∧
           Assembly.Bytecode.EncodingCorrect target
             (Assembly.Bytecode.encodeTarget target) ∧
-            target.GasOpcodeBoundary ∧
-              Assembly.GasOracleAssumption asm bridge.compilerInitial ∧
                 Assembly.OutOfGasPolicyAssumption
                   asm bridge.compilerInitial ∧
                   Assembly.CurrentContractProjectionAssumption
@@ -82444,13 +82314,12 @@ theorem compile_whole_program_result_sound_of_lowered_bridge
   rcases compile_preserves_of_lowered_bridge bridge hCompile hInitialPc with
     ⟨targetFuel, targetOutcome, hRun, hOutcome⟩
   obtain
-    ⟨hAccepted, hBytes, hEncoding, hGasBoundary,
-      hGasOracle, hOutOfGas, hProjection, hTrace⟩ :=
+    ⟨hAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
     Assembly.compile_whole_program_result_sound
       hAssemble hRuntime hRun
   exact
     ⟨targetFuel, targetOutcome, hOutcome, hAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_lowered_bridge_with_result_rel
     {stateRel : Reference.LoweredStateRel}
@@ -82476,9 +82345,6 @@ theorem compile_whole_program_result_sound_of_lowered_bridge_with_result_rel
               some (Assembly.Bytecode.encodeTarget target) ∧
               Assembly.Bytecode.EncodingCorrect target
                 (Assembly.Bytecode.encodeTarget target) ∧
-                target.GasOpcodeBoundary ∧
-                  Assembly.GasOracleAssumption
-                    asm bridge.compilerInitial ∧
                     Assembly.OutOfGasPolicyAssumption
                       asm bridge.compilerInitial ∧
                       Assembly.CurrentContractProjectionAssumption
@@ -82490,10 +82356,10 @@ theorem compile_whole_program_result_sound_of_lowered_bridge_with_result_rel
     compile_whole_program_result_sound_of_lowered_bridge
       bridge hCompile hAssemble hRuntime hInitialPc with
     ⟨targetFuel, targetOutcome, hOutcome, hAccepted, hBytes, hEncoding,
-      hGasBoundary, hGasOracle, hOutOfGas, hProjection, hTrace⟩
+      hOutOfGas, hProjection, hTrace⟩
   exact
     ⟨targetFuel, targetOutcome, bridge.outcomeRel, hOutcome, hAccepted,
-      hBytes, hEncoding, hGasBoundary, hGasOracle, hOutOfGas,
+      hBytes, hEncoding, hOutOfGas,
       hProjection, hTrace⟩
 
 end Program
