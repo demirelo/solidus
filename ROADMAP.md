@@ -3281,11 +3281,15 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   `OpenResult`/`OpenResultRel` surface now relates imported Yul open argument
   results to generated stack-argument preludes in the completed `.done` case,
   and its call branch now permits call-specific admissible-response predicates
-  for nested state-dependent external calls.
+  for nested state-dependent external calls. The checked hidden-context open
+  sequence target and `CALLOpenSeqLoweringFrontierAt` now name the exact
+  recursive-spine replacement needed for CALL: checked lowering to
+  `YulOpen.execSeq`/`CompilerOpen`, with response preservation quantified by
+  `OpenResultRel`, rather than the old closed sequence result relation.
   Remaining work is to make generated preludes produce that open result in the
-  suspending case, replace the recursive closed assignment/let consumers with
-  this open sequence frontier, construct expression-level instances of the open
-  argument-domain contract, remove the old closed argument-domain premise from
-  accepted CALL wrappers, and then compose to the EVM stack boundary.
+  suspending case, prove the recursive assignment/let CALL consumers against
+  `CALLOpenSeqLoweringFrontierAt`, construct expression-level instances of the
+  open argument-domain contract, remove the old closed argument-domain premise
+  from accepted CALL wrappers, and then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
