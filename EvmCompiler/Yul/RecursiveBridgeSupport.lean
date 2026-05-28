@@ -33401,14 +33401,19 @@ theorem openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_open_toYulOperat
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hTargetMem : identName name ∈ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -33513,8 +33518,8 @@ theorem openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_open_toYulOperat
           .done (.ok
             (targetResult.1.insert (identName name) value, ctxAfter))
       | _ => CompilerOpen.invalid)]
-  refine OpenExternal.OpenResultRel.bind hPrelude ?_ ?_
-  · intro sourceDone targetDone hDone
+  refine OpenResultDoneInvariant.bind_left hPrelude hArgDoneInvariant ?_ ?_
+  · intro sourceDone targetDone hDone hSourceDoneInv
     cases sourceDone with
     | error _ =>
         cases targetDone <;> contradiction
@@ -33529,12 +33534,11 @@ theorem openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_open_toYulOperat
                 OpenExternal.CallKind.exists_operands_of_reverse_args_length
                   kind hLength with
               ⟨operands, hValues⟩
-            have hDoneForDomain := hDone
             rcases hDone with ⟨hRelArgs, hTargetValuesEq⟩
             cases hRelArgs with
             | @ok sourceSharedAfter sourceStoreAfter _ hShared hVars =>
                 have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
-                  hDomain (target := target) hDoneForDomain
+                  hSourceDoneInv rfl
                 rcases
                     CompilerOpen.Primitive.yulCompilerOpenCallRel_toYulOperation
                       (cfg := cfg) (layout := layout)
@@ -33674,14 +33678,19 @@ theorem openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_open_toYulOperation
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hFresh : identName name ∉ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -33776,8 +33785,8 @@ theorem openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_open_toYulOperation
     (next' := fun sourceResult =>
       .done (EvmYul.Yul.multifill' [name] (.ok sourceResult)))]
   simp only [openResult_bind_assoc_sourceBridge]
-  refine OpenExternal.OpenResultRel.bind hPrelude ?_ ?_
-  · intro sourceDone targetDone hDone
+  refine OpenResultDoneInvariant.bind_left hPrelude hArgDoneInvariant ?_ ?_
+  · intro sourceDone targetDone hDone hSourceDoneInv
     cases sourceDone with
     | error _ =>
         cases targetDone <;> contradiction
@@ -33792,12 +33801,11 @@ theorem openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_open_toYulOperation
                 OpenExternal.CallKind.exists_operands_of_reverse_args_length
                   kind hLength with
               ⟨operands, hValues⟩
-            have hDoneForDomain := hDone
             rcases hDone with ⟨hRelArgs, hTargetValuesEq⟩
             cases hRelArgs with
             | @ok sourceSharedAfter sourceStoreAfter _ hShared hVars =>
                 have hDomainAfter : StoreDomainExact layout sourceStoreAfter :=
-                  hDomain (target := target) hDoneForDomain
+                  hSourceDoneInv rfl
                 rcases
                     CompilerOpen.Primitive.yulCompilerOpenCallRel_toYulOperation
                       (cfg := cfg) (layout := layout)
@@ -43322,14 +43330,19 @@ theorem openPrimitiveCallAssignOpenSeqOpenResultRel_of_arg_prelude_open_toYulOpe
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hTargetMem : identName name ∈ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -43472,7 +43485,7 @@ theorem openPrimitiveCallAssignOpenSeqOpenResultRel_of_arg_prelude_open_toYulOpe
       (source := source) (compiler := compiler)
       (preludeCallResponseRel := preludeCallResponseRel)
       (callResponseRel := stmtCallResponseRel) name hPrelude hArity
-      hDomain hTargetMem hPrimitiveResponse hPreludeResponse
+      hArgDoneInvariant hTargetMem hPrimitiveResponse hPreludeResponse
   exact
     openRegularStmtOpenResultRel_bind_openSeq_tail_hidden
       (cfg := cfg) (layoutMid := layout) (outcomeLayout := outcomeLayout)
@@ -43536,14 +43549,19 @@ theorem openPrimitiveCallLetOpenSeqOpenResultRel_of_arg_prelude_open_toYulOperat
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hFresh : identName name ∉ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -43689,7 +43707,7 @@ theorem openPrimitiveCallLetOpenSeqOpenResultRel_of_arg_prelude_open_toYulOperat
       (source := source) (compiler := compiler)
       (preludeCallResponseRel := preludeCallResponseRel)
       (callResponseRel := stmtCallResponseRel) name hPrelude hArity
-      hDomain hFresh hPrimitiveResponse hPreludeResponse
+      hArgDoneInvariant hFresh hPrimitiveResponse hPreludeResponse
   exact
     openRegularStmtOpenResultRel_bind_openSeq_tail_hidden
       (cfg := cfg) (layoutMid := identName name :: layout)
@@ -44197,14 +44215,19 @@ theorem yulOpen_execSeq_assign_call_openSeqOpenResultRel_of_arg_prelude_open_toY
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hTargetMem : identName name ∈ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -44329,8 +44352,9 @@ theorem yulOpen_execSeq_assign_call_openSeqOpenResultRel_of_arg_prelude_open_toY
       (compiler := compiler) (rest := rest) (lowerTail := lowerTail)
       (allowed := allowed) (preludeCallResponseRel := preludeCallResponseRel)
       (stmtCallResponseRel := stmtCallResponseRel)
-      (seqCallResponseRel := seqCallResponseRel) name hPrelude hArity hDomain
-      hTargetMem hPrimitiveResponse hPreludeResponse hTail hCallResponse
+      (seqCallResponseRel := seqCallResponseRel) name hPrelude hArity
+      hArgDoneInvariant hTargetMem hPrimitiveResponse hPreludeResponse hTail
+      hCallResponse
 
 /--
 Actual open Yul declaration-CALL sequence head with an open argument prelude,
@@ -44383,14 +44407,19 @@ theorem yulOpen_execSeq_let_call_openSeqOpenResultRel_of_arg_prelude_open_toYulO
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hFresh : identName name ∉ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -44518,8 +44547,9 @@ theorem yulOpen_execSeq_let_call_openSeqOpenResultRel_of_arg_prelude_open_toYulO
       (compiler := compiler) (rest := rest) (lowerTail := lowerTail)
       (allowed := allowed) (preludeCallResponseRel := preludeCallResponseRel)
       (stmtCallResponseRel := stmtCallResponseRel)
-      (seqCallResponseRel := seqCallResponseRel) name hPrelude hArity hDomain
-      hFresh hPrimitiveResponse hPreludeResponse hTail hCallResponse
+      (seqCallResponseRel := seqCallResponseRel) name hPrelude hArity
+      hArgDoneInvariant hFresh hPrimitiveResponse hPreludeResponse hTail
+      hCallResponse
 
 /-- Associativity for the generic open-result bind. -/
 theorem openResult_bind_assoc
@@ -45235,14 +45265,19 @@ theorem yulOpen_execSeq_assign_call_compilerOpen_openSeqOpenResultRel_of_arg_pre
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hTargetMem : identName name ∈ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -45370,7 +45405,7 @@ theorem yulOpen_execSeq_assign_call_compilerOpen_openSeqOpenResultRel_of_arg_pre
       (preludeCallResponseRel := preludeCallResponseRel)
       (stmtCallResponseRel := stmtCallResponseRel)
       (seqCallResponseRel := seqCallResponseRel) name hCheck hPrelude hArity
-      hDomain hTargetMem hPrimitiveResponse hPreludeResponse hTail
+      hArgDoneInvariant hTargetMem hPrimitiveResponse hPreludeResponse hTail
       hCallResponse
 
 /--
@@ -45432,14 +45467,19 @@ theorem yulOpen_execSeq_let_call_compilerOpen_openSeqOpenResultRel_of_arg_prelud
         SourceArgStackPreludeOpenDoneRel cfg layout
           (.ok sourceResult) (.ok target) →
           sourceResult.2.length = kind.inputArity)
-    (hDomain :
-      ∀ {sourceShared : EvmYul.SharedState .Yul}
-        {sourceStore : EvmYul.Yul.VarStore}
-        {values : List Word} {target : SourceArgPreludeOpenTarget},
-        SourceArgStackPreludeOpenDoneRel cfg layout
-          (.ok ((.Ok sourceShared sourceStore : State), values))
-          (.ok target) →
-          StoreDomainExact layout sourceStore)
+    (hArgDoneInvariant :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceSharedAfter : EvmYul.SharedState .Yul}
+            {sourceStoreAfter : EvmYul.Yul.VarStore}
+            {values : List Word},
+            doneResult =
+                .ok ((.Ok sourceSharedAfter sourceStoreAfter : State),
+                  values) →
+              StoreDomainExact layout sourceStoreAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source)))
     (hFresh : identName name ∉ layout)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -45570,7 +45610,8 @@ theorem yulOpen_execSeq_let_call_compilerOpen_openSeqOpenResultRel_of_arg_prelud
       (preludeCallResponseRel := preludeCallResponseRel)
       (stmtCallResponseRel := stmtCallResponseRel)
       (seqCallResponseRel := seqCallResponseRel) name hCheck hPrelude hArity
-      hDomain hFresh hPrimitiveResponse hPreludeResponse hTail hCallResponse
+      hArgDoneInvariant hFresh hPrimitiveResponse hPreludeResponse hTail
+      hCallResponse
 
 /--
 Actual open Yul assignment-CALL sequence head, paired with the actual emitted
