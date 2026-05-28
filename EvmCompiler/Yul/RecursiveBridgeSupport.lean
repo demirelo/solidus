@@ -45767,6 +45767,69 @@ theorem openResult_bind_assoc
         exact ih response next next')
       result) next next'
 
+/--
+Open append law for compiler-generated argument preludes.
+
+The old closed proof could compose generated preludes with a suffix only after
+the prelude had already completed. For CALL-capable argument code we need the
+open version: if a generated prelude suspends on an external request, both the
+standalone prelude run and the full `pre ++ suffix` run expose that same request,
+and every response resumes with the same suffix continuation.
+-/
+theorem compilerOpen_generatedPrelude_runOpen_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} :
+    ∀ {pre suffix : List Functions.Stmt}
+      {ctx : Functions.Source.Ctx} {state : Objects.Source.State}
+      {suffixFuel : Nat},
+      GeneratedPrelude pre →
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel) { stmts := pre ++ suffix } state =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (pre.length + suffixFuel) { stmts := pre } state)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                  preResult.2 suffixFuel { stmts := suffix }
+                  preResult.1.state
+            | .brk | .cont | .leave | .halt _ => CompilerOpen.invalid) := by
+  intro pre suffix ctx state suffixFuel hPreShape
+  induction hPreShape generalizing suffix ctx state suffixFuel with
+  | nil =>
+      cases suffixFuel <;>
+        simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+          CompilerOpen.invalid, Functions.Source.invalid,
+          Structured.invalid,
+          Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+  | let_ hRest ih =>
+      rename_i name expr rest
+      have hFuel :
+          (Functions.Stmt.let_ name expr :: rest).length + suffixFuel =
+            (rest.length + suffixFuel).succ := by
+        simp
+        omega
+      rw [hFuel]
+      simp only [List.cons_append]
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [compilerOpen_block_runOpen_cons_succ]
+      simp [List.length_cons,
+        CompilerOpen.FunctionsOpen.Stmt.run, OpenExternal.OpenResult.ok]
+      rw [openResult_bind_assoc]
+      rw [openResult_bind_assoc]
+      rw [openResult_bind_assoc]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro evalResult
+      simpa [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+        Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+        Locals.Source.State.insert] using
+        (ih (suffix := suffix)
+          (ctx := { ctx with scope := name :: ctx.scope })
+          (state := evalResult.1.insert name evalResult.2)
+          (suffixFuel := suffixFuel))
+
 /-- Open compiler expression shape for an output-one primitive cast. -/
 theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
     {prim : Objects.Source.PrimitiveSemantics}
