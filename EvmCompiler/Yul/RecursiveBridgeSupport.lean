@@ -32736,6 +32736,60 @@ theorem yulOpen_toOpenResult_execSeq_cons_succ
   intro state'
   cases state' <;> rfl
 
+theorem yulOpen_toOpenResult_execSeq_assign_call_of_check_ok
+    {sourceFuel : Nat} {name : EvmYul.Identifier}
+    {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {state : State}
+    (hCheck : EvmYul.Yul.checkAssignment state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+          codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallAssignSourceStmtResult name
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ
+              (.Call (.inl yulPrim) args) codeOverride state)))
+        (fun state' =>
+          match state' with
+          | .Ok _ _ =>
+              OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                  codeOverride state')
+          | .OutOfFuel => .done (.ok state')
+          | .Checkpoint _ => .done (.ok state')) := by
+  rw [yulOpen_toOpenResult_execSeq_cons_succ]
+  rw [yulOpen_toOpenResult_exec_assign_call_of_check_ok hCheck]
+  rfl
+
+theorem yulOpen_toOpenResult_execSeq_let_call_of_check_ok
+    {sourceFuel : Nat} {name : EvmYul.Identifier}
+    {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {state : State}
+    (hCheck : EvmYul.Yul.checkDeclaration state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Let [name] (some (.Call (.inl yulPrim) args)) :: rest)
+          codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallLetSourceStmtResult name
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ
+              (.Call (.inl yulPrim) args) codeOverride state)))
+        (fun state' =>
+          match state' with
+          | .Ok _ _ =>
+              OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                  codeOverride state')
+          | .OutOfFuel => .done (.ok state')
+          | .Checkpoint _ => .done (.ok state')) := by
+  rw [yulOpen_toOpenResult_execSeq_cons_succ]
+  rw [yulOpen_toOpenResult_exec_let_call_of_check_ok hCheck]
+  rfl
+
 def openPrimitiveCallLetCompilerStmtResult
     (ctx : Functions.Source.Ctx) (name : EvmYul.Identifier)
     (target :
