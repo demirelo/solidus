@@ -117,6 +117,69 @@ theorem eval_suspends_toBasicOp
   eval_suspends_of_basicOp
     (kind := kind) (OpenExternal.CallKind.ofBasicOp?_toBasicOp kind) hCall
 
+def ResultRel (cfg : StateRelConfig) (layout : List Name) :
+    Except EvmYul.Yul.Exception (EvmYul.Yul.State × List Word) →
+      Except Functions.EVMException (Objects.Source.State × List Word) →
+        Prop
+  | .ok sourceResult, .ok compilerResult =>
+      SourceStateRel.OpenPrimitiveResultRel cfg layout sourceResult
+        compilerResult
+  | _, _ => False
+
+theorem yulCompilerOpenCallRel_toYulOperation
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    (hRel :
+      SourceStateRel cfg layout (.Ok sourceShared store) compiler)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands) :
+    ∃ sourceCall :
+        OpenExternal.OpenCall
+          (Except EvmYul.Yul.Exception
+            (EvmYul.Yul.State × List Word)),
+    ∃ compilerCall :
+        OpenExternal.OpenCall
+          (Except Functions.EVMException
+            (Objects.Source.State × List Word)),
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          (.Ok sourceShared store) kind.toYulOperation
+          (kind.args operands) =
+        some sourceCall ∧
+      openCall? compiler kind.toBasicOp (kind.args operands).reverse =
+        some compilerCall ∧
+      OpenExternal.OpenCallRel
+        (SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compiler.shared)
+        (ResultRel cfg layout) sourceCall compilerCall := by
+  rcases
+      SourceStateRel.openExternalPrimitiveOpenCallRel_of_args
+        hRel kind operands with
+    ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
+  let sourceExceptCall :
+      OpenExternal.OpenCall
+        (Except EvmYul.Yul.Exception (EvmYul.Yul.State × List Word)) :=
+    { site := sourceCall.site
+      resume := fun response => .ok (sourceCall.resume response) }
+  let compilerExceptCall :
+      OpenExternal.OpenCall
+        (Except Functions.EVMException
+          (Objects.Source.State × List Word)) :=
+    { site := compilerCall.site
+      resume := fun response => .ok (compilerCall.resume response) }
+  refine ⟨sourceExceptCall, compilerExceptCall, ?_, ?_, ?_⟩
+  · simp [OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?,
+      OpenExternal.CallKind.ofYulOperation?_toYulOperation, hSourceCall,
+      sourceExceptCall]
+  · simpa [compilerExceptCall] using
+      openCall?_toBasicOp (state := compiler) kind hCompilerCall
+  · constructor
+    · simpa [sourceExceptCall, compilerExceptCall] using hCallRel.sameSite
+    · intro response hResponse
+      dsimp [sourceExceptCall, compilerExceptCall, ResultRel]
+      exact hCallRel.preservesAllResponses response hResponse
+
 end Primitive
 
 namespace LocalsExpr
