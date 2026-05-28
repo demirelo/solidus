@@ -179820,6 +179820,100 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude_callKind
     ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
       hPreRun, hArgEval, hRelArgs, hOpen⟩
 
+/--
+Open-result version of `openPrimitiveEVMCallSound_of_argStackPrelude_callKind`.
+
+This exposes the direct Yul-open-result/EVM-open-result relation after the
+checked argument prelude has produced the post-argument compiler state.  It is
+constructed from the state relation, not assumed by the semantic contract.
+-/
+theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (_hContracts :
+      RecursiveBridgeCALLSemanticContracts cfg terminalRel revertRel prim
+        outcomeRel program shared store)
+    {layout : List Name}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerProgram : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lower :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {values : List Word}
+    (hKind :
+      OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hArgsRegular :
+      Reference.SourceBridgeFacts.SourceArgStackPreludeRegularAt cfg layout
+        prim lowerProgram ctx sourceFuel args codeOverride pre lower)
+    (hInitial :
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceShared sourceStore) compiler)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hValuesArity :
+      values.length = Expressions.Structured.BasicOp.inputs op) :
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim lowerProgram ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∀ {evmState : EvmYul.EVM.State},
+        evmState.toSharedState = compilerAfterArgs.shared →
+        ∀ (baseStack : OpenExternal.Stack),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.evmOpenCall?
+                ({ evmState with stack := kind.args operands ++ baseStack }
+                  : EvmYul.EVM.State) kind =
+              some evmCall ∧
+            OpenExternal.OpenResultRel
+              (fun _sourceCall _targetCall response =>
+                Reference.SharedStateRel.OpenExternalResponseRel
+                  cfg sourceSharedAfter compilerAfterArgs.shared response)
+              (Reference.SourceBridgeFacts.OpenPrimitiveEVMResultDoneRel
+                cfg layout baseStack)
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalValues sourceFuel.succ
+                  (.Call (.inl yulPrim) args) codeOverride
+                  (.Ok sourceShared sourceStore)))
+              (Reference.SourceBridgeFacts.openPrimitiveCallEVMResult
+                evmCall) :=
+  Reference.SourceBridgeFacts.openPrimitiveCallExprEVMOpenResultRel_of_arg_stack_preludeRegularAt_callKind
+    (cfg := cfg) (layout := layout) (prim := prim)
+    (program := lowerProgram) (ctx := ctx) (sourceFuel := sourceFuel)
+    (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+    (codeOverride := codeOverride) (pre := pre) (lowerArgs := lower)
+    (sourceShared := sourceShared) (sourceSharedAfter := sourceSharedAfter)
+    (sourceStore := sourceStore) (sourceStoreAfter := sourceStoreAfter)
+    (compiler := compiler) (values := values) hKind hBasic hArgsRegular
+    hInitial hOpenEvalArgs hValuesArity
+
 end RecursiveBridgeCALLSemanticContracts
 
 namespace RecursiveBridgeSemanticCoreContracts
