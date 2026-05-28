@@ -42698,11 +42698,13 @@ def SourceOpenResultSeqDoneRel (cfg : StateRelConfig)
     Except Exception State →
       Except Functions.EVMException
         (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
-  | sourceResult, .ok (sourceOutcome, _) =>
+  | sourceResult, targetResult =>
       allowed sourceResult →
-        SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
-          sourceResult sourceOutcome
-  | _, _ => False
+        match targetResult with
+        | .ok (sourceOutcome, _) =>
+            SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
+              sourceResult sourceOutcome
+        | .error _ => False
 
 abbrev SourceOpenSeqCallResponseRel : Type :=
   OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
@@ -47017,6 +47019,163 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
                         SourceOpenResultSeqDoneRel cfg outcomeLayout
                           terminalRel revertRel allowed)
                       hDone)
+
+/--
+Open hidden-context sequence soundness for impossible source out-of-fuel
+branches.
+
+The source-facing open evaluator has already completed with out-of-fuel, so it
+cannot expose an external CALL.  The checked preservation obligation is
+therefore vacuous under the same public relatability filter used by the closed
+sequence spine.
+-/
+theorem sourceOpenResultSeqSoundWhenAtExactHiddenCtx_of_execSeq_outOfFuel
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hExec :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source =
+            .error (.OutOfFuel : Exception)) :
+    SourceOpenResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed callResponseRel := by
+  intro source compiler hInitial
+  refine ⟨0, ?_⟩
+  have hDone :
+      SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed (.error (.OutOfFuel : Exception)) Functions.Source.invalid := by
+    intro hAllow
+    have hRelatable :
+        SourceResultRelatable (.error (.OutOfFuel : Exception)) :=
+      hAllowed hAllow
+    cases hRelatable
+  simpa [hExec hInitial, CompilerOpen.FunctionsOpen.Block.runOpen,
+    CompilerOpen.invalid, OpenExternal.YulOpenResult.toOpenResult] using
+    (OpenExternal.OpenResultRel.done
+      (callResponseRel := callResponseRel)
+      (doneRel :=
+        SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+          allowed)
+      hDone)
+
+/--
+Checked open hidden-context sequence wrapper for impossible source out-of-fuel
+branches.
+-/
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hExec :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source =
+            .error (.OutOfFuel : Exception)) :
+    CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel sourceStmts codeOverride allowed
+      callResponseRel := by
+  intro _freshState _freshState' lowerBlock _hCovers _hLower
+  exact
+    sourceOpenResultSeqSoundWhenAtExactHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+      (sourceStmts := sourceStmts) (codeOverride := codeOverride)
+      (lowerBlock := lowerBlock) (allowed := allowed)
+      (callResponseRel := callResponseRel) hAllowed hExec
+
+/--
+Checked open hidden-context sequence bridge at source fuel zero.
+-/
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx 0
+      compileFuel sourceStmts codeOverride allowed callResponseRel :=
+  checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := 0) (compileFuel := compileFuel)
+    (sourceStmts := sourceStmts) (codeOverride := codeOverride)
+    (allowed := allowed) (callResponseRel := callResponseRel) hAllowed
+    (by
+      intro source compiler hInitial
+      simp [OpenExternal.YulOpen.execSeq])
+
+/--
+Checked open hidden-context sequence bridge for any nonempty sequence at source
+fuel one.
+
+The open evaluator behaves like the imported closed evaluator here: it tries to
+execute the head with fuel zero before any CALL-family primitive can suspend.
+-/
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx 1
+      compileFuel (head :: rest) codeOverride allowed callResponseRel :=
+  checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    (cfg := cfg) (reserved := reserved) (layout := layout)
+    (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := 1) (compileFuel := compileFuel)
+    (sourceStmts := head :: rest) (codeOverride := codeOverride)
+    (allowed := allowed) (callResponseRel := callResponseRel) hAllowed
+    (by
+      intro source compiler hInitial
+      simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.error,
+        OpenExternal.YulOpenResult.ok])
 
 theorem sourceResultSeqKontSoundWhenAtExactHiddenCtx_of_same_layout_no_checkpoint
     {cfg : StateRelConfig} {layout : List Name}
@@ -148016,6 +148175,74 @@ def CALLOpenSeqLoweringFrontierAt
       reserved layout outcomeLayout terminalRel revertRel prim program ctx
       bound compileFuel sourceStmts (some yulProgram.contract) allowed
       callResponseRel
+
+/--
+Open CALL-safe sequence frontier at source fuel zero.
+
+No statement can expose an external CALL at this fuel; the source open
+evaluator is immediately out-of-fuel, so the frontier is discharged by the
+same relatability filter as the closed spine.
+-/
+theorem callOpenSeqLoweringFrontierAt_zero
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+      program 0 := by
+  intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+    canBreak canContinue canLeave callResponseRel _hSafe _hScoped _hStmtOk
+    _hSourceScoped _hReserved hAllowed _hSupported _hScopeContains
+  exact
+    checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (compileFuel := compileFuel)
+      (sourceStmts := sourceStmts)
+      (codeOverride := some yulProgram.contract) (allowed := allowed)
+      (callResponseRel := callResponseRel) hAllowed
+
+/--
+Open CALL-safe sequence frontier at source fuel one.
+
+The empty sequence finishes normally.  Any nonempty sequence evaluates its head
+at fuel zero before argument or primitive evaluation can suspend at a CALL.
+-/
+theorem callOpenSeqLoweringFrontierAt_one
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+      program 1 := by
+  intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+    canBreak canContinue canLeave callResponseRel _hSafe _hScoped _hStmtOk
+    _hSourceScoped _hReserved hAllowed hSupported _hScopeContains
+  cases sourceStmts with
+  | nil =>
+      exact
+        checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := 1) (compileFuel := compileFuel)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          (callResponseRel := callResponseRel) hAllowed hSupported
+  | cons head rest =>
+      exact
+        checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := head)
+          (rest := rest) (codeOverride := some yulProgram.contract)
+          (allowed := allowed) (callResponseRel := callResponseRel)
+          hAllowed
 
 /--
 CALL-safe typed-continuation sequence frontier at one source-fuel bound.
