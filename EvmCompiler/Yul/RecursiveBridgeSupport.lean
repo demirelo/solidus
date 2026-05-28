@@ -31106,6 +31106,121 @@ theorem run_call_of_args
 
 end SourceArgPreludeOpen
 
+namespace SourceExprPreludeOpen
+
+def run
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (targetFuel : Nat) (pre : List Functions.Stmt)
+    {results : Nat} (lower : Locals.Expr results)
+    (compiler : Objects.Source.State) :
+    SourceArgPreludeOpenResult :=
+  OpenExternal.OpenResult.bind
+    (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+      targetFuel { stmts := pre } compiler)
+    fun preResult =>
+      match preResult.1.mode with
+      | .regular =>
+          OpenExternal.OpenResult.map
+            (fun exprResult =>
+              { state := exprResult.1
+                ctx := preResult.2
+                values := exprResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim lower preResult.1.state)
+      | .brk | .cont | .leave | .halt _ =>
+          CompilerOpen.invalid
+
+theorem run_done_regular
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler compilerAfterPre compilerAfterExpr : Objects.Source.State}
+    {values : List Word}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hExpr :
+      CompilerOpen.LocalsExpr.eval prim lower compilerAfterPre =
+        .done (.ok (compilerAfterExpr, values))) :
+    run prim program ctx targetFuel pre lower compiler =
+      .done (.ok
+        { state := compilerAfterExpr
+          ctx := ctxAfter
+          values := values }) := by
+  simp [run, hPre, hExpr, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+    Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+
+theorem run_call_of_pre
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler : Objects.Source.State}
+    {preCall :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Functions.EVMException
+          (Functions.Source.Outcome × Functions.Source.Ctx))}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .call preCall) :
+    run prim program ctx targetFuel pre lower compiler =
+      .call
+        { site := preCall.site
+          resume := fun response =>
+            OpenExternal.OpenResult.bind (preCall.resume response)
+              fun preResult =>
+                match preResult.1.mode with
+                | .regular =>
+                    OpenExternal.OpenResult.map
+                      (fun exprResult =>
+                        { state := exprResult.1
+                          ctx := preResult.2
+                          values := exprResult.2 })
+                      (CompilerOpen.LocalsExpr.eval prim lower
+                        preResult.1.state)
+                | .brk | .cont | .leave | .halt _ =>
+                    CompilerOpen.invalid } := by
+  simp [run, hPre, OpenExternal.OpenResult.bind]
+
+theorem run_call_of_expr
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler compilerAfterPre : Objects.Source.State}
+    {exprCall :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Functions.EVMException
+          (Objects.Source.State × List Word))}
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hExpr :
+      CompilerOpen.LocalsExpr.eval prim lower compilerAfterPre =
+        .call exprCall) :
+    run prim program ctx targetFuel pre lower compiler =
+      .call
+        { site := exprCall.site
+          resume := fun response =>
+            OpenExternal.OpenResult.map
+              (fun exprResult =>
+                { state := exprResult.1
+                  ctx := ctxAfter
+                  values := exprResult.2 })
+              (exprCall.resume response) } := by
+  simp [run, hPre, hExpr, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, Functions.Source.Outcome.regular,
+    Locals.Source.Outcome.regular]
+
+end SourceExprPreludeOpen
+
 def SourceArgStackPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name) :
     Except EvmYul.Yul.Exception (State × List Word) →
@@ -31130,6 +31245,21 @@ def SourceArgStackPreludeOpenResultRel
     (target : SourceArgPreludeOpenResult) : Prop :=
   OpenExternal.OpenResultRel
     (fun _sourceCall _targetCall response => responseRel response)
+    (SourceArgStackPreludeOpenDoneRel cfg layout)
+    (OpenExternal.YulOpenResult.toOpenResult source) target
+
+def SourceExprPreludeOpenResultRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (callResponseRel :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            SourceArgPreludeOpenTarget) →
+        OpenExternal.CallResponse → Prop)
+    (source : OpenExternal.YulOpenResult (State × List Word))
+    (target : SourceArgPreludeOpenResult) : Prop :=
+  OpenExternal.OpenResultRel callResponseRel
     (SourceArgStackPreludeOpenDoneRel cfg layout)
     (OpenExternal.YulOpenResult.toOpenResult source) target
 
@@ -31411,6 +31541,44 @@ theorem yulOpen_toOpenResult_evalValues_call_toYulOperation_eq_bind_args
         simp [OpenExternal.OpenResult.bind,
           OpenExternal.YulOpenResult.toOpenResult,
           OpenExternal.YulOpenResult.liftExceptCall, hCall?]
+
+theorem sourceExprPreludeOpen_run_prim_eq_arg_prelude_bind
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {op : Structured.BasicOp}
+    {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compiler : Objects.Source.State}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results) :
+    SourceExprPreludeOpen.run prim program ctx targetFuel pre
+        (Expr.cast hOutputs (.prim op lowerArgs)) compiler =
+      OpenExternal.OpenResult.bind
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler)
+        (fun target =>
+          OpenExternal.OpenResult.map
+            (fun primResult =>
+              { state := primResult.1
+                ctx := target.ctx
+                values := primResult.2 })
+            (CompilerOpen.Primitive.eval prim op target.state
+              target.values)) := by
+  cases hOutputs
+  unfold SourceExprPreludeOpen.run SourceArgPreludeOpen.run
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfterPre mode =>
+      cases mode <;>
+        simp [Expressions.Structured.BasicOp.outputs, Expr.cast,
+          CompilerOpen.LocalsExpr.eval, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+          openResult_bind_assoc_sourceBridge, CompilerOpen.invalid,
+          Functions.Source.invalid, Structured.invalid]
 
 theorem openPrimitiveCallExprOpenResultRel_of_arg_prelude_open_toYulOperation
     {cfg : StateRelConfig} {layout : List Name}
