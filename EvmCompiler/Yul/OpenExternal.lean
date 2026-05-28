@@ -1263,25 +1263,30 @@ Pointwise relation between two open results.
 
 The `call` branch is intentionally visible: a proof cannot relate suspended
 computations without same-site equality and a continuation proof for every
-admissible shared response.
+admissible shared response. The admissible-response predicate is allowed to
+depend on the two suspended calls, since the external response relation for
+stateful calls is usually determined by the source/target pre-call states
+captured by those continuations.
 -/
 inductive OpenResultRel
     {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
-    (responseRel : CallResponse → Prop)
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop)
     (doneRel : Except ε₁ α → Except ε₂ β → Prop) :
     OpenResult ε₁ α → OpenResult ε₂ β → Prop where
   | done {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β} :
       doneRel sourceDone targetDone →
-      OpenResultRel responseRel doneRel
+      OpenResultRel callResponseRel doneRel
         (.done sourceDone) (.done targetDone)
   | call
       {sourceCall : OpenCall (OpenResult ε₁ α)}
       {targetCall : OpenCall (OpenResult ε₂ β)} :
       sourceCall.site = targetCall.site →
-      (∀ response, responseRel response →
-        OpenResultRel responseRel doneRel
+      (∀ response, callResponseRel sourceCall targetCall response →
+        OpenResultRel callResponseRel doneRel
           (sourceCall.resume response) (targetCall.resume response)) →
-      OpenResultRel responseRel doneRel
+      OpenResultRel callResponseRel doneRel
         (.call sourceCall) (.call targetCall)
 
 /--

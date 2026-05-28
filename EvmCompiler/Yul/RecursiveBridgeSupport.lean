@@ -30860,7 +30860,8 @@ def SourceArgStackPreludeOpenResultRel
     (responseRel : OpenExternal.CallResponse → Prop)
     (source : OpenExternal.YulOpenResult (State × List Word))
     (target : SourceArgPreludeOpenResult) : Prop :=
-  OpenExternal.OpenResultRel responseRel
+  OpenExternal.OpenResultRel
+    (fun _sourceCall _targetCall response => responseRel response)
     (SourceArgStackPreludeOpenDoneRel cfg layout)
     (OpenExternal.YulOpenResult.toOpenResult source) target
 

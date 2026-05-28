@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 21:23 PDT.
+Last updated: 2026-05-27 21:32 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -44,6 +44,9 @@ open CALL-family requests, while ordinary `CALL` suspensions propagate the
 local-domain invariant through every possible shared response.
 There is now a generic `OpenExternal.OpenResult` carrier/relation and a first
 checked stack-argument prelude open-result surface for completed `.done` runs.
+`OpenResultRel` chooses admissible responses per suspended source/target call
+pair, so nested calls can use the state-dependent reentrant response relation
+appropriate to the pre-call states captured by that call.
 The remaining CALL-capable step is to make generated preludes actually produce
 this open result in the suspending case, then replace expression-prelude
 consumers that still expect the old closed `EvmYul.Yul.evalArgs` result.
@@ -3254,7 +3257,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   every response and recovers exact local-domain preservation for completed
   reversed-argument evaluation. The first generic compiler-side
   `OpenResult`/`OpenResultRel` surface now relates imported Yul open argument
-  results to generated stack-argument preludes in the completed `.done` case.
+  results to generated stack-argument preludes in the completed `.done` case,
+  and its call branch now permits call-specific admissible-response predicates
+  for nested state-dependent external calls.
   Remaining work is to make generated preludes produce that open result in the
   suspending case, replace the recursive closed assignment/let consumers with
   this open sequence frontier, construct expression-level instances of the open
