@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 21:47 PDT.
+Last updated: 2026-05-27 22:23 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -63,6 +63,15 @@ remaining CALL-capable step is the true suspending case: prove open Yul
 argument evaluation relates to `SourceArgPreludeOpen.run` when it reaches a
 CALL-family site, then replace expression-prelude consumers that still expect
 the old closed `EvmYul.Yul.evalArgs` result.
+
+Paused checkpoint: before continuing this route, audit the state relation for
+contract storage equality. The current open-call work assumes responses
+preserve the relevant source/target relation, but the newly discovered concern
+is that the public proof may not actually force equality of the contract's
+storage state. Resumption should first identify where storage lives in
+`SourceStateRel`/`SharedStateRel`/target state relations, strengthen or expose
+the needed equality invariant, and only then continue the CALL suspension
+bridge.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled

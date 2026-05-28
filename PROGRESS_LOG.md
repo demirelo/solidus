@@ -1,5 +1,7 @@
 # Progress Log
 
+- 2026-05-27 22:23 PDT - pause/storage-state-equality-audit-needed - Paused the open external-call proof work at clean commit `2ca2c0aa` after discovering that the public proof may not actually prove equality of contract storage state. Before resuming the CALL suspension bridge, audit and strengthen the relevant state relation so storage equality is explicit or derivable.
+
 - 2026-05-27 22:23 PDT - proof/source-arg-prelude-open-run-shape - Added structural `SourceArgPreludeOpen.run` equations for completed runs, prelude suspensions, and final argument-sequence suspensions, plus `SourceArgStackPreludeOpenResultRel.done_ok_of_open_parts` to relate completed open Yul argument evaluation to the actual compiler-open prelude runner. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
 
 - 2026-05-27 22:10 PDT - proof/open-yul-done-closed-prelude-adapter - Added `YulOpen` done-to-closed evaluator agreement lemmas and `SourceArgStackPreludeOpenResultRel.done_ok_of_regularAt_open`, allowing completed open argument evaluation to feed existing regular prelude evidence without closing suspended calls. Verification: `lake build EvmCompiler.Yul.OpenExternal`, `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
