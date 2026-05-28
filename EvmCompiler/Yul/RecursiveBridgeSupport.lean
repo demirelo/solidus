@@ -42699,7 +42699,7 @@ def SourceOpenResultSeqDoneRel (cfg : StateRelConfig)
       Except Functions.EVMException
         (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
   | sourceResult, .ok (sourceOutcome, _) =>
-      allowed sourceResult ∧
+      allowed sourceResult →
         SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
           sourceResult sourceOutcome
   | _, _ => False
@@ -46924,6 +46924,99 @@ theorem CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_atExa
   exact
     SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
       (targetFuel := targetFuel) (hExact hCovers hLower)
+
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult) :
+    CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel [] codeOverride allowed callResponseRel := by
+  intro freshState freshState' lowerBlock _hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ compileFuel' =>
+      cases compileFuel' with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ compileFuel'' =>
+          have hLowerSome :
+              some (({ stmts := [] } : Functions.Block), freshState) =
+                some (lowerBlock, freshState') := by
+            simpa [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?]
+              using hLower
+          have hLowerPair :
+              (({ stmts := [] } : Functions.Block), freshState) =
+                (lowerBlock, freshState') :=
+            Option.some.inj hLowerSome
+          cases hLowerPair
+          intro source compiler hInitial
+          refine ⟨1, ?_⟩
+          cases sourceFuel with
+          | zero =>
+              have hDone :
+                  SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel
+                    revertRel allowed
+                    (.error (.OutOfFuel : Exception))
+                    (.ok (Functions.Source.Outcome.regular compiler, ctx)) := by
+                intro hAllow
+                have hRelatable' := hRelatable hAllow
+                exact False.elim
+                  (by
+                    simpa [SourceResultRelatable] using hRelatable')
+              simpa [OpenExternal.YulOpen.execSeq,
+                CompilerOpen.FunctionsOpen.Block.runOpen] using
+                (OpenExternal.OpenResultRel.done
+                  (callResponseRel := callResponseRel)
+                  (doneRel :=
+                    SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel
+                      revertRel allowed)
+                  hDone)
+          | succ sourceFuel' =>
+              cases hInitial with
+              | ok hShared hVars _hDomain =>
+                  rename_i shared store
+                  have hDone :
+                      SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel
+                        revertRel allowed
+                        (.ok (.Ok shared store))
+                        (.ok (Functions.Source.Outcome.regular compiler,
+                          ctx)) := by
+                    intro hAllow
+                    have hSubset :
+                        ∀ name : Name,
+                          name ∈ outcomeLayout → name ∈ layout := by
+                      simpa [SourceResultOutcomeLayoutSupported] using
+                        hSupported hAllow
+                    exact
+                      SourceResultOutcomeRel.ok
+                        (SourceOkOutcomeRel.regular
+                          (SourceStateRel.ok hShared
+                            (by
+                              intro name hMem
+                              exact hVars name (hSubset name hMem))))
+                  simpa [OpenExternal.YulOpen.execSeq,
+                    CompilerOpen.FunctionsOpen.Block.runOpen] using
+                    (OpenExternal.OpenResultRel.done
+                      (callResponseRel := callResponseRel)
+                      (doneRel :=
+                        SourceOpenResultSeqDoneRel cfg outcomeLayout
+                          terminalRel revertRel allowed)
+                      hDone)
 
 theorem sourceResultSeqKontSoundWhenAtExactHiddenCtx_of_same_layout_no_checkpoint
     {cfg : StateRelConfig} {layout : List Name}
