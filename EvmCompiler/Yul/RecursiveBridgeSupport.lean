@@ -44554,6 +44554,71 @@ theorem compilerOpen_assign_prim_openSeq_eq_helper_of_args_done
                 Locals.Source.invalid, Structured.invalid]
 
 /--
+Target-side shape for an emitted assignment primitive with an open argument
+sequence.
+
+This is the suspending counterpart of
+`compilerOpen_assign_prim_openSeq_eq_helper_of_args_done`: the emitted block is
+the same open-result bind through argument evaluation, primitive execution,
+assignment of the one returned value, and the real open tail.
+-/
+theorem compilerOpen_assign_prim_openSeq_eq_helper_of_args_open
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetTailFuel : Nat} {op : Structured.BasicOp}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compilerAfterPre : Objects.Source.State}
+    {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallAssignCompilerStmtResult ctx name
+          (OpenExternal.OpenResult.bind
+            (CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre)
+            (fun argResult =>
+              CompilerOpen.Primitive.eval prim op argResult.1 argResult.2)))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  cases lowerTail
+  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+    CompilerOpen.FunctionsOpen.Stmt.run,
+    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+    hContains, OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+    CompilerOpen.invalid, Functions.Source.invalid, Locals.Source.invalid,
+    Structured.invalid, Locals.Source.State.insert,
+    Locals.Source.State.withVars, Functions.Source.Outcome.regular,
+    Locals.Source.Outcome.regular, openResult_bind_assoc,
+    openPrimitiveCallAssignCompilerStmtResult]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro argResult
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro primResult
+  rcases primResult with ⟨compilerAfterPrim, resultValues⟩
+  cases resultValues with
+  | nil =>
+      simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+        Locals.Source.invalid, Structured.invalid]
+  | cons value restValues =>
+      cases restValues with
+      | nil =>
+          simpa [OpenExternal.OpenResult.bind, Locals.Source.State.insert,
+            Locals.Source.State.withVars]
+      | cons value' restValues =>
+          simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid]
+
+/--
 Target-side shape for an emitted declaration primitive followed by an open tail.
 
 This is the declaration counterpart of
@@ -44663,6 +44728,67 @@ theorem compilerOpen_let_prim_openSeq_eq_helper_of_args_done
           | cons value' restValues =>
               simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
                 Locals.Source.invalid, Structured.invalid]
+
+/--
+Target-side shape for an emitted declaration primitive with an open argument
+sequence.
+
+This is the declaration counterpart of
+`compilerOpen_assign_prim_openSeq_eq_helper_of_args_open`.
+-/
+theorem compilerOpen_let_prim_openSeq_eq_helper_of_args_open
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetTailFuel : Nat} {op : Structured.BasicOp}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compilerAfterPre : Objects.Source.State}
+    {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallLetCompilerStmtResult ctx name
+          (OpenExternal.OpenResult.bind
+            (CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre)
+            (fun argResult =>
+              CompilerOpen.Primitive.eval prim op argResult.1 argResult.2)))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  cases lowerTail
+  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+    CompilerOpen.FunctionsOpen.Stmt.run,
+    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+    CompilerOpen.invalid, Functions.Source.invalid, Locals.Source.invalid,
+    Structured.invalid, Locals.Source.State.insert,
+    Locals.Source.State.withVars, Functions.Source.Outcome.regular,
+    Locals.Source.Outcome.regular, openResult_bind_assoc,
+    openPrimitiveCallLetCompilerStmtResult]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro argResult
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro primResult
+  rcases primResult with ⟨compilerAfterPrim, resultValues⟩
+  cases resultValues with
+  | nil =>
+      simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+        Locals.Source.invalid, Structured.invalid]
+  | cons value restValues =>
+      cases restValues with
+      | nil =>
+          simpa [OpenExternal.OpenResult.bind, Locals.Source.State.insert,
+            Locals.Source.State.withVars]
+      | cons value' restValues =>
+          simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid]
 
 /--
 Target-side shape for an emitted assignment primitive after a completed argument
@@ -44793,6 +44919,508 @@ theorem compilerOpen_let_prim_openSeq_eq_of_arg_prelude_done
       (compilerAfterPre := compilerAfterPre)
       (compilerAfterArgs := compilerAfterArgs) (values := values) hPre hArgs
   simp [hRun, OpenExternal.OpenResult.bind]
+
+/--
+Target-side shape for an emitted assignment primitive after the generated
+statement prelude has completed, while the lowered argument sequence remains
+open.
+
+This is the bridge needed for nested CALLs inside the outer CALL arguments: the
+real emitted assignment block is rewritten to the same helper form used by the
+open source-sequence theorem, but no longer assumes `lowerArgs` has completed.
+-/
+theorem compilerOpen_assign_prim_openSeq_eq_of_arg_prelude_open_pre_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel targetTailFuel : Nat} {op : Structured.BasicOp}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compiler compilerAfterPre : Objects.Source.State}
+    {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallAssignCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  rw [compilerOpen_assign_prim_openSeq_eq_helper_of_args_open
+    (prim := prim) (program := program) (ctx := ctxAfter)
+    (targetTailFuel := targetTailFuel) (op := op)
+    (lowerArgs := lowerArgs) (compilerAfterPre := compilerAfterPre)
+    (lowerTail := lowerTail) name hOutputs hContains]
+  simp [SourceArgPreludeOpen.run, hPre, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+    Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+    openResult_bind_assoc, openPrimitiveCallAssignCompilerStmtResult]
+
+/--
+Target-side shape for an emitted declaration primitive after the generated
+statement prelude has completed, while the lowered argument sequence remains
+open.
+-/
+theorem compilerOpen_let_prim_openSeq_eq_of_arg_prelude_open_pre_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel targetTailFuel : Nat} {op : Structured.BasicOp}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compiler compilerAfterPre : Objects.Source.State}
+    {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallLetCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  rw [compilerOpen_let_prim_openSeq_eq_helper_of_args_open
+    (prim := prim) (program := program) (ctx := ctxAfter)
+    (targetTailFuel := targetTailFuel) (op := op)
+    (lowerArgs := lowerArgs) (compilerAfterPre := compilerAfterPre)
+    (lowerTail := lowerTail) name hOutputs]
+  simp [SourceArgPreludeOpen.run, hPre, OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+    Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+    openResult_bind_assoc, openPrimitiveCallLetCompilerStmtResult]
+
+/--
+Actual open Yul assignment-CALL sequence head, paired with the actual emitted
+compiler-open assignment block, after the generated statement prelude has
+completed and while the lowered argument sequence remains open.
+-/
+theorem yulOpen_execSeq_assign_call_compilerOpen_openSeqOpenResultRel_of_arg_prelude_open_toYulOperation
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel targetTailFuel : Nat}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs kind.toBasicOp)}
+    {source : State} {compiler compilerAfterPre : Objects.Source.State}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {preludeCallResponseRel :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            SourceArgPreludeOpenTarget) →
+        OpenExternal.CallResponse → Prop}
+    {stmtCallResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.State × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (name : EvmYul.Identifier)
+    (hCheck : EvmYul.Yul.checkAssignment source [name] = .ok ())
+    (hOutputs :
+      Expressions.Structured.BasicOp.outputs kind.toBasicOp = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hPrelude :
+      OpenExternal.OpenResultRel preludeCallResponseRel
+        (SourceArgStackPreludeOpenDoneRel cfg layout)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source))
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler))
+    (hArity :
+      ∀ {sourceResult : State × List Word}
+        {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok sourceResult) (.ok target) →
+          sourceResult.2.length = kind.inputArity)
+    (hDomain :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {values : List Word} {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok ((.Ok sourceShared sourceStore : State), values))
+          (.ok target) →
+          StoreDomainExact layout sourceStore)
+    (hTargetMem : identName name ∈ layout)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (Except Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (Except Functions.EVMException
+              (Objects.Source.State × List Word))}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        stmtCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind
+                (.done (sourceCall.resume response))
+                (fun sourceResult =>
+                  .done (EvmYul.Yul.multifill' [name]
+                    (.ok sourceResult))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind
+                (.done (targetCall.resume response))
+                (fun targetResult =>
+                  match targetResult.2 with
+                  | [value] =>
+                      .done (.ok
+                        (targetResult.1.insert (identName name) value,
+                          ctxAfter))
+                  | _ => CompilerOpen.invalid) }
+          response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        stmtCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  OpenExternal.OpenResult.bind
+                    (yulPrimitiveOpenResultAfterArgs sourceFuel kind
+                      sourceResult)
+                    (fun sourceResult =>
+                      .done (EvmYul.Yul.multifill' [name]
+                        (.ok sourceResult)))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.bind
+                    (CompilerOpen.Primitive.eval prim kind.toBasicOp
+                      target.state target.values)
+                    (fun targetResult =>
+                      match targetResult.2 with
+                      | [value] =>
+                          .done (.ok
+                            (targetResult.1.insert (identName name) value,
+                              ctxAfter))
+                      | _ => CompilerOpen.invalid)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxMid sourceFuel.succ.succ rest
+          codeOverride lowerTail targetTailFuel allowed seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceMid =>
+                  match sourceMid with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          codeOverride sourceMid)
+                  | .OutOfFuel => .done (.ok sourceMid)
+                  | .Checkpoint _ => .done (.ok sourceMid)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun compilerMid =>
+                  CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                    compilerMid.2 targetTailFuel lowerTail compilerMid.1) }
+          response →
+        stmtCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel seqCallResponseRel
+      (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Assign [name] (.Call (.inl kind.toYulOperation) args) :: rest)
+          codeOverride source))
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim kind.toBasicOp lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre) := by
+  rw [compilerOpen_assign_prim_openSeq_eq_of_arg_prelude_open_pre_done
+    (prim := prim) (program := program) (ctx := ctx)
+    (ctxAfter := ctxAfter) (targetFuel := targetFuel)
+    (targetTailFuel := targetTailFuel) (op := kind.toBasicOp) (pre := pre)
+    (lowerArgs := lowerArgs) (compiler := compiler)
+    (compilerAfterPre := compilerAfterPre) (lowerTail := lowerTail) name
+    hOutputs hContains hPre]
+  exact
+    yulOpen_execSeq_assign_call_openSeqOpenResultRel_of_arg_prelude_open_toYulOperation
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (ctxAfter := ctxAfter)
+      (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+      (targetTailFuel := targetTailFuel) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (source := source) (compiler := compiler) (rest := rest)
+      (lowerTail := lowerTail) (allowed := allowed)
+      (preludeCallResponseRel := preludeCallResponseRel)
+      (stmtCallResponseRel := stmtCallResponseRel)
+      (seqCallResponseRel := seqCallResponseRel) name hCheck hPrelude hArity
+      hDomain hTargetMem hPrimitiveResponse hPreludeResponse hTail
+      hCallResponse
+
+/--
+Actual open Yul declaration-CALL sequence head, paired with the actual emitted
+compiler-open declaration block, after the generated statement prelude has
+completed and while the lowered argument sequence remains open.
+-/
+theorem yulOpen_execSeq_let_call_compilerOpen_openSeqOpenResultRel_of_arg_prelude_open_toYulOperation
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel targetTailFuel : Nat}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs kind.toBasicOp)}
+    {source : State} {compiler compilerAfterPre : Objects.Source.State}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {preludeCallResponseRel :
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            SourceArgPreludeOpenTarget) →
+        OpenExternal.CallResponse → Prop}
+    {stmtCallResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.State × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (name : EvmYul.Identifier)
+    (hCheck : EvmYul.Yul.checkDeclaration source [name] = .ok ())
+    (hOutputs :
+      Expressions.Structured.BasicOp.outputs kind.toBasicOp = 1)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hPrelude :
+      OpenExternal.OpenResultRel preludeCallResponseRel
+        (SourceArgStackPreludeOpenDoneRel cfg layout)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source))
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler))
+    (hArity :
+      ∀ {sourceResult : State × List Word}
+        {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok sourceResult) (.ok target) →
+          sourceResult.2.length = kind.inputArity)
+    (hDomain :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {values : List Word} {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok ((.Ok sourceShared sourceStore : State), values))
+          (.ok target) →
+          StoreDomainExact layout sourceStore)
+    (hFresh : identName name ∉ layout)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (Except Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (Except Functions.EVMException
+              (Objects.Source.State × List Word))}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        stmtCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind
+                (.done (sourceCall.resume response))
+                (fun sourceResult =>
+                  .done (EvmYul.Yul.multifill' [name]
+                    (.ok sourceResult))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind
+                (.done (targetCall.resume response))
+                (fun targetResult =>
+                  match targetResult.2 with
+                  | [value] =>
+                      .done (.ok
+                        (targetResult.1.insert (identName name) value,
+                          { ctxAfter with
+                            scope := identName name :: ctxAfter.scope }))
+                  | _ => CompilerOpen.invalid) }
+          response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        stmtCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  OpenExternal.OpenResult.bind
+                    (yulPrimitiveOpenResultAfterArgs sourceFuel kind
+                      sourceResult)
+                    (fun sourceResult =>
+                      .done (EvmYul.Yul.multifill' [name]
+                        (.ok sourceResult)))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.bind
+                    (CompilerOpen.Primitive.eval prim kind.toBasicOp
+                      target.state target.values)
+                    (fun targetResult =>
+                      match targetResult.2 with
+                      | [value] =>
+                          .done (.ok
+                            (targetResult.1.insert (identName name) value,
+                              { ctxAfter with
+                                scope := identName name :: ctxAfter.scope }))
+                      | _ => CompilerOpen.invalid)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel prim
+          program ctxMid sourceFuel.succ.succ rest codeOverride lowerTail
+          targetTailFuel allowed seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceMid =>
+                  match sourceMid with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          codeOverride sourceMid)
+                  | .OutOfFuel => .done (.ok sourceMid)
+                  | .Checkpoint _ => .done (.ok sourceMid)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun compilerMid =>
+                  CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                    compilerMid.2 targetTailFuel lowerTail compilerMid.1) }
+          response →
+        stmtCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel seqCallResponseRel
+      (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ.succ
+          (.Let [name] (some (.Call (.inl kind.toYulOperation) args)) :: rest)
+          codeOverride source))
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim kind.toBasicOp lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre) := by
+  rw [compilerOpen_let_prim_openSeq_eq_of_arg_prelude_open_pre_done
+    (prim := prim) (program := program) (ctx := ctx)
+    (ctxAfter := ctxAfter) (targetFuel := targetFuel)
+    (targetTailFuel := targetTailFuel) (op := kind.toBasicOp) (pre := pre)
+    (lowerArgs := lowerArgs) (compiler := compiler)
+    (compilerAfterPre := compilerAfterPre) (lowerTail := lowerTail) name
+    hOutputs hPre]
+  exact
+    yulOpen_execSeq_let_call_openSeqOpenResultRel_of_arg_prelude_open_toYulOperation
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (ctxAfter := ctxAfter)
+      (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+      (targetTailFuel := targetTailFuel) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (source := source) (compiler := compiler) (rest := rest)
+      (lowerTail := lowerTail) (allowed := allowed)
+      (preludeCallResponseRel := preludeCallResponseRel)
+      (stmtCallResponseRel := stmtCallResponseRel)
+      (seqCallResponseRel := seqCallResponseRel) name hCheck hPrelude hArity
+      hDomain hFresh hPrimitiveResponse hPreludeResponse hTail hCallResponse
 
 /--
 Actual open Yul assignment-CALL sequence head, paired with the actual emitted
