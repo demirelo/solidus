@@ -42639,6 +42639,429 @@ theorem yulOpen_execSeq_let_call_openSeqOpenResultRel_of_arg_prelude_done_callKi
       name hKind hBasic hOpenEvalArgs hPre hArgs hRelArgs hDomainAfter hFresh
       hValuesArity hTail
 
+/-- Associativity for the generic open-result bind. -/
+theorem openResult_bind_assoc
+    {ε α β γ : Type*}
+    (result : OpenExternal.OpenResult ε α)
+    (next : α → OpenExternal.OpenResult ε β)
+    (next' : β → OpenExternal.OpenResult ε γ) :
+    OpenExternal.OpenResult.bind
+        (OpenExternal.OpenResult.bind result next) next' =
+      OpenExternal.OpenResult.bind result
+        (fun value => OpenExternal.OpenResult.bind (next value) next') := by
+  exact
+    (OpenExternal.OpenResult.rec
+      (motive_1 := fun result =>
+        ∀ (next : α → OpenExternal.OpenResult ε β)
+          (next' : β → OpenExternal.OpenResult ε γ),
+          OpenExternal.OpenResult.bind
+              (OpenExternal.OpenResult.bind result next) next' =
+            OpenExternal.OpenResult.bind result
+              (fun value =>
+                OpenExternal.OpenResult.bind (next value) next'))
+      (motive_2 := fun externalCall =>
+        ∀ (next : α → OpenExternal.OpenResult ε β)
+          (next' : β → OpenExternal.OpenResult ε γ),
+          OpenExternal.OpenResult.bind
+              (OpenExternal.OpenResult.bind (.call externalCall) next)
+              next' =
+            OpenExternal.OpenResult.bind (.call externalCall)
+              (fun value =>
+                OpenExternal.OpenResult.bind (next value) next'))
+      (done := by
+        intro result next next'
+        cases result <;> simp [OpenExternal.OpenResult.bind])
+      (call := by
+        intro _ hCall next next'
+        exact hCall next next')
+      (mk := by
+        intro _ _ ih next next'
+        simp [OpenExternal.OpenResult.bind]
+        funext response
+        exact ih response next next')
+      result) next next'
+
+/-- Open compiler expression shape for an output-one primitive cast. -/
+theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
+    {prim : Objects.Source.PrimitiveSemantics}
+    {op : Structured.BasicOp}
+    {lowerArgs :
+    Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {state : Objects.Source.State}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1) :
+    CompilerOpen.LocalsExpr.evalOne prim
+        (Expr.cast hOutputs (.prim op lowerArgs)) state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.LocalsExpr.evalSeq prim lowerArgs state)
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.Primitive.eval prim op argResult.1 argResult.2)
+            fun primResult =>
+              match primResult.2 with
+              | [value] => .done (.ok (primResult.1, value))
+              | _ => CompilerOpen.invalid) := by
+  cases op <;>
+    simp [Expressions.Structured.BasicOp.outputs, Expr.cast,
+      CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+      OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+      CompilerOpen.invalid, openResult_bind_assoc] at hOutputs ⊢ <;>
+    rfl
+
+/--
+Target-side shape for an emitted assignment primitive followed by an open tail.
+
+After the argument sequence has already produced `values`, the actual
+compiler-open execution of the emitted assignment statement and tail is the
+same open-result bind as `openPrimitiveCallAssignCompilerStmtResult`.
+-/
+theorem compilerOpen_assign_prim_openSeq_eq_helper_of_args_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetTailFuel : Nat} {op : Structured.BasicOp}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word} {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallAssignCompilerStmtResult ctx name
+          (CompilerOpen.Primitive.eval prim op compilerAfterArgs values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  cases hPrim : CompilerOpen.Primitive.eval prim op compilerAfterArgs values with
+  | done primResult =>
+      cases primResult with
+      | error err =>
+          simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+            CompilerOpen.FunctionsOpen.Stmt.run,
+            compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+            hContains, hArgs, hPrim,
+            OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+            CompilerOpen.invalid, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+            openPrimitiveCallAssignCompilerStmtResult]
+      | ok primOk =>
+          rcases primOk with ⟨compilerAfterPrim, resultValues⟩
+          cases resultValues with
+          | nil =>
+              simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+                CompilerOpen.FunctionsOpen.Stmt.run,
+                compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                hContains, hArgs, hPrim,
+                OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                CompilerOpen.invalid, Functions.Source.invalid,
+                Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+                openPrimitiveCallAssignCompilerStmtResult]
+          | cons value restValues =>
+              cases restValues with
+              | nil =>
+                  cases lowerTail
+                  simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                    hContains, hArgs, hPrim,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                    CompilerOpen.invalid, Functions.Source.invalid,
+                    Locals.Source.invalid, Structured.invalid,
+                    Locals.Source.State.insert, Locals.Source.State.withVars,
+                    openResult_bind_assoc,
+                    Functions.Source.Outcome.regular,
+                    Locals.Source.Outcome.regular,
+                    openPrimitiveCallAssignCompilerStmtResult]
+              | cons value' restValues =>
+                  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                    hContains, hArgs, hPrim,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                    CompilerOpen.invalid, Functions.Source.invalid,
+                    Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+                    openPrimitiveCallAssignCompilerStmtResult]
+  | call primCall =>
+      cases lowerTail
+      simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run,
+        compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+        hContains, hArgs, hPrim,
+        OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+        CompilerOpen.invalid, Functions.Source.invalid,
+        Locals.Source.invalid, Structured.invalid,
+        Locals.Source.State.insert, Locals.Source.State.withVars,
+        Functions.Source.Outcome.regular,
+        Locals.Source.Outcome.regular, openResult_bind_assoc,
+        openPrimitiveCallAssignCompilerStmtResult]
+      funext response
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro value
+      rcases value with ⟨compilerAfterCall, resultValues⟩
+      cases resultValues with
+      | nil =>
+          simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid]
+      | cons value restValues =>
+          cases restValues with
+          | nil =>
+              simpa [OpenExternal.OpenResult.bind,
+                Locals.Source.State.insert, Locals.Source.State.withVars]
+          | cons value' restValues =>
+              simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+                Locals.Source.invalid, Structured.invalid]
+
+/--
+Target-side shape for an emitted declaration primitive followed by an open tail.
+
+This is the declaration counterpart of
+`compilerOpen_assign_prim_openSeq_eq_helper_of_args_done`.
+-/
+theorem compilerOpen_let_prim_openSeq_eq_helper_of_args_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetTailFuel : Nat} {op : Structured.BasicOp}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word} {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallLetCompilerStmtResult ctx name
+          (CompilerOpen.Primitive.eval prim op compilerAfterArgs values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  cases hPrim : CompilerOpen.Primitive.eval prim op compilerAfterArgs values with
+  | done primResult =>
+      cases primResult with
+      | error err =>
+          simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+            CompilerOpen.FunctionsOpen.Stmt.run,
+            compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+            hArgs, hPrim,
+            OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+            CompilerOpen.invalid, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+            openPrimitiveCallLetCompilerStmtResult]
+      | ok primOk =>
+          rcases primOk with ⟨compilerAfterPrim, resultValues⟩
+          cases resultValues with
+          | nil =>
+              simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+                CompilerOpen.FunctionsOpen.Stmt.run,
+                compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                hArgs, hPrim,
+                OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                CompilerOpen.invalid, Functions.Source.invalid,
+                Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+                openPrimitiveCallLetCompilerStmtResult]
+          | cons value restValues =>
+              cases restValues with
+              | nil =>
+                  cases lowerTail
+                  simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                    hArgs, hPrim,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                    CompilerOpen.invalid, Functions.Source.invalid,
+                    Locals.Source.invalid, Structured.invalid,
+                    Locals.Source.State.insert, Locals.Source.State.withVars,
+                    openResult_bind_assoc,
+                    Functions.Source.Outcome.regular,
+                    Locals.Source.Outcome.regular,
+                    openPrimitiveCallLetCompilerStmtResult]
+              | cons value' restValues =>
+                  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+                    hArgs, hPrim,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                    CompilerOpen.invalid, Functions.Source.invalid,
+                    Locals.Source.invalid, Structured.invalid, openResult_bind_assoc,
+                    openPrimitiveCallLetCompilerStmtResult]
+  | call primCall =>
+      cases lowerTail
+      simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run,
+        compilerOpen_localsExpr_evalOne_cast_prim_outputs_one,
+        hArgs, hPrim,
+        OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+        CompilerOpen.invalid, Functions.Source.invalid,
+        Locals.Source.invalid, Structured.invalid,
+        Locals.Source.State.insert, Locals.Source.State.withVars,
+        Functions.Source.Outcome.regular,
+        Locals.Source.Outcome.regular, openResult_bind_assoc,
+        openPrimitiveCallLetCompilerStmtResult]
+      funext response
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro value
+      rcases value with ⟨compilerAfterCall, resultValues⟩
+      cases resultValues with
+      | nil =>
+          simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid]
+      | cons value restValues =>
+          cases restValues with
+          | nil =>
+              simpa [OpenExternal.OpenResult.bind,
+                Locals.Source.State.insert, Locals.Source.State.withVars]
+          | cons value' restValues =>
+              simp [OpenExternal.OpenResult.bind, Functions.Source.invalid,
+                Locals.Source.invalid, Structured.invalid]
+
+/--
+Target-side shape for an emitted assignment primitive after a completed argument
+prelude.
+
+This packages `SourceArgPreludeOpen.run_done_regular` with the emitted statement
+shape lemma, so callers can rewrite the target side from the prelude/primitive
+helper result to the actual compiler-open assignment block.
+-/
+theorem compilerOpen_assign_prim_openSeq_eq_of_arg_prelude_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel targetTailFuel : Nat} {op : Structured.BasicOp}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word} {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hContains :
+      compilerAfterPre.vars.contains (identName name) = true)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.assign (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallAssignCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  rw [compilerOpen_assign_prim_openSeq_eq_helper_of_args_done
+    (prim := prim) (program := program) (ctx := ctxAfter)
+    (targetTailFuel := targetTailFuel) (op := op)
+    (lowerArgs := lowerArgs) (compilerAfterPre := compilerAfterPre)
+    (compilerAfterArgs := compilerAfterArgs) (values := values)
+    (lowerTail := lowerTail) name hOutputs hContains hArgs]
+  have hRun :
+      SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler =
+        .done (.ok
+          { state := compilerAfterArgs
+            ctx := ctxAfter
+            values := values }) :=
+    SourceArgPreludeOpen.run_done_regular
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (targetFuel := targetFuel) (pre := pre)
+      (lower := lowerArgs) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) hPre hArgs
+  simp [hRun, OpenExternal.OpenResult.bind]
+
+/--
+Target-side shape for an emitted declaration primitive after a completed argument
+prelude.
+-/
+theorem compilerOpen_let_prim_openSeq_eq_of_arg_prelude_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {targetFuel targetTailFuel : Nat} {op : Structured.BasicOp}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word} {lowerTail : Functions.Block}
+    (name : EvmYul.Identifier)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values))) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+        targetTailFuel.succ
+        { stmts :=
+            Functions.Stmt.let_ (identName name)
+              (Expr.cast hOutputs (.prim op lowerArgs)) ::
+              lowerTail.stmts }
+        compilerAfterPre =
+      OpenExternal.OpenResult.bind
+        (openPrimitiveCallLetCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values))
+        (fun compilerMid =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            compilerMid.2 targetTailFuel lowerTail compilerMid.1) := by
+  rw [compilerOpen_let_prim_openSeq_eq_helper_of_args_done
+    (prim := prim) (program := program) (ctx := ctxAfter)
+    (targetTailFuel := targetTailFuel) (op := op)
+    (lowerArgs := lowerArgs) (compilerAfterPre := compilerAfterPre)
+    (compilerAfterArgs := compilerAfterArgs) (values := values)
+    (lowerTail := lowerTail) name hOutputs hArgs]
+  have hRun :
+      SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler =
+        .done (.ok
+          { state := compilerAfterArgs
+            ctx := ctxAfter
+            values := values }) :=
+    SourceArgPreludeOpen.run_done_regular
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (targetFuel := targetFuel) (pre := pre)
+      (lower := lowerArgs) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) hPre hArgs
+  simp [hRun, OpenExternal.OpenResult.bind]
+
 /--
 Open sequence-level CALL-family continuation for assignment heads.
 
