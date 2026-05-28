@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 17:11 PDT - compaction resume/cleanup/account-state-boundary - Resumed after compaction while checking the account-state boundary cleanup; current checkpoint is to keep Nethermind `accountMap` local, finish the full Yul build, and commit if green.
+
+- 2026-05-27 17:09 PDT - cleanup/chain-relation-account-state-boundary - Kept Nethermind's `accountMap` as the internal local-state representation, but decoupled `SELFBALANCE`/`BALANCE` result agreement from the account-map relation and removed `createdAccounts` from `ChainStateRel` while CREATE/CREATE2 remain outside the live CALL proof. Verification: `lake env lean EvmCompiler/Yul/Reference.lean`, `lake build EvmCompiler.Yul`, scoped stale-world scan, scoped proof-escape scan, and `git diff --check` passed.
+
 - 2026-05-27 17:03 PDT - cleanup/open-response-state-boundary - Made the open external-call response boundary opaque by replacing concrete `accountMap`/`substate`/`createdAccounts` response mutations with a single caller-visible state transformer, updated comments/docs to describe universally quantified opaque responses, and removed unreferenced closed-call result-state helper lemmas from the recursive bridge support file. Verification: `lake build EvmCompiler.Yul.OpenExternal`, `lake env lean EvmCompiler/Yul/Reference.lean`, `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.
 
 - 2026-05-27 16:52 PDT - proof/open-yul-safe-domain-constructor - Added the Safe/no-external-call constructor for `YulOpenEvalArgsReverseStateDomainExactContract`, including an open-result bind invariant and proof that `Safe.primitive` cannot produce a CALL-family open request. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean`, `lake build EvmCompiler.Yul.RecursiveBridgeSupport`, `lake build EvmCompiler.Yul`, scoped proof-escape scan, and `git diff --check` passed.

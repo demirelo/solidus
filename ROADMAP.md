@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 17:03 PDT.
+Last updated: 2026-05-27 17:09 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -23,6 +23,11 @@ relation.
 `EvmCompiler.Yul.OpenExternal` now contains the checked request-extraction
 boundary for Yul argument lists and EVM stacks plus `OpenCallRel`, whose
 response preservation field is explicitly universal over all shared responses.
+The imported Nethermind `accountMap` remains part of the internal local-state
+relation for operations such as contract storage and account lookup; the open
+external boundary should not expose it as an external-world model.
+`createdAccounts` is no longer part of `ChainStateRel` while CREATE/CREATE2
+remain outside the live CALL proof.
 The current checked hook also proves CALL-family argument/stack agreement over
 an arbitrary target stack suffix and derives the needed call-context relation
 from the existing compiler/source state relations. The CALL-safe semantic
