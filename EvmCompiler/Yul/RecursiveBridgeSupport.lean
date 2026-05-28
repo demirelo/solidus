@@ -6609,73 +6609,6 @@ theorem StateCheckpointAllowed.of_ok_shape
   subst state
   simp [StateCheckpointAllowed]
 
-theorem SourcePairResultCheckpointAllowed.buildContractCallEmptyReturnState
-    {canBreak canContinue canLeave : Bool}
-    {state : State} {accountMap : Option (EvmYul.AccountMap .Yul)}
-    {inOffset inSize outOffset outSize value : Word}
-    (hAllowed :
-      StateCheckpointAllowed canBreak canContinue canLeave state) :
-    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
-      (EvmYul.Yul.buildContractCallEmptyReturnState state accountMap
-        inOffset inSize outOffset outSize value) := by
-  cases state with
-  | Ok shared store =>
-      simp [EvmYul.Yul.buildContractCallEmptyReturnState,
-        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-  | OutOfFuel =>
-      simp [EvmYul.Yul.buildContractCallEmptyReturnState,
-        SourcePairResultCheckpointAllowed]
-  | Checkpoint jump =>
-      cases jump <;>
-        simpa [EvmYul.Yul.buildContractCallEmptyReturnState,
-          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-          using hAllowed
-
-theorem SourcePairResultCheckpointAllowed.buildContractCallReturnState
-    {canBreak canContinue canLeave : Bool}
-    {state : State} {accountMap : EvmYul.AccountMap .Yul}
-    {substate : EvmYul.Substate} {returnData : ByteArray}
-    {inOffset inSize outOffset outSize value : Word}
-    (hAllowed :
-      StateCheckpointAllowed canBreak canContinue canLeave state) :
-    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
-      (EvmYul.Yul.buildContractCallReturnState state accountMap substate
-        returnData inOffset inSize outOffset outSize value) := by
-  cases state with
-  | Ok shared store =>
-      simp [EvmYul.Yul.buildContractCallReturnState,
-        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-  | OutOfFuel =>
-      simp [EvmYul.Yul.buildContractCallReturnState,
-        SourcePairResultCheckpointAllowed]
-  | Checkpoint jump =>
-      cases jump <;>
-        simpa [EvmYul.Yul.buildContractCallReturnState,
-          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-          using hAllowed
-
-theorem SourcePairResultCheckpointAllowed.restoreRevertedContractCallState
-    {canBreak canContinue canLeave : Bool}
-    {callerState bodyState : State}
-    {inOffset inSize outOffset outSize : Word}
-    (hAllowed :
-      StateCheckpointAllowed canBreak canContinue canLeave callerState) :
-    SourcePairResultCheckpointAllowed canBreak canContinue canLeave
-      (EvmYul.Yul.restoreRevertedContractCallState callerState bodyState
-        inOffset inSize outOffset outSize) := by
-  cases callerState with
-  | Ok shared store =>
-      simp [EvmYul.Yul.restoreRevertedContractCallState,
-        SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-  | OutOfFuel =>
-      simp [EvmYul.Yul.restoreRevertedContractCallState,
-        SourcePairResultCheckpointAllowed]
-  | Checkpoint jump =>
-      cases jump <;>
-        simpa [EvmYul.Yul.restoreRevertedContractCallState,
-          SourcePairResultCheckpointAllowed, StateCheckpointAllowed]
-          using hAllowed
-
 theorem SourcePairResultCheckpointAllowed.restoreSuccessfulContractCallState
     {canBreak canContinue canLeave : Bool}
     {callerState bodyState : State} {varstore : EvmYul.Yul.VarStore}
@@ -22605,8 +22538,8 @@ This is the named proof boundary needed by the open external-call route.  For
 old no-CALL arguments it is discharged by the existing primitive-family domain
 theorems.  For CALL-safe arguments with nested external calls, the intended
 constructor is the open argument/response semantics: every nested response may
-mutate account/substate data, but it must not mutate the suspended caller's
-local varstore.
+carry an arbitrary opaque caller-visible state transformer, but it must not
+mutate the suspended caller's local varstore.
 -/
 structure EvalArgsReverseOkDomainExactContract
     (layout : List Name) (fuel : Nat) (args : List AstExpr)
@@ -22666,7 +22599,7 @@ end EvalArgsReverseOkDomainExactContract
 /--
 Local-varstore preservation for the Yul side of an open CALL-family response.
 
-The response may arbitrarily mutate the shared account/substate component, but
+The response may carry an arbitrary opaque caller-visible state transformer, but
 `OpenExternal.CallKind.yulOpenCall?` resumes the suspended caller with the same
 Yul varstore. This is the small semantic fact the nested open-argument proof
 needs instead of unfolding any concrete closed `primCall` branch.

@@ -695,40 +695,26 @@ theorem callSite_eq_of_args
 end CallKind
 
 /--
-An abstract mutation of contract-visible internal state while the caller frame
-is suspended at an external call.
+An abstract mutation of contract-visible internal state while the caller frame is
+suspended at an external call.
 
 The external callee is not modeled as stateful here. Reentrancy is
-over-approximated by allowing the call response to carry an arbitrary mutation
-of the account/substate portion of the caller-visible chain state: balances,
-storage, transient storage, logs/refunds/access lists, and newly-created
-accounts. This intentionally does not touch the caller's frame-local machine
-state or execution environment: the return-data copy/status continuation below
-is still the caller's local work. The proof boundary decides which internal
-mutations are related on the Yul and EVM sides.
+over-approximated by letting the call response carry an arbitrary transformer of
+the caller-visible chain state. We intentionally do not expose an account map,
+created-account set, precompile table, child-code lookup, or any other concrete
+world model at this boundary. The caller-local machine frame is still updated
+only by the return-data copy/status continuation below, and the proof boundary
+decides which arbitrary returned transformers preserve the Yul/EVM state
+relation.
 -/
 structure ReentrantStateMutation where
-  accountMap :
-    {τ : EvmYul.OperationType} →
-      EvmYul.AccountMap τ → EvmYul.AccountMap τ
-  substate : EvmYul.Substate → EvmYul.Substate
-  createdAccounts :
-    Batteries.RBSet Address compare → Batteries.RBSet Address compare
+  apply :
+    {τ : EvmYul.OperationType} → EvmYul.State τ → EvmYul.State τ
 
 namespace ReentrantStateMutation
 
-def apply (mutation : ReentrantStateMutation)
-    {τ : EvmYul.OperationType} (state : EvmYul.State τ) :
-    EvmYul.State τ :=
-  { state with
-    accountMap := mutation.accountMap state.accountMap
-    substate := mutation.substate state.substate
-    createdAccounts := mutation.createdAccounts state.createdAccounts }
-
 def identity : ReentrantStateMutation where
-  accountMap := fun accountMap => accountMap
-  substate := fun substate => substate
-  createdAccounts := fun createdAccounts => createdAccounts
+  apply := fun state => state
 
 end ReentrantStateMutation
 
@@ -738,9 +724,9 @@ An arbitrary external-call response.
 The black-box callee can return any status/returndata pair. It can also have
 triggered arbitrary reentrant execution before returning, represented by
 `internalMutation`. The compiler proof quantifies over all responses whose
-internal mutation preserves the relevant source/target relation, instead of
-proving facts about a concrete scheduler, precompile table, or child-code
-semantics.
+opaque internal-state transformer preserves the relevant source/target relation,
+instead of proving facts about a concrete scheduler, precompile table, account
+map, created-account set, or child-code semantics.
 -/
 structure CallResponse where
   success : Bool

@@ -5975,9 +5975,9 @@ def OpenExternalResponseRel
     (sourceShared : EvmYul.SharedState .Yul)
     (targetShared : EvmYul.SharedState .EVM)
     (response : OpenExternal.CallResponse) : Prop :=
-  -- Reentrant callbacks may mutate caller-visible account/substate data; an
-  -- admissible response is one whose arbitrary internal mutation keeps the
-  -- source and target chain states related.
+  -- Reentrant callbacks are represented only by the opaque response
+  -- transformer; an admissible response is one that keeps the source and target
+  -- chain states related.
   ChainStateRel cfg
     (response.internalMutation.apply sourceShared.toState)
     (response.internalMutation.apply targetShared.toState)
