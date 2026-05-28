@@ -10392,14 +10392,6 @@ theorem sourcePrimitiveNullarySharedOneSound_structured_msize :
   sourcePrimitiveNullarySharedOneSound_structured_of_machineState
     EvmYul.MachineState.msize (by rfl)
 
-theorem sourcePrimitiveNullarySharedOneSound_structured_gas :
-    SourcePrimitiveNullarySharedOneSound
-      Locals.Source.PrimitiveSemantics.structured .gas
-      (fun shared => shared)
-      (fun shared => EvmYul.MachineState.gas shared.toMachineState) :=
-  sourcePrimitiveNullarySharedOneSound_structured_of_machineState
-    EvmYul.MachineState.gas (by rfl)
-
 theorem primitiveStackSoundAt_structured_add
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
     PrimitiveStackSoundAt cfg layout
@@ -11185,29 +11177,6 @@ theorem primitiveStackSoundAtArity_structured_msize
             (fun activeWords : EvmYul.UInt256 =>
               activeWords * (⟨32⟩ : EvmYul.UInt256))
             hShared.machine.activeWords)
-      (by intro sourceShared targetShared hShared; exact hShared)
-
-theorem primitiveStackSoundAtArity_structured_gas
-    {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
-    PrimitiveStackSoundAtArity cfg layout
-      Locals.Source.PrimitiveSemantics.structured sourceFuel
-      ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) .gas := by
-  exact
-    primitiveStackSoundAtArity_of_nullary_shared_one
-      (cfg := cfg) (layout := layout)
-      (prim := Locals.Source.PrimitiveSemantics.structured)
-      (sourceFuel := sourceFuel)
-      (yulPrim := ((.StackMemFlow .GAS : EvmYul.Operation .Yul)))
-      (op := .gas)
-      (fun shared => shared) (fun shared => shared)
-      (fun shared => EvmYul.MachineState.gas shared.toMachineState)
-      (fun shared => EvmYul.MachineState.gas shared.toMachineState)
-      (by rfl)
-      yulPrimitiveNullarySharedOneSoundAtArity_gas
-      sourcePrimitiveNullarySharedOneSound_structured_gas
-      (by
-        intro sourceShared targetShared hShared
-        exact cfg.gasValueRel hShared.machine.gasAvailable)
       (by intro sourceShared targetShared hShared; exact hShared)
 
 theorem primitiveStackSoundAtArity_structured_of_nullary_executionEnv
@@ -12662,8 +12631,6 @@ theorem primitiveStackSoundAtArity_structured_of_safe_toBasicOp
           primitiveStackSoundAt_structured_mstore8
       · cases hBasic
         exact primitiveStackSoundAtArity_structured_msize
-      · cases hBasic
-        exact primitiveStackSoundAtArity_structured_gas
       · cases hBasic
         exact primitiveStackSoundAtArity_structured_tload
       · cases hBasic
@@ -46149,42 +46116,6 @@ theorem exprValueBridgeWithLayoutSlots_msize
             (fun activeWords : EvmYul.UInt256 =>
               activeWords * (⟨32⟩ : EvmYul.UInt256))
             hShared.machine.activeWords)
-      hRel
-
-theorem exprValueBridgeWithLayoutSlots_gas
-    {cfg : StateRelConfig}
-    {sourceLayout fullLayout : List Name}
-    {program : Functions.Program} {returns : List Name}
-    {ctx : Locals.Ctx} {sourceFuel : Nat}
-    {shared : EvmYul.SharedState .Yul}
-    {store : EvmYul.Yul.VarStore}
-    {codeOverride : Option AstContract} {compiler : RunState}
-    (hCtxLayout : ctx.layout = fullLayout)
-    (hRel :
-      CompilerStateRelWithLayoutSlots cfg sourceLayout fullLayout
-        (.Ok shared store) compiler.evm) :
-      ExprValueBridgeWithLayoutSlots (cfg := cfg) sourceLayout fullLayout
-        fullLayout program returns ctx sourceFuel.succ.succ
-        (.Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) [])
-        codeOverride (.Ok shared store) compiler []
-        (.prim .gas .nil) := by
-  exact
-    exprValueBridgeWithLayoutSlots_nullary_machineState
-      ((.StackMemFlow .GAS : EvmYul.Operation .Yul))
-      (.prim .gas .nil)
-      .gas
-      (fun shared => EvmYul.MachineState.gas shared.toMachineState)
-      (fun state => EvmYul.MachineState.gas state.toMachineState)
-      EvmYul.MachineState.gas hCtxLayout
-      (by intro fuel shared store; exact
-        PrimSemantics.primCall_gas_ok fuel shared store)
-      (by simp [Structured.BasicOp.toPrimOp,
-        Assembly.PrimOp.continuingStep?])
-      (by intro state; rfl)
-      (by intro ctxAfter base; rfl)
-      (by
-        intro sourceShared targetState hShared
-        exact cfg.gasValueRel hShared.machine.gasAvailable)
       hRel
 
 theorem exprValueBridgeWithLayoutSlots_unary_state_same_hidden

@@ -10,6 +10,13 @@ external execution certificate.
 
 Last updated: 2026-05-27 22:23 PDT.
 
+Current `GAS` policy: imported Yul may still parse/reference the raw `gas()`
+primitive, and the lower EVM/assembly semantics still model the opcode, but the
+accepted imported-Yul compiler surface rejects `gas()` the same way it rejects
+`pc()`. The public theorem should therefore be read over accepted Yul programs
+that do not lower `gas()`; older gas-oracle-parametric proof work is preserved
+only on the `codex/gas-oracle-checkpoint` branch.
+
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
 prove that imported Yul and compiled EVM reach the same external call site

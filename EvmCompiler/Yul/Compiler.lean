@@ -68,7 +68,9 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
   | .StackMemFlow .SSTORE => some .sstore
   | .StackMemFlow .MSTORE8 => some .mstore8
   | .StackMemFlow .MSIZE => some .msize
-  | .StackMemFlow .GAS => some .gas
+  -- Like `pc()`, imported-Yul `gas()` is recognized but not accepted by
+  -- this verified compiler surface.
+  | .StackMemFlow .GAS => none
   | .StackMemFlow .TLOAD => some .tload
   | .StackMemFlow .TSTORE => some .tstore
   | .StackMemFlow .MCOPY => some .mcopy
@@ -87,6 +89,9 @@ def toBasicOp? : EvmYul.Operation .Yul → Option Structured.BasicOp
   | .System .REVERT => none
   | .System .INVALID => some .invalid
   | .System .SELFDESTRUCT => none
+
+@[simp] theorem toBasicOp?_gas :
+    toBasicOp? ((.StackMemFlow .GAS : EvmYul.Operation .Yul)) = none := rfl
 
 def stop? : EvmYul.Operation .Yul → Option Assembly.HaltKind
   | .StopArith .STOP => some .stop
@@ -330,6 +335,24 @@ def lower1? (state : Fresh.State) (expr : AstExpr) :
 def lower0? (state : Fresh.State) (expr : AstExpr) :
     Option (List Functions.Stmt × Locals.Expr 0 × Fresh.State) :=
   lower? 0 state expr
+
+theorem toLocals?_gas (results : Nat) :
+    toLocals? results
+        (.Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) []) =
+      none := by
+  simp [toLocals?, Prim.toBasicOp?]
+
+theorem lower?_gas (results : Nat) (state : Fresh.State) :
+    lower? results state
+        (.Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) []) =
+      none := by
+  simp [lower?, Prim.toBasicOp?]
+
+theorem lower1?_gas (state : Fresh.State) :
+    lower1? state
+        (.Call (.inl ((.StackMemFlow .GAS : EvmYul.Operation .Yul))) []) =
+      none := by
+  simp [lower1?, lower?_gas]
 
 theorem lower1?_lit (state : Fresh.State) (value : Word) :
     lower1? state (.Lit value) =

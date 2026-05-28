@@ -28233,10 +28233,12 @@ theorem safeBasicZeroOutputPrimCall_error_not_relatable
                 rfl
               rw [hStep] at hCall
               simp [yulPrimListResult] at hCall
-          | MLOAD | SLOAD | MSIZE | GAS | TLOAD =>
+          | MLOAD | SLOAD | MSIZE | TLOAD =>
               simp [Prim.toBasicOp?] at hBasic
               rw [← hBasic] at hOutputs
               simp [Expressions.Structured.BasicOp.outputs] at hOutputs
+          | GAS =>
+              simp [Prim.toBasicOp?] at hBasic
           | MSTORE =>
               have hExec :
                   yulPrimListResult
