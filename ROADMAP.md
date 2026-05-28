@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 21:32 PDT.
+Last updated: 2026-05-27 21:47 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -47,8 +47,14 @@ checked stack-argument prelude open-result surface for completed `.done` runs.
 `OpenResultRel` chooses admissible responses per suspended source/target call
 pair, so nested calls can use the state-dependent reentrant response relation
 appropriate to the pre-call states captured by that call.
+`EvmCompiler.Yul.CompilerOpen` now gives the compiler side its own source-open
+interpreter, mirroring the existing `Locals.Source`/`Functions.Source`
+semantics while suspending at CALL-family primitive expressions. The generated
+argument-prelude target is named by `SourceArgPreludeOpen.run`, rather than
+being represented only by the old closed `EvmYul.Yul.evalArgs` evidence.
 The remaining CALL-capable step is to make generated preludes actually produce
-this open result in the suspending case, then replace expression-prelude
+this open result in the suspending case by proving open Yul argument evaluation
+relates to `SourceArgPreludeOpen.run`, then replace expression-prelude
 consumers that still expect the old closed `EvmYul.Yul.evalArgs` result.
 
 Architecture checkpoint: the proof tower is being refactored to route

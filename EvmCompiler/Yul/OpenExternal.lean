@@ -273,6 +273,17 @@ def toBasicOp : CallKind → Structured.BasicOp
   | .delegatecall => .delegatecall
   | .staticcall => .staticcall
 
+def ofBasicOp? : Structured.BasicOp → Option CallKind
+  | .call => some .call
+  | .callcode => some .callcode
+  | .delegatecall => some .delegatecall
+  | .staticcall => some .staticcall
+  | _ => none
+
+@[simp] theorem ofBasicOp?_toBasicOp (kind : CallKind) :
+    ofBasicOp? kind.toBasicOp = some kind := by
+  cases kind <;> rfl
+
 @[simp] theorem inputs_toBasicOp (kind : CallKind) :
     Expressions.Structured.BasicOp.inputs kind.toBasicOp =
       kind.inputArity := by

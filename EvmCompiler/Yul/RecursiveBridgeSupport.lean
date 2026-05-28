@@ -1,4 +1,5 @@
 import EvmCompiler.Yul.RecursiveBridge
+import EvmCompiler.Yul.CompilerOpen
 
 /-!
 Support lemmas for the Nethermind-Yul source-tower recursive bridge.
@@ -30837,6 +30838,32 @@ structure SourceArgPreludeOpenTarget where
 
 abbrev SourceArgPreludeOpenResult :=
   OpenExternal.OpenResult Functions.EVMException SourceArgPreludeOpenTarget
+
+namespace SourceArgPreludeOpen
+
+def run
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (targetFuel : Nat) (pre : List Functions.Stmt)
+    {results : Nat} (lower : Locals.ExprSeq results)
+    (compiler : Objects.Source.State) :
+    SourceArgPreludeOpenResult :=
+  OpenExternal.OpenResult.bind
+    (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+      targetFuel { stmts := pre } compiler)
+    fun preResult =>
+      match preResult.1.mode with
+      | .regular =>
+          OpenExternal.OpenResult.map
+            (fun argResult =>
+              { state := argResult.1
+                ctx := preResult.2
+                values := argResult.2 })
+            (CompilerOpen.LocalsExpr.evalSeq prim lower preResult.1.state)
+      | .brk | .cont | .leave | .halt _ =>
+          CompilerOpen.invalid
+
+end SourceArgPreludeOpen
 
 def SourceArgStackPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name) :

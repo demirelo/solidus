@@ -1,5 +1,9 @@
 # Progress Log
 
+- 2026-05-27 21:47 PDT - proof/compiler-open-target-semantics - Added `CompilerOpen`, a source-side open interpreter for compiler-generated code that mirrors `Locals.Source`/`Functions.Source` while suspending at CALL-family primitives, plus `SourceArgPreludeOpen.run` as the generated argument-prelude target computation. Verification: `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` and `lake build EvmCompiler.Yul.RecursiveBridgeSupport` passed.
+
+- 2026-05-27 21:45 PDT - compaction resume/proof/compiler-open-target - Resumed after compaction with the compiler-side open interpreter added locally; current checkpoint is to verify and document `CompilerOpen` plus `SourceArgPreludeOpen.run`.
+
 - 2026-05-27 21:32 PDT - compaction resume/proof/open-result-call-dependent-responses - Resumed after compaction with the call-dependent `OpenResultRel` refinement verified by the full `RecursiveBridgeSupport` build; next step is hygiene and a focused checkpoint commit.
 
 - 2026-05-27 21:30 PDT - proof/open-result-call-dependent-responses - Tightened `OpenExternal.OpenResultRel` so admissible responses are chosen per suspended source/target call pair, matching state-dependent reentrant response relations instead of using one fixed predicate for every nested call. `SourceArgStackPreludeOpenResultRel` now explicitly uses the constant-response-predicate specialization. Verification: `lake build EvmCompiler.Yul.OpenExternal` and `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` passed.
