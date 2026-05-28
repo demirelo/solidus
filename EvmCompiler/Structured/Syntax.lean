@@ -140,7 +140,7 @@ inductive BasicOp where
   | returndatasize | returndatacopy | extcodehash
   | blockhash | coinbase | timestamp | number | prevrandao | gaslimit | chainid
   | selfbalance | basefee | blobhash | blobbasefee
-  | pop | mload | mstore | sload | sstore | mstore8 | msize | gas
+  | pop | mload | mstore | sload | sstore | mstore8 | msize
   | tload | tstore
   | mcopy
   | keccak256
@@ -215,7 +215,6 @@ def toPrimOp : BasicOp → Assembly.PrimOp
   | .sstore => .sstore
   | .mstore8 => .mstore8
   | .msize => .msize
-  | .gas => .gas
   | .tload => .tload
   | .tstore => .tstore
   | .mcopy => .mcopy

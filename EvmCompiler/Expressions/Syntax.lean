@@ -26,7 +26,7 @@ def inputs : Structured.BasicOp → Nat
   | .extcodecopy => 4
   | .pop | .mload | .sload | .tload => 1
   | .mstore | .sstore | .mstore8 | .tstore | .keccak256 => 2
-  | .msize | .gas => 0
+  | .msize => 0
   | .dup1 => 1
   | .dup2 => 2
   | .dup3 => 3
@@ -87,7 +87,7 @@ def outputs : Structured.BasicOp → Nat
   | .mload | .sload | .tload => 1
   | .mstore | .sstore | .mstore8 | .tstore => 0
   | .keccak256 => 1
-  | .msize | .gas => 1
+  | .msize => 1
   | .dup1 => 2
   | .dup2 => 3
   | .dup3 => 4

@@ -28,8 +28,8 @@ Primitive operations admitted directly into the first assembly layer.
 
 Control transfer, labels, and pushes are represented by dedicated assembly
 instructions. Raw `JUMP`/`JUMPI`/`JUMPDEST` are represented by labeled
-control-flow instructions. `GAS` is admitted syntactically but remains part of
-the explicit gas-oracle/agreement boundary in the gas-aware theorem.
+control-flow instructions. The source/compiler tower does not admit the EVM
+`GAS` opcode; gas accounting remains only in the final gas-aware runner.
 -/
 inductive PrimOp where
   | stop
@@ -40,7 +40,7 @@ inductive PrimOp where
   | returndatasize | returndatacopy | extcodehash
   | blockhash | coinbase | timestamp | number | prevrandao | gaslimit | chainid
   | selfbalance | basefee | blobhash | blobbasefee
-  | pop | mload | mstore | sload | sstore | mstore8 | pc | msize | gas
+  | pop | mload | mstore | sload | sstore | mstore8 | pc | msize
   | tload | tstore
   | mcopy
   | keccak256
@@ -117,7 +117,6 @@ def toEVM : PrimOp → EVMOp
   | .mstore8 => EvmYul.Operation.MSTORE8
   | .pc => EvmYul.Operation.PC
   | .msize => EvmYul.Operation.MSIZE
-  | .gas => EvmYul.Operation.GAS
   | .tload => EvmYul.Operation.TLOAD
   | .tstore => EvmYul.Operation.TSTORE
   | .mcopy => EvmYul.Operation.MCOPY

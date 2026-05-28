@@ -1277,10 +1277,8 @@ namespace PrimOp
 Continuing primitives admitted by structured control as ordinary statements.
 
 Excluded here: `STOP`, `RETURN`, `REVERT`, `SELFDESTRUCT`, the call/create
-family, and `PC`. Those are control-boundary or PC-dependent opcodes and need
-an outcome-aware source semantics rather than normal statement sequencing.
-`GAS` is admitted here but remains covered by the top-level gas oracle and
-gas-aware runner preconditions.
+family, `PC`, and `GAS`. Those are control-boundary, PC-dependent, or
+gas-accounting opcodes and are not ordinary source/compiler-tower statements.
 -/
 def continuingStep? : PrimOp → Option PrimStep
   | .add => some (.bin EvmYul.UInt256.add)
@@ -1360,7 +1358,6 @@ def continuingStep? : PrimOp → Option PrimStep
   | .sstore => some (.binaryState EvmYul.State.sstore)
   | .mstore8 => some (.binaryMachineState EvmYul.MachineState.mstore8)
   | .msize => some (.machineState EvmYul.MachineState.msize)
-  | .gas => some (.machineState EvmYul.MachineState.gas)
   | .tload => some (.unaryState EvmYul.State.tload)
   | .tstore => some (.binaryState EvmYul.State.tstore)
   | .mcopy => some (.ternaryMachineState EvmYul.MachineState.mcopy)
