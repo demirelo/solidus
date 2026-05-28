@@ -31248,20 +31248,91 @@ def SourceArgStackPreludeOpenResultRel
     (SourceArgStackPreludeOpenDoneRel cfg layout)
     (OpenExternal.YulOpenResult.toOpenResult source) target
 
+abbrev SourceExprPreludeOpenCallResponseRel : Type :=
+  OpenExternal.OpenCall
+    (OpenExternal.OpenResult Exception (State × List Word)) →
+    OpenExternal.OpenCall
+      (OpenExternal.OpenResult Functions.EVMException
+        SourceArgPreludeOpenTarget) →
+    OpenExternal.CallResponse → Prop
+
 def SourceExprPreludeOpenResultRel
     (cfg : StateRelConfig) (layout : List Name)
-    (callResponseRel :
-      OpenExternal.OpenCall
-        (OpenExternal.OpenResult Exception (State × List Word)) →
-        OpenExternal.OpenCall
-          (OpenExternal.OpenResult Functions.EVMException
-            SourceArgPreludeOpenTarget) →
-        OpenExternal.CallResponse → Prop)
+    (callResponseRel : SourceExprPreludeOpenCallResponseRel)
     (source : OpenExternal.YulOpenResult (State × List Word))
     (target : SourceArgPreludeOpenResult) : Prop :=
   OpenExternal.OpenResultRel callResponseRel
     (SourceArgStackPreludeOpenDoneRel cfg layout)
     (OpenExternal.YulOpenResult.toOpenResult source) target
+
+def SourceArgStackPreludeOpenSoundAtExactTarget
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) {results : Nat}
+    (lower : Locals.ExprSeq results) (targetFuel : Nat)
+    (callResponseRel : SourceExprPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceArgStackPreludeOpenDoneRel cfg layout)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source))
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lower
+          compiler)
+
+def SourceExprPreludeOpenSoundAtExactTarget
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (expr : AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) {results : Nat}
+    (lower : Locals.Expr results) (targetFuel : Nat)
+    (callResponseRel : SourceExprPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      SourceExprPreludeOpenResultRel cfg layout callResponseRel
+        (OpenExternal.YulOpen.evalValues sourceFuel expr codeOverride source)
+        (SourceExprPreludeOpen.run prim program ctx targetFuel pre lower
+          compiler)
+
+def SourceExprPreludeOpenSoundWhen
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (expr : AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) {results : Nat}
+    (lower : Locals.Expr results)
+    (callResponseRel : SourceExprPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      ∃ targetFuel,
+        SourceExprPreludeOpenResultRel cfg layout callResponseRel
+          (OpenExternal.YulOpen.evalValues sourceFuel expr codeOverride source)
+          (SourceExprPreludeOpen.run prim program ctx targetFuel pre lower
+            compiler)
+
+theorem SourceExprPreludeOpenSoundWhen.of_atExactTarget
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.Expr results} {targetFuel : Nat}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hExact :
+      SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel expr codeOverride pre lower targetFuel callResponseRel) :
+    SourceExprPreludeOpenSoundWhen cfg layout prim program ctx sourceFuel expr
+      codeOverride pre lower callResponseRel := by
+  intro source compiler hInitial
+  exact ⟨targetFuel, hExact hInitial⟩
 
 namespace SourceArgStackPreludeOpenResultRel
 
@@ -32040,6 +32111,86 @@ theorem openPrimitiveCallExprPreludeOpenResultRel_of_arg_prelude_open_callKind
       (by
         intro sourceResult target hDone
         simpa using hArity hDone)
+      hPrimitiveResponse hPreludeResponse
+
+theorem sourceExprPreludeOpenSoundAtExactTarget_prim_call_of_arg_prelude_open_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        preludeCallResponseRel)
+    (hArity :
+      ∀ {sourceResult : State × List Word}
+        {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok sourceResult) (.ok target) →
+          sourceResult.2.length = Expressions.Structured.BasicOp.inputs op)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        callResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgs sourceFuel kind
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim kind.toBasicOp
+                      target.state target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel callResponseRel := by
+  intro source compiler hInitial
+  exact
+    openPrimitiveCallExprPreludeOpenResultRel_of_arg_prelude_open_callKind
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+      (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (results := results)
+      (lowerArgs := lowerArgs) (source := source) (compiler := compiler)
+      hKind hBasic hOutputs (hPrelude hInitial) hArity
       hPrimitiveResponse hPreludeResponse
 
 /--
