@@ -32241,6 +32241,90 @@ def openPrimitiveCallEVMResult
     { site := call.site
       resume := fun response => .done (.ok (call.resume response)) }
 
+theorem openPrimitiveCallExprEVMOpenResultRel_of_args_done_operands
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compilerAfterArgs : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    {values : List Word} {baseStack : OpenExternal.Stack}
+    (operands : OpenExternal.CallOperands)
+    (hValues : values = (kind.args operands).reverse)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hEVMShared : evmState.toSharedState = compilerAfterArgs.shared) :
+    ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+      OpenExternal.CallKind.evmOpenCall?
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenExternal.OpenResultRel
+        (fun _sourceCall _targetCall response =>
+          Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared response)
+        (OpenPrimitiveEVMResultDoneRel cfg layout baseStack)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel.succ
+            (.Call (.inl kind.toYulOperation) args) codeOverride
+            (.Ok sourceShared sourceStore)))
+        (openPrimitiveCallEVMResult evmCall) := by
+  rcases
+      SourceStateRel.openExternalPrimitiveEVMOpenCallRel_of_args
+        hRelArgs hEVMShared kind operands baseStack with
+    ⟨sourceCall, evmCall, hSourceCall, hEVMCall, hCallRel⟩
+  let sourceExceptCall :
+      OpenExternal.OpenCall
+        (Except Exception (State × List Word)) :=
+    { site := sourceCall.site
+      resume := fun response => .ok (sourceCall.resume response) }
+  have hValuesReverse :
+      values.reverse = kind.args operands := by
+    rw [hValues]
+    simp
+  have hSourceCallForEval :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          (.Ok sourceSharedAfter sourceStoreAfter) kind.toYulOperation
+          values.reverse =
+        some sourceExceptCall := by
+    simp [OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?,
+      OpenExternal.CallKind.ofYulOperation?_toYulOperation, hValuesReverse,
+      hSourceCall, sourceExceptCall]
+  have hSourceEval :
+      OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride
+          (.Ok sourceShared sourceStore) =
+        .call (OpenExternal.YulOpenResult.liftExceptCall
+          sourceExceptCall) :=
+    OpenExternal.YulOpen.evalValues_prim_call_suspends_of_evalArgs_done
+      (fuel := sourceFuel) (prim := kind.toYulOperation) (args := args)
+      (codeOverride := codeOverride) (state := .Ok sourceShared sourceStore)
+      (stateAfterArgs := .Ok sourceSharedAfter sourceStoreAfter)
+      (rawValues := values) (call := sourceExceptCall) hOpenEvalArgs
+      hSourceCallForEval
+  refine ⟨evmCall, hEVMCall, ?_⟩
+  rw [hSourceEval]
+  dsimp [openPrimitiveCallEVMResult,
+    OpenExternal.YulOpenResult.toOpenResult,
+    OpenExternal.YulOpenResult.liftExceptCall, sourceExceptCall]
+  refine
+    OpenExternal.OpenResultRel.call
+      (by simpa [sourceExceptCall] using hCallRel.sameSite)
+      ?_
+  intro response hResponse
+  exact
+    OpenExternal.OpenResultRel.done
+      (by
+        dsimp [OpenPrimitiveEVMResultDoneRel, sourceExceptCall]
+        exact hCallRel.preservesAllResponses response hResponse)
+
 /--
 Open expression-result bridge from imported Yul directly to the EVM CALL
 boundary.
@@ -32290,53 +32374,18 @@ theorem openPrimitiveCallExprEVMOpenResultRel_of_args_done_toYulOperation
         kind hValuesArity with
     ⟨operands, hValues⟩
   rcases
-      SourceStateRel.openExternalPrimitiveEVMOpenCallRel_of_args
-        hRelArgs hEVMShared kind operands baseStack with
-    ⟨sourceCall, evmCall, hSourceCall, hEVMCall, hCallRel⟩
-  let sourceExceptCall :
-      OpenExternal.OpenCall
-        (Except Exception (State × List Word)) :=
-    { site := sourceCall.site
-      resume := fun response => .ok (sourceCall.resume response) }
-  have hValuesReverse :
-      values.reverse = kind.args operands := by
-    rw [hValues]
-    simp
-  have hSourceCallForEval :
-      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
-          (.Ok sourceSharedAfter sourceStoreAfter) kind.toYulOperation
-          values.reverse =
-        some sourceExceptCall := by
-    simp [OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?,
-      OpenExternal.CallKind.ofYulOperation?_toYulOperation, hValuesReverse,
-      hSourceCall, sourceExceptCall]
-  have hSourceEval :
-      OpenExternal.YulOpen.evalValues sourceFuel.succ
-          (.Call (.inl kind.toYulOperation) args) codeOverride
-          (.Ok sourceShared sourceStore) =
-        .call (OpenExternal.YulOpenResult.liftExceptCall
-          sourceExceptCall) :=
-    OpenExternal.YulOpen.evalValues_prim_call_suspends_of_evalArgs_done
-      (fuel := sourceFuel) (prim := kind.toYulOperation) (args := args)
-      (codeOverride := codeOverride) (state := .Ok sourceShared sourceStore)
-      (stateAfterArgs := .Ok sourceSharedAfter sourceStoreAfter)
-      (rawValues := values) (call := sourceExceptCall) hOpenEvalArgs
-      hSourceCallForEval
-  refine ⟨operands, evmCall, hEVMCall, ?_⟩
-  rw [hSourceEval]
-  dsimp [openPrimitiveCallEVMResult,
-    OpenExternal.YulOpenResult.toOpenResult,
-    OpenExternal.YulOpenResult.liftExceptCall, sourceExceptCall]
-  refine
-    OpenExternal.OpenResultRel.call
-      (by simpa [sourceExceptCall] using hCallRel.sameSite)
-      ?_
-  intro response hResponse
-  exact
-    OpenExternal.OpenResultRel.done
-      (by
-        dsimp [OpenPrimitiveEVMResultDoneRel, sourceExceptCall]
-        exact hCallRel.preservesAllResponses response hResponse)
+      openPrimitiveCallExprEVMOpenResultRel_of_args_done_operands
+        (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+        (kind := kind) (args := args) (codeOverride := codeOverride)
+        (sourceShared := sourceShared)
+        (sourceSharedAfter := sourceSharedAfter)
+        (sourceStore := sourceStore)
+        (sourceStoreAfter := sourceStoreAfter)
+        (compilerAfterArgs := compilerAfterArgs) (evmState := evmState)
+        (values := values) (baseStack := baseStack) operands hValues
+        hOpenEvalArgs hRelArgs hEVMShared with
+    ⟨evmCall, hEVMCall, hRel⟩
+  exact ⟨operands, evmCall, hEVMCall, hRel⟩
 
 /-- Checked-operation wrapper for the Yul-to-EVM open expression boundary. -/
 theorem openPrimitiveCallExprEVMOpenResultRel_of_args_done_callKind
@@ -32394,6 +32443,123 @@ theorem openPrimitiveCallExprEVMOpenResultRel_of_args_done_callKind
       (compilerAfterArgs := compilerAfterArgs) (evmState := evmState)
       (values := values) (baseStack := baseStack)
       hOpenEvalArgs hRelArgs hEVMShared hArity
+
+/--
+Argument-prelude consumer for the direct Yul-to-EVM open CALL result
+boundary.
+
+The generated prelude proof constructs the compiler post-argument state used
+to relate the imported Yul shared state to any EVM state at the corresponding
+primitive boundary.  From there, the result relation is fully open: for every
+matching EVM state and caller stack suffix, both sides expose the same CALL site
+and preserve every shared response admitted by the state relation.
+-/
+theorem openPrimitiveCallExprEVMOpenResultRel_of_arg_stack_preludeRegularAt_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {values : List Word}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hArgsRegular :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args codeOverride pre lowerArgs)
+    (hInitial :
+      SourceStateRel cfg layout (.Ok sourceShared sourceStore) compiler)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op) :
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∀ {evmState : EvmYul.EVM.State},
+        evmState.toSharedState = compilerAfterArgs.shared →
+        ∀ (baseStack : OpenExternal.Stack),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.evmOpenCall?
+                ({ evmState with stack := kind.args operands ++ baseStack }
+                  : EvmYul.EVM.State) kind =
+              some evmCall ∧
+            OpenExternal.OpenResultRel
+              (fun _sourceCall _targetCall response =>
+                Reference.SharedStateRel.OpenExternalResponseRel
+                  cfg sourceSharedAfter compilerAfterArgs.shared response)
+              (OpenPrimitiveEVMResultDoneRel cfg layout baseStack)
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalValues sourceFuel.succ
+                  (.Call (.inl yulPrim) args) codeOverride
+                  (.Ok sourceShared sourceStore)))
+              (openPrimitiveCallEVMResult evmCall) := by
+  have hYul : yulPrim = kind.toYulOperation :=
+    OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+  have hOp : op = kind.toBasicOp :=
+    OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst yulPrim
+  subst op
+  have hArity : values.length = kind.inputArity := by
+    simpa using hValuesArity
+  rcases
+      OpenExternal.CallKind.exists_operands_of_reverse_args_length
+        kind hArity with
+    ⟨operands, hValues⟩
+  have hClosedEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .ok (.Ok sourceSharedAfter sourceStoreAfter, values) :=
+    OpenExternal.YulOpen.evalArgs_done_eq_closed hOpenEvalArgs
+  have hClosedEvalArgsForRegular :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .ok (.Ok sourceSharedAfter sourceStoreAfter,
+          values.reverse.reverse) := by
+    simpa using hClosedEvalArgs
+  rcases hArgsRegular (values := values.reverse) hInitial
+      hClosedEvalArgsForRegular with
+    ⟨compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEval, hRelArgs⟩
+  have hArgEvalValues :
+      Locals.Source.Expr.ExprSeq.eval prim lowerArgs compilerAfterPre =
+        .ok (compilerAfterArgs, values) := by
+    simpa using hArgEval
+  refine
+    ⟨operands, compilerAfterPre, compilerAfterArgs, ctxAfter, targetFuel,
+      hPreRun, hArgEvalValues, hRelArgs, ?_⟩
+  intro evmState hEVMShared baseStack
+  rcases
+      openPrimitiveCallExprEVMOpenResultRel_of_args_done_operands
+        (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+        (kind := kind) (args := args) (codeOverride := codeOverride)
+        (sourceShared := sourceShared)
+        (sourceSharedAfter := sourceSharedAfter)
+        (sourceStore := sourceStore)
+        (sourceStoreAfter := sourceStoreAfter)
+        (compilerAfterArgs := compilerAfterArgs) (evmState := evmState)
+        (values := values) (baseStack := baseStack) operands hValues
+        hOpenEvalArgs hRelArgs hEVMShared with
+    ⟨evmCall, hEVMCall, hRel⟩
+  exact ⟨evmCall, hEVMCall, hRel⟩
 
 /--
 Checked one-result CALL-family primitive lowering into the open expression
