@@ -30946,6 +30946,54 @@ theorem done_ok_of_regularAt
       target]
     exact OpenExternal.OpenResultRel.done ⟨hRelAfter, rfl⟩
 
+theorem done_ok_of_regularAt_open
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.ExprSeq results}
+    {responseRel : OpenExternal.CallResponse → Prop}
+    (hRegular :
+      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
+        args codeOverride pre lower)
+    {source sourceAfter : State} {compiler : Objects.Source.State}
+    {values : List Word}
+    (hInitial : SourceStateRel cfg layout source compiler)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          source =
+        .done (.ok (sourceAfter, values))) :
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ targetFuel : Nat,
+    ∃ target : SourceArgPreludeOpenTarget,
+      Functions.Source.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre,
+          target.ctx) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (target.state, target.values) ∧
+      SourceArgStackPreludeOpenResultRel cfg layout responseRel
+        (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          source)
+        (.done (.ok target)) := by
+  have hClosedEvalArgs :
+      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
+        .ok (sourceAfter, values) :=
+    OpenExternal.YulOpen.evalArgs_done_eq_closed hOpenEvalArgs
+  rcases
+      done_ok_of_regularAt
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (results := results)
+        (lower := lower) (responseRel := responseRel) hRegular
+        hInitial hClosedEvalArgs with
+    ⟨compilerAfterPre, targetFuel, target, hPreRun, hArgEval, hRel⟩
+  exact
+    ⟨compilerAfterPre, targetFuel, target, hPreRun, hArgEval,
+      by simpa [hOpenEvalArgs] using hRel⟩
+
 theorem done_ok_of_regular
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

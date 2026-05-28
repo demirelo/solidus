@@ -52,10 +52,13 @@ interpreter, mirroring the existing `Locals.Source`/`Functions.Source`
 semantics while suspending at CALL-family primitive expressions. The generated
 argument-prelude target is named by `SourceArgPreludeOpen.run`, rather than
 being represented only by the old closed `EvmYul.Yul.evalArgs` evidence.
-The remaining CALL-capable step is to make generated preludes actually produce
-this open result in the suspending case by proving open Yul argument evaluation
-relates to `SourceArgPreludeOpen.run`, then replace expression-prelude
-consumers that still expect the old closed `EvmYul.Yul.evalArgs` result.
+Completed open Yul argument evaluation now feeds the generated-prelude proof via
+checked open-done-to-closed evaluator agreement lemmas and an adapter from
+`YulOpen.evalArgs = .done ...` to `SourceArgPreludeOpenResultRel`. The
+remaining CALL-capable step is the true suspending case: prove open Yul
+argument evaluation relates to `SourceArgPreludeOpen.run` when it reaches a
+CALL-family site, then replace expression-prelude consumers that still expect
+the old closed `EvmYul.Yul.evalArgs` result.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled

@@ -1166,6 +1166,195 @@ theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
   simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
     YulOpenResult.ok, hArgs, hCall]
 
+mutual
+  theorem evalArgs_done_eq_closed
+      {fuel : Nat} {args : List Expr} {codeOverride : Option Contract}
+      {state : State}
+      {result : Except Exception (State × List Word)}
+      (hOpen :
+        evalArgs fuel args codeOverride state = .done result) :
+      EvmYul.Yul.evalArgs fuel args codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [evalArgs, EvmYul.Yul.evalArgs, YulOpenResult.error] using hOpen
+    | succ fuel' =>
+        cases args with
+        | nil =>
+            simpa [evalArgs, EvmYul.Yul.evalArgs, YulOpenResult.ok]
+              using hOpen
+        | cons head tail =>
+            cases hHead : eval fuel' head codeOverride state with
+            | done headResult =>
+                have hOpenTail :
+                    evalTail fuel' tail codeOverride (.done headResult) =
+                      .done result := by
+                  simpa [evalArgs, hHead] using hOpen
+                have hHeadClosed :
+                    EvmYul.Yul.eval fuel' head codeOverride state =
+                      headResult :=
+                  eval_done_eq_closed hHead
+                have hTailClosed :
+                    EvmYul.Yul.evalTail fuel' tail codeOverride
+                        headResult =
+                      result :=
+                  evalTail_done_eq_closed
+                    (fuel := fuel') (args := tail)
+                    (codeOverride := codeOverride)
+                    (headResult := headResult) hOpenTail
+                simpa [EvmYul.Yul.evalArgs, hHeadClosed] using hTailClosed
+            | call call =>
+                simp [evalArgs, evalTail, YulOpenResult.bind, hHead] at hOpen
+
+  theorem evalTail_done_eq_closed
+      {fuel : Nat} {args : List Expr} {codeOverride : Option Contract}
+      {headResult : Except Exception (State × Word)}
+      {result : Except Exception (State × List Word)}
+      (hOpen :
+        evalTail fuel args codeOverride (.done headResult) = .done result) :
+      EvmYul.Yul.evalTail fuel args codeOverride headResult = result := by
+    cases headResult with
+    | error err =>
+        simpa [evalTail, EvmYul.Yul.evalTail, YulOpenResult.bind] using hOpen
+    | ok headPair =>
+        rcases headPair with ⟨stateAfterHead, value⟩
+        cases fuel with
+        | zero =>
+            simpa [evalTail, EvmYul.Yul.evalTail, YulOpenResult.bind,
+              YulOpenResult.error] using hOpen
+        | succ fuel' =>
+            simp [evalTail, EvmYul.Yul.evalTail, YulOpenResult.bind,
+              consResult, YulOpenResult.map, YulOpenResult.ok] at hOpen ⊢
+            cases hArgs :
+                evalArgs fuel' args codeOverride stateAfterHead with
+            | done argsResult =>
+                have hArgsClosed :
+                    EvmYul.Yul.evalArgs fuel' args codeOverride
+                        stateAfterHead =
+                      argsResult :=
+                  evalArgs_done_eq_closed hArgs
+                cases argsResult with
+                | error err =>
+                    simp [hArgs, hArgsClosed, YulOpenResult.bind,
+                      EvmYul.Yul.cons'] at hOpen ⊢
+                    exact hOpen
+                | ok argsPair =>
+                    rcases argsPair with ⟨stateAfterArgs, values⟩
+                    simp [hArgs, hArgsClosed, YulOpenResult.bind,
+                      EvmYul.Yul.cons'] at hOpen ⊢
+                    exact hOpen
+            | call call =>
+                simp [hArgs, YulOpenResult.bind] at hOpen
+
+  theorem evalValues_done_eq_closed
+      {fuel : Nat} {expr : Expr} {codeOverride : Option Contract}
+      {state : State}
+      {result : Except Exception (State × List Word)}
+      (hOpen :
+        evalValues fuel expr codeOverride state = .done result) :
+      EvmYul.Yul.evalValues fuel expr codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [evalValues, EvmYul.Yul.evalValues, YulOpenResult.error]
+          using hOpen
+    | succ fuel' =>
+        cases expr with
+        | Lit value =>
+            simpa [evalValues, EvmYul.Yul.evalValues, YulOpenResult.ok]
+              using hOpen
+        | Var id =>
+            cases hLookup : state.lookup? id with
+            | none =>
+                simpa [evalValues, EvmYul.Yul.evalValues, hLookup,
+                  YulOpenResult.error] using hOpen
+            | some value =>
+                simpa [evalValues, EvmYul.Yul.evalValues, hLookup,
+                  YulOpenResult.ok] using hOpen
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                simp [evalValues, EvmYul.Yul.evalValues, reverseResult,
+                  YulOpenResult.map] at hOpen ⊢
+                cases hArgs :
+                    evalArgs fuel' args.reverse codeOverride state with
+                | done argsResult =>
+                    have hArgsClosed :
+                        EvmYul.Yul.evalArgs fuel' args.reverse codeOverride
+                            state =
+                          argsResult :=
+                      evalArgs_done_eq_closed hArgs
+                    cases argsResult with
+                    | error err =>
+                        simp [hArgs, hArgsClosed, YulOpenResult.bind,
+                          YulOpenResult.ok, EvmYul.Yul.reverse'] at hOpen ⊢
+                        exact hOpen
+                    | ok argsPair =>
+                        rcases argsPair with ⟨stateAfterArgs, values⟩
+                        cases hCall :
+                            CallKind.yulPrimitiveEvalValuesOpenCall?
+                              stateAfterArgs prim values.reverse with
+                        | none =>
+                            simp [hArgs, hArgsClosed, hCall,
+                              YulOpenResult.bind,
+                              YulOpenResult.ok,
+                              EvmYul.Yul.reverse'] at hOpen ⊢
+                            exact hOpen
+                        | some call =>
+                            simp [hArgs, hCall, YulOpenResult.bind,
+                              YulOpenResult.ok] at hOpen
+                | call call =>
+                    simp [hArgs, YulOpenResult.bind] at hOpen
+            | inr functionName =>
+                simp [evalValues, EvmYul.Yul.evalValues, reverseResult,
+                  YulOpenResult.map] at hOpen ⊢
+                cases hArgs :
+                    evalArgs fuel' args.reverse codeOverride state with
+                | done argsResult =>
+                    have hArgsClosed :
+                        EvmYul.Yul.evalArgs fuel' args.reverse codeOverride
+                            state =
+                          argsResult :=
+                      evalArgs_done_eq_closed hArgs
+                    cases argsResult with
+                    | error err =>
+                        simp [hArgs, hArgsClosed, YulOpenResult.bind,
+                          YulOpenResult.ok, EvmYul.Yul.reverse'] at hOpen ⊢
+                        exact hOpen
+                    | ok argsPair =>
+                        rcases argsPair with ⟨stateAfterArgs, values⟩
+                        simp [hArgs, hArgsClosed, YulOpenResult.bind,
+                          YulOpenResult.ok, EvmYul.Yul.reverse'] at hOpen ⊢
+                        exact hOpen
+                | call call =>
+                    simp [hArgs, YulOpenResult.bind] at hOpen
+
+  theorem eval_done_eq_closed
+      {fuel : Nat} {expr : Expr} {codeOverride : Option Contract}
+      {state : State}
+      {result : Except Exception (State × Word)}
+      (hOpen :
+        eval fuel expr codeOverride state = .done result) :
+      EvmYul.Yul.eval fuel expr codeOverride state = result := by
+    simp [eval, EvmYul.Yul.eval, headResult] at hOpen ⊢
+    cases hValues : evalValues fuel expr codeOverride state with
+    | done valuesResult =>
+        have hValuesClosed :
+            EvmYul.Yul.evalValues fuel expr codeOverride state =
+              valuesResult :=
+          evalValues_done_eq_closed hValues
+        cases valuesResult with
+        | error err =>
+            simp [hValues, hValuesClosed, YulOpenResult.bind,
+              EvmYul.Yul.head'] at hOpen ⊢
+            exact hOpen
+        | ok valuesPair =>
+            rcases valuesPair with ⟨stateAfter, values⟩
+            simp [hValues, hValuesClosed, YulOpenResult.bind,
+              EvmYul.Yul.head'] at hOpen ⊢
+            exact hOpen
+    | call call =>
+        simp [hValues, YulOpenResult.bind] at hOpen
+end
+
 end YulOpen
 
 namespace CallKind
