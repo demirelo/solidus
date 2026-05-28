@@ -1,7 +1,6 @@
 import EvmCompiler.Objects.Semantics
 import EvmCompiler.Objects.SourceSemantics
 import EvmCompiler.Functions.Preservation
-import EvmCompiler.Functions.GasParametricPreservation
 
 namespace EvmCompiler
 namespace Objects
@@ -26,17 +25,6 @@ theorem eval_toFunctions {fuel : Nat} {program : Program}
   | ofRun hRun =>
       exact Functions.Program.eval_of_run
         (by simpa [run_toFunctions] using hRun)
-
-theorem runWithGasOracle_toFunctions {fuel : Nat} {program : Program}
-    {oracle : Structured.GasOracle} {cursor : Nat} {initial : EVMState} :
-    program.runWithGasOracle fuel oracle cursor initial =
-      Functions.Program.runWithGasOracle fuel program.toFunctions oracle cursor
-        initial := by
-  cases program with
-  | mk root =>
-      cases root with
-      | mk name code data objects =>
-          rfl
 
 noncomputable def compileChecked? (program : Program) :
     Option Assembly.Program := do
@@ -115,82 +103,6 @@ theorem compile_preserves_checked {program : Program}
   exact
     Functions.Program.compile_preserves_checked
       hFunctionCompile hInitialPc (by simpa [run_toFunctions] using hRun)
-
-noncomputable def compileCheckedWithGasOracle? (program : Program) :
-    Option Assembly.Program := do
-  let lower ← program.toExpressions?
-  Expressions.Program.compileCheckedWithGasOracle? lower
-
-theorem compileCheckedWithGasOracle?_eq_some {program : Program}
-    {asm : Assembly.Program}
-    (hCompile : compileCheckedWithGasOracle? program = some asm) :
-    ∃ lower : Expressions.Program,
-      program.toExpressions? = some lower ∧
-        Expressions.Program.compileCheckedWithGasOracle? lower = some asm := by
-  unfold compileCheckedWithGasOracle? at hCompile
-  cases hLower : program.toExpressions? with
-  | none =>
-      simp [hLower] at hCompile
-  | some lower =>
-      simp [hLower] at hCompile
-      exact ⟨lower, rfl, hCompile⟩
-
-theorem compile_preserves_withGasOracle {program : Program}
-    {lower : Expressions.Program} {asm : Assembly.Program} {fuel : Nat}
-    {initial : EVMState} {oracle : Structured.GasOracle}
-    {cursor cursorFinal : Nat} {outcome : Outcome}
-    (hLower : program.toExpressions? = some lower)
-    (hCompile :
-      Structured.Preservation.GasParametric.compileCheckedWithGasOracle?
-        lower.toStructured = some asm)
-    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
-    (hRun :
-      program.runWithGasOracle fuel oracle cursor initial =
-        .ok (outcome, cursorFinal)) :
-    ∃ targetFuel targetOutcome,
-      Assembly.GasParametric.sourceRunNResultWithGasOracle asm oracle
-          targetFuel cursor initial =
-        .ok (targetOutcome, cursorFinal) ∧
-      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome := by
-  have hFunctionLower :
-      program.toFunctions.toExpressions? = some lower := by
-    simpa [Program.toExpressions?, Functions.Inline.Program.toExpressions?]
-      using hLower
-  exact
-    Functions.Program.compile_preserves_withGasOracle
-      (program := program.toFunctions) (lower := lower) (asm := asm)
-      hFunctionLower hCompile hInitialPc
-      (by simpa [runWithGasOracle_toFunctions] using hRun)
-
-theorem compile_preserves_of_compileCheckedWithGasOracle {program : Program}
-    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
-    {oracle : Structured.GasOracle} {cursor cursorFinal : Nat}
-    {outcome : Outcome}
-    (hCompile : compileCheckedWithGasOracle? program = some asm)
-    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
-    (hRun :
-      program.runWithGasOracle fuel oracle cursor initial =
-        .ok (outcome, cursorFinal)) :
-    ∃ targetFuel targetOutcome,
-      Assembly.GasParametric.sourceRunNResultWithGasOracle asm oracle
-          targetFuel cursor initial =
-        .ok (targetOutcome, cursorFinal) ∧
-      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome := by
-  rcases compileCheckedWithGasOracle?_eq_some hCompile with
-    ⟨lower, hLower, hLowerCompile⟩
-  have hFunctionLower :
-      program.toFunctions.toExpressions? = some lower := by
-    simpa [Program.toExpressions?, Functions.Inline.Program.toExpressions?]
-      using hLower
-  have hFunctionCompile :
-      Functions.Program.compileCheckedWithGasOracle? program.toFunctions =
-        some asm := by
-    unfold Functions.Program.compileCheckedWithGasOracle?
-    simp [hFunctionLower, hLowerCompile]
-  exact
-    Functions.Program.compile_preserves_of_compileCheckedWithGasOracle
-      hFunctionCompile hInitialPc
-      (by simpa [runWithGasOracle_toFunctions] using hRun)
 
 end Program
 
