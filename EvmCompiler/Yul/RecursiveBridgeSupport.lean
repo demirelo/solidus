@@ -41156,6 +41156,25 @@ def OpenRegularHeadSeqOpenCallResultRel
         terminalRel revertRel prim program compilerMid.2 sourceFuel rest
         codeOverride lowerTail allowed
 
+def OpenRegularHeadSeqOpenResultDoneRel
+    (cfg : StateRelConfig) (layoutMid outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program)
+    (sourceFuel : Nat) (rest : List AstStmt)
+    (codeOverride : Option AstContract) (lowerTail : Functions.Block)
+    (allowed : Except Exception State → Prop) :
+    Except Exception State →
+      Except Functions.EVMException
+        (Objects.Source.State × Functions.Source.Ctx) → Prop
+  | .ok sourceMid, .ok compilerMid =>
+      OpenRegularHeadSeqOpenCallResultRel cfg layoutMid outcomeLayout
+        terminalRel revertRel prim program sourceFuel rest codeOverride
+        lowerTail allowed sourceMid compilerMid
+  | _, _ => False
+
 /--
 Lift a regular-head open CALL relation through the sequence tail.
 
@@ -41198,6 +41217,270 @@ theorem openRegularStmtOpenCallRel_cons_tail_hidden
     exact
       ⟨hHead.preservesAllResponses response hResponse,
         hTail (ctxMid := (compilerCall.resume response).2)⟩
+
+theorem openRegularStmtOpenResultRel_cons_tail_hidden
+    {cfg : StateRelConfig} {layoutMid outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.State × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {sourceResult : OpenExternal.OpenResult Exception State}
+    {targetResult :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.State × Functions.Source.Ctx)}
+    (hHead :
+      OpenExternal.OpenResultRel callResponseRel
+        (OpenRegularStmtOpenResultDoneRel cfg layoutMid)
+        sourceResult targetResult)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceResultSeqSoundWhenAtExactHiddenCtx cfg layoutMid outcomeLayout
+          terminalRel revertRel prim program ctxMid sourceFuel rest
+          codeOverride lowerTail allowed) :
+    OpenExternal.OpenResultRel callResponseRel
+      (OpenRegularHeadSeqOpenResultDoneRel cfg layoutMid outcomeLayout
+        terminalRel revertRel prim program sourceFuel rest codeOverride
+        lowerTail allowed)
+      sourceResult targetResult := by
+  induction hHead with
+  | @done sourceDone targetDone hDone =>
+      cases sourceDone with
+      | error _ =>
+          cases targetDone <;> contradiction
+      | ok sourceMid =>
+          cases targetDone with
+          | error _ => contradiction
+          | ok compilerMid =>
+              exact
+                OpenExternal.OpenResultRel.done
+                  ⟨hDone, hTail (ctxMid := compilerMid.2)⟩
+  | call hSite _hResume ih =>
+      exact
+        OpenExternal.OpenResultRel.call hSite
+          (by
+            intro response hResponse
+            exact ih response hResponse)
+
+/-- Assignment open-result CALL head, paired with a hidden-context closed tail. -/
+theorem openPrimitiveCallAssignSeqOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel tailFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hTargetMem : identName name ∈ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxMid tailFuel rest
+          codeOverride lowerTail allowed) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (OpenRegularHeadSeqOpenResultDoneRel cfg layout outcomeLayout
+        terminalRel revertRel prim program tailFuel rest codeOverride
+        lowerTail allowed)
+      (openPrimitiveCallAssignSourceStmtResult name
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel.succ
+            (.Call (.inl yulPrim) args) codeOverride
+            (.Ok sourceShared sourceStore))))
+      (openPrimitiveCallAssignCompilerStmtResult ctxAfter name
+        (OpenExternal.OpenResult.bind
+          (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+            compiler)
+          fun target =>
+            CompilerOpen.Primitive.eval prim op target.state
+              target.values)) := by
+  have hStmt :
+      OpenExternal.OpenResultRel
+        (fun _sourceCall _targetCall response =>
+          Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared response)
+        (OpenRegularStmtOpenResultDoneRel cfg layout)
+        (openPrimitiveCallAssignSourceStmtResult name
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ
+              (.Call (.inl yulPrim) args) codeOverride
+              (.Ok sourceShared sourceStore))))
+        (openPrimitiveCallAssignCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values)) :=
+    openPrimitiveCallAssignStmtOpenResultRel_of_arg_prelude_done_callKind
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (yulPrim := yulPrim) (op := op)
+      (kind := kind) (args := args) (codeOverride := codeOverride)
+      (pre := pre) (lowerArgs := lowerArgs) (sourceShared := sourceShared)
+      (sourceSharedAfter := sourceSharedAfter) (sourceStore := sourceStore)
+      (sourceStoreAfter := sourceStoreAfter) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) name
+      hKind hBasic hOpenEvalArgs hPre hArgs hRelArgs hDomainAfter
+      hTargetMem hValuesArity
+  exact
+    openRegularStmtOpenResultRel_cons_tail_hidden
+      (cfg := cfg) (layoutMid := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (sourceFuel := tailFuel)
+      (rest := rest) (codeOverride := codeOverride)
+      (lowerTail := lowerTail) (allowed := allowed) hStmt hTail
+
+/-- Declaration open-result CALL head, paired with a hidden-context closed tail. -/
+theorem openPrimitiveCallLetSeqOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel tailFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    {rest : List AstStmt} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier)
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hDomainAfter : StoreDomainExact layout sourceStoreAfter)
+    (hFresh : identName name ∉ layout)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceResultSeqSoundWhenAtExactHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel prim
+          program ctxMid tailFuel rest codeOverride lowerTail allowed) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (OpenRegularHeadSeqOpenResultDoneRel cfg (identName name :: layout)
+        outcomeLayout terminalRel revertRel prim program tailFuel rest
+        codeOverride lowerTail allowed)
+      (openPrimitiveCallLetSourceStmtResult name
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel.succ
+            (.Call (.inl yulPrim) args) codeOverride
+            (.Ok sourceShared sourceStore))))
+      (openPrimitiveCallLetCompilerStmtResult ctxAfter name
+        (OpenExternal.OpenResult.bind
+          (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+            compiler)
+          fun target =>
+            CompilerOpen.Primitive.eval prim op target.state
+              target.values)) := by
+  have hStmt :
+      OpenExternal.OpenResultRel
+        (fun _sourceCall _targetCall response =>
+          Reference.SharedStateRel.OpenExternalResponseRel
+            cfg sourceSharedAfter compilerAfterArgs.shared response)
+        (OpenRegularStmtOpenResultDoneRel cfg (identName name :: layout))
+        (openPrimitiveCallLetSourceStmtResult name
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ
+              (.Call (.inl yulPrim) args) codeOverride
+              (.Ok sourceShared sourceStore))))
+        (openPrimitiveCallLetCompilerStmtResult ctxAfter name
+          (OpenExternal.OpenResult.bind
+            (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+              compiler)
+            fun target =>
+              CompilerOpen.Primitive.eval prim op target.state
+                target.values)) :=
+    openPrimitiveCallLetStmtOpenResultRel_of_arg_prelude_done_callKind
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (yulPrim := yulPrim) (op := op)
+      (kind := kind) (args := args) (codeOverride := codeOverride)
+      (pre := pre) (lowerArgs := lowerArgs) (sourceShared := sourceShared)
+      (sourceSharedAfter := sourceSharedAfter) (sourceStore := sourceStore)
+      (sourceStoreAfter := sourceStoreAfter) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values) name
+      hKind hBasic hOpenEvalArgs hPre hArgs hRelArgs hDomainAfter hFresh
+      hValuesArity
+  exact
+    openRegularStmtOpenResultRel_cons_tail_hidden
+      (cfg := cfg) (layoutMid := identName name :: layout)
+      (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (sourceFuel := tailFuel) (rest := rest)
+      (codeOverride := codeOverride) (lowerTail := lowerTail)
+      (allowed := allowed) hStmt hTail
 
 /--
 Open sequence-level CALL-family continuation for assignment heads.
