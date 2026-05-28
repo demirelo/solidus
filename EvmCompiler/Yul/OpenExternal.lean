@@ -57,6 +57,21 @@ def CallKind.ofEVMOperation? : EvmYul.Operation .EVM → Option CallKind
     CallKind.ofYulOperation? kind.toYulOperation = some kind := by
   cases kind <;> rfl
 
+set_option linter.unusedSimpArgs false in
+theorem CallKind.toYulOperation_eq_ofYulOperation?
+    {yulOp : EvmYul.Operation .Yul} {kind : CallKind}
+    (hKind : CallKind.ofYulOperation? yulOp = some kind) :
+    yulOp = kind.toYulOperation := by
+  cases kind <;> cases yulOp <;>
+    simp [CallKind.ofYulOperation?, CallKind.toYulOperation] at hKind
+  all_goals
+    try rename_i subop
+    try cases subop <;>
+      simp [CallKind.ofYulOperation?, CallKind.toYulOperation] at hKind
+  all_goals
+    cases hKind
+    rfl
+
 @[simp] theorem CallKind.ofEVMOperation?_toEVMOperation
     (kind : CallKind) :
     CallKind.ofEVMOperation? kind.toEVMOperation = some kind := by

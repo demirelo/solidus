@@ -32009,6 +32009,221 @@ theorem openPrimitiveCallExprPreludeSoundAt_of_arg_stack_preludeRegularAt_callKi
       hCompilerCall, hCallRel⟩
 
 /--
+Open expression-result bridge after CALL-family arguments have completed.
+
+This is one step closer to the eventual recursive consumer than
+`OpenPrimitiveCallExprPreludeSoundAt`: it relates the actual Yul open evaluator
+for `kind.toYulOperation` to the compiler-open expression shape that first runs
+the generated argument prelude and then evaluates `kind.toBasicOp`.  The proof
+stops at the external-call request/response boundary and does not call the
+closed `primCall` semantics.
+-/
+theorem openPrimitiveCallExprOpenResultRel_of_arg_prelude_done_toYulOperation
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs kind.toBasicOp)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hValuesArity : values.length = kind.inputArity) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (CompilerOpen.Primitive.ResultRel cfg layout)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride
+          (.Ok sourceShared sourceStore)))
+      (OpenExternal.OpenResult.bind
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler)
+        fun target =>
+          CompilerOpen.Primitive.eval prim kind.toBasicOp target.state
+            target.values) := by
+  rcases
+      OpenExternal.CallKind.exists_operands_of_reverse_args_length
+        kind hValuesArity with
+    ⟨operands, hValues⟩
+  rcases
+      CompilerOpen.Primitive.yulCompilerOpenCallRel_toYulOperation
+        (cfg := cfg) (layout := layout)
+        (sourceShared := sourceSharedAfter) (store := sourceStoreAfter)
+        (compiler := compilerAfterArgs)
+        hRelArgs kind operands with
+    ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
+  have hValuesReverse :
+      values.reverse = kind.args operands := by
+    rw [hValues]
+    simp
+  have hSourceCallForEval :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          (.Ok sourceSharedAfter sourceStoreAfter) kind.toYulOperation
+          values.reverse =
+        some sourceCall := by
+    simpa [hValuesReverse] using hSourceCall
+  have hSourceEval :
+      OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride
+          (.Ok sourceShared sourceStore) =
+        .call (OpenExternal.YulOpenResult.liftExceptCall sourceCall) :=
+    OpenExternal.YulOpen.evalValues_prim_call_suspends_of_evalArgs_done
+      (fuel := sourceFuel) (prim := kind.toYulOperation) (args := args)
+      (codeOverride := codeOverride) (state := .Ok sourceShared sourceStore)
+      (stateAfterArgs := .Ok sourceSharedAfter sourceStoreAfter)
+      (rawValues := values) (call := sourceCall) hOpenEvalArgs
+      hSourceCallForEval
+  have hCompilerCallForEval :
+      CompilerOpen.Primitive.openCall? compilerAfterArgs kind.toBasicOp
+          values =
+        some compilerCall := by
+    simpa [hValues] using hCompilerCall
+  have hTargetPrim :
+      CompilerOpen.Primitive.eval prim kind.toBasicOp compilerAfterArgs
+          values =
+        .call
+          { site := compilerCall.site
+            resume := fun response =>
+              .done (compilerCall.resume response) } := by
+    simp [CompilerOpen.Primitive.eval, hCompilerCallForEval]
+  have hPreludeRun :
+      SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler =
+        .done (.ok
+          { state := compilerAfterArgs
+            ctx := ctxAfter
+            values := values }) :=
+    SourceArgPreludeOpen.run_done_regular
+      (prim := prim) (program := program) (ctx := ctx)
+      (ctxAfter := ctxAfter) (targetFuel := targetFuel) (pre := pre)
+      (lower := lowerArgs) (compiler := compiler)
+      (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values)
+      hPre hArgs
+  have hTargetEval :
+      OpenExternal.OpenResult.bind
+          (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+            compiler)
+          (fun target =>
+            CompilerOpen.Primitive.eval prim kind.toBasicOp target.state
+              target.values) =
+        .call
+          { site := compilerCall.site
+            resume := fun response =>
+              .done (compilerCall.resume response) } := by
+    rw [hPreludeRun]
+    simpa [OpenExternal.OpenResult.bind] using hTargetPrim
+  rw [hSourceEval, hTargetEval]
+  dsimp [OpenExternal.YulOpenResult.toOpenResult,
+    OpenExternal.YulOpenResult.liftExceptCall]
+  exact
+    OpenExternal.OpenResultRel.call hCallRel.sameSite
+      (by
+        intro response hResponse
+        exact
+          OpenExternal.OpenResultRel.done
+            (hCallRel.preservesAllResponses response hResponse))
+
+/--
+Arbitrary-primitive wrapper for
+`openPrimitiveCallExprOpenResultRel_of_arg_prelude_done_toYulOperation`.
+
+The lowering facts usually remember the original imported Yul primitive and the
+chosen structured basic op separately.  This wrapper canonicalizes both through
+the checked CALL-family classification before applying the open result bridge.
+-/
+theorem openPrimitiveCallExprOpenResultRel_of_arg_prelude_done_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler compilerAfterPre compilerAfterArgs : Objects.Source.State}
+    {values : List Word}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hPre :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compilerAfterPre,
+          ctxAfter)))
+    (hArgs :
+      CompilerOpen.LocalsExpr.evalSeq prim lowerArgs compilerAfterPre =
+        .done (.ok (compilerAfterArgs, values)))
+    (hRelArgs :
+      SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs)
+    (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op) :
+    OpenExternal.OpenResultRel
+      (fun _sourceCall _targetCall response =>
+        Reference.SharedStateRel.OpenExternalResponseRel
+          cfg sourceSharedAfter compilerAfterArgs.shared response)
+      (CompilerOpen.Primitive.ResultRel cfg layout)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl yulPrim) args) codeOverride
+          (.Ok sourceShared sourceStore)))
+      (OpenExternal.OpenResult.bind
+        (SourceArgPreludeOpen.run prim program ctx targetFuel pre lowerArgs
+          compiler)
+        fun target =>
+          CompilerOpen.Primitive.eval prim op target.state
+            target.values) := by
+  have hYul : yulPrim = kind.toYulOperation :=
+    OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+  have hOp : op = kind.toBasicOp :=
+    OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+  subst yulPrim
+  subst op
+  have hArity : values.length = kind.inputArity := by
+    simpa using hValuesArity
+  exact
+    openPrimitiveCallExprOpenResultRel_of_arg_prelude_done_toYulOperation
+      (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+      (ctx := ctx) (ctxAfter := ctxAfter) (sourceFuel := sourceFuel)
+      (targetFuel := targetFuel) (kind := kind) (args := args)
+      (codeOverride := codeOverride) (pre := pre) (lowerArgs := lowerArgs)
+      (sourceShared := sourceShared) (sourceSharedAfter := sourceSharedAfter)
+      (sourceStore := sourceStore) (sourceStoreAfter := sourceStoreAfter)
+      (compiler := compiler) (compilerAfterPre := compilerAfterPre)
+      (compilerAfterArgs := compilerAfterArgs) (values := values)
+      hOpenEvalArgs hPre hArgs hRelArgs hArity
+
+/--
 Checked one-result CALL-family primitive lowering into the open expression
 boundary.
 
