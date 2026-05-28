@@ -21957,6 +21957,103 @@ theorem evalArgs_reverse_ok_domain_exact_of_eval_ok_domain
     hDomain hEval
 
 /--
+Done-result invariant for generic open results.
+
+This is the proof shape needed when a bind continuation needs a fact about the
+actual source result that reached the `.done` branch, while still following every
+possible suspended external-call response.
+-/
+inductive OpenResultDoneInvariant {ε α : Type*}
+    (doneInv : Except ε α → Prop) :
+    OpenExternal.OpenResult ε α → Prop where
+  | done {result : Except ε α} :
+      doneInv result →
+      OpenResultDoneInvariant doneInv (.done result)
+  | call
+      {call : OpenExternal.OpenCall (OpenExternal.OpenResult ε α)} :
+      (∀ response, OpenResultDoneInvariant doneInv (call.resume response)) →
+      OpenResultDoneInvariant doneInv (.call call)
+
+namespace OpenResultDoneInvariant
+
+theorem imp
+    {ε α : Type*}
+    {doneInv doneInv' : Except ε α → Prop}
+    {result : OpenExternal.OpenResult ε α}
+    (hInv : OpenResultDoneInvariant doneInv result)
+    (hImp : ∀ {doneResult}, doneInv doneResult → doneInv' doneResult) :
+    OpenResultDoneInvariant doneInv' result := by
+  induction hInv with
+  | done hDone =>
+      exact OpenResultDoneInvariant.done (hImp hDone)
+  | call _hResume ih =>
+      exact OpenResultDoneInvariant.call ih
+
+theorem bind_left
+    {ε₁ ε₂ α : Type*} {β γ δ : Type}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ α) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ β) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ γ) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ δ) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {source : OpenExternal.OpenResult ε₁ α}
+    {target : OpenExternal.OpenResult ε₂ β}
+    {sourceNext : α → OpenExternal.OpenResult ε₁ γ}
+    {targetNext : β → OpenExternal.OpenResult ε₂ δ}
+    {sourceDoneInv : Except ε₁ α → Prop}
+    (hRel :
+      OpenExternal.OpenResultRel callResponseRel doneRel source target)
+    (hInv : OpenResultDoneInvariant sourceDoneInv source)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          sourceDoneInv sourceDone →
+          OpenExternal.OpenResultRel callResponseRel' doneRel'
+            (match sourceDone with
+            | .ok value => sourceNext value
+            | .error err => .done (.error err))
+            (match targetDone with
+            | .ok value => targetNext value
+            | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                targetNext }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel' doneRel'
+      (OpenExternal.OpenResult.bind source sourceNext)
+      (OpenExternal.OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases hInv with
+      | done hSourceInv =>
+          cases sourceDone <;> cases targetDone <;>
+            exact hDone hDoneRel hSourceInv
+  | call hSite _hResume ih =>
+      cases hInv with
+      | call hResumeInv =>
+          simp [OpenExternal.OpenResult.bind]
+          exact OpenExternal.OpenResultRel.call hSite (by
+            intro response hResponse
+            exact ih response (hCallResponse hResponse)
+              (hResumeInv response))
+
+end OpenResultDoneInvariant
+
+/--
 Open-evaluator state-domain invariant.
 
 Unlike the closed `evalArgs` domain lemmas above, this proposition follows
@@ -22007,6 +22104,24 @@ theorem done_ok_store_domain
       StateStoreDomainExact layout (.Ok shared store : State) :=
     done_ok_state_domain hResult
   simpa [StateStoreDomainExact] using hState
+
+theorem toOpenResult_doneInvariant
+    {layout : List Name} {α : Type}
+    {result : OpenExternal.YulOpenResult (State × α)}
+    (hResult :
+      YulOpenResultStateStoreDomainExact layout α result) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {state : State} {value : α},
+          doneResult = .ok (state, value) →
+            StateStoreDomainExact layout state)
+      (OpenExternal.YulOpenResult.toOpenResult result) := by
+  induction hResult with
+  | done hDone =>
+      exact OpenResultDoneInvariant.done hDone
+  | call _hResume ih =>
+      simp [OpenExternal.YulOpenResult.toOpenResult]
+      exact OpenResultDoneInvariant.call ih
 
 theorem bind
     {layout : List Name} {α β : Type}
@@ -22325,6 +22440,41 @@ theorem done_ok_store_domain
   rw [hEval] at hResult
   exact
     YulOpenResultStateStoreDomainExact.done_ok_store_domain hResult
+
+theorem evalArgsDoneInvariant
+    {layout : List Name} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    (hContract :
+      YulOpenEvalArgsReverseStateDomainExactContract layout fuel args
+        codeOverride)
+    (hDomain : StoreDomainExact layout store) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {sharedAfter : EvmYul.SharedState .Yul}
+          {storeAfter : EvmYul.Yul.VarStore} {values : List Word},
+          doneResult = .ok ((.Ok sharedAfter storeAfter : State), values) →
+            StoreDomainExact layout storeAfter)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store))) := by
+  have hResult :
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          (.Ok shared store)) :=
+    hContract.evalArgsResult
+      (by simpa [StateStoreDomainExact] using hDomain)
+  exact
+    OpenResultDoneInvariant.imp
+      (YulOpenResultStateStoreDomainExact.toOpenResult_doneInvariant hResult)
+      (by
+        intro doneResult hDone sharedAfter storeAfter values hOk
+        have hState :
+            StateStoreDomainExact layout
+              (.Ok sharedAfter storeAfter : State) :=
+          hDone hOk
+        simpa [StateStoreDomainExact] using hState)
 
 end YulOpenEvalArgsReverseStateDomainExactContract
 
