@@ -1045,6 +1045,7 @@ namespace YulOpen
 
 abbrev State := EvmYul.Yul.State
 abbrev Expr := EvmYul.Yul.Ast.Expr
+abbrev Stmt := EvmYul.Yul.Ast.Stmt
 abbrev Contract := EvmYul.Yul.Ast.YulContract
 abbrev Exception := EvmYul.Yul.Exception
 
@@ -1142,6 +1143,158 @@ def eval (fuel : Nat) (expr : Expr)
     (codeOverride : Option Contract) (state : State) :
     YulOpenResult (State × Word) :=
   headResult (evalValues fuel expr codeOverride state)
+
+end
+
+def execPrimCall (fuel : Nat) (prim : EvmYul.Operation .Yul)
+    (vars : List EvmYul.Identifier)
+    (argsResult : YulOpenResult (State × List Word)) :
+    YulOpenResult State :=
+  YulOpenResult.bind argsResult fun pair =>
+    match CallKind.yulPrimitiveEvalValuesOpenCall? pair.1 prim pair.2 with
+    | some call =>
+        YulOpenResult.bind (.call (YulOpenResult.liftExceptCall call))
+          fun result =>
+            .done (EvmYul.Yul.multifill' vars (.ok result))
+    | none =>
+        .done (EvmYul.Yul.multifill' vars
+          (EvmYul.Yul.primCall fuel pair.1 prim pair.2))
+
+def execCall (fuel : Nat) (functionName : EvmYul.Yul.Ast.YulFunctionName)
+    (vars : List EvmYul.Identifier) (codeOverride : Option Contract)
+    (argsResult : YulOpenResult (State × List Word)) :
+    YulOpenResult State :=
+  YulOpenResult.bind argsResult fun pair =>
+    match fuel with
+    | 0 => .error .OutOfFuel
+    | .succ fuel' =>
+        .done (EvmYul.Yul.multifill' vars
+          (EvmYul.Yul.call fuel' pair.2 functionName codeOverride pair.1))
+
+mutual
+
+/--
+Open analogue of imported `Yul.execSeq`.
+
+The control-flow behavior is the imported interpreter's behavior, but any
+statement head that reaches a CALL-family primitive can suspend before the tail
+is executed.
+-/
+def execSeq (fuel : Nat) (stmts : List Stmt)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult State :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | .succ fuel' =>
+      match stmts with
+      | [] => .ok state
+      | stmt :: rest =>
+          YulOpenResult.bind (exec fuel' stmt codeOverride state) fun state' =>
+            match state' with
+            | .Ok _ _ => execSeq fuel' rest codeOverride state'
+            | .OutOfFuel => .ok state'
+            | .Checkpoint _ => .ok state'
+
+/-- Open analogue of imported `Yul.exec`. -/
+def exec (fuel : Nat) (stmt : Stmt)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult State :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | .succ fuel' =>
+      match stmt with
+      | .Block stmts =>
+          YulOpenResult.bind (execSeq fuel' stmts codeOverride state) fun state' =>
+            .ok (state'.restrictStoreTo state.store)
+      | .Let vars exprOption =>
+          match EvmYul.Yul.checkDeclaration state vars with
+          | .error err => .error err
+          | .ok () =>
+              match exprOption with
+              | .none => .ok (state.zeroFill vars)
+              | .some expr =>
+                  YulOpenResult.bind (evalValues fuel' expr codeOverride state)
+                    fun result =>
+                      .done (EvmYul.Yul.multifill' vars (.ok result))
+      | .Assign vars expr =>
+          match EvmYul.Yul.checkAssignment state vars with
+          | .error err => .error err
+          | .ok () =>
+              YulOpenResult.bind (evalValues fuel' expr codeOverride state)
+                fun result =>
+                  .done (EvmYul.Yul.multifill' vars (.ok result))
+      | .If cond body =>
+          YulOpenResult.bind (eval fuel' cond codeOverride state) fun result =>
+            if result.2 ≠ EvmYul.UInt256.ofNat 0 then
+              exec fuel' (.Block body) codeOverride result.1
+            else
+              .ok result.1
+      | .ExprStmtCall expr =>
+          match expr with
+          | .Call (.inl prim) args =>
+              execPrimCall fuel' prim []
+                (reverseResult (evalArgs fuel' args.reverse codeOverride state))
+          | .Call (.inr functionName) args =>
+              execCall fuel' functionName [] codeOverride
+                (reverseResult (evalArgs fuel' args.reverse codeOverride state))
+          | _ => .error .InvalidExpression
+      | .Switch cond cases defaultBody =>
+          YulOpenResult.bind (eval fuel' cond codeOverride state) fun result =>
+            exec fuel'
+              (.Block (EvmYul.Yul.selectSwitchCase result.2 defaultBody cases))
+              codeOverride result.1
+      | .For cond post body =>
+          loop fuel' cond post body codeOverride state
+      | .Continue =>
+          .ok (EvmYul.Yul.State.setContinue state)
+      | .Break =>
+          .ok (EvmYul.Yul.State.setBreak state)
+      | .Leave =>
+          .ok (EvmYul.Yul.State.setLeave state)
+
+/-- Open analogue of imported `Yul.loop`. -/
+def loop (fuel : Nat) (cond : Expr) (post body : List Stmt)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult State :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | 1 => .error .OutOfFuel
+  | fuel' + 1 + 1 =>
+      YulOpenResult.bind
+        (eval fuel' cond codeOverride (EvmYul.Yul.State.mkOk state))
+        fun condResult =>
+          if condResult.2 = EvmYul.UInt256.ofNat 0 then
+            .ok (EvmYul.Yul.State.overwrite? condResult.1 state)
+          else
+            YulOpenResult.bind
+              (exec fuel' (.Block body) codeOverride condResult.1)
+              fun bodyResult =>
+                match bodyResult with
+                | .OutOfFuel =>
+                    .ok (EvmYul.Yul.State.overwrite? bodyResult state)
+                | .Checkpoint (.Break _ _) =>
+                    .ok
+                      (EvmYul.Yul.State.overwrite?
+                        (EvmYul.Yul.State.reviveJump bodyResult) state)
+                | .Checkpoint (.Leave _ _) =>
+                    .ok (EvmYul.Yul.State.overwrite? bodyResult state)
+                | .Checkpoint (.Continue _ _) | _ =>
+                    YulOpenResult.bind
+                      (exec fuel' (.Block post) codeOverride
+                        (EvmYul.Yul.State.reviveJump bodyResult))
+                      fun postResult =>
+                        let stateAfterPost :=
+                          EvmYul.Yul.State.overwrite? postResult state
+                        match postResult with
+                        | .OutOfFuel => .ok stateAfterPost
+                        | .Checkpoint (.Leave _ _) => .ok stateAfterPost
+                        | _ =>
+                            YulOpenResult.bind
+                              (exec fuel' (.For cond post body) codeOverride
+                                stateAfterPost)
+                              fun loopResult =>
+                                .ok
+                                  (EvmYul.Yul.State.overwrite? loopResult state)
 
 end
 
