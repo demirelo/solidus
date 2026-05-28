@@ -5591,11 +5591,13 @@ structure StateRelConfig where
   accountMapRel : AccountMapRel
   selfbalanceRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM},
+      accountMapRel yul.accountMap evm.accountMap →
       yul.executionEnv.codeOwner = evm.executionEnv.codeOwner →
         EvmYul.State.selfbalance yul = EvmYul.State.selfbalance evm
   balanceRel :
     ∀ {yul : EvmYul.State .Yul} {evm : EvmYul.State .EVM}
         {address : Word},
+      accountMapRel yul.accountMap evm.accountMap →
       (EvmYul.State.balance yul address).2 =
         (EvmYul.State.balance evm address).2
   sloadRel :
@@ -5679,6 +5681,7 @@ structure ChainStateRel (cfg : StateRelConfig)
   executionEnv : ExecutionEnvRel cfg yul.executionEnv evm.executionEnv
   blocks : yul.blocks = evm.blocks
   genesisBlockHeader : yul.genesisBlockHeader = evm.genesisBlockHeader
+  createdAccounts : yul.createdAccounts = evm.createdAccounts
 
 structure MachineStateRel (cfg : StateRelConfig)
     (yul evm : EvmYul.MachineState) : Prop where
@@ -5873,6 +5876,14 @@ theorem sstore_genesisBlockHeader {τ : EvmYul.OperationType}
     simp [EvmYul.State.sstore, EvmYul.State.lookupAccount, Option.option,
       hLookup, EvmYul.State.setAccount, EvmYul.State.addAccessedStorageKey]
 
+theorem sstore_createdAccounts {τ : EvmYul.OperationType}
+    (state : EvmYul.State τ) (slot value : Word) :
+    (EvmYul.State.sstore state slot value).createdAccounts =
+      state.createdAccounts := by
+  cases hLookup : state.accountMap.find? state.executionEnv.codeOwner <;>
+    simp [EvmYul.State.sstore, EvmYul.State.lookupAccount, Option.option,
+      hLookup, EvmYul.State.setAccount, EvmYul.State.addAccessedStorageKey]
+
 theorem tstore_σ₀ {τ : EvmYul.OperationType}
     (state : EvmYul.State τ) (slot value : Word) :
     (EvmYul.State.tstore state slot value).σ₀ = state.σ₀ := by
@@ -5922,6 +5933,14 @@ theorem tstore_genesisBlockHeader {τ : EvmYul.OperationType}
     (state : EvmYul.State τ) (slot value : Word) :
     (EvmYul.State.tstore state slot value).genesisBlockHeader =
       state.genesisBlockHeader := by
+  cases hLookup : state.accountMap.find? state.executionEnv.codeOwner <;>
+    simp [EvmYul.State.tstore, EvmYul.State.lookupAccount, Option.option,
+      hLookup, EvmYul.State.updateAccount]
+
+theorem tstore_createdAccounts {τ : EvmYul.OperationType}
+    (state : EvmYul.State τ) (slot value : Word) :
+    (EvmYul.State.tstore state slot value).createdAccounts =
+      state.createdAccounts := by
   cases hLookup : state.accountMap.find? state.executionEnv.codeOwner <;>
     simp [EvmYul.State.tstore, EvmYul.State.lookupAccount, Option.option,
       hLookup, EvmYul.State.updateAccount]
@@ -5999,7 +6018,7 @@ theorem balance {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
         hAccountMap
@@ -6017,6 +6036,8 @@ theorem balance {cfg : StateRelConfig}
         hBlocks
     · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
         hGenesis
+    · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
+        hCreated
   · simpa [EvmYul.State.balance, EvmYul.State.addAccessedAccount] using
       hMachine
 
@@ -6034,7 +6055,7 @@ theorem sload {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
         hAccountMap
@@ -6052,6 +6073,8 @@ theorem sload {cfg : StateRelConfig}
         hBlocks
     · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
         hGenesis
+    · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
+        hCreated
   · simpa [EvmYul.State.sload, EvmYul.State.addAccessedStorageKey] using
       hMachine
 
@@ -6069,7 +6092,7 @@ theorem sstore {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · exact
         cfg.sstoreAccountMapRel hAccountMap hSigma hEnv.codeOwner
@@ -6092,6 +6115,9 @@ theorem sstore {cfg : StateRelConfig}
     · rw [StateFacts.sstore_genesisBlockHeader,
         StateFacts.sstore_genesisBlockHeader]
       exact hGenesis
+    · rw [StateFacts.sstore_createdAccounts,
+        StateFacts.sstore_createdAccounts]
+      exact hCreated
   · exact hMachine
 
 theorem tload {cfg : StateRelConfig}
@@ -6120,7 +6146,7 @@ theorem tstore {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     constructor
     · exact cfg.tstoreAccountMapRel hAccountMap hEnv.codeOwner
     · rw [StateFacts.tstore_σ₀, StateFacts.tstore_σ₀]
@@ -6140,6 +6166,9 @@ theorem tstore {cfg : StateRelConfig}
     · rw [StateFacts.tstore_genesisBlockHeader,
         StateFacts.tstore_genesisBlockHeader]
       exact hGenesis
+    · rw [StateFacts.tstore_createdAccounts,
+        StateFacts.tstore_createdAccounts]
+      exact hCreated
   · exact hMachine
 
 theorem logOp {cfg : StateRelConfig}
@@ -6154,7 +6183,7 @@ theorem logOp {cfg : StateRelConfig}
   constructor
   · rcases hChain with
       ⟨hAccountMap, hSigma, hTotal, hReceipts, hSubstate, hEnv,
-        hBlocks, hGenesis⟩
+        hBlocks, hGenesis, hCreated⟩
     rcases hMachine with
       ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
     constructor
@@ -6166,6 +6195,7 @@ theorem logOp {cfg : StateRelConfig}
     · simpa [EvmYul.SharedState.logOp] using hEnv
     · simpa [EvmYul.SharedState.logOp] using hBlocks
     · simpa [EvmYul.SharedState.logOp] using hGenesis
+    · simpa [EvmYul.SharedState.logOp] using hCreated
   · rcases hMachine with
       ⟨hGas, hActive, hMemory, hReturn, hHReturn⟩
     constructor
@@ -11606,7 +11636,8 @@ theorem primitiveStackSoundAtArity_structured_selfbalance
     (by
       intro sourceShared targetShared hShared
       exact
-        cfg.selfbalanceRel hShared.chain.executionEnv.codeOwner)
+        cfg.selfbalanceRel hShared.chain.accountMap
+          hShared.chain.executionEnv.codeOwner)
 
 theorem primitiveStackSoundAtArity_structured_pop
     {cfg : StateRelConfig} {layout : List Name} {sourceFuel : Nat} :
@@ -11673,7 +11704,7 @@ theorem primitiveStackSoundAtArity_structured_balance
                       (EvmYul.State.balance sourceShared.toState value).2 =
                         (EvmYul.State.balance
                           compilerAfterArgs.shared.toState value).2 := by
-                    exact cfg.balanceRel
+                    exact cfg.balanceRel hShared.chain.accountMap
                   refine ⟨sharedAfter, ?_, ?_⟩
                   · simp [Locals.Source.PrimitiveSemantics.structured,
                       Locals.Source.PrimitiveSemantics.sourceContinuingStep?,
@@ -46015,7 +46046,8 @@ theorem exprValueBridgeWithLayoutSlots_selfbalance
       (by
         intro sourceShared targetState hShared
         exact
-          cfg.selfbalanceRel hShared.chain.executionEnv.codeOwner)
+          cfg.selfbalanceRel hShared.chain.accountMap
+            hShared.chain.executionEnv.codeOwner)
       hRel
 
 theorem exprValueBridgeWithLayoutSlots_nullary_machineState
@@ -46611,7 +46643,7 @@ theorem exprValueBridgeWithLayoutSlots_balance_hidden
           have hResultEq :
               (EvmYul.State.balance sharedAfter.toState argValue).2 =
                 (EvmYul.State.balance evmAfterVar.toState argValue).2 := by
-            exact cfg.balanceRel
+            exact cfg.balanceRel hOldSharedAfterVar.chain.accountMap
           have hSharedBalance :
               SharedStateRel cfg sourceSharedAfterBalance
                 evmAfterBalanceState.toSharedState := by

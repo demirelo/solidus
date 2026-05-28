@@ -123,7 +123,7 @@ def withAcceptedNoCallCreate {program : Program}
 
 end RecursiveBridgeTargetRuntime
 
-namespace RecursiveBridgeTopAssumptions
+namespace RecursiveBridgeNoCallTopAssumptions
 
 def withAcceptedNoCallCreate
     {cfg : Reference.StateRelConfig}
@@ -158,7 +158,7 @@ def withAcceptedNoCallCreate
       Assembly.CurrentContractProjectionAssumption asm initial)
     (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
     (hInitialStack : initial.stack = []) :
-    RecursiveBridgeTopAssumptions cfg terminalRel revertRel prim outcomeRel
+    RecursiveBridgeNoCallTopAssumptions cfg terminalRel revertRel prim outcomeRel
       program asm target shared store sourceFuel initial referenceResult where
   sourceAccepted := hSourceAccepted
   compileResources := hCompileResources
@@ -173,7 +173,7 @@ def withAcceptedNoCallCreate
       gasOracle outOfGasPolicy currentContractProjection hInitialPc
       hInitialStack
 
-end RecursiveBridgeTopAssumptions
+end RecursiveBridgeNoCallTopAssumptions
 
 /--
 Final no-CALL/CREATE public assumption package.
@@ -375,9 +375,9 @@ def toTopAssumptions
       RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
         outcomeRel program asm target shared store sourceFuel initial
         referenceResult) :
-    RecursiveBridgeTopAssumptions cfg terminalRel revertRel prim outcomeRel
+    RecursiveBridgeNoCallTopAssumptions cfg terminalRel revertRel prim outcomeRel
       program asm target shared store sourceFuel initial referenceResult :=
-  RecursiveBridgeTopAssumptions.withAcceptedNoCallCreate
+  RecursiveBridgeNoCallTopAssumptions.withAcceptedNoCallCreate
     hTop.sourceAccepted hTop.compileResources hTop.semantics
     hTop.initialShared hTop.sourceRun hTop.compileTarget hTop.decodeWindow
     hTop.jumpdestCorrect hTop.gasOracle hTop.outOfGasPolicy
@@ -420,7 +420,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
                   Assembly.CurrentContractProjectionAssumption asm initial ∧
                     Assembly.Preservation.BlockTraceResult
                       asm target targetFuel initial targetOutcome :=
-  compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+  compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_noCallTop
     (hTop := hTop.toTopAssumptions)
 
 /--

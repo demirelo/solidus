@@ -8,4 +8,3 @@ import EvmCompiler.Yul.Preservation
 import EvmCompiler.Yul.RecursiveBridgeSupport
 import EvmCompiler.Yul.OpenExternal
 import EvmCompiler.Yul.NoCallCreate
-import EvmCompiler.Yul.NoCallRuntime

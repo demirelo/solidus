@@ -1,6 +1,8 @@
 import EvmCompiler.Structured.Syntax
 import EvmCompiler.Structured.Semantics
+import EvmCompiler.Structured.GasParametric
 import EvmCompiler.Structured.Compiler
 import EvmCompiler.Structured.TypedContinuations
 import EvmCompiler.Structured.TypedCfgBridge
 import EvmCompiler.Structured.Preservation
+import EvmCompiler.Structured.GasParametricPreservation

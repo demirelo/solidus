@@ -1,4 +1,5 @@
 import EvmCompiler.Locals.Compiler
+import EvmCompiler.Structured.GasParametric
 
 namespace EvmCompiler
 namespace Locals
@@ -89,6 +90,56 @@ def runCondition (ctx : Ctx) (cond : Expr 1) (state : RunState) :
   let (evm', condTrue) ← Structured.Code.popCondition evm
   .ok (state.withEVM evm', condTrue)
 
+mutual
+  def runCodeWithGasOracle {results : Nat} (ctx : Ctx) (offset : Nat)
+      (expr : Expr results) (oracle : Structured.GasOracle) (cursor : Nat)
+      (state : EVMState) : Except EVMException (EVMState × Nat) :=
+    match expr with
+    | .lit value =>
+        Structured.BasicInstr.stepWithGasOracle (.push value) oracle cursor
+          state
+    | .var name =>
+        match Layout.lookupDepth? name ctx.layout with
+        | none => invalid
+        | some depth =>
+            match StackOp.dup? (offset + depth) with
+            | none => invalid
+            | some op => op.stepWithGasOracle oracle cursor state
+    | .code code =>
+        Structured.Code.runWithGasOracle code oracle cursor state
+    | .prim op args => do
+        let (state', cursor') ←
+          ExprSeq.runCodeWithGasOracle ctx offset args oracle cursor state
+        op.stepWithGasOracle oracle cursor' state'
+
+  def ExprSeq.runCodeWithGasOracle {results : Nat} (ctx : Ctx)
+      (offset : Nat) (exprs : ExprSeq results)
+      (oracle : Structured.GasOracle) (cursor : Nat)
+      (state : EVMState) : Except EVMException (EVMState × Nat) :=
+    match exprs with
+    | .nil => .ok (state, cursor)
+    | .cons (left := left) head tail => do
+        let (state', cursor') ←
+          runCodeWithGasOracle ctx offset head oracle cursor state
+        ExprSeq.runCodeWithGasOracle ctx (offset + left) tail oracle cursor'
+          state'
+end
+
+def runStateWithGasOracle {results : Nat} (ctx : Ctx) (expr : Expr results)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : RunState) :
+    Except EVMException (RunState × Nat) := do
+  let (evm, cursor') ←
+    runCodeWithGasOracle ctx 0 expr oracle cursor state.evm
+  .ok (state.withEVM evm, cursor')
+
+def runConditionWithGasOracle (ctx : Ctx) (cond : Expr 1)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : RunState) :
+    Except EVMException (RunState × Bool × Nat) := do
+  let (evm, cursor') ←
+    runCodeWithGasOracle ctx 0 cond oracle cursor state.evm
+  let (evm', condTrue) ← Structured.Code.popCondition evm
+  .ok (state.withEVM evm', condTrue, cursor')
+
 end Expr
 
 namespace Ctx
@@ -109,6 +160,25 @@ def runCleanupToPreserving (ctx : Ctx) (preserve targetDepth : Nat)
 def runCleanupAll (ctx : Ctx) (state : RunState) :
     Except EVMException RunState :=
   Structured.Code.runState ctx.cleanupAll state
+
+def runCleanupToWithGasOracle (ctx : Ctx) (targetDepth : Nat)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : RunState) :
+    Except EVMException (RunState × Nat) :=
+  match ctx.cleanupTo? targetDepth with
+  | none => invalid
+  | some code => Structured.Code.runStateWithGasOracle code oracle cursor state
+
+def runCleanupToPreservingWithGasOracle (ctx : Ctx) (preserve targetDepth : Nat)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : RunState) :
+    Except EVMException (RunState × Nat) :=
+  match ctx.cleanupToPreserving? preserve targetDepth with
+  | none => invalid
+  | some code => Structured.Code.runStateWithGasOracle code oracle cursor state
+
+def runCleanupAllWithGasOracle (ctx : Ctx) (oracle : Structured.GasOracle)
+    (cursor : Nat) (state : RunState) :
+    Except EVMException (RunState × Nat) :=
+  Structured.Code.runStateWithGasOracle ctx.cleanupAll oracle cursor state
 
 namespace CleanupFacts
 
@@ -441,6 +511,293 @@ mutual
           (Prod.Lex.left _ _ (by omega))
 end
 
+mutual
+  def Block.runOpenWithGasOracle (program : Program) (ctx : Ctx)
+      (oracle : Structured.GasOracle) :
+      Nat → Block → Nat → RunState →
+        Except EVMException (Outcome × Ctx × Nat)
+    | 0, _block, _cursor, _state =>
+        invalid
+    | _fuel + 1, ⟨[]⟩, cursor, state =>
+        .ok (Outcome.regular state, ctx, cursor)
+    | fuel + 1, ⟨stmt :: rest⟩, cursor, state => do
+        let (outcome, ctx', cursor') ←
+          Stmt.runWithGasOracle program ctx oracle fuel stmt cursor state
+        match outcome.mode with
+        | .regular =>
+            Block.runOpenWithGasOracle program ctx' oracle fuel
+              { stmts := rest } cursor' outcome.state
+        | .brk | .cont | .leave | .halt _ =>
+            .ok (outcome, ctx, cursor')
+  termination_by fuel block _cursor _state => (fuel, 0, sizeOf block)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  def Block.runScopedWithGasOracle (program : Program) (ctx : Ctx)
+      (block : Block) (oracle : Structured.GasOracle) (fuel : Nat)
+      (cursor : Nat) (state : RunState) :
+      Except EVMException (Outcome × Nat) := do
+    let (outcome, finalCtx, cursor') ←
+      Block.runOpenWithGasOracle program ctx oracle fuel block cursor state
+    match outcome.mode with
+    | .regular =>
+        let (state', cursor'') ←
+          Ctx.runCleanupToWithGasOracle finalCtx ctx.layout.length oracle
+            cursor' outcome.state
+        .ok (Outcome.regular state', cursor'')
+    | .brk | .cont | .leave | .halt _ =>
+        .ok (outcome, cursor')
+  termination_by (fuel, 1, sizeOf block)
+  decreasing_by
+    simp_wf
+    exact Prod.Lex.right fuel
+      (Prod.Lex.left (sizeOf block) (sizeOf block) (by omega))
+
+  def Stmt.runForLoopWithGasOracle (program : Program) (loopCtx : Ctx)
+      (cond : Expr 1) (postBase : Ctx) (post : Block) (bodyBase : Ctx)
+      (body : Block) (oracle : Structured.GasOracle) :
+      Nat → Nat → RunState → Except EVMException (Outcome × Nat)
+    | 0, _cursor, _state =>
+        invalid
+    | fuel + 1, cursor, state =>
+        match Expr.runConditionWithGasOracle loopCtx cond oracle cursor state with
+        | .error err => .error err
+        | .ok (stateAfterCond, condTrue, cursorAfterCond) =>
+            if condTrue then
+              match Block.runScopedWithGasOracle program bodyBase body oracle fuel
+                  cursorAfterCond stateAfterCond with
+              | .error err => .error err
+              | .ok (bodyOutcome, cursorAfterBody) =>
+                  match bodyOutcome.mode with
+                  | .brk =>
+                      .ok (Outcome.regular bodyOutcome.state, cursorAfterBody)
+                  | .regular | .cont =>
+                      match Block.runScopedWithGasOracle program postBase post
+                          oracle fuel cursorAfterBody bodyOutcome.state with
+                      | .error err => .error err
+                      | .ok (postOutcome, cursorAfterPost) =>
+                          match postOutcome.mode with
+                          | .regular =>
+                              Stmt.runForLoopWithGasOracle program loopCtx cond
+                                postBase post bodyBase body oracle fuel
+                                cursorAfterPost postOutcome.state
+                          | .brk | .cont =>
+                              invalid
+                          | .leave | .halt _ =>
+                              .ok (postOutcome, cursorAfterPost)
+                  | .leave | .halt _ =>
+                      .ok (bodyOutcome, cursorAfterBody)
+            else
+              .ok (Outcome.regular stateAfterCond, cursorAfterCond)
+  termination_by fuel _cursor _state => (fuel, 2, 0)
+  decreasing_by
+    all_goals simp_wf
+    all_goals omega
+
+  def Stmt.runWithGasOracle (program : Program) (ctx : Ctx)
+      (oracle : Structured.GasOracle) :
+      Nat → Stmt → Nat → RunState →
+        Except EVMException (Outcome × Ctx × Nat)
+    | _fuel, .expr expr, cursor, state => do
+        let (state', cursor') ←
+          Expr.runStateWithGasOracle ctx expr oracle cursor state
+        .ok (Outcome.regular state', ctx, cursor')
+    | _fuel, .exprs exprs, cursor, state => do
+        let (evm, cursor') ←
+          Expr.ExprSeq.runCodeWithGasOracle ctx 0 exprs oracle cursor state.evm
+        .ok (Outcome.regular (state.withEVM evm), ctx, cursor')
+    | _fuel, .let_ name value, cursor, state => do
+        let (state', cursor') ←
+          Expr.runStateWithGasOracle ctx value oracle cursor state
+        .ok (Outcome.regular state', ctx.withLayout (name :: ctx.layout),
+          cursor')
+    | _fuel, .assign name value, cursor, state => do
+        let depth ← (Layout.lookupDepth? name ctx.layout).elim invalid pure
+        let swapOp ← (StackOp.swap? depth).elim invalid pure
+        let (evmAfterValue, cursorAfterValue) ←
+          Expr.runCodeWithGasOracle ctx 0 value oracle cursor state.evm
+        let (evmAfterSwap, cursorAfterSwap) ←
+          swapOp.stepWithGasOracle oracle cursorAfterValue evmAfterValue
+        let (evmAfterPop, cursorAfterPop) ←
+          Structured.BasicOp.pop.stepWithGasOracle oracle cursorAfterSwap
+            evmAfterSwap
+        .ok (Outcome.regular (state.withEVM evmAfterPop), ctx, cursorAfterPop)
+    | _fuel, .assignTop name, cursor, state => do
+        let depth ← (Layout.lookupDepth? name ctx.layout).elim invalid pure
+        let swapOp ← (StackOp.swap? depth).elim invalid pure
+        let (evmAfterSwap, cursorAfterSwap) ←
+          swapOp.stepWithGasOracle oracle cursor state.evm
+        let (evmAfterPop, cursorAfterPop) ←
+          Structured.BasicOp.pop.stepWithGasOracle oracle cursorAfterSwap
+            evmAfterSwap
+        .ok (Outcome.regular (state.withEVM evmAfterPop), ctx, cursorAfterPop)
+    | _fuel, .assignTopWithOffset offset name, cursor, state => do
+        let depth ← (Layout.lookupDepth? name ctx.layout).elim invalid pure
+        let swapOp ← (StackOp.swap? (offset + depth)).elim invalid pure
+        let (evmAfterSwap, cursorAfterSwap) ←
+          swapOp.stepWithGasOracle oracle cursor state.evm
+        let (evmAfterPop, cursorAfterPop) ←
+          Structured.BasicOp.pop.stepWithGasOracle oracle cursorAfterSwap
+            evmAfterSwap
+        .ok (Outcome.regular (state.withEVM evmAfterPop), ctx, cursorAfterPop)
+    | _fuel, .block body, cursor, state => do
+        let (outcome, cursor') ←
+          Block.runScopedWithGasOracle program ctx body oracle _fuel cursor state
+        .ok (outcome, ctx, cursor')
+    | 0, .if_ _cond _body, _cursor, _state =>
+        invalid
+    | fuel + 1, .if_ cond body, cursor, state =>
+        match Expr.runConditionWithGasOracle ctx cond oracle cursor state with
+        | .error err => .error err
+        | .ok (stateAfterCond, condTrue, cursorAfterCond) =>
+            if condTrue then do
+              let (outcome, cursor') ←
+                Block.runScopedWithGasOracle program ctx body oracle fuel
+                  cursorAfterCond stateAfterCond
+              .ok (outcome, ctx, cursor')
+            else
+              .ok (Outcome.regular stateAfterCond, ctx, cursorAfterCond)
+    | 0, .switch _scrutinee _cases _defaultBody, _cursor, _state =>
+        invalid
+    | fuel + 1, .switch scrutinee cases defaultBody, cursor, state => do
+        let (stateAfterScrutinee, cursorAfterScrutinee) ←
+          Expr.runStateWithGasOracle ctx scrutinee oracle cursor state
+        match stateAfterScrutinee.evm.stack.pop with
+        | none =>
+            .error .StackUnderflow
+        | some ⟨stack, value⟩ =>
+            let stateAfterPop :=
+              stateAfterScrutinee.withEVM
+                { stateAfterScrutinee.evm with stack := stack }
+            match Switch.select value cases defaultBody with
+            | none =>
+                .ok (Outcome.regular stateAfterPop, ctx, cursorAfterScrutinee)
+            | some body => do
+                let (outcome, cursor') ←
+                  Block.runScopedWithGasOracle program ctx body oracle fuel
+                    cursorAfterScrutinee stateAfterPop
+                .ok (outcome, ctx, cursor')
+    | 0, .for_ _init _cond _post _body, _cursor, _state =>
+        invalid
+    | fuel + 1, .for_ init cond post body, cursor, state => do
+        let initBase := ctx.withoutLoopControl
+        let (initOutcome, initCtx, cursorAfterInit) ←
+          Block.runOpenWithGasOracle program initBase oracle fuel init cursor state
+        match initOutcome.mode with
+        | .regular =>
+            let postBase := initCtx.withoutLoopControl
+            let bodyBase := initCtx.withLoopControl initCtx.layout.length
+            let (loopOutcome, cursorAfterLoop) ←
+              Stmt.runForLoopWithGasOracle program initCtx cond postBase post
+                bodyBase body oracle fuel cursorAfterInit initOutcome.state
+            match loopOutcome.mode with
+            | .regular =>
+                let (state', cursor') ←
+                  Ctx.runCleanupToWithGasOracle initCtx ctx.layout.length oracle
+                    cursorAfterLoop loopOutcome.state
+                .ok (Outcome.regular state', ctx, cursor')
+            | .brk | .cont =>
+                invalid
+            | .leave | .halt _ =>
+                .ok (loopOutcome, ctx, cursorAfterLoop)
+        | .brk | .cont =>
+            invalid
+        | .leave | .halt _ =>
+            .ok (initOutcome, ctx, cursorAfterInit)
+    | _fuel, .brk, cursor, state => do
+        let target ← ctx.breakDepth?.elim invalid pure
+        let (state', cursor') ←
+          Ctx.runCleanupToWithGasOracle ctx target oracle cursor state
+        .ok (Outcome.brk state', ctx, cursor')
+    | _fuel, .cont, cursor, state => do
+        let target ← ctx.continueDepth?.elim invalid pure
+        let (state', cursor') ←
+          Ctx.runCleanupToWithGasOracle ctx target oracle cursor state
+        .ok (Outcome.cont state', ctx, cursor')
+    | _fuel, .leave, cursor, state => do
+        let target ← ctx.leaveDepth?.elim invalid pure
+        let (state', cursor') ←
+          Ctx.runCleanupToPreservingWithGasOracle ctx ctx.leaveRetc target oracle
+            cursor state
+        match state'.returns with
+        | [] => invalid
+        | _ :: _ => .ok (Outcome.leave state', ctx, cursor')
+    | 0, .call _name, _cursor, _state =>
+        invalid
+    | fuel + 1, .call name, cursor, state =>
+        match ProcList.lookup? name program.procs with
+        | none =>
+            invalid
+        | some proc =>
+            match Structured.StackFrame.splitArgs? proc.argc state.evm.stack with
+            | none =>
+                .error .StackUnderflow
+            | some (args, callerStack) =>
+                let callEVM := { state.evm with stack := args }
+                let callState :=
+                  (state.withEVM callEVM).pushReturn callerStack proc.retc
+                match Block.runOpenWithGasOracle program
+                    (Ctx.procEntryWithLayoutAndRetc
+                      proc.entryLayout proc.retc) oracle fuel proc.body cursor
+                    callState with
+                | .error err => .error err
+                | .ok (outcome, bodyCtx, cursorAfterBody) =>
+                    match outcome.mode with
+                    | .regular => do
+                        let (bodyState, cursorAfterCleanup) ←
+                          Ctx.runCleanupToPreservingWithGasOracle bodyCtx
+                            proc.retc 0 oracle cursorAfterBody outcome.state
+                        match bodyState.popReturn? with
+                        | none => invalid
+                        | some (frame, returned) =>
+                            match Structured.StackFrame.attachReturns? frame
+                                bodyState.evm.stack with
+                            | none => invalid
+                            | some stack =>
+                                let evm := { bodyState.evm with stack := stack }
+                                .ok (Outcome.regular (returned.withEVM evm), ctx,
+                                  cursorAfterCleanup)
+                    | .leave =>
+                        match outcome.state.popReturn? with
+                        | none => invalid
+                        | some (frame, returned) =>
+                            match Structured.StackFrame.attachReturns? frame
+                                outcome.state.evm.stack with
+                            | none => invalid
+                            | some stack =>
+                                let evm := { outcome.state.evm with stack := stack }
+                                .ok (Outcome.regular (returned.withEVM evm), ctx,
+                                  cursorAfterBody)
+                    | .brk | .cont =>
+                        invalid
+                    | .halt kind =>
+                        .ok (Outcome.halt kind outcome.state, ctx,
+                          cursorAfterBody)
+    | _fuel, .terminal kind, cursor, state => do
+        let (stateAfterCleanup, cursorAfterCleanup) ←
+          Ctx.runCleanupAllWithGasOracle ctx oracle cursor state
+        let (evm, cursor') ←
+          Structured.Terminal.stepWithGasOracle kind oracle cursorAfterCleanup
+            stateAfterCleanup.evm
+        .ok (Outcome.halt kind (stateAfterCleanup.withEVM evm), ctx, cursor')
+    | _fuel, .terminalArgs kind args, cursor, state => do
+        let (evmAfterArgs, cursorAfterArgs) ←
+          Expr.ExprSeq.runCodeWithGasOracle ctx 0 args oracle cursor state.evm
+        let (evm, cursor') ←
+          Structured.Terminal.stepWithGasOracle kind oracle cursorAfterArgs
+            evmAfterArgs
+        .ok (Outcome.halt kind (state.withEVM evm), ctx, cursor')
+  termination_by fuel stmt _cursor _state => (fuel, 3, sizeOf stmt)
+  decreasing_by
+    all_goals simp_wf
+    all_goals
+      first
+      | omega
+      | exact Prod.Lex.right _
+          (Prod.Lex.left _ _ (by omega))
+end
+
 namespace Block
 
 /--
@@ -495,6 +852,18 @@ def run (fuel : Nat) (program : Program) (state : EVMState) :
     Except EVMException Outcome :=
   runState fuel program (Structured.Program.initialState state)
 
+def runStateWithGasOracle (fuel : Nat) (program : Program)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : RunState) :
+    Except EVMException (Outcome × Nat) :=
+  Block.runScopedWithGasOracle program Ctx.initial program.body oracle fuel
+    cursor state
+
+def runWithGasOracle (fuel : Nat) (program : Program)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : EVMState) :
+    Except EVMException (Outcome × Nat) :=
+  runStateWithGasOracle fuel program oracle cursor
+    (Structured.Program.initialState state)
+
 inductive Eval :
     Nat → Program → EVMState → Outcome → Prop where
   | ofRun {fuel : Nat} {program : Program} {initial : EVMState}
@@ -511,6 +880,11 @@ namespace Program
 def run (fuel : Nat) (program : Program) (state : EVMState) :
     Except EVMException Outcome :=
   Direct.Program.run fuel program state
+
+def runWithGasOracle (fuel : Nat) (program : Program)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : EVMState) :
+    Except EVMException (Outcome × Nat) :=
+  Direct.Program.runWithGasOracle fuel program oracle cursor state
 
 inductive Eval :
     Nat → Program → EVMState → Outcome → Prop where

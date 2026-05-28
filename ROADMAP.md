@@ -8,7 +8,7 @@ Nethermind-Yul-to-source semantic bridge packages, and derives the gas-aware
 `EVM.X` sufficient-gas/precondition evidence instead of taking it as an
 external execution certificate.
 
-Last updated: 2026-05-27 22:23 PDT.
+Last updated: 2026-05-28 08:24 PDT.
 
 Current external-call direction: the speculative concrete `World` proof route
 has been retired. The new CALL-family route is an open external-call theorem:
@@ -26,8 +26,17 @@ response preservation field is explicitly universal over all shared responses.
 The imported Nethermind `accountMap` remains part of the internal local-state
 relation for operations such as contract storage and account lookup; the open
 external boundary should not expose it as an external-world model.
-`createdAccounts` is no longer part of `ChainStateRel` while CREATE/CREATE2
-remain outside the live CALL proof.
+`createdAccounts` remains part of `ChainStateRel` as equality while
+CREATE/CREATE2 remain outside the live CALL proof.
+Public-spine checkpoint: `LayerAudit.ImportedYulBoundary` now exposes the
+CALL-open package under the main imported-Yul names rather than a separate
+CALL-prefixed side boundary. It still does not export the old closed no-CALL
+gas-aware `EVM.X` theorem; the remaining whole-program CALL step is the open
+recursive sequence/EVM-runner composition.
+The root `EvmCompiler.Yul` module no longer imports `EvmCompiler.Yul.NoCallRuntime`,
+so the legacy closed no-CALL gas-aware theorem family is importable only by
+asking for that implementation module directly, not as part of the main public
+Yul spine.
 The current checked hook also proves CALL-family argument/stack agreement over
 an arbitrary target stack suffix and derives the needed call-context relation
 from the existing compiler/source state relations. The CALL-safe semantic
@@ -58,20 +67,235 @@ checked open-done-to-closed evaluator agreement lemmas and an adapter from
 `SourceArgPreludeOpen.run` wrapper now has checked structural equations for
 regular completion, prelude suspension, and final argument-sequence suspension,
 plus a completed-run relation against the actual wrapper rather than only a
-hand-built target value. The
-remaining CALL-capable step is the true suspending case: prove open Yul
-argument evaluation relates to `SourceArgPreludeOpen.run` when it reaches a
-CALL-family site, then replace expression-prelude consumers that still expect
-the old closed `EvmYul.Yul.evalArgs` result.
+hand-built target value. The stack-order mismatch at the CALL primitive
+boundary now has checked call-specific open-result reversal adapters, so nested
+suspended argument calls can be threaded through the source-side reversal used by
+`YulOpen.evalValues` without collapsing them into a global response predicate.
+Lowered argument-expression evaluation also has a call-pair-dependent relation
+and a checked adapter into `SourceArgPreludeOpen.run` when the generated prelude
+statements have already completed. There is now a checked pre-result adapter
+that carries suspensions in the generated argument prelude through
+`SourceArgPreludeOpen.run` and the final argument readback, without collapsing
+call-specific response relations, plus the checked empty-argument base case for
+the open generated-prelude wrapper. The empty lowered-argument base is now named
+directly as
+`SourceArgStackOpenArgsResultRelWith.nil`, and the main
+`LayerAudit.ImportedYulBoundary` spine exposes the checked lowered-argument,
+pre-result, and full-wrapper empty constructors under non-side-channel public
+names. It also exposes checked response-relation weakening for lowered
+arguments, generated-prelude pre-results, and the full generated-prelude wrapper,
+so nested CALL response predicates can be refined by proof rather than forced
+through one global predicate. The completed generated-prelude open-parts
+constructor now also has a call-pair-dependent `With.done_ok_of_open_parts`
+version exposed from `LayerAudit`, and the generated-prelude pre-result has a
+matching `SourceArgStackPreludeOpenPreDoneRelWith.done_ok_of_open_parts`
+constructor. The lowered argument-expression relation itself now has
+`SourceArgStackOpenArgsResultRelWith.done_ok_of_open_parts`, so completed open
+Yul argument evaluation and completed compiler-open lowered-argument evaluation
+can feed that pre-result constructor directly when they produce matching values
+and related final states. Completed CALL argument preludes therefore no longer
+need to pass through the older constant response predicate or a hand-built
+pre-result relation. The primitive CALL expression-prelude boundary now has an
+open-argument sibling,
+`OpenPrimitiveCallExprOpenPreludeSoundAt`, plus a checked `lower1?` wrapper that
+consumes completed `YulOpen.evalArgs` evidence directly instead of requiring
+closed `EvmYul.Yul.evalArgs`. Assignment and let statement-level CALL consumers
+now also have open-argument siblings, including checked `lower1?`/statement
+wrappers and call-safe constructors that build the open argument-domain
+invariant internally instead of asking for closed evalArgs/domain evidence.
+Assignment and let sequence-level CALL prelude consumers now have the same
+open-argument shape, including lowerer/call-safe/program-accepted wrappers that
+construct the open argument-domain evidence internally. These sequence wrappers
+still hand the post-CALL tail to the existing hidden-context sequence boundary;
+the public spine also exposes the direct actual `YulOpen.execSeq` assignment/let
+CALL-head lemmas against the emitted compiler-open sequence when the generated
+argument prelude has completed and the open tail proof is available. The
+remaining CALL-capable step is still to construct the nonempty generated-argument
+pre-result relation from the actual `lowerBound1?` / `lower1?` argument
+lowering induction, then connect these direct open-result sequence lemmas into
+the full checked open sequence/EVM runner spine.
 
-Paused checkpoint: before continuing this route, audit the state relation for
-contract storage equality. The current open-call work assumes responses
-preserve the relevant source/target relation, but the newly discovered concern
-is that the public proof may not actually force equality of the contract's
-storage state. Resumption should first identify where storage lives in
-`SourceStateRel`/`SharedStateRel`/target state relations, strengthen or expose
-the needed equality invariant, and only then continue the CALL suspension
-bridge.
+Storage/result checkpoint: the separate storage/result proof repair has landed,
+so the CALL route can continue using the strengthened source/target relation.
+The remaining CALL-capable step is still the structural open argument-lowering
+and sequence/full-runner composition proof, not a closed `EVM.X` claim.
+
+Gas-oracle checkpoint: assembly and structured execution now have explicit
+GAS-oracle semantics, result-level assembly bytecode bridge, frame-aware
+straight-line code preservation, checked structured oracle-frame acceptedness,
+condition/JUMPI preservation, reusable oracle-parametric label/jump/POP control
+lemmas, checked no-match `switch` compositions for both no-default and
+default-body execution, checked selected-case `switch` composition, and the
+public structured `StmtPreservation.switch_withGasOracle` wrapper. These thread
+the oracle through the scrutinee, fallthrough tests, selected-case/default
+dispatch and tail code, selected/default block bodies, and switch end label while
+preserving the final cursor and `CompiledOutcomeRel`. The structured
+GAS-parametric semantics now also has checked returns-preservation invariants
+for `Block`/`Stmt`/`For` evaluation, checked oracle-parametric
+`ModeAllowed`/whole-program source-outcome invariants, and an at-fuel
+block-preservation wrapper, which are prerequisites for porting the gasless
+loop/procedure recursion arguments. The first oracle-parametric `ForLoop`
+layout pieces and their recursive/public composition are now checked:
+false-condition exit, true-condition body entry, body
+`break`/`leave`/terminal halt exits, body regular/continue entry into the post
+block, and post `leave`/terminal halt/regular back-edge helpers compose into
+`ForLoopPreservation.preserves_eval_withGasOracle`, and
+`StmtPreservation.for_withGasOracle` wraps the structured `Stmt.for` init/core
+split. These preserve exact GAS cursor flow and the same result relation shape
+as the gasless loop proof. The procedure-call route now also has checked
+oracle-parametric no-GAS stack-shuffle/call-prologue lemmas plus
+`FrameStateRel.source_callEntry_after_prologue_withGasOracle` and
+`FrameStateRel.source_callEntry_after_prologue_and_jump_withGasOracle`, so a
+callee entry can be reached with the same return-token frame relation and an
+unchanged GAS cursor. The return-dispatch case substrate is now checked via
+`StackShuffleGas.liftBuriedToTop_source_exists_withGasOracle`,
+`StackShuffleGas.removeBuriedUnder_source_exists_withGasOracle`,
+`FrameStateRel.source_returnAttach_after_remove_withGasOracle`, and
+`FrameStateRel.dispatch_case_runResult_at_withGasOracle`, covering the
+case-label/return-token-remove/jump-to-return-label path while preserving the
+exact GAS cursor and `Frame.StateRel`. The dispatch test prefix is now also
+checked with the same cursor-preservation shape via
+`StackShuffleGas.dispatchCondition_source_exists_withGasOracle`,
+`StackShuffleGas.dispatchCondition_jumpi_source_exists_withGasOracle`,
+`FrameStateRel.dispatch_mismatched_test_runResult_at_withGasOracle`, and
+`FrameStateRel.dispatch_selected_site_runResult_at_withGasOracle`, covering
+both nonmatching fallthrough and selected-site jump into the return-dispatch
+case. The recursive generated dispatch-table route is now checked through
+`DispatchPreservation.selected_table_runResult_at_withGasOracle` and
+`DispatchPreservation.forProc_selected_runResult_at_withGasOracle`, walking
+nonmatching tests and entering the selected return case while preserving the
+exact GAS cursor and returned-frame relation. The remaining non-assumptive
+route now has checked procedure-call outcome substrate through
+`ProcedureCall.exit_label_then_dispatch_withGasOracle`,
+`ProcedureCall.regular_body_then_dispatch_withGasOracle`,
+`ProcedureCall.leave_body_then_dispatch_withGasOracle`, and
+`ProcedureCall.halt_body_from_entry_withGasOracle`: regular and leave callee
+body outcomes consume the body GAS cursor and then preserve it through the exit
+label/dispatch table, while terminal halts propagate from the callee body. The
+segment body-preservation premise is now derived from checked block
+preservation by `ProcedureCall.procBodyPreservesAtSegment_of_local_withGasOracle`,
+and the checked structured call-site wrappers
+`ProcedureCall.call_regular_segments_withGasOracle`,
+`ProcedureCall.call_leave_segments_withGasOracle`,
+`ProcedureCall.call_halt_segments_withGasOracle`,
+`ProcedureCall.call_stmt_segments_withGasOracle`, and
+`ProcedureCall.call_stmt_of_segments_withGasOracle` compose the call prologue,
+callee body, return dispatch, return label, and halt paths while preserving the
+exact final GAS cursor and `CompiledOutcomeRel`. This is now lifted one rung
+into the existing compiled procedure `ProgramLayout` by
+`ProcedureLayoutPreservation.StmtPreservesInProgramLayoutWithGasOracle`,
+`ProcedureLayoutPreservation.BlockPreservesInProgramLayoutWithGasOracle`,
+`ProcedureLayoutPreservation.call_stmt_of_programLayout_withGasOracle`,
+`ProcedureLayoutPreservation.call_stmt_of_programLayout_eval_withGasOracle`,
+`ProcedureLayoutPreservation.preserves_call_in_programLayout_withGasOracle`,
+`ProcedureLayoutPreservation.stmt_preserves_in_programLayout_of_local_withGasOracle`,
+`ProcedureLayoutPreservation.block_preserves_in_programLayout_of_local_withGasOracle`,
+`ProcedureLayoutPreservation.preserves_nil_in_programLayout_withGasOracle`, and
+`ProcedureLayoutPreservation.preserves_cons_in_programLayout_withGasOracle`.
+Those wrappers bridge the old gasless compiled layout/code-segment evidence to
+the GAS-oracle helper code, compose local non-call preservation with `.call`,
+and preserve the exact final GAS cursor and `CompiledOutcomeRel` at the shared
+program-layout assembly. The fuel-bounded recursive-call substrate is now also
+checked: `ProcedureLayoutPreservation.BlockPreservesInProgramLayoutWithGasOracleAtFuel`,
+`ProcedureLayoutPreservation.procBodyPreservesAtSegment_of_programLayout_withGasOracle`,
+`ProcedureLayoutPreservation.StmtPreservesInProgramLayoutWithGasOracleUpTo`,
+`ProcedureLayoutPreservation.BlockPreservesInProgramLayoutWithGasOracleUpTo`,
+`ProcedureLayoutPreservation.CallObligationUpToWithGasOracle`,
+`ProcedureLayoutPreservation.blockPreservesInProgramLayoutWithGasOracleAtFuel_of_upTo`,
+`ProcedureLayoutPreservation.preserves_if_in_programLayout_upTo_withGasOracle`,
+`ProcedureLayoutPreservation.SwitchCasesPreservesInProgramLayoutWithGasOracleAtFuel`,
+`ProcedureLayoutPreservation.SwitchDefaultPreservesInProgramLayoutWithGasOracleAtFuel`,
+`ProcedureLayoutPreservation.SwitchCasesPreservesInProgramLayoutWithGasOracleUpTo`,
+`ProcedureLayoutPreservation.SwitchDefaultPreservesInProgramLayoutWithGasOracleUpTo`,
+`ProcedureLayoutPreservation.switchCasesPreservesInProgramLayoutWithGasOracleAtFuel_of_upTo`,
+`ProcedureLayoutPreservation.switchDefaultPreservesInProgramLayoutWithGasOracleAtFuel_of_upTo`,
+`ProcedureLayoutPreservation.switchCasesPreservesInProgramLayoutWithGasOracleUpTo_of_all`,
+`ProcedureLayoutPreservation.preserves_cons_in_programLayout_upTo_withGasOracle`,
+and `ProcedureLayoutPreservation.callObligationUpTo_succ_of_procBodies_withGasOracle`
+mirror the gasless fuel-induction boundary while threading oracle cursor
+equality through procedure body segments, `if` branch bodies, switch case/default
+block obligations, and call sites.
+
+The selected-switch program-layout port now has the checked body-entry pieces:
+`ProcedureLayoutPreservation.labeled_body_tail_result_ctx_in_programLayout_withGasOracle`,
+`ProcedureLayoutPreservation.head_case_from_tests_result_ctx_in_programLayout_withGasOracle`,
+and
+`ProcedureLayoutPreservation.default_selected_tail_result_ctx_in_programLayout_withGasOracle`.
+They run the selected/default case label, pop the scrutinee, invoke the
+fuel-bounded `ProgramLayout` body proof, and preserve exact GAS cursor equality
+plus `CompiledOutcomeRel`. The recursive selected-case wrapper
+`ProcedureLayoutPreservation.selected_cases_result_ctx_in_programLayout_withGasOracle`
+is now checked: it threads false test fallthrough over the case list, dispatches
+to the selected case/default body, and preserves exact final GAS cursor equality
+plus `CompiledOutcomeRel`. The public statement-level switch wrapper
+`ProcedureLayoutPreservation.preserves_switch_in_programLayout_upTo_withGasOracle`
+is also checked over the fuel-bounded `ProgramLayout` `UpTo` interface. The
+analogous `for` program-layout port is now checked too:
+`ProcedureLayoutPreservation.for_eval_in_programLayout_withGasOracle` and
+`ProcedureLayoutPreservation.preserves_for_in_programLayout_upTo_withGasOracle`
+thread init, condition/JUMPI, loop body, post block, back-edge, break, leave,
+and terminal exits through the shared `ProgramLayout` assembly while preserving
+exact final GAS cursor equality and `CompiledOutcomeRel`.
+
+The full structured compiler/program-layout GAS-oracle induction is now checked:
+`CompilerPreservationProgramLayoutUpToWithGasOracle.block` and `.stmt` wire
+local code, `if`, `switch`, `for`, break/continue/leave, terminals, and
+recursive `.call` through the fuel-bounded `UpTo` interface using
+`Program.FrameSafeWithGasOracle` for source code that may execute `GAS`.
+`callObligationForAllFuel_of_acceptedWithGasOracle` discharges recursive calls
+from checked acceptedness plus oracle-frame safety, and
+`CompilerPreservationProgramLayoutWithGasOracle.main_block` gives the main block
+preservation theorem. The new public structured entry point
+`compile_preserves_withGasOracle` takes `compileCheckedWithGasOracle? program =
+some asm` and a successful oracle-threaded structured source run, then produces
+a run of the compiled labeled assembly under the same oracle and initial/final
+GAS cursor with `WholeProgramOutcomeRel`. This is now lifted one layer through
+Expressions: `Expressions.Expr.runWithGasOracle`/`ExprSeq.runWithGasOracle`
+give independent oracle-threaded expression semantics, the block/statement
+oracle runner mirrors the existing expression source semantics, and
+`Expressions.Program.runWithGasOracle_toStructured` proves lowering to
+structured oracle execution. The checked Expressions entry point
+`Expressions.Program.compile_preserves_of_compileCheckedWithGasOracle` now
+routes an oracle-threaded Expressions source run through the structured
+GAS-oracle compiler theorem with the same final cursor and whole-program
+outcome relation. This is now lifted through direct Locals as well:
+`Locals.Program.runWithGasOracle` has an independent oracle-threaded semantics,
+`Direct.Block.runOpenWithGasOracle_toExpressions_exists` /
+`Direct.Stmt.runWithGasOracle_toExpressions_exists` lower Locals block and
+statement executions into Expressions while preserving the exact final cursor,
+and `Locals.Program.compile_preserves_of_compileCheckedWithGasOracle` exposes
+the checked Locals compiler theorem. The same oracle-parametric route is now
+lifted through direct Functions:
+`Functions.Direct.Block.runOpenWithGasOracle_toLocals_exists` and
+`Functions.Direct.Stmt.runWithGasOracle_toLocals_exists` lower function body,
+loop, and internal-call execution into Locals, and
+`Functions.Program.compile_preserves_of_compileCheckedWithGasOracle` exposes
+the checked Functions compiler theorem with the same initial/final GAS cursor
+and `WholeProgramOutcomeRel`. This result is now lifted through Objects and
+lowered Yul: `Objects.Program.runWithGasOracle` and
+`Yul.Lowered.runWithGasOracle` delegate through the transparent object/lowered
+adapters, `Objects.Program.compile_preserves_of_compileCheckedWithGasOracle`
+and `Yul.Program.compile_preserves_of_compileCheckedWithGasOracle` produce the
+same oracle-parametric assembly run and outcome relation, and
+`LayerAudit.AssemblyGasOracleBoundary.compileCheckedLoweredYulToGasAwareEVMWithGasOracle`
+exposes the public checked route from a lowered-Yul oracle run into the
+gas-aware assembly bridge. The public boundary now also exposes
+`LayerAudit.AssemblyGasOracleBoundary.LoweredYulGasOracleRunWitness` and
+`compileCheckedLoweredYulToGasAwareEVMWithSomeGasOracle`: the theorem states
+the route existentially over a GAS answer stream, where the oracle supplies one
+word at each dynamic `GAS` request and the final cursor records how many answers
+the run consumed. This replaces the earlier, wrong-for-`GAS` shape of one fixed
+oracle/result for all larger installed gas; the intended boundary is now
+per-installed-gas. The lower `XRunsOracleResultSuccessfullyAtGas` package now
+also requires `TargetOracleResultRun`, so the `EVM.X` comparison is tied to a
+same-oracle, same-cursor target run instead of letting the oracle parameters be
+decorative. The remaining non-assumptive route is to derive that witness from
+gas-aware `EVM.X` itself by replaying the concrete gasful execution, showing
+that each dynamic `GAS` instruction induces the corresponding oracle answer,
+and packaging the resulting `XOracleResultPreconditionAssumptions`. Until then
+that witness package is still the explicit EVM adequacy boundary, now tied to
+the exact oracle-parametric assembly run and target run rather than the old
+gasless block-trace callback.
 
 Architecture checkpoint: the proof tower is being refactored to route
 structured control through an explicit typed CFG middle layer before labeled
@@ -83,9 +307,10 @@ this IR as the refactor proceeds.
 
 Current cleanup checkpoint: stale proof-facing wrappers that were no longer used
 by the main public theorem spine have been removed. `EvmCompiler.LayerAudit`
-now intentionally exposes only the current imported-Yul gas-aware top theorem
-roots; Solidity frontend and object/Yul-object interfaces remain owned by their
-actual modules rather than preserved through audit aliases.
+now intentionally exposes the CALL-open imported-Yul boundary and no longer
+exports the old closed no-CALL gas-aware `EVM.X` route; Solidity frontend and
+object/Yul-object interfaces remain owned by their actual modules rather than
+preserved through audit aliases.
 
 1. [ ] Full Yul accepted language, not a fragment
    - [x] Add a non-rejecting full-Yul safety surface
@@ -347,18 +572,74 @@ actual modules rather than preserved through audit aliases.
        `PrimitiveSound` field internally.
 
 3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
-   - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
+  - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
      fundamental gas/oracle assumptions from compiler-derived execution
      evidence. The compiler theorem still derives the concrete
      `BlockTraceResult` internally. The preferred public wrapper now takes the
      exact trace-to-`X` gas-precondition callback consumed by the lower
      gas-aware bridge.
-   - [ ] Prove the needed `XResultPreconditionAssumptions` from the checked
-     bytecode trace, target encoding/jumpdest correctness, gas oracle,
-     out-of-gas policy, and explicit sufficient-gas bound.
-   - [ ] Strengthen the preferred gas-aware top theorem so it existentially
-     derives the gas bound and `EVM.X` agreement without taking an external
-     `hTargetGasForX` certificate.
+   - [x] Expose the preferred boundary existentially over the per-request GAS
+     answer stream with `LoweredYulGasOracleRunWitness` and
+     `compileCheckedLoweredYulToGasAwareEVMWithSomeGasOracle`, so the public
+     theorem no longer suggests one fixed GAS result for all larger installed
+     gas.
+   - [x] Require the lower `EVM.X` agreement package to include
+     `TargetOracleResultRun`, tying the compared target result to the same
+     oracle stream and cursor discipline used by the assembly/Yul proof.
+   - [x] Prove the local dynamic-`GAS` replay seed:
+     `Assembly.GasAware.memoryExpansionCost_gas`, `opcodeCost_gas`, and
+     `evm_step_gas_matches_oracle_step` show that `GAS` has no memory expansion
+     cost, has base opcode cost, pushes the post-cost `gasAvailable` word, and
+     an oracle target step with that cursor answer has the same gas-erased
+     observable state while advancing the cursor.
+   - [x] Lift that seed through the first concrete `EVM.X` boundary:
+     `decode_installed_gas_of_fetch` derives the `EVM.X` decoder fact from the
+     installed compiled bytecode and target fetch, `evm_X_gas_peel` opens the
+     resource/decode loop for a decoded `GAS`, and
+     `evm_X_installed_gas_request_matches_oracle_step` proves that the oracle
+     consumes exactly one cursor-indexed answer equal to the concrete post-base
+     cost gas word for that dynamic request.
+   - [x] Add the checked oracle stream-extension step:
+     `GasOracle.withAnswer` plus
+     `evm_X_installed_gas_request_extends_oracle_step` show that a dynamic
+     `GAS` request can extend any existing answer stream at the current cursor
+     with the concrete post-base-cost gas word, while preserving earlier
+     entries by request-index inequality.
+   - [x] Add the checked non-`GAS` substrate:
+     `Target.stepInstrResultWithGasOracle_of_not_usesGas` and
+     `Target.runListResultWithGasOracle_of_forall_not_usesGas` show that
+     oracle-parametric target execution agrees with ordinary target execution
+     and leaves the cursor unchanged when the executed target code contains no
+     dynamic `GAS` requests.
+   - [x] Add the checked prefix-stability substrate for per-request oracle
+     construction: `Target.runListResultWithGasOracle_cursor_le` proves cursor
+     monotonicity, and
+     `Target.runListResultWithGasOracle_withAnswer_of_run_le` proves that
+     extending the GAS answer stream at a future request index preserves an
+     already replayed target prefix.
+   - [x] Lift prefix stability to the whole target runner and lower EVM package:
+     `Target.runNResultWithGasOracle_cursor_le` and
+     `Target.runNResultWithGasOracle_withAnswer_of_run_le` prove that whole
+     target-program runs are monotone/stable under future oracle answers, and
+     `TargetOracleResultRun.withAnswer_of_cursorFinal_le`,
+     `XRunsOracleResultSuccessfullyAtGas.withAnswer_of_cursorFinal_le`, and
+     `SufficientGasForXOracleResult.withAnswer_of_cursorFinal_le` preserve the
+     lower oracle-result agreement package under the same future-extension
+     condition.
+   - [x] Lift prefix stability to the assembly source runner:
+     `sourceRunNResultWithGasOracle_cursor_le` and
+     `sourceRunNResultWithGasOracle_withAnswer_of_run_le` prove that installing
+     a later GAS answer preserves an already checked source run. This is needed
+     for incremental oracle construction: later concrete `EVM.X` GAS answers
+     must not invalidate the source execution prefix that consumed earlier
+     answers.
+   - [ ] Prove the needed `XOracleResultPreconditionAssumptions` by deriving
+     the GAS answer stream, target encoding/jumpdest correctness, out-of-gas
+     policy, and explicit sufficient-gas/resource evidence from the concrete
+     gasful `EVM.X` execution.
+   - [ ] Remove the external `LoweredYulGasOracleRunWitness` premise by
+     constructing it from `EVM.X` replay, so the top theorem existentially
+     derives the oracle stream, gas bound, and `EVM.X` agreement.
 
 ## Final Nethermind Yul Bridge Completion Steps
 
@@ -645,11 +926,12 @@ Current assumption-cleanup checkpoint:
     surface.
 - [x] Promote the actual result-level `EVM.X` theorem as the preferred public
   gas-aware alias.
-  - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and
-    `recursiveBridgeTopNoCallToGasAwareEVM` now point at the source-compile
-    no-call/create canonical-observation result-level `EVM.X` theorem, with
-    the bytecode decode-window and jumpdest-scanner premises constructed from
-    `compileCheckedAssemblyTargetBytecode?`.
+  - [x] Historical checkpoint: the closed no-call/create canonical-observation
+    result-level `EVM.X` theorem was once the preferred `LayerAudit` route, with
+    bytecode decode-window and jumpdest-scanner premises constructed from
+    `compileCheckedAssemblyTargetBytecode?`. It is now kept in its
+    implementation module only, while `LayerAudit.ImportedYulBoundary` exposes
+    the CALL-open imported-Yul boundary instead.
   - [x] The older gasless result bridge remains as an internal spine theorem,
     but is no longer exported as an alternate `LayerAudit` route.
 - [x] Run final proof-hygiene audit for the current public theorem surface.
@@ -2587,10 +2869,10 @@ Successor theorem readiness gate:
     obligations, or generated compiler evidence as premises.
 - [x] Historical duplicate successor/all-bounds/dispatcher/gas-aware checklist
   superseded by the checked top-of-file bridge checklist above. The actual
-  public theorem is
+  historical closed theorem is
   `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X`,
-  exported through `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`;
-  its preferred source-compile no-call/create assumption package no longer
+  but it is no longer exported from `LayerAudit`; its preferred source-compile
+  no-call/create assumption package no longer
   exposes recursive bridge evidence, replay or call obligations, generated
   layout evidence, dispatcher certificates, or a caller-supplied external-call
   agreement as public inputs.
@@ -2792,7 +3074,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
    - Current status: syntax, executable direct semantics, `Program.eval_of_run`, lowering, WF transport, expression correctness, cleanup/layout helpers, generic scoped preservation, and composed EVM bridge theorem are checked.
    - Abstraction repair in progress: `Locals.SourceSemantics` introduces a stack-free named-store source interpreter so future higher layers do not depend on layout depths or stack cleanup as part of their source meaning. `Locals.Program.SourceAccepted` now uses `Source.Program.SourceWF`, which separates pure lexical scoping/no-shadowing (`Locals.Lexical`) from source ownership. Raw lower `.code` is lexically scoped if it mentions no names, but rejected by `SourceOwned` and invalid in the stack-free source interpreter; `Source.PrimitiveSemantics` no longer contains a `lowerCode` hook. Scoped block cleanup is now exposed as source-level facts `Block.runScoped_regular_eq_restrict` and `Block.runScoped_regular_drops_not_mem`, and successful regular source statement/open-block runs expose their syntactic `Scope.outEnv` via `Stmt.run_regular_scope` and `Block.runOpen_regular_scope`. `Locals.SourceLowering` now owns checked relation lemmas from that source interface to the existing stack-shaped backend: context handlers to cleanup depths and retained handler scopes, source store to stack layout, expression results as target stack temporaries, source-owned expression execution, source-environment access bounds, scoped-to-source-owned/accessibility conversion, scoped statement bridge wrappers for expression statements, `let`, assignment, and terminal arguments, exact source-run-driven wrappers for ordinary expression/`let`/assignment/break/continue/terminal statement heads, an atomic statement dispatcher, exact source-run-driven open-block head/tail composition including an atomic-head wrapper, scoped-block closure from open-block bridge evidence, source-run-driven block/`if`/`switch` statement wrappers, generic one-result `let` and assignment replay, `break`/`continue` cleanup replay, terminal-with-arguments replay, local insertion, suffix-scope cleanup, and outcome modes. It now also exposes `HandlerScopesEq`, `RunResultRelAt`, `ScopedOutcomeRelAt`, `StmtRunBridgeAt`, and `BlockOpenRunBridgeAt`; the new open-block bridge separates handler-entry context from current lexical context, so structural block proofs can keep abrupt exits tied to source handlers while regular tails extend local scope. The handler-aware bridge now has checked base statement wrappers, exact source-run atomic dispatch, open-block cons drivers, source-run-driven `block`/`if`/`switch` wrappers, and handler-preservation propagation for regular atomic heads, giving the recursive locals theorem a source-run-driven path that does not collapse abrupt exits back to existential target layouts.
    - Structural source-run checkpoint: `Locals.SourceLowering.Structural` defines an explicit locals-source structural subset (`expr`, `let`, assignment, scoped block, `if`, `switch`, `for`, `break`, `continue`, terminal statements), proves it implies source scoping/access bounds, proves regular structural statement and open-block runs preserve installed handler scopes, and proves a recursive source-run-driven `BlockOpenRunBridgeAt`/`StmtRunBridgeAt` theorem that now includes `for`. The loop proof uses a bounded-fuel bridge interface for init/post/body blocks, so nested loop recursion is discharged by Lean's termination checker instead of an opaque arbitrary-fuel callback. Separate checked `runForLoopBridgeAt_of_source_run` and `forStmtRunBridgeAt_of_source_run` wrappers remain available for direct use. Procedure calls, nonempty procedure lists, and procedure-delimited `leave` are intentionally not Locals-source features; they belong to the Functions layer. `Locals.Source.Program.CompileAccepted` is now the source-facing compiler gate: it bundles stack-free `SourceAccepted` with structural/access-bound lowerability, and `SourceWF` separately derives the `Scope.*.Scoped` predicates without claiming that lexical source wellformedness alone proves DUP/SWAP access bounds.
-   - Direct compile boundary now has `Locals.Program.compileChecked?` and `compile_preserves_checked`, so the public direct Locals theorem computes expression/structured compiler success instead of exposing raw lowering evidence.
+   - Direct compile boundary now has `Locals.Program.compileChecked?` / `compile_preserves_checked` and oracle-parametric `compileCheckedWithGasOracle?` / `compile_preserves_of_compileCheckedWithGasOracle`, so the public direct Locals theorem computes expression/structured compiler success while the GAS-aware route also preserves the same oracle cursor through Locals, Expressions, Structured, and labeled assembly.
    - Source-owned boundary: `Locals.Source.Program.SourceOwned` intentionally rejects lower-only stack/procedure constructs such as `.call`, `.assignTop`, `.exprs`, `.code`, and nonempty `procs`; those are backend features unless/until an explicit abstract procedure-call interface is added.
    - Public theorem status: `Locals.Program.compile_preserves` composes a direct Locals source run through Expressions/Structured to labeled assembly without taking intermediate lowering evidence as an input.
    - Adjacent theorem lowers scoped statements/expressions into the expressions/structured-control layer.
@@ -3241,7 +3523,7 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 
 ## Proof Hardening
 
-- [ ] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
+- [ ] Derive per-installed-gas `EVM.X` replay/oracle witnesses from concrete gasful executions, including the dynamic GAS answer stream, the same-oracle target replay, and sufficient-resource evidence, instead of taking them only as assumptions.
 - [ ] Complete the CALL-family open external semantics spine: requests are
   forwarded-gas-free at the outside-world boundary while preserving the
   requested-gas operand, and the argument-prelude source/compiler,
@@ -3285,7 +3567,15 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   sequence target and `CALLOpenSeqLoweringFrontierAt` now name the exact
   recursive-spine replacement needed for CALL: checked lowering to
   `YulOpen.execSeq`/`CompilerOpen`, with response preservation quantified by
-  `OpenResultRel`, rather than the old closed sequence result relation.
+  `OpenResultRel`, rather than the old closed sequence result relation. The
+  public closed gas-aware spine must not be widened by swapping in the CALL
+  feature checker while it still calls the `topNoCall` theorem: that route also
+  derives a no-call/create target runtime through `NoCallCreate`. A real CALL
+  spine needs the open recursive sequence frontier and a CALL-capable
+  target/open-EVM boundary composed into the public theorem. `LayerAudit` now
+  makes `ImportedYulBoundary` the checked CALL-open boundary and does not export
+  the old closed `EVM.X` theorem, so public consumers can depend on the honest
+  CALL spine without pretending the no-CALL gas-aware theorem handles CALL.
   Remaining work is to make generated preludes produce that open result in the
   suspending case, prove the recursive assignment/let CALL consumers against
   `CALLOpenSeqLoweringFrontierAt`, construct expression-level instances of the

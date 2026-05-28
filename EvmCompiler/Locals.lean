@@ -5,3 +5,4 @@ import EvmCompiler.Locals.Compiler
 import EvmCompiler.Locals.StackLowering
 import EvmCompiler.Locals.SourceLowering
 import EvmCompiler.Locals.Preservation
+import EvmCompiler.Locals.GasParametricPreservation

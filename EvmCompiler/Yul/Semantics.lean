@@ -102,6 +102,13 @@ noncomputable def run (fuel : Nat) (program : Program) (state : EVMState) :
   | none => .error .InvalidInstruction
   | some lower => lower.run fuel state
 
+noncomputable def runWithGasOracle (fuel : Nat) (program : Program)
+    (oracle : Structured.GasOracle) (cursor : Nat) (state : EVMState) :
+    Except EVMException (Outcome × Nat) :=
+  match program.toObjects? with
+  | none => .error .InvalidInstruction
+  | some lower => lower.runWithGasOracle fuel oracle cursor state
+
 inductive Eval :
     Nat → Program → EVMState → Outcome → Prop where
   | ofObjects {fuel : Nat} {program : Program}
