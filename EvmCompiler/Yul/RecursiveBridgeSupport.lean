@@ -32736,6 +32736,38 @@ theorem yulOpen_toOpenResult_execSeq_cons_succ
   intro state'
   cases state' <;> rfl
 
+theorem compilerOpen_block_runOpen_nil_succ
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {state : Objects.Source.State} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel.succ
+        { stmts := [] } state =
+      OpenExternal.OpenResult.ok
+        (Functions.Source.Outcome.regular state, ctx) := by
+  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+    OpenExternal.OpenResult.ok]
+
+theorem compilerOpen_block_runOpen_cons_succ
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {stmt : Functions.Stmt} {rest : List Functions.Stmt}
+    {state : Objects.Source.State} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel.succ
+        { stmts := stmt :: rest } state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel stmt
+          state)
+        (fun stmtResult =>
+          match stmtResult.1.mode with
+          | .regular =>
+              CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                stmtResult.2 fuel { stmts := rest } stmtResult.1.state
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok (stmtResult.1, ctx)) := by
+  simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+    OpenExternal.OpenResult.ok]
+  rfl
+
 theorem yulOpen_toOpenResult_execSeq_assign_call_of_check_ok
     {sourceFuel : Nat} {name : EvmYul.Identifier}
     {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr}
@@ -41598,6 +41630,76 @@ def SourceResultSeqSoundWhenAtExactHiddenCtx (cfg : StateRelConfig)
       SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
         sourceResult sourceOutcome
 
+def SourceOpenResultSeqDoneRel (cfg : StateRelConfig)
+    (outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (allowed : Except Exception State → Prop) :
+    Except Exception State →
+      Except Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
+  | sourceResult, .ok (sourceOutcome, _) =>
+      allowed sourceResult ∧
+        SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
+          sourceResult sourceOutcome
+  | _, _ => False
+
+def SourceOpenResultSeqSoundAtExactHiddenCtx
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmts : List AstStmt)
+    (codeOverride : Option AstContract) (lowerBlock : Functions.Block)
+    (targetFuel : Nat) (allowed : Except Exception State → Prop)
+    (callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.Outcome × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop) : Prop :=
+  ∀ {source compiler},
+    SourceStateExactRel cfg layout source compiler →
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+          allowed)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+            source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          targetFuel lowerBlock compiler)
+
+def SourceOpenResultSeqSoundWhenAtExactHiddenCtx
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmts : List AstStmt)
+    (codeOverride : Option AstContract) (lowerBlock : Functions.Block)
+    (allowed : Except Exception State → Prop)
+    (callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.Outcome × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop) : Prop :=
+  ∀ {source compiler},
+    SourceStateExactRel cfg layout source compiler →
+      ∃ targetFuel,
+        OpenExternal.OpenResultRel callResponseRel
+          (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+            allowed)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel lowerBlock compiler)
+
 /--
 Open-call continuation for a regular hidden statement head followed by an
 ordinary closed tail.
@@ -41737,6 +41839,142 @@ theorem openRegularStmtOpenResultRel_cons_tail_hidden
           (by
             intro response hResponse
             exact ih response hResponse)
+
+theorem openRegularStmtOpenResultRel_bind_open_tail_hidden
+    {cfg : StateRelConfig} {layoutMid : List Name}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.State × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {callResponseRel' :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.Outcome × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel' :
+      Except Exception State →
+        Except Functions.EVMException
+          (Objects.Source.Outcome × Functions.Source.Ctx) → Prop}
+    {sourceHead : OpenExternal.OpenResult Exception State}
+    {targetHead :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.State × Functions.Source.Ctx)}
+    {sourceNext : State → OpenExternal.OpenResult Exception State}
+    {targetNext :
+      Objects.Source.State × Functions.Source.Ctx →
+        OpenExternal.OpenResult Functions.EVMException
+          (Objects.Source.Outcome × Functions.Source.Ctx)}
+    (hHead :
+      OpenExternal.OpenResultRel callResponseRel
+        (OpenRegularStmtOpenResultDoneRel cfg layoutMid)
+        sourceHead targetHead)
+    (hTail :
+      ∀ {sourceMid compilerMid},
+        SourceStateExactRel cfg layoutMid sourceMid compilerMid.1 →
+          OpenExternal.OpenResultRel callResponseRel' doneRel'
+            (sourceNext sourceMid) (targetNext compilerMid))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                targetNext }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel' doneRel'
+      (OpenExternal.OpenResult.bind sourceHead sourceNext)
+      (OpenExternal.OpenResult.bind targetHead targetNext) := by
+  refine OpenExternal.OpenResultRel.bind hHead ?_ ?_
+  · intro sourceDone targetDone hDone
+    cases sourceDone with
+    | error _ =>
+        cases targetDone <;> contradiction
+    | ok sourceMid =>
+        cases targetDone with
+        | error _ => contradiction
+        | ok compilerMid =>
+            exact hTail hDone
+  · intro sourceCall targetCall response hResponse
+    exact hCallResponse hResponse
+
+theorem openRegularStmtOpenResultRel_bind_openSeq_tail_hidden
+    {cfg : StateRelConfig} {layoutMid outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program}
+    {sourceFuel targetTailFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.State × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {callResponseRel' :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            (Objects.Source.Outcome × Functions.Source.Ctx)) →
+        OpenExternal.CallResponse → Prop}
+    {sourceHead : OpenExternal.OpenResult Exception State}
+    {targetHead :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.State × Functions.Source.Ctx)}
+    (hHead :
+      OpenExternal.OpenResultRel callResponseRel
+        (OpenRegularStmtOpenResultDoneRel cfg layoutMid)
+        sourceHead targetHead)
+    (hTail :
+      ∀ {ctxMid : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layoutMid outcomeLayout
+          terminalRel revertRel prim program ctxMid sourceFuel rest
+          codeOverride lowerTail targetTailFuel allowed callResponseRel')
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceMid =>
+                  OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.execSeq sourceFuel rest
+                      codeOverride sourceMid)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun compilerMid =>
+                  CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                    compilerMid.2 targetTailFuel lowerTail compilerMid.1) }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel'
+      (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+        allowed)
+      (OpenExternal.OpenResult.bind sourceHead fun sourceMid =>
+        OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq sourceFuel rest codeOverride
+            sourceMid))
+      (OpenExternal.OpenResult.bind targetHead fun compilerMid =>
+        CompilerOpen.FunctionsOpen.Block.runOpen prim program compilerMid.2
+          targetTailFuel lowerTail compilerMid.1) := by
+  exact
+    openRegularStmtOpenResultRel_bind_open_tail_hidden
+      (cfg := cfg) (layoutMid := layoutMid) hHead
+      (by
+        intro sourceMid compilerMid hRel
+        exact hTail (ctxMid := compilerMid.2) hRel)
+      hCallResponse
 
 /-- Assignment open-result CALL head, paired with a hidden-context closed tail. -/
 theorem openPrimitiveCallAssignSeqOpenResultRel_of_arg_prelude_done_callKind
