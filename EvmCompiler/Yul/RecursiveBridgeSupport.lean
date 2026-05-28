@@ -180795,6 +180795,90 @@ theorem openPrimitiveEVMCallSound_of_argStackPrelude
   hTop.semantics.openPrimitiveEVMCallSound_of_argStackPrelude
     hArgsRegular hInitial kind operands hEvalArgs
 
+theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuelTop : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuelTop initial
+        referenceResult)
+    {layout : List Name}
+    {sourceShared sourceSharedAfter : EvmYul.SharedState .Yul}
+    {sourceStore sourceStoreAfter : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {lowerProgram : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lower :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {values : List Word}
+    (hKind :
+      OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hArgsRegular :
+      Reference.SourceBridgeFacts.SourceArgStackPreludeRegularAt cfg layout
+        prim lowerProgram ctx sourceFuel args codeOverride pre lower)
+    (hInitial :
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceShared sourceStore) compiler)
+    (hOpenEvalArgs :
+      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          (.Ok sourceShared sourceStore) =
+        .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hValuesArity :
+      values.length = Expressions.Structured.BasicOp.inputs op) :
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerAfterPre : Objects.Source.State,
+    ∃ compilerAfterArgs : Objects.Source.State,
+    ∃ ctxAfter : Functions.Source.Ctx,
+    ∃ targetFuel : Nat,
+      Functions.Source.Block.runOpen prim lowerProgram ctx targetFuel
+          { stmts := pre } compiler =
+        .ok (Functions.Source.Outcome.regular compilerAfterPre, ctxAfter) ∧
+      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
+        .ok (compilerAfterArgs, values) ∧
+      Reference.SourceBridgeFacts.SourceStateRel cfg layout
+        (.Ok sourceSharedAfter sourceStoreAfter) compilerAfterArgs ∧
+      ∀ {evmState : EvmYul.EVM.State},
+        evmState.toSharedState = compilerAfterArgs.shared →
+        ∀ (baseStack : OpenExternal.Stack),
+          ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+            OpenExternal.CallKind.evmOpenCall?
+                ({ evmState with stack := kind.args operands ++ baseStack }
+                  : EvmYul.EVM.State) kind =
+              some evmCall ∧
+            OpenExternal.OpenResultRel
+              (fun _sourceCall _targetCall response =>
+                Reference.SharedStateRel.OpenExternalResponseRel
+                  cfg sourceSharedAfter compilerAfterArgs.shared response)
+              (Reference.SourceBridgeFacts.OpenPrimitiveEVMResultDoneRel
+                cfg layout baseStack)
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalValues sourceFuel.succ
+                  (.Call (.inl yulPrim) args) codeOverride
+                  (.Ok sourceShared sourceStore)))
+              (Reference.SourceBridgeFacts.openPrimitiveCallEVMResult
+                evmCall) :=
+  hTop.semantics.openPrimitiveEVMResultRel_of_argStackPrelude_callKind
+    hKind hBasic hArgsRegular hInitial hOpenEvalArgs hValuesArity
+
 end RecursiveBridgeCALLTopAssumptions
 
 /--
