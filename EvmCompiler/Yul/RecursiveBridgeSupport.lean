@@ -50107,6 +50107,68 @@ def runAssignSource
       | .OutOfFuel => .done (.ok sourceAfter)
       | .Checkpoint _ => .done (.ok sourceAfter))
 
+theorem runLetSource_user_call_succ_eq_bind_args
+    (fuel : Nat) (name : EvmYul.Identifier) (functionName : Name)
+    (args : List AstExpr) (rest : List AstStmt)
+    (codeOverride : Option AstContract) (source : State) :
+    runLetSource fuel.succ name (.Call (.inr functionName) args) rest
+        codeOverride source =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult
+            (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+              source)))
+        (fun pair =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call fuel pair.2 functionName
+                codeOverride pair.1))
+            (fun result =>
+              let sourceAfter :=
+                EvmYul.Yul.State.multifill [name] result.2 result.1
+              match sourceAfter with
+              | .Ok _ _ =>
+                  OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.execSeq fuel.succ.succ rest
+                      codeOverride sourceAfter)
+              | .OutOfFuel => .done (.ok sourceAfter)
+              | .Checkpoint _ => .done (.ok sourceAfter))) := by
+  unfold runLetSource
+  rw [yulOpen_evalValues_user_call_succ_eq_bind_args]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [openResult_bind_assoc]
+
+theorem runAssignSource_user_call_succ_eq_bind_args
+    (fuel : Nat) (name : EvmYul.Identifier) (functionName : Name)
+    (args : List AstExpr) (rest : List AstStmt)
+    (codeOverride : Option AstContract) (source : State) :
+    runAssignSource fuel.succ name (.Call (.inr functionName) args) rest
+        codeOverride source =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult
+            (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+              source)))
+        (fun pair =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call fuel pair.2 functionName
+                codeOverride pair.1))
+            (fun result =>
+              let sourceAfter :=
+                EvmYul.Yul.State.multifill [name] result.2 result.1
+              match sourceAfter with
+              | .Ok _ _ =>
+                  OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.execSeq fuel.succ.succ rest
+                      codeOverride sourceAfter)
+              | .OutOfFuel => .done (.ok sourceAfter)
+              | .Checkpoint _ => .done (.ok sourceAfter))) := by
+  unfold runAssignSource
+  rw [yulOpen_evalValues_user_call_succ_eq_bind_args]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [openResult_bind_assoc]
+
 def runLetTarget
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (ctx : Functions.Source.Ctx)

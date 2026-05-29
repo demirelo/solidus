@@ -233,6 +233,10 @@ Checked base we can rely on:
   lowering, exposing the actual `lower1?` shape as `preArgs` followed by
   `let tmp := 0; call [tmp] f lowerArgs` through the raw
   `SourceExprSeqPreludeOpen` target append laws.
+- [x] Added source-side `SourceExprSeqPreludeOpen.runLetSource` and
+  `runAssignSource` equations for internal user-call expressions, exposing
+  open argument evaluation followed by open internal function-call execution
+  before the outer let/assign tail continuation.
 
 Remaining work:
 
