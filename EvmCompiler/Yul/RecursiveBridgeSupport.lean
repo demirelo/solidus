@@ -50486,6 +50486,327 @@ theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_callSafe_expr_prelu
       hSafe hScoped hLower hUserSingle)
       hTail hCallResponse
 
+/--
+Contract-specialized `let x := expr` expression-frontier constructor.
+
+When the enclosing source run uses a concrete contract override, the user-call
+single-result branch is not an extra proof obligation: it follows from
+`UserCallArity.ExprOk` plus the live open `YulOpen.call` return-shape theorem.
+-/
+theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_callSafe_expr_prelude_of_lower1?_cases_userArity
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hPreShape : GeneratedPrelude pre)
+    (hFresh : identName name ∉ layout)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hExprOk : UserCallArity.ExprOk contract sourceExpr)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hArgPrelude :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+        Safe.CallSafe.exprs args →
+      ∀ {op argExprs}
+        {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+        {hOutputs : Expressions.Structured.BasicOp.outputs op = 1},
+        Prim.toBasicOp? yulPrim = some op →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        lowerExpr = Expr.cast hOutputs (.prim op seq) →
+          SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program
+            ctx sourceFuel args (some contract) pre seq
+            (pre.length + tailFuel.succ)
+            (SourceExprPreludeOpenCallResponseRel.beforeCallSafePrimitive prim
+              sourceFuel yulPrim op exprCallResponseRel))
+    (hPrim :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+        Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        exprCallResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hUserCall :
+      ∀ {functionName : Name} {args : List AstExpr},
+        sourceExpr = .Call (.inr functionName) args →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        Expr.lower1? freshState (.Call (.inr functionName) args) =
+          some (pre, lowerExpr, freshState') →
+          SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+            sourceFuel.succ (.Call (.inr functionName) args) (some contract)
+            pre lowerExpr (pre.length + tailFuel.succ) exprCallResponseRel)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          sourceFuel.succ.succ rest (some contract) lowerTail tailFuel allowed
+          seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          (some contract) sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  match target.values with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        { target.ctx with
+                          scope := identName name :: target.ctx.scope }
+                        tailFuel { stmts := lowerTail.stmts }
+                        (target.state.insert (identName name) value)
+                  | _ => CompilerOpen.invalid) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ.succ
+      (.Let [name] (some sourceExpr) :: rest) (some contract)
+      { stmts :=
+        pre ++ [Functions.Stmt.let_ (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      (pre.length + tailFuel.succ) allowed seqCallResponseRel :=
+  sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_callSafe_expr_prelude_of_lower1?_cases
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+    (name := name) (sourceExpr := sourceExpr) (rest := rest)
+    (codeOverride := some contract) (freshState := freshState)
+    (freshState' := freshState') (pre := pre) (lowerExpr := lowerExpr)
+    (lowerTail := lowerTail) (tailFuel := tailFuel) (allowed := allowed)
+    (exprCallResponseRel := exprCallResponseRel)
+    (seqCallResponseRel := seqCallResponseRel)
+    hPreShape hFresh hSafe hScoped hStoreContains hLower hArgPrelude hPrim
+    hPrimitiveResponse hUserCall
+    (by
+      intro functionName args hEq _hSafeUser _hScopedUser _hLowerUser
+        source _compiler _hRel
+      have hCallOk :
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args) := by
+        simpa [hEq] using hExprOk
+      exact
+        yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk
+          (sourceFuel := sourceFuel) (state := source)
+          (functionName := functionName) (args := args)
+          (contract := contract) hCallOk)
+    hTail hCallResponse
+
+/--
+Contract-specialized `x := expr` expression-frontier constructor.
+
+This is the assignment sibling of the `let` `_userArity` wrapper above.
+-/
+theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_callSafe_expr_prelude_of_lower1?_cases_userArity
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hPreShape : GeneratedPrelude pre)
+    (hTargetMem : identName name ∈ layout)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hExprOk : UserCallArity.ExprOk contract sourceExpr)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hArgPrelude :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+        Safe.CallSafe.exprs args →
+      ∀ {op argExprs}
+        {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+        {hOutputs : Expressions.Structured.BasicOp.outputs op = 1},
+        Prim.toBasicOp? yulPrim = some op →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        lowerExpr = Expr.cast hOutputs (.prim op seq) →
+          SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program
+            ctx sourceFuel args (some contract) pre seq
+            (pre.length + tailFuel.succ)
+            (SourceExprPreludeOpenCallResponseRel.beforeCallSafePrimitive prim
+              sourceFuel yulPrim op exprCallResponseRel))
+    (hPrim :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+        Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        sourceExpr = .Call (.inl yulPrim) args →
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        exprCallResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hUserCall :
+      ∀ {functionName : Name} {args : List AstExpr},
+        sourceExpr = .Call (.inr functionName) args →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        Expr.lower1? freshState (.Call (.inr functionName) args) =
+          some (pre, lowerExpr, freshState') →
+          SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+            sourceFuel.succ (.Call (.inr functionName) args) (some contract)
+            pre lowerExpr (pre.length + tailFuel.succ) exprCallResponseRel)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ.succ rest (some contract) lowerTail tailFuel allowed
+          seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          (some contract) sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  match target.values with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        target.ctx tailFuel { stmts := lowerTail.stmts }
+                        (target.state.insert (identName name) value)
+                  | _ => CompilerOpen.invalid) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ.succ
+      (.Assign [name] sourceExpr :: rest) (some contract)
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      (pre.length + tailFuel.succ) allowed seqCallResponseRel :=
+  sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_callSafe_expr_prelude_of_lower1?_cases
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+    (name := name) (sourceExpr := sourceExpr) (rest := rest)
+    (codeOverride := some contract) (freshState := freshState)
+    (freshState' := freshState') (pre := pre) (lowerExpr := lowerExpr)
+    (lowerTail := lowerTail) (tailFuel := tailFuel) (allowed := allowed)
+    (exprCallResponseRel := exprCallResponseRel)
+    (seqCallResponseRel := seqCallResponseRel)
+    hPreShape hTargetMem hSafe hScoped hStoreContains hLower hArgPrelude
+    hPrim hPrimitiveResponse hUserCall
+    (by
+      intro functionName args hEq _hSafeUser _hScopedUser _hLowerUser
+        source _compiler _hRel
+      have hCallOk :
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args) := by
+        simpa [hEq] using hExprOk
+      exact
+        yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk
+          (sourceFuel := sourceFuel) (state := source)
+          (functionName := functionName) (args := args)
+          (contract := contract) hCallOk)
+    hTail hCallResponse
+
 theorem generatedPrelude_append
     {left right : List Functions.Stmt}
     (hLeft : GeneratedPrelude left)
@@ -100424,6 +100745,256 @@ theorem sourceArgStackPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound
                 hUserSingle hHeadEq hUserSafe hUserScoped hLowerUser)
             hInitial)
       hTailResponse hHeadResponse
+
+/--
+Contract-specialized generated-cons expression dispatcher.
+
+This is the recursive argument-list sibling of the let/assign `_userArity`
+wrappers: the head user-call singleton invariant is constructed from
+`UserCallArity.ExprOk contract head`, so callers do not thread an ad hoc
+single-result assumption for internal user calls.
+-/
+theorem sourceArgStackPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_callSafe_exprs_expr_cases_userArity
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {results : Nat} {finalArgs : Locals.ExprSeq results}
+    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {contract : AstContract}
+    {tailVirtualCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {headCallResponseRel : SourceExprHeadPreludeOpenCallResponseRel}
+    {finalCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hSafe : Safe.CallSafe.exprs (head :: tail))
+    (hScoped : SourceExprsScoped layout (head :: tail))
+    (hHeadOk : UserCallArity.ExprOk contract head)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.List.lowerBound1? freshState (head :: tail) =
+        some (pre, argExprs, stateFresh))
+    (hFinalSeq :
+      Expr.List.toStackSeq? argExprs results = some finalArgs)
+    (hTail :
+      Safe.CallSafe.exprs tail →
+      ∀ {preTail lowerTail stateTail preHead lowerHead stateHead},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        ∀ {tailResults : Nat} {tailSeq : Locals.ExprSeq tailResults},
+          Expr.List.toStackSeq? lowerTail tailResults = some tailSeq →
+            SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program
+              ctx (yulOpenEvalArgsAppendFuel base tail.reverse) tail
+              (some contract) preTail tailSeq
+              (preTail.length + (preHead.length + 2))
+              tailVirtualCallResponseRel)
+    (hHeadArgPrelude :
+      ∀ {stateTail preHead lowerHead stateHead}
+        {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        head = .Call (.inl yulPrim) args →
+        Safe.CallSafe.exprs args →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+      ∀ {op argExprs}
+        {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+        {hOutputs : Expressions.Structured.BasicOp.outputs op = 1},
+        Prim.toBasicOp? yulPrim = some op →
+        Expr.List.lowerBound1? stateTail args =
+          some (preHead, argExprs, stateHead) →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        lowerHead = Expr.cast hOutputs (.prim op seq) →
+        ∀ {ctxHead : Functions.Source.Ctx},
+          SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program
+            ctxHead base.succ args (some contract) preHead seq
+            (preHead.length + 2)
+            (SourceExprPreludeOpenCallResponseRel.beforeCallSafePrimitive prim
+              base.succ yulPrim op
+              (SourceExprHeadPreludeOpenCallResponseRel.toExprValuesRel
+                headCallResponseRel)))
+    (hPrim :
+      ∀ {stateTail preHead lowerHead stateHead}
+        {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        head = .Call (.inl yulPrim) args →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim base.succ yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        head = .Call (.inl yulPrim) args →
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        SourceExprHeadPreludeOpenCallResponseRel.toExprValuesRel
+          headCallResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hUserExpr :
+      ∀ {stateTail preHead lowerHead stateHead}
+        {functionName : Name} {args : List AstExpr},
+        head = .Call (.inr functionName) args →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        Expr.lower1? stateTail (.Call (.inr functionName) args) =
+          some (preHead, lowerHead, stateHead) →
+      ∀ {ctxHead : Functions.Source.Ctx},
+        SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program
+          ctxHead base.succ.succ (.Call (.inr functionName) args)
+          (some contract) preHead lowerHead (preHead.length + 2)
+          (SourceExprHeadPreludeOpenCallResponseRel.toExprValuesRel
+            headCallResponseRel))
+    (hTailResponse :
+      ∀ {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {tailResults : Nat} {tailSeq : Locals.ExprSeq tailResults},
+        Expr.List.toStackSeq? lowerTail tailResults = some tailSeq →
+      ∀ {sourceCall}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              (Functions.Source.Outcome × Functions.Source.Ctx))}
+        {response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.eval base.succ.succ head
+                        (some contract) sourceTailResult.1))
+                    (fun sourceHeadResult =>
+                      .done (.ok
+                        (sourceHeadResult.1,
+                          sourceTailResult.2 ++ [sourceHeadResult.2])))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (match targetTailResult.1.mode with
+                    | .regular =>
+                        SourceExprPreludeOpen.run prim program
+                          targetTailResult.2 (preHead.length + 2) preHead
+                          lowerHead targetTailResult.1.state
+                    | .brk | .cont | .leave | .halt _ =>
+                        CompilerOpen.invalid)
+                    (fun targetHeadResult =>
+                      match targetHeadResult.values with
+                      | [value] =>
+                          SourceArgPreludeOpen.run prim program
+                            { targetHeadResult.ctx with
+                              scope := tmp :: targetHeadResult.ctx.scope }
+                            1 [] finalArgs
+                            (targetHeadResult.state.insert tmp value)
+                      | _ => CompilerOpen.invalid)) }
+          response →
+        tailVirtualCallResponseRel sourceCall
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun preResult =>
+                  match preResult.1.mode with
+                  | .regular =>
+                      OpenExternal.OpenResult.map
+                        (fun argResult =>
+                          { state := argResult.1
+                            ctx := preResult.2
+                            values := argResult.2 })
+                        (CompilerOpen.LocalsExpr.evalSeq prim tailSeq
+                          preResult.1.state)
+                  | .brk | .cont | .leave | .halt _ =>
+                      CompilerOpen.invalid) }
+          response)
+    (hHeadResponse :
+      ∀ {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx}
+        {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceHeadResult =>
+                  .done (.ok
+                    (sourceHeadResult.1,
+                      sourceTailResult.2 ++ [sourceHeadResult.2]))) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetHeadResult =>
+                  match targetHeadResult.values with
+                  | [value] =>
+                      SourceArgPreludeOpen.run prim program
+                        { targetHeadResult.ctx with
+                          scope := tmp :: targetHeadResult.ctx.scope }
+                        1 [] finalArgs
+                        (targetHeadResult.state.insert tmp value)
+                  | _ => CompilerOpen.invalid) }
+          response →
+        headCallResponseRel sourceCall targetCall response) :
+    SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail)
+      (some contract) pre finalArgs pre.length.succ finalCallResponseRel :=
+  sourceArgStackPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_callSafe_exprs_expr_cases
+    (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+    (prim := prim) (program := program) (ctx := ctx)
+    (freshState := freshState) (stateFresh := stateFresh)
+    (pre := pre) (argExprs := argExprs)
+    (results := results) (finalArgs := finalArgs)
+    (base := base) (head := head) (tail := tail)
+    (codeOverride := some contract)
+    (tailVirtualCallResponseRel := tailVirtualCallResponseRel)
+    (headCallResponseRel := headCallResponseRel)
+    (finalCallResponseRel := finalCallResponseRel)
+    hSafe hScoped hLayoutSubset hCovers hStoreContains hLower hFinalSeq hTail
+    hHeadArgPrelude hPrim hPrimitiveResponse hUserExpr
+    (by
+      intro _stateTail _preHead _lowerHead _stateHead functionName args
+        hHeadEq _hUserSafe _hUserScoped _hLowerUser source _compiler _hRel
+      have hCallOk :
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args) := by
+        simpa [hHeadEq] using hHeadOk
+      exact
+        yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk
+          (sourceFuel := base.succ) (state := source)
+          (functionName := functionName) (args := args)
+          (contract := contract) hCallOk)
+    hTailResponse hHeadResponse
 
 /--
 CALL-family specialization of

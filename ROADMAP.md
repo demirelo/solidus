@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 12:29 PDT.
+Last updated: 2026-05-29 12:37 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -201,6 +201,15 @@ Checked base we can rely on:
   `UserCallArity.ExprOk` that every completed open user-call expression result
   is a singleton, following any suspended callee-body CALL responses rather
   than appealing to closed `Yul.call`.
+- [x] Added contract-specialized expression-frontier wrappers for open
+  let/assign heads and generated argument cons:
+  `sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_callSafe_expr_prelude_of_lower1?_cases_userArity`,
+  `sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_callSafe_expr_prelude_of_lower1?_cases_userArity`,
+  and
+  `sourceArgStackPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_callSafe_exprs_expr_cases_userArity`.
+  These construct the internal user-call singleton branch from
+  `UserCallArity.ExprOk` in concrete-contract contexts instead of asking the
+  caller for an ad hoc `hUserSingle` premise.
 
 Remaining work:
 
