@@ -99775,6 +99775,197 @@ theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of
               (pre := pre) (state := compiler) hPreWrites hContains)
     hHead
 
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_non_user_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel tailTargetFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hNotUserCall :
+      ∀ functionName args, sourceExpr ≠ .Call (.inr functionName) args)
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTail : Functions.Block},
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        SourceExprSeqPreludeOpen.LetSoundAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel.succ
+          name sourceExpr rest codeOverride pre lowerExpr lowerTail
+          tailTargetFuel allowed seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) codeOverride allowed
+        seqCallResponseRel := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_let_expr_single_components_of_not_user_call
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hNotUserCall hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              have hFresh : identName name ∉ layout := by
+                exact hSourceScoped.1.2 (identName name)
+                  (by simp [identNames])
+              intro source compiler hInitial
+              exact ⟨pre.length + tailTargetFuel.succ, by
+                simpa [hHeadEq, List.append_assoc] using
+                  sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_expr_prelude_raw
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (prim := prim) (program := program) (ctx := ctx)
+                    (exprFuel := sourceFuel.succ) (name := name)
+                    (sourceExpr := sourceExpr) (rest := rest)
+                    (codeOverride := codeOverride) (pre := pre)
+                    (lowerExpr := lowerExpr)
+                    (lowerTail := { stmts := lowerRest })
+                    (tailFuel := tailTargetFuel) (allowed := allowed)
+                    (seqCallResponseRel := seqCallResponseRel)
+                    hFresh
+                    (hHeadSound (freshState := freshState)
+                      (stateHead := stateHead) (pre := pre)
+                      (lowerExpr := lowerExpr)
+                      (lowerTail := { stmts := lowerRest }) hExprLower)
+                    hInitial⟩
+
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_non_user_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel tailTargetFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hNotUserCall :
+      ∀ functionName args, sourceExpr ≠ .Call (.inr functionName) args)
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTail : Functions.Block},
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel.succ
+          name sourceExpr rest codeOverride pre lowerExpr lowerTail
+          tailTargetFuel allowed seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) codeOverride allowed
+        seqCallResponseRel := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_assign_expr_single_components_of_not_user_call
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hNotUserCall hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              have hTargetMem : identName name ∈ layout := by
+                exact hSourceScoped.1.2 (identName name)
+                  (by simp [identNames])
+              have hCoversTarget :
+                  FreshCoversLayout [identName name] freshState := by
+                intro target hTarget
+                have hEq : target = identName name := by
+                  simpa using hTarget
+                subst target
+                exact hCovers (identName name)
+                  (by simp [hTargetMem])
+              have hPreWrites :
+                  SourceWritesDisjoint [identName name] pre :=
+                lower1?_sourceWritesDisjoint hCoversTarget hExprLower
+              intro source compiler hInitial
+              exact ⟨pre.length + tailTargetFuel.succ, by
+                simpa [hHeadEq, List.append_assoc] using
+                  sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (prim := prim) (program := program) (ctx := ctx)
+                    (exprFuel := sourceFuel.succ) (name := name)
+                    (sourceExpr := sourceExpr) (rest := rest)
+                    (codeOverride := codeOverride) (pre := pre)
+                    (lowerExpr := lowerExpr)
+                    (lowerTail := { stmts := lowerRest })
+                    (tailFuel := tailTargetFuel) (allowed := allowed)
+                    (seqCallResponseRel := seqCallResponseRel)
+                    hTargetMem hPreWrites
+                    (hHeadSound (freshState := freshState)
+                      (stateHead := stateHead) (pre := pre)
+                      (lowerExpr := lowerExpr)
+                      (lowerTail := { stmts := lowerRest }) hExprLower)
+                    hInitial⟩
+
 theorem sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes
     {names : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
