@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 15:12 PDT.
+Last updated: 2026-05-29 15:15 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -274,6 +274,11 @@ Checked base we can rely on:
   `sourceArgCallPreludeOpenResultRel_bind_targetArgEval_insert`, allowing the
   post-reversal open argument-prelude relation to compose through target
   lowered-argument evaluation after hidden return-slot insertion.
+- [x] Added raw-to-bound wrapper
+  `sourceArgRawPreludeOpenResultRel_bind_reverse_targetArgEval_insert`, so
+  internal user-call expression callers can consume the raw generated-argument
+  relation and get reversal plus hidden-temp target argument evaluation in one
+  checked step.
 - [x] Added expression-level target decomposition for internal user-call
   lowering: `sourceExprPreludeOpen_append_eq`,
   `sourceExprPreludeOpen_user_call_suffix_eq`, and

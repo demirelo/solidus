@@ -36832,6 +36832,118 @@ theorem sourceArgCallPreludeOpenResultRel_bind_targetArgEval_insert
               | halt kind =>
                   cases hDone
 
+theorem sourceArgRawPreludeOpenResultRel_bind_reverse_targetArgEval_insert
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name}
+    {source : OpenExternal.YulOpenResult (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    {γ δ : Type}
+    {rawCallResponseRel argCallResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {callResponseRel' :
+      OpenExternal.OpenCall (OpenExternal.OpenResult Exception γ) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException δ) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel' : Except Exception γ → Except Functions.EVMException δ → Prop}
+    {sourceNext : State → List Word → OpenExternal.OpenResult Exception γ}
+    {targetNext :
+      Objects.Source.State → List Word → Functions.Source.Ctx →
+        OpenExternal.OpenResult Functions.EVMException δ}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hRel :
+      OpenExternal.OpenResultRel rawCallResponseRel
+        (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult source) target)
+    (hReverseCallResponse :
+      ∀ {sourceCall targetCall response},
+        argCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  OpenExternal.OpenResult.ok
+                    (sourceResult.1, sourceResult.2.reverse)) }
+          targetCall response →
+        rawCallResponseRel sourceCall targetCall response)
+    (hNext :
+      ∀ {sourceAfter values} {targetState : Objects.Source.State} {ctxAfter},
+        SourceStateRel cfg layout sourceAfter
+          (targetState.insert tmp Expr.zero) →
+          OpenExternal.OpenResultRel callResponseRel' doneRel'
+            (sourceNext sourceAfter values)
+            (targetNext (targetState.insert tmp Expr.zero) values ctxAfter))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel'
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  sourceNext sourceResult.1 sourceResult.2) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetResult =>
+                  match targetResult.1.mode with
+                  | .regular =>
+                      OpenExternal.OpenResult.bind
+                        (CompilerOpen.FunctionsOpen.ArgList.eval prim
+                          lowerArgs
+                          (targetResult.1.state.insert tmp Expr.zero))
+                        (fun argResult =>
+                          targetNext argResult.1 argResult.2
+                            targetResult.2)
+                  | .brk | .cont | .leave | .halt _ =>
+                      CompilerOpen.invalid) }
+          response →
+        argCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel' doneRel'
+      (OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult source))
+        (fun sourceResult => sourceNext sourceResult.1 sourceResult.2))
+      (OpenExternal.OpenResult.bind target
+        (fun targetResult =>
+          match targetResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.bind
+                (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+                  (targetResult.1.state.insert tmp Expr.zero))
+                (fun argResult =>
+                  targetNext argResult.1 argResult.2 targetResult.2)
+          | .brk | .cont | .leave | .halt _ =>
+              CompilerOpen.invalid)) := by
+  have hPostReverse :
+      OpenExternal.OpenResultRel argCallResponseRel
+        (SourceArgCallPreludeOpenDoneRel cfg layout prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult source))
+        target :=
+    sourceArgCallPreludeOpenResultRel_of_raw_reverseResult
+      (cfg := cfg) (layout := layout) (prim := prim)
+      (lowerArgs := lowerArgs) hRel hReverseCallResponse
+  exact
+    sourceArgCallPreludeOpenResultRel_bind_targetArgEval_insert
+      (cfg := cfg) (layout := layout) (prim := prim) (args := args)
+      (freshState := freshState) (stateArgs := stateArgs)
+      (freshState' := freshState') (preArgs := preArgs)
+      (lowerArgs := lowerArgs) (tmp := tmp) hArgs hFresh hTmpFreshLayout
+      hPostReverse hNext hCallResponse
+
 theorem sourceArgList_eval_var_map_of_toSeq?_compilerOpen_evalSeq_done
     {prim : Objects.Source.PrimitiveSemantics} :
     ∀ {names : List Name} {results : Nat} {seq : Locals.ExprSeq results}
