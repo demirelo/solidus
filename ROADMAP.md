@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 15:34 PDT.
+Last updated: 2026-05-29 15:43 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -323,6 +323,12 @@ Checked base we can rely on:
   `compilerOpen_funDef_runBody_succ_halted_of_body_done` expose the target
   `FunDef.runBody` returned and halted branches after completed open body
   execution.
+- [x] Added the source restriction return-list bridge used by
+  `YulOpen.exec (.Block ...)`: `lookupBang_restrictStoreTo_eq_of_scope_some`,
+  its list forms, `sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo`,
+  and `compilerOpen_funDef_runBody_succ_returned_of_body_done_rel` now prove
+  the target returned values are exactly the values read by the source open
+  block after callee-frame restriction.
 
 Remaining work:
 

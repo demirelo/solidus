@@ -14009,6 +14009,72 @@ theorem lookupBang_reviveJump_eq (name : Name) (state : State) :
           simp [EvmYul.Yul.State.reviveJump, EvmYul.Yul.State.revive,
             EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?]
 
+theorem lookupBang_restrictStoreTo_eq_of_scope_some
+    {name : Name} {scope : EvmYul.Yul.VarStore} {state : State}
+    (hScope : (scope.lookup name).isSome = true) :
+    EvmYul.Yul.State.lookup! name
+        (EvmYul.Yul.State.restrictStoreTo scope state) =
+      EvmYul.Yul.State.lookup! name state := by
+  cases hScopeLookup : scope.lookup name with
+  | none =>
+      simp [hScopeLookup] at hScope
+  | some value =>
+      cases state with
+      | Ok shared store =>
+          simp [EvmYul.Yul.State.restrictStoreTo,
+            EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?,
+            FinmapFacts.lookup_restrictVarStore_of_scope_some store scope
+              name hScopeLookup]
+      | OutOfFuel =>
+          simp [EvmYul.Yul.State.restrictStoreTo,
+            EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?]
+      | Checkpoint jump =>
+          cases jump with
+          | Continue shared store =>
+              simp [EvmYul.Yul.State.restrictStoreTo,
+                EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?,
+                FinmapFacts.lookup_restrictVarStore_of_scope_some store scope
+                  name hScopeLookup]
+          | Break shared store =>
+              simp [EvmYul.Yul.State.restrictStoreTo,
+                EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?,
+                FinmapFacts.lookup_restrictVarStore_of_scope_some store scope
+                  name hScopeLookup]
+          | Leave shared store =>
+              simp [EvmYul.Yul.State.restrictStoreTo,
+                EvmYul.Yul.State.lookup!, EvmYul.Yul.State.lookup?,
+                FinmapFacts.lookup_restrictVarStore_of_scope_some store scope
+                  name hScopeLookup]
+
+theorem map_lookupBang_restrictStoreTo_eq_of_domain
+    {names : List Name} {scope : EvmYul.Yul.VarStore} {state : State}
+    (hScope : StoreDomainExact names scope) :
+    (names.map fun name =>
+        EvmYul.Yul.State.lookup! name
+          (EvmYul.Yul.State.restrictStoreTo scope state)) =
+      names.map fun name => EvmYul.Yul.State.lookup! name state := by
+  apply List.map_congr_left
+  intro name hMem
+  exact
+    lookupBang_restrictStoreTo_eq_of_scope_some
+      (name := name) (scope := scope) (state := state)
+      ((hScope name).mpr hMem)
+
+theorem map_lookupBang_restrictStoreTo_eq_of_scope_contains
+    {names : List Name} {scope : EvmYul.Yul.VarStore} {state : State}
+    (hScope :
+      ∀ name, name ∈ names → (scope.lookup name).isSome = true) :
+    (names.map fun name =>
+        EvmYul.Yul.State.lookup! name
+          (EvmYul.Yul.State.restrictStoreTo scope state)) =
+      names.map fun name => EvmYul.Yul.State.lookup! name state := by
+  apply List.map_congr_left
+  intro name hMem
+  exact
+    lookupBang_restrictStoreTo_eq_of_scope_some
+      (name := name) (scope := scope) (state := state)
+      (hScope name hMem)
+
 /--
 No-target user-call state relation after imported call restoration.
 
@@ -49604,6 +49670,48 @@ theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
           (source := source) (outcome := outcome) (values := values)
           hOk hMode hReturns hLookup
 
+theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo
+    {cfg : StateRelConfig} {layout returns : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {source : State} {scope : EvmYul.Yul.VarStore}
+    {outcome : Objects.Source.Outcome}
+    {ctx : Functions.Source.Ctx} {values : List Word}
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel allowed
+        (.ok source) (.ok (outcome, ctx)))
+    (hAllowed : allowed (.ok source))
+    (hMode : outcome.mode = .regular ∨ outcome.mode = .leave)
+    (hReturns : ∀ name, name ∈ returns → name ∈ layout)
+    (hScope :
+      ∀ name, name ∈ returns → (scope.lookup name).isSome = true)
+    (hLookup :
+      Functions.Source.Store.lookupMany returns outcome.state.vars =
+        some values) :
+    values =
+      returns.map fun name =>
+        EvmYul.Yul.State.lookup! name
+          (EvmYul.Yul.State.restrictStoreTo scope source) := by
+  have hValues :
+      values =
+        returns.map fun name => EvmYul.Yul.State.lookup! name source :=
+    sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
+      (cfg := cfg) (layout := layout) (returns := returns)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (source := source) (outcome := outcome)
+      (ctx := ctx) (values := values)
+      hDone hAllowed hMode hReturns hLookup
+  have hRestrict :
+      (returns.map fun name =>
+          EvmYul.Yul.State.lookup! name
+            (EvmYul.Yul.State.restrictStoreTo scope source)) =
+        returns.map fun name => EvmYul.Yul.State.lookup! name source :=
+    map_lookupBang_restrictStoreTo_eq_of_scope_contains
+      (names := returns) (scope := scope) (state := source) hScope
+  exact hValues.trans hRestrict.symm
+
 theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
@@ -51738,6 +51846,80 @@ theorem compilerOpen_funDef_runBody_succ_halted_of_body_done
     hInsert]
   simp [hBody, OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
     Functions.Source.Outcome.halt, Locals.Source.Outcome.halt]
+
+/--
+Returned callee-body branch with source post-block return values exposed.
+
+This composes the open sequence done relation with the target `runBody`
+returned branch, accounting for the source-side block restriction performed by
+`YulOpen.exec (.Block ...)`.
+-/
+theorem compilerOpen_funDef_runBody_succ_returned_of_body_done_rel
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {source : State} {scope : EvmYul.Yul.VarStore}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args values : List Word} {fuel : Nat}
+    {shared : EvmYul.SharedState .EVM}
+    {paramStore : Locals.Source.Store}
+    {bodyOutcome : Objects.Source.Outcome}
+    {ctxAfter : Functions.Source.Ctx}
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel allowed
+        (.ok source) (.ok (bodyOutcome, ctxAfter)))
+    (hAllowed : allowed (.ok source))
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBody :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          fuel fn.body
+          ({ shared := shared
+             vars :=
+              Functions.Source.Store.initReturns fn.returns paramStore } :
+            Objects.Source.State) =
+        .done (.ok (bodyOutcome, ctxAfter)))
+    (hMode : bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave)
+    (hReturns : ∀ name, name ∈ fn.returns → name ∈ layout)
+    (hScope :
+      ∀ name, name ∈ fn.returns → (scope.lookup name).isSome = true)
+    (hLookup :
+      Functions.Source.Store.lookupMany fn.returns
+          bodyOutcome.state.vars =
+        some values) :
+    CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+        fuel.succ shared =
+      .done
+        (.ok
+          (Functions.Source.CallResult.returned bodyOutcome.state.shared
+            (fn.returns.map fun name =>
+              EvmYul.Yul.State.lookup! name
+                (EvmYul.Yul.State.restrictStoreTo scope source)))) := by
+  have hValues :
+      values =
+        fn.returns.map fun name =>
+          EvmYul.Yul.State.lookup! name
+            (EvmYul.Yul.State.restrictStoreTo scope source) :=
+    sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo
+      (cfg := cfg) (layout := layout) (returns := fn.returns)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (source := source) (scope := scope)
+      (outcome := bodyOutcome) (ctx := ctxAfter) (values := values)
+      hDone hAllowed hMode hReturns hScope hLookup
+  simpa [hValues] using
+    (compilerOpen_funDef_runBody_succ_returned_of_body_done
+      (prim := prim) (program := program) (fn := fn) (args := args)
+      (values := values) (fuel := fuel) (shared := shared)
+      (paramStore := paramStore) (bodyOutcome := bodyOutcome)
+      (ctxAfter := ctxAfter) hInsert hBody hMode hLookup)
 
 /--
 Target-side final replay for singleton internal user-call expressions.
