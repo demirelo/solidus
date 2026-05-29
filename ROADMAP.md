@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 14:47 PDT.
+Last updated: 2026-05-29 14:58 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -289,6 +289,10 @@ Checked base we can rely on:
   `_reverseResult`, converting raw open argument-prelude `OpenResultRel`
   evidence through source `reverseResult` while keeping the target raw
   argument prelude unchanged.
+- [x] Added source/target callee-body bind equations:
+  `yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq` and
+  `compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany`, exposing the
+  open body execution underneath internal user calls on both sides.
 
 Remaining work:
 

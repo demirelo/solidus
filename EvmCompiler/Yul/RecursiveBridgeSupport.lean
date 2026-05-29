@@ -24043,6 +24043,24 @@ theorem yulOpen_toOpenResult_reverseResult_eq_bind
   rw [OpenExternal.YulOpenResult.toOpenResult_bind]
   rfl
 
+theorem yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq
+    (fuel : Nat) (body : List AstStmt)
+    (codeOverride : Option AstContract) (state : State) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.Block body) codeOverride
+          state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel body codeOverride state))
+        (fun stateAfter =>
+          OpenExternal.OpenResult.ok (stateAfter.restrictStoreTo state.store)) := by
+  simp [OpenExternal.YulOpen.exec,
+    OpenExternal.YulOpenResult.toOpenResult_bind,
+    OpenExternal.YulOpenResult.ok]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro stateAfter
+  rfl
+
 theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
     (fuel : Nat) (args : List Word)
     (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
@@ -51153,6 +51171,49 @@ theorem runAssignTarget_user_call_lower1?_eq_open_call
       cases mode <;>
         simp [runAssignTarget_user_call_suffix_eq,
           OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
+theorem compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args : List Word} {fuel : Nat}
+    {shared : EvmYul.SharedState .EVM}
+    {paramStore : Locals.Source.Store}
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore) :
+    CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+        fuel.succ shared =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          fuel fn.body
+          ({ shared := shared
+             vars :=
+              Functions.Source.Store.initReturns fn.returns paramStore } :
+            Objects.Source.State))
+        (fun bodyResult =>
+          match bodyResult.1.mode with
+          | .regular | .leave =>
+              match
+                Functions.Source.Store.lookupMany fn.returns
+                  bodyResult.1.state.vars with
+              | none => CompilerOpen.invalid
+              | some values =>
+                  OpenExternal.OpenResult.ok
+                    (Functions.Source.CallResult.returned
+                      bodyResult.1.state.shared values)
+          | .brk | .cont => CompilerOpen.invalid
+          | .halt kind =>
+              OpenExternal.OpenResult.ok
+                (Functions.Source.CallResult.halted kind
+                  bodyResult.1.state)) := by
+  simp [CompilerOpen.FunctionsOpen.FunDef.runBody, hInsert]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro bodyResult
+  cases bodyResult.1.mode <;> rfl
 
 /--
 Target-side open shape of an internal function-call statement after the callee
