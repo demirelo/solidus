@@ -243,6 +243,12 @@ Checked base we can rely on:
   initializer, the open target `Stmt.call`, regular continuation through the
   temporary read, and nonregular call propagation without closing the callee
   body.
+- [x] Added checked `Expr.lower1?` target wrappers for internal user-call
+  expression heads: `runLetTarget_user_call_lower1?_eq_open_call` and
+  `runAssignTarget_user_call_lower1?_eq_open_call` combine the compiler-output
+  decomposition with the suffix equations, so let/assign frontiers can expose
+  `preArgs`, hidden temp insertion, the open target `Stmt.call`, regular temp
+  replay, and nonregular propagation from the actual checked lowering result.
 
 Remaining work:
 

@@ -50561,6 +50561,184 @@ theorem runAssignTarget_user_call_suffix_eq
           CompilerOpen.LocalsExpr.eval, Locals.Source.State.insert,
           compilerOpen_block_runOpen_nil_succ]
 
+/--
+Checked target decomposition for an internal user-call expression in a `let`,
+peeled all the way to the open target call statement.
+-/
+theorem runLetTarget_user_call_lower1?_eq_open_call
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {name : Name} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState')) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      runLetTarget prim program ctx pre name lowerExpr tail tailFuel
+          compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                OpenExternal.OpenResult.bind
+                  (CompilerOpen.FunctionsOpen.Stmt.run prim program
+                    { preResult.2 with
+                      scope := tmp :: preResult.2.scope }
+                    tailFuel.succ
+                    (Functions.Stmt.call [tmp] functionName lowerArgs)
+                    (preResult.1.state.insert tmp Expr.zero))
+                  (fun callResult =>
+                    match callResult.1.mode with
+                    | .regular =>
+                        OpenExternal.OpenResult.bind
+                          (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                            callResult.1.state)
+                          (fun exprResult =>
+                            match exprResult.2 with
+                            | [value] =>
+                                CompilerOpen.FunctionsOpen.Block.runOpen prim
+                                  program
+                                  { callResult.2 with
+                                    scope := name :: callResult.2.scope }
+                                  tailFuel { stmts := tail }
+                                  (exprResult.1.insert name value)
+                            | _ => CompilerOpen.invalid)
+                    | .brk | .cont | .leave | .halt _ =>
+                        OpenExternal.OpenResult.ok
+                          (callResult.1,
+                            { preResult.2 with
+                              scope := tmp :: preResult.2.scope }))
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok preResult) := by
+  rcases
+      runLetTarget_user_call_lower1?_eq
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (name := name) (tail := tail)
+        (tailFuel := tailFuel) (compiler := compiler) hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hTarget⟩
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  rw [hTarget]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode <;>
+        simp [runLetTarget_user_call_suffix_eq,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
+/--
+Checked target decomposition for an internal user-call expression in an
+assignment, peeled all the way to the open target call statement.
+-/
+theorem runAssignTarget_user_call_lower1?_eq_open_call
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {name : Name} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState')) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      runAssignTarget prim program ctx pre name lowerExpr tail tailFuel
+          compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                OpenExternal.OpenResult.bind
+                  (CompilerOpen.FunctionsOpen.Stmt.run prim program
+                    { preResult.2 with
+                      scope := tmp :: preResult.2.scope }
+                    tailFuel.succ
+                    (Functions.Stmt.call [tmp] functionName lowerArgs)
+                    (preResult.1.state.insert tmp Expr.zero))
+                  (fun callResult =>
+                    match callResult.1.mode with
+                    | .regular =>
+                        OpenExternal.OpenResult.bind
+                          (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                            callResult.1.state)
+                          (fun exprResult =>
+                            match exprResult.2 with
+                            | [value] =>
+                                CompilerOpen.FunctionsOpen.Block.runOpen prim
+                                  program callResult.2 tailFuel
+                                  { stmts := tail }
+                                  (exprResult.1.insert name value)
+                            | _ => CompilerOpen.invalid)
+                    | .brk | .cont | .leave | .halt _ =>
+                        OpenExternal.OpenResult.ok
+                          (callResult.1,
+                            { preResult.2 with
+                              scope := tmp :: preResult.2.scope }))
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok preResult) := by
+  rcases
+      runAssignTarget_user_call_lower1?_eq
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (name := name) (tail := tail)
+        (tailFuel := tailFuel) (compiler := compiler) hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hTarget⟩
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  rw [hTarget]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode <;>
+        simp [runAssignTarget_user_call_suffix_eq,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :
