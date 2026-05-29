@@ -237,6 +237,12 @@ Checked base we can rely on:
   `runAssignSource` equations for internal user-call expressions, exposing
   open argument evaluation followed by open internal function-call execution
   before the outer let/assign tail continuation.
+- [x] Added exact target suffix equations for internal user-call expression
+  heads: `runLetTarget_user_call_suffix_eq` and
+  `runAssignTarget_user_call_suffix_eq` expose the hidden temporary
+  initializer, the open target `Stmt.call`, regular continuation through the
+  temporary read, and nonregular call propagation without closing the callee
+  body.
 
 Remaining work:
 

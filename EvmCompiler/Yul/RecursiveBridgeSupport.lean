@@ -50420,6 +50420,147 @@ theorem runAssignTarget_user_call_lower1?_eq
       (tail := tail) (name := name) (lowerExpr := (.var tmp))
       (tailFuel := tailFuel) (compiler := compiler))
 
+/--
+Exact target-side shape of the hidden result-slot suffix emitted for an
+internal user-call expression in a `let`.
+
+The suffix initializes the fresh temporary, runs the open function-call
+statement, and only on regular return reads the temporary and continues the
+outer let tail.  Nonregular call outcomes are propagated as the prefix result.
+-/
+theorem runLetTarget_user_call_suffix_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tmp functionName name : Name}
+    {lowerArgs : List (Locals.Expr 1)} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runLetTarget prim program ctx
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs]
+        name (.var tmp) tail tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Stmt.run prim program
+          { ctx with scope := tmp :: ctx.scope } tailFuel.succ
+          (Functions.Stmt.call [tmp] functionName lowerArgs)
+          (compiler.insert tmp Expr.zero))
+        (fun callResult =>
+          match callResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.bind
+                (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                  callResult.1.state)
+                (fun exprResult =>
+                  match exprResult.2 with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        { callResult.2 with
+                          scope := name :: callResult.2.scope }
+                        tailFuel { stmts := tail }
+                        (exprResult.1.insert name value)
+                  | _ => CompilerOpen.invalid)
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok
+                (callResult.1, { ctx with scope := tmp :: ctx.scope })) := by
+  unfold runLetTarget
+  have hFuel :
+      [Functions.Stmt.let_ tmp (.lit Expr.zero),
+        Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ =
+        tailFuel.succ.succ.succ := by
+    simp
+    omega
+  conv_lhs =>
+    rw [hFuel]
+    rw [compilerOpen_block_runOpen_cons_succ]
+    simp [CompilerOpen.FunctionsOpen.Stmt.run,
+      CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+      OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+      Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+      Locals.Source.State.insert]
+    rw [compilerOpen_block_runOpen_cons_succ]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro callResult
+  rcases callResult with ⟨callOutcome, callCtx⟩
+  cases callOutcome with
+  | mk callState mode =>
+      cases mode <;>
+        simp [CompilerOpen.invalid, Functions.Source.invalid,
+          Structured.invalid, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok, Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          CompilerOpen.LocalsExpr.eval, Locals.Source.State.insert,
+          compilerOpen_block_runOpen_nil_succ]
+
+/--
+Exact target-side shape of the hidden result-slot suffix emitted for an
+internal user-call expression in an assignment.
+
+This is the assignment analogue of `runLetTarget_user_call_suffix_eq`; the
+outer assignment tail keeps the call-return context unchanged.
+-/
+theorem runAssignTarget_user_call_suffix_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tmp functionName name : Name}
+    {lowerArgs : List (Locals.Expr 1)} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runAssignTarget prim program ctx
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs]
+        name (.var tmp) tail tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Stmt.run prim program
+          { ctx with scope := tmp :: ctx.scope } tailFuel.succ
+          (Functions.Stmt.call [tmp] functionName lowerArgs)
+          (compiler.insert tmp Expr.zero))
+        (fun callResult =>
+          match callResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.bind
+                (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                  callResult.1.state)
+                (fun exprResult =>
+                  match exprResult.2 with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        callResult.2 tailFuel { stmts := tail }
+                        (exprResult.1.insert name value)
+                  | _ => CompilerOpen.invalid)
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok
+                (callResult.1, { ctx with scope := tmp :: ctx.scope })) := by
+  unfold runAssignTarget
+  have hFuel :
+      [Functions.Stmt.let_ tmp (.lit Expr.zero),
+        Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ =
+        tailFuel.succ.succ.succ := by
+    simp
+    omega
+  conv_lhs =>
+    rw [hFuel]
+    rw [compilerOpen_block_runOpen_cons_succ]
+    simp [CompilerOpen.FunctionsOpen.Stmt.run,
+      CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+      OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+      Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+      Locals.Source.State.insert]
+    rw [compilerOpen_block_runOpen_cons_succ]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro callResult
+  rcases callResult with ⟨callOutcome, callCtx⟩
+  cases callOutcome with
+  | mk callState mode =>
+      cases mode <;>
+        simp [CompilerOpen.invalid, Functions.Source.invalid,
+          Structured.invalid, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok, Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          CompilerOpen.LocalsExpr.eval, Locals.Source.State.insert,
+          compilerOpen_block_runOpen_nil_succ]
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :
