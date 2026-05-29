@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 13:37 PDT.
+Last updated: 2026-05-29 14:47 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -285,6 +285,10 @@ Checked base we can rely on:
 - [x] Added `SourceArgCallPreludeOpenDoneRel` plus
   `sourceArgCallPreludeOpenDoneRel_of_raw_reverse`, naming the post-reversal
   argument-prelude done relation consumed by internal user-call bodies.
+- [x] Added `sourceArgCallPreludeOpenResultRel_of_raw_reverse` and
+  `_reverseResult`, converting raw open argument-prelude `OpenResultRel`
+  evidence through source `reverseResult` while keeping the target raw
+  argument prelude unchanged.
 
 Remaining work:
 

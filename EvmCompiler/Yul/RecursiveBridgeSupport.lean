@@ -32406,6 +32406,87 @@ abbrev SourceArgRawPreludeOpenCallResponseRel : Type :=
         (Functions.Source.Outcome × Functions.Source.Ctx)) →
     OpenExternal.CallResponse → Prop
 
+theorem sourceArgCallPreludeOpenResultRel_of_raw_reverse
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {rawCallResponseRel callResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hRel :
+      OpenExternal.OpenResultRel rawCallResponseRel
+        (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+        source target)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  OpenExternal.OpenResult.ok
+                    (sourceResult.1, sourceResult.2.reverse)) }
+          targetCall response →
+        rawCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgCallPreludeOpenDoneRel cfg layout prim lowerArgs)
+      (OpenExternal.OpenResult.bind source
+        (fun sourceResult =>
+          OpenExternal.OpenResult.ok
+            (sourceResult.1, sourceResult.2.reverse)))
+      target := by
+  induction hRel with
+  | @done sourceDone targetDone hDone =>
+      cases sourceDone <;> cases targetDone <;>
+        simpa [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok] using
+          (OpenExternal.OpenResultRel.done
+            (sourceArgCallPreludeOpenDoneRel_of_raw_reverse hDone))
+  | call hSite _hResume ih =>
+      simp [OpenExternal.OpenResult.bind]
+      exact OpenExternal.OpenResultRel.call hSite (by
+        intro response hResponse
+        exact ih response (hCallResponse hResponse))
+
+theorem sourceArgCallPreludeOpenResultRel_of_raw_reverseResult
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {rawCallResponseRel callResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {source : OpenExternal.YulOpenResult (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hRel :
+      OpenExternal.OpenResultRel rawCallResponseRel
+        (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult source) target)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  OpenExternal.OpenResult.ok
+                    (sourceResult.1, sourceResult.2.reverse)) }
+          targetCall response →
+        rawCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgCallPreludeOpenDoneRel cfg layout prim lowerArgs)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.reverseResult source))
+      target := by
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+  exact
+    sourceArgCallPreludeOpenResultRel_of_raw_reverse
+      (cfg := cfg) (layout := layout) (prim := prim)
+      (lowerArgs := lowerArgs) hRel hCallResponse
+
 /--
 Open result relation for stack-order generated argument preludes.
 
