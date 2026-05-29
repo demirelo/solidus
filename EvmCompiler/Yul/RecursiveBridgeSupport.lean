@@ -24012,6 +24012,60 @@ theorem yulOpen_evalValues_user_call_succ_eq_bind_args
             codeOverride pair.1) := by
   simp [OpenExternal.YulOpen.evalValues]
 
+theorem yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args
+    (fuel : Nat) (functionName : EvmYul.Yul.Ast.YulFunctionName)
+    (args : List AstExpr) (codeOverride : Option AstContract)
+    (state : State) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues fuel.succ
+          (.Call (.inr functionName) args) codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult
+            (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+              state)))
+        (fun pair =>
+          OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.call fuel pair.2 functionName
+              codeOverride pair.1)) := by
+  rw [yulOpen_evalValues_user_call_succ_eq_bind_args]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+
+theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
+    (fuel : Nat) (args : List Word)
+    (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
+    (codeOverride : Option AstContract) (state : State)
+    {yulContract : EvmYul.Account .Yul}
+    {f : EvmYul.Yul.Ast.FunctionDefinition}
+    (hFind :
+      state.sharedState.accountMap.find? state.executionEnv.codeOwner =
+        some yulContract)
+    (hFunction :
+      OpenExternal.YulOpen.callFunction? functionName?
+          (codeOverride.getD yulContract.code) =
+        some f) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call fuel.succ args functionName? codeOverride
+          state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel (.Block f.body) codeOverride
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall f.params f.rets args state))))
+        (fun state₂ =>
+          let state₃ :=
+            EvmYul.Yul.State.setStore
+              (EvmYul.Yul.State.overwrite?
+                (EvmYul.Yul.State.reviveJump state₂) state)
+              state
+          .done (.ok (state₃, List.map state₂.lookup! f.rets))) := by
+  rw [OpenExternal.YulOpen.call_succ_eq_bind_body_of_find_function
+    (fuel := fuel) (args := args) (functionName? := functionName?)
+    (codeOverride := codeOverride) (state := state)
+    (yulContract := yulContract) (f := f) hFind hFunction]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  rfl
+
 /--
 Current `YulOpen` user-call statement boundary.
 

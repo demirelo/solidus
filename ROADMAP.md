@@ -274,6 +274,11 @@ Checked base we can rely on:
   which unfolds the checked expression-level target `Stmt.call` through open
   lowered-argument evaluation, open `FunDef.runBody`, return assignment, and
   regular temp read.
+- [x] Added source-side open bind equations
+  `yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args` and
+  `yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function`, exposing
+  imported-Yul internal user calls as open argument evaluation followed by
+  open callee-body execution after function lookup.
 
 Remaining work:
 
