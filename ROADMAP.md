@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 14:58 PDT.
+Last updated: 2026-05-29 15:02 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -262,6 +262,10 @@ Checked base we can rely on:
   `compilerOpen_functionsArgList_eval_var_map_of_source`, so the raw
   generated-argument relation can feed its checked closed `ArgList.eval` fact
   into the open target internal-call statement.
+- [x] Added hidden-result-temp argument bridge
+  `compilerOpen_functionsArgList_eval_insert_of_user_call_args`, so direct
+  empty argument calls and generated variable-only argument calls can evaluate
+  lowered arguments after the target inserts the fresh return slot.
 - [x] Added expression-level target decomposition for internal user-call
   lowering: `sourceExprPreludeOpen_append_eq`,
   `sourceExprPreludeOpen_user_call_suffix_eq`, and

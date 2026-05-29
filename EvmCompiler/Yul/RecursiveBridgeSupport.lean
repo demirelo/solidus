@@ -36602,6 +36602,74 @@ theorem compilerOpen_functionsArgList_eval_var_map_of_source
                 OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
                 hTailOpen]
 
+/--
+Hidden result-slot insertion does not affect the lowered arguments emitted for
+an internal user-call expression.
+
+The direct path is only the empty argument list.  The generated path emits only
+fresh temporary variables already recorded in the argument fresh state; the
+later call-result temporary is fresh for that state, so it cannot shadow any of
+those variables.
+-/
+theorem compilerOpen_functionsArgList_eval_insert_of_user_call_args
+    {prim : Objects.Source.PrimitiveSemantics}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name} {state : Objects.Source.State} {values : List Word}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hEval :
+      Functions.Source.ArgList.eval prim lowerArgs state =
+        .ok (state, values)) :
+    CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+        (state.insert tmp Expr.zero) =
+      .done (.ok (state.insert tmp Expr.zero, values)) := by
+  cases hArgs with
+  | inl hDirect =>
+      rcases hDirect with ⟨hDirect, hToLocals, _hPreArgs, _hStateArgs⟩
+      have hLowerNil : lowerArgs = [] :=
+        toLocals1?_eq_nil_of_directCallArgsSafe hDirect hToLocals
+      subst lowerArgs
+      simpa using
+        (compilerOpen_functionsArgList_eval_var_map_of_source
+          (prim := prim) (names := ([] : List Name))
+          (state := state.insert tmp Expr.zero) (values := values)
+          (by simpa [Functions.Source.ArgList.eval] using hEval))
+  | inr hGenerated =>
+      rcases hGenerated with ⟨_hDirect, hLowerArgs⟩
+      rcases Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs with
+        ⟨names, hLowerNames⟩
+      have hLowerMem :
+          ∀ name, name ∈ names → name ∈ stateArgs.used :=
+        lowerBound1?_lowerArg_names_mem_final_used hLowerArgs hLowerNames
+      have hTmpNotInNames : tmp ∉ names := by
+        intro hMem
+        exact fresh?_name_not_mem_used hFresh (hLowerMem tmp hMem)
+      have hEvalNames :
+          Functions.Source.ArgList.eval prim
+              (names.map (fun name => (.var name : Locals.Expr 1))) state =
+            .ok (state, values) := by
+        simpa [hLowerNames] using hEval
+      have hEvalInserted :
+          Functions.Source.ArgList.eval prim
+              (names.map (fun name => (.var name : Locals.Expr 1)))
+              (state.insert tmp Expr.zero) =
+            .ok (state.insert tmp Expr.zero, values) :=
+        sourceArgList_eval_var_map_insert_of_not_mem
+          (prim := prim) (names := names) (tmp := tmp)
+          (value := Expr.zero) hEvalNames hTmpNotInNames
+      simpa [hLowerNames] using
+        (compilerOpen_functionsArgList_eval_var_map_of_source
+          (prim := prim) (names := names)
+          (state := state.insert tmp Expr.zero) (values := values)
+          hEvalInserted)
+
 theorem sourceArgList_eval_var_map_of_toSeq?_compilerOpen_evalSeq_done
     {prim : Objects.Source.PrimitiveSemantics} :
     ∀ {names : List Name} {results : Nat} {seq : Locals.ExprSeq results}
