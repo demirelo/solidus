@@ -36670,6 +36670,40 @@ theorem compilerOpen_functionsArgList_eval_insert_of_user_call_args
           (state := state.insert tmp Expr.zero) (values := values)
           hEvalInserted)
 
+theorem sourceArgCallPreludeOpenDoneRel_targetArgEval_insert
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name} {sourceAfter : State} {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hDone :
+      SourceArgCallPreludeOpenDoneRel cfg layout prim lowerArgs
+        (.ok (sourceAfter, values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter))) :
+    CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+        (targetState.insert tmp Expr.zero) =
+      .done (.ok (targetState.insert tmp Expr.zero, values)) ∧
+    SourceStateRel cfg layout sourceAfter
+      (targetState.insert tmp Expr.zero) := by
+  rcases hDone with ⟨hRelAfter, hEvalArgs⟩
+  exact
+    ⟨compilerOpen_functionsArgList_eval_insert_of_user_call_args
+        (prim := prim) (args := args) (freshState := freshState)
+        (stateArgs := stateArgs) (freshState' := freshState')
+        (preArgs := preArgs) (lowerArgs := lowerArgs) (tmp := tmp)
+        (state := targetState) (values := values) hArgs hFresh hEvalArgs,
+      SourceStateRel.insert_hidden hRelAfter hTmpFreshLayout⟩
+
 theorem sourceArgList_eval_var_map_of_toSeq?_compilerOpen_evalSeq_done
     {prim : Objects.Source.PrimitiveSemantics} :
     ∀ {names : List Name} {results : Nat} {seq : Locals.ExprSeq results}

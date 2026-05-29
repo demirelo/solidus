@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 15:02 PDT.
+Last updated: 2026-05-29 15:05 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -266,6 +266,10 @@ Checked base we can rely on:
   `compilerOpen_functionsArgList_eval_insert_of_user_call_args`, so direct
   empty argument calls and generated variable-only argument calls can evaluate
   lowered arguments after the target inserts the fresh return slot.
+- [x] Added done-branch handoff
+  `sourceArgCallPreludeOpenDoneRel_targetArgEval_insert`, combining the
+  post-reversal source/target argument relation with the hidden-temp argument
+  bridge and preserving `SourceStateRel` after target return-slot insertion.
 - [x] Added expression-level target decomposition for internal user-call
   lowering: `sourceExprPreludeOpen_append_eq`,
   `sourceExprPreludeOpen_user_call_suffix_eq`, and
