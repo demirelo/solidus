@@ -41729,6 +41729,29 @@ theorem openResult_bind_assoc
         exact ih response next next')
       result) next next'
 
+theorem openResult_bind_congr_next_of_doneInvariant
+    {ε α β : Type*}
+    {result : OpenExternal.OpenResult ε α}
+    {doneInv : Except ε α → Prop}
+    {next next' : α → OpenExternal.OpenResult ε β}
+    (hInv : OpenResultDoneInvariant doneInv result)
+    (hNext :
+      ∀ value, doneInv (.ok value) → next value = next' value) :
+    OpenExternal.OpenResult.bind result next =
+      OpenExternal.OpenResult.bind result next' := by
+  induction hInv with
+  | done hDone =>
+      rename_i doneResult
+      cases doneResult with
+      | error err =>
+          simp [OpenExternal.OpenResult.bind]
+      | ok value =>
+          simpa [OpenExternal.OpenResult.bind] using hNext value hDone
+  | call hResume ih =>
+      simp [OpenExternal.OpenResult.bind]
+      funext response
+      exact ih response
+
 /--
 Open append law for compiler-generated argument preludes.
 
@@ -41791,6 +41814,157 @@ theorem compilerOpen_generatedPrelude_runOpen_append_eq
           (ctx := { ctx with scope := name :: ctx.scope })
           (state := evalResult.1.insert name evalResult.2)
           (suffixFuel := suffixFuel))
+
+theorem compilerOpen_expr_prelude_let_single_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {state : Objects.Source.State} {suffixFuel : Nat}
+    (hPreShape : GeneratedPrelude pre) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + suffixFuel.succ)
+        { stmts := pre ++ ([Functions.Stmt.let_ name lowerExpr] ++ tail) }
+        state =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.run prim program ctx
+          (pre.length + suffixFuel.succ) pre lowerExpr state)
+        (fun target =>
+          match target.values with
+          | [value] =>
+              CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                { target.ctx with scope := name :: target.ctx.scope }
+                suffixFuel { stmts := tail } (target.state.insert name value)
+          | _ => CompilerOpen.invalid) := by
+  rw [compilerOpen_generatedPrelude_runOpen_append_eq hPreShape]
+  unfold SourceExprPreludeOpen.run
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfterPre mode =>
+      cases mode
+      · simp [compilerOpen_block_runOpen_cons_succ,
+          CompilerOpen.FunctionsOpen.Stmt.run,
+          CompilerOpen.LocalsExpr.evalOne,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+          Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+          Locals.Source.State.insert]
+        conv_lhs =>
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+        conv_rhs =>
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+        apply OpenExternal.OpenResult.bind_congr_next
+        intro exprResult
+        rcases exprResult with ⟨stateAfterExpr, values⟩
+        cases values with
+        | nil =>
+            simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+              Functions.Source.invalid, Structured.invalid]
+        | cons value rest =>
+            cases rest with
+            | nil =>
+                simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                  Locals.Source.State.insert]
+            | cons value' rest' =>
+                simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                  Functions.Source.invalid, Structured.invalid]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+
+theorem compilerOpen_expr_prelude_assign_single_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {state : Objects.Source.State} {suffixFuel : Nat}
+    (hPreShape : GeneratedPrelude pre)
+    (hPreContains :
+      OpenResultDoneInvariant
+        (fun preDone =>
+          ∀ {compilerAfterPre : Objects.Source.State}
+            {ctxAfter : Functions.Source.Ctx},
+            preDone =
+              .ok (Functions.Source.Outcome.regular compilerAfterPre,
+                ctxAfter) →
+              compilerAfterPre.vars.contains name = true)
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel.succ) { stmts := pre } state)) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + suffixFuel.succ)
+        { stmts := pre ++ ([Functions.Stmt.assign name lowerExpr] ++ tail) }
+        state =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.run prim program ctx
+          (pre.length + suffixFuel.succ) pre lowerExpr state)
+        (fun target =>
+          match target.values with
+          | [value] =>
+              CompilerOpen.FunctionsOpen.Block.runOpen prim program target.ctx
+                suffixFuel { stmts := tail } (target.state.insert name value)
+          | _ => CompilerOpen.invalid) := by
+  rw [compilerOpen_generatedPrelude_runOpen_append_eq hPreShape]
+  unfold SourceExprPreludeOpen.run
+  rw [openResult_bind_assoc]
+  apply openResult_bind_congr_next_of_doneInvariant hPreContains
+  intro preResult
+  intro hPreContainsResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfterPre mode =>
+      cases mode
+      · have hContainsPre :
+            compilerAfterPre.vars.contains name = true :=
+          hPreContainsResult rfl
+        simp [compilerOpen_block_runOpen_cons_succ,
+          CompilerOpen.FunctionsOpen.Stmt.run,
+          CompilerOpen.LocalsExpr.evalOne,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+          Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+          Locals.Source.State.insert, Locals.Source.State.withVars,
+          hContainsPre]
+        conv_lhs =>
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+        conv_rhs =>
+          rw [openResult_bind_assoc
+            (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+        apply OpenExternal.OpenResult.bind_congr_next
+        intro exprResult
+        rcases exprResult with ⟨stateAfterExpr, values⟩
+        cases values with
+        | nil =>
+            simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+              Functions.Source.invalid, Structured.invalid]
+        | cons value rest =>
+            cases rest with
+            | nil =>
+                simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                  Locals.Source.State.insert, Locals.Source.State.withVars]
+            | cons value' rest' =>
+                simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                  Functions.Source.invalid, Structured.invalid]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
 
 /-- Open compiler expression shape for an output-one primitive cast. -/
 theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
