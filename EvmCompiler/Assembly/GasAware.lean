@@ -40,6 +40,70 @@ def targetInstrUsesCallCreate : TargetInstr → Bool
   | .prim op => op.isCallCreate
   | .push32 _ | .jump | .jumpi | .jumpdest => false
 
+theorem targetInstr_op_isCreate_false_of_usesCallCreate_false
+    {instr : TargetInstr}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false) :
+    instr.op.isCreate = false := by
+  cases instr with
+  | push32 value =>
+      rfl
+  | jump =>
+      rfl
+  | jumpi =>
+      rfl
+  | jumpdest =>
+      rfl
+  | prim op =>
+      cases op <;>
+        simp [targetInstrUsesCallCreate, PrimOp.isCallCreate,
+          TargetInstr.op, PrimOp.toEVM, EvmYul.Operation.isCreate]
+          at hNoCallCreate ⊢
+
+def targetInstrUsesReturnDataCopy : TargetInstr → Bool
+  | .prim .returndatacopy => true
+  | .prim _ | .push32 _ | .jump | .jumpi | .jumpdest => false
+
+def targetInstrNoReturnDataCopy (instr : TargetInstr) : Bool :=
+  !targetInstrUsesReturnDataCopy instr
+
+def targetProgramNoReturnDataCopy (target : TargetProgram) : Prop :=
+  ∀ {located : LocatedTarget}, located ∈ target.code →
+    targetInstrNoReturnDataCopy located.instr = true
+
+def targetProgramNoReturnDataCopy? (target : TargetProgram) : Bool :=
+  target.code.all fun located =>
+    targetInstrNoReturnDataCopy located.instr
+
+theorem targetProgramNoReturnDataCopy_of_check
+    {target : TargetProgram}
+    (hCheck : targetProgramNoReturnDataCopy? target = true) :
+    targetProgramNoReturnDataCopy target := by
+  intro located hMem
+  exact
+    (List.all_eq_true.mp hCheck) located hMem
+
+theorem targetInstr_op_ne_returnDataCopy_of_noReturnDataCopy
+    {instr : TargetInstr}
+    (hNoReturnDataCopy : targetInstrNoReturnDataCopy instr = true) :
+    instr.op ≠ EvmYul.Operation.RETURNDATACOPY := by
+  cases instr with
+  | push32 value =>
+      simp [targetInstrNoReturnDataCopy, targetInstrUsesReturnDataCopy,
+        TargetInstr.op] at hNoReturnDataCopy ⊢
+  | jump =>
+      simp [targetInstrNoReturnDataCopy, targetInstrUsesReturnDataCopy,
+        TargetInstr.op] at hNoReturnDataCopy ⊢
+  | jumpi =>
+      simp [targetInstrNoReturnDataCopy, targetInstrUsesReturnDataCopy,
+        TargetInstr.op] at hNoReturnDataCopy ⊢
+  | jumpdest =>
+      simp [targetInstrNoReturnDataCopy, targetInstrUsesReturnDataCopy,
+        TargetInstr.op] at hNoReturnDataCopy ⊢
+  | prim op =>
+      cases op <;>
+        simp [targetInstrNoReturnDataCopy, targetInstrUsesReturnDataCopy,
+          TargetInstr.op, PrimOp.toEVM] at hNoReturnDataCopy ⊢
+
 theorem instr_usesCallCreate_false_of_instrAtPcFrom
     {program : Program} {base query pc : Nat} {instr : Instr}
     (hNoCallCreate : Program.usesCallCreate program = false)
@@ -131,6 +195,50 @@ theorem targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
   targetInstr_usesCallCreate_false_of_emitInstr_mem
     (instr_usesCallCreate_false_of_instrAtPc hNoCallCreate hAt)
     hEmit hMem
+
+theorem emitInstr?_exists_head_pc
+    {program : Program} {pc : Nat} {instr : Instr}
+    {emitted : List LocatedTarget}
+    (hEmit : emitInstr? program pc instr = some emitted) :
+    ∃ located rest,
+      emitted = located :: rest ∧ located.pc = pc := by
+  cases instr with
+  | label name =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      exact ⟨{ pc := pc, instr := TargetInstr.jumpdest }, [], rfl, rfl⟩
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      exact ⟨{ pc := pc, instr := TargetInstr.prim op }, [], rfl, rfl⟩
+  | push value =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      exact ⟨{ pc := pc, instr := TargetInstr.push32 value }, [], rfl, rfl⟩
+  | jump target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          exact
+            ⟨{ pc := pc,
+                instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) },
+              [{ pc := pc + Instr.push32Size, instr := TargetInstr.jump }],
+              rfl, rfl⟩
+  | jumpi target =>
+      cases hDest : Program.labelPc program target with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          exact
+            ⟨{ pc := pc,
+                instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) },
+              [{ pc := pc + Instr.push32Size, instr := TargetInstr.jumpi }],
+              rfl, rfl⟩
 
 theorem EVM_step_targetInstr_eq_of_no_call_create {fuel gasCost : Nat}
     {state : EVMState} {instr : TargetInstr}
@@ -546,6 +654,34 @@ theorem decode_installed_of_state_pc_mem_emitted
     decode_installed_of_state_pc_mem hEncoding
       (mem_target_of_mem_emitted hTargetBlock hMem) hPc
 
+theorem decode_of_code_eq_state_pc_mem
+    {target : TargetProgram} {full : EVMState}
+    {located : LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hMem : located ∈ target.code)
+    (hCode : full.executionEnv.code = Bytecode.encodeTarget target)
+    (hPc : full.pc = EvmYul.UInt256.ofNat located.pc) :
+    EvmYul.EVM.decode full.executionEnv.code full.pc =
+      some (located.instr.op, located.instr.arg) := by
+  rw [hCode, hPc]
+  simpa [Bytecode.decodeAt] using hEncoding.decodes located hMem
+
+theorem decode_of_code_eq_state_pc_mem_emitted
+    {target : TargetProgram} {full : EVMState}
+    {located : LocatedTarget} {before emitted after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hMem : located ∈ emitted)
+    (hCode : full.executionEnv.code = Bytecode.encodeTarget target)
+    (hPc : full.pc = EvmYul.UInt256.ofNat located.pc) :
+    EvmYul.EVM.decode full.executionEnv.code full.pc =
+      some (located.instr.op, located.instr.arg) := by
+  exact
+    decode_of_code_eq_state_pc_mem hEncoding
+      (mem_target_of_mem_emitted hTargetBlock hMem) hCode hPc
+
 theorem decode_installed_of_instrAt_mem_emitted
     {program : Program} {target : TargetProgram} {state : EVMState}
     {gas : Nat} {pc : Nat} {instr : Instr}
@@ -625,6 +761,18 @@ theorem executionEnv_eq {full target : EVMState}
     full.executionEnv = target.executionEnv := by
   rw [hRel]
 
+theorem perm_eq {full target : EVMState}
+    (hRel : GasExecRel full target) :
+    full.executionEnv.perm = target.executionEnv.perm := by
+  rw [hRel]
+
+theorem perm_true {full target : EVMState}
+    (hRel : GasExecRel full target)
+    (hPerm : target.executionEnv.perm = true) :
+    full.executionEnv.perm = true := by
+  rw [perm_eq hRel]
+  exact hPerm
+
 theorem code_eq {full target : EVMState}
     (hRel : GasExecRel full target) :
     full.executionEnv.code = target.executionEnv.code := by
@@ -698,6 +846,271 @@ theorem set_pc_stack_left {full target : EVMState}
   simp [GasExecRel]
 
 end GasExecRel
+
+theorem decode_of_gasExecRel_instrAt_mem_emitted
+    {program : Program} {target : TargetProgram}
+    {targetState fullState : EVMState}
+    {pc : Nat} {instr : Instr}
+    {located : LocatedTarget} {before emitted after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hAt : Program.instrAtPc program targetState.pc.toNat = some (pc, instr))
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hMem : located ∈ emitted)
+    (hLocatedPc : located.pc = pc)
+    (hNoWrap : (EvmYul.UInt256.ofNat located.pc).toNat = located.pc)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target) :
+    EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+      some (located.instr.op, located.instr.arg) := by
+  have hNoWrapPc : (EvmYul.UInt256.ofNat pc).toNat = pc := by
+    simpa [hLocatedPc] using hNoWrap
+  have hTargetPc := state_pc_eq_of_instrAt_of_noWrap hAt hNoWrapPc
+  have hFullPc :
+      fullState.pc = EvmYul.UInt256.ofNat located.pc := by
+    rw [hRel.pc_eq]
+    simpa [hLocatedPc] using hTargetPc
+  exact
+    decode_of_code_eq_state_pc_mem_emitted hEncoding hTargetBlock hMem
+      hCode hFullPc
+
+theorem decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+    {program : Program} {target : TargetProgram}
+    {targetState fullState : EVMState}
+    {pc : Nat} {instr : Instr}
+    {located : LocatedTarget} {before emitted after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt : Program.instrAtPc program targetState.pc.toNat = some (pc, instr))
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hMem : located ∈ emitted)
+    (hLocatedPc : located.pc = pc)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target) :
+    EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+      some (located.instr.op, located.instr.arg) := by
+  exact
+    decode_of_gasExecRel_instrAt_mem_emitted hEncoding hAt hTargetBlock hMem
+      hLocatedPc
+      (hSafety.pcNoWrap located
+        (mem_target_of_mem_emitted hTargetBlock hMem))
+      hRel hCode
+
+theorem block_start_decode_of_emitInstr
+    {program : Program} {target : TargetProgram}
+    {targetState fullState : EVMState}
+    {pc : Nat} {instr : Instr}
+    {emitted before after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt : Program.instrAtPc program targetState.pc.toNat = some (pc, instr))
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target) :
+    ∃ targetInstr rest,
+      emitted.map LocatedTarget.instr = targetInstr :: rest ∧
+        EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+          some (targetInstr.op, targetInstr.arg) := by
+  obtain ⟨located, rest, hEmitted, hLocatedPc⟩ :=
+    emitInstr?_exists_head_pc hEmit
+  have hMem : located ∈ emitted := by
+    rw [hEmitted]
+    simp
+  have hDecode :
+      EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+        some (located.instr.op, located.instr.arg) :=
+    decode_of_gasExecRel_instrAt_mem_emitted_of_safety hEncoding hSafety hAt
+      hTargetBlock hMem hLocatedPc hRel hCode
+  exact
+    ⟨located.instr, rest.map LocatedTarget.instr, by simp [hEmitted],
+      hDecode⟩
+
+theorem EVM_step_push32_preserves_code_and_pc
+    {full fullPost : EVMState} {value : Word} {gasCost stepFuel : Nat}
+    (hStep :
+      EvmYul.EVM.step stepFuel.succ gasCost
+        (some ((TargetInstr.push32 value).op, (TargetInstr.push32 value).arg))
+        (memoryGasState full (TargetInstr.push32 value).op) = .ok fullPost) :
+    fullPost.executionEnv.code = full.executionEnv.code ∧
+      fullPost.pc = full.pc + EvmYul.UInt256.ofNat 33 := by
+  rw [EVM_step_targetInstr_eq_of_no_call_create
+    (fuel := stepFuel) (gasCost := gasCost)
+    (state := memoryGasState full (TargetInstr.push32 value).op)
+    (instr := TargetInstr.push32 value) rfl] at hStep
+  simp [memoryGasState] at hStep
+  cases hStep
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem decode_next_after_push32_step_of_emitted_pair
+    {target : TargetProgram} {full fullPost : EVMState}
+    {pc gasCost stepFuel : Nat} {value : Word} {next : TargetInstr}
+    {rest before after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hTargetBlock :
+      target.code =
+        before ++
+          ({ pc := pc, instr := TargetInstr.push32 value } ::
+            { pc := pc + Instr.push32Size, instr := next } :: rest) ++
+          after)
+    (hCode : full.executionEnv.code = Bytecode.encodeTarget target)
+    (hPc : full.pc = EvmYul.UInt256.ofNat pc)
+    (hStep :
+      EvmYul.EVM.step stepFuel.succ gasCost
+        (some ((TargetInstr.push32 value).op, (TargetInstr.push32 value).arg))
+        (memoryGasState full (TargetInstr.push32 value).op) = .ok fullPost) :
+    EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+      some (next.op, next.arg) := by
+  have hStepProps := EVM_step_push32_preserves_code_and_pc hStep
+  have hCodePost : fullPost.executionEnv.code = Bytecode.encodeTarget target := by
+    rw [hStepProps.1, hCode]
+  have hPcPost :
+      fullPost.pc = EvmYul.UInt256.ofNat (pc + Instr.push32Size) := by
+    rw [hStepProps.2, hPc]
+    rw [UInt256_ofNat_add]
+    rfl
+  exact
+    decode_of_code_eq_state_pc_mem_emitted hEncoding hTargetBlock
+      (located := { pc := pc + Instr.push32Size, instr := next })
+      (by simp) hCodePost hPcPost
+
+theorem decode_jump_after_push32_step_of_emitInstr
+    {program : Program} {target : TargetProgram}
+    {targetState fullState fullPost : EVMState}
+    {pc dest gasCost stepFuel : Nat} {label : Label}
+    {emitted before after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt :
+      Program.instrAtPc program targetState.pc.toNat =
+        some (pc, Instr.jump label))
+    (hDest : Program.labelPc program label = some dest)
+    (hEmit : emitInstr? program pc (Instr.jump label) = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target)
+    (hStep :
+      EvmYul.EVM.step stepFuel.succ gasCost
+        (some ((TargetInstr.push32
+          (EvmYul.UInt256.ofNat dest)).op,
+          (TargetInstr.push32
+            (EvmYul.UInt256.ofNat dest)).arg))
+        (memoryGasState fullState
+          (TargetInstr.push32
+            (EvmYul.UInt256.ofNat dest)).op) =
+        .ok fullPost) :
+    EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+      some (TargetInstr.jump.op, TargetInstr.jump.arg) := by
+  simp [emitInstr?, hDest] at hEmit
+  subst emitted
+  have hFirstMem :
+      ({ pc := pc,
+          instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) } :
+        LocatedTarget) ∈
+        ([ { pc := pc,
+              instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) },
+            { pc := pc + Instr.push32Size, instr := TargetInstr.jump } ] :
+          List LocatedTarget) := by
+    simp
+  have hNoWrapPc :
+      (EvmYul.UInt256.ofNat pc).toNat = pc := by
+    have hNoWrap :=
+      hSafety.pcNoWrap
+        ({ pc := pc,
+            instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) } :
+          LocatedTarget)
+        (mem_target_of_mem_emitted hTargetBlock hFirstMem)
+    simpa using hNoWrap
+  have hTargetPc := state_pc_eq_of_instrAt_of_noWrap hAt hNoWrapPc
+  have hFullPc : fullState.pc = EvmYul.UInt256.ofNat pc := by
+    rw [hRel.pc_eq]
+    exact hTargetPc
+  exact
+    decode_next_after_push32_step_of_emitted_pair
+      (target := target)
+      (full := fullState)
+      (fullPost := fullPost)
+      (pc := pc)
+      (gasCost := gasCost)
+      (stepFuel := stepFuel)
+      (value := EvmYul.UInt256.ofNat dest)
+      (next := TargetInstr.jump)
+      (rest := [])
+      hEncoding
+      (by simpa using hTargetBlock)
+      hCode hFullPc hStep
+
+theorem decode_jumpi_after_push32_step_of_emitInstr
+    {program : Program} {target : TargetProgram}
+    {targetState fullState fullPost : EVMState}
+    {pc dest gasCost stepFuel : Nat} {label : Label}
+    {emitted before after : List LocatedTarget}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt :
+      Program.instrAtPc program targetState.pc.toNat =
+        some (pc, Instr.jumpi label))
+    (hDest : Program.labelPc program label = some dest)
+    (hEmit : emitInstr? program pc (Instr.jumpi label) = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target)
+    (hStep :
+      EvmYul.EVM.step stepFuel.succ gasCost
+        (some ((TargetInstr.push32
+          (EvmYul.UInt256.ofNat dest)).op,
+          (TargetInstr.push32
+            (EvmYul.UInt256.ofNat dest)).arg))
+        (memoryGasState fullState
+          (TargetInstr.push32
+            (EvmYul.UInt256.ofNat dest)).op) =
+        .ok fullPost) :
+    EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+      some (TargetInstr.jumpi.op, TargetInstr.jumpi.arg) := by
+  simp [emitInstr?, hDest] at hEmit
+  subst emitted
+  have hFirstMem :
+      ({ pc := pc,
+          instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) } :
+        LocatedTarget) ∈
+        ([ { pc := pc,
+              instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) },
+            { pc := pc + Instr.push32Size, instr := TargetInstr.jumpi } ] :
+          List LocatedTarget) := by
+    simp
+  have hNoWrapPc :
+      (EvmYul.UInt256.ofNat pc).toNat = pc := by
+    have hNoWrap :=
+      hSafety.pcNoWrap
+        ({ pc := pc,
+            instr := TargetInstr.push32 (EvmYul.UInt256.ofNat dest) } :
+          LocatedTarget)
+        (mem_target_of_mem_emitted hTargetBlock hFirstMem)
+    simpa using hNoWrap
+  have hTargetPc := state_pc_eq_of_instrAt_of_noWrap hAt hNoWrapPc
+  have hFullPc : fullState.pc = EvmYul.UInt256.ofNat pc := by
+    rw [hRel.pc_eq]
+    exact hTargetPc
+  exact
+    decode_next_after_push32_step_of_emitted_pair
+      (target := target)
+      (full := fullState)
+      (fullPost := fullPost)
+      (pc := pc)
+      (gasCost := gasCost)
+      (stepFuel := stepFuel)
+      (value := EvmYul.UInt256.ofNat dest)
+      (next := TargetInstr.jumpi)
+      (rest := [])
+      hEncoding
+      (by simpa using hTargetBlock)
+      hCode hFullPc hStep
 
 theorem EvmYul_step_push32_preserves_gasExecRel
     {full target fullPost targetPost : EVMState} {value : Word}
@@ -4463,6 +4876,101 @@ def jumpTargetAllowed (target? : Option Word)
   | some target => validJumps.contains target = true
   | none => False
 
+theorem emitFrom_labelPcFrom_jumpdest_mem
+    {full suffix : Program} {base pc : Nat} {label : Label}
+    {code : List LocatedTarget}
+    (hEmit : emitFrom? full suffix base = some code)
+    (hLabel : Program.labelPcFrom suffix base label = some pc) :
+    ({ pc := pc, instr := TargetInstr.jumpdest } : LocatedTarget) ∈
+      code := by
+  induction suffix generalizing base code with
+  | nil =>
+      simp [Program.labelPcFrom] at hLabel
+  | cons head rest ih =>
+      unfold emitFrom? at hEmit
+      cases hHere : emitInstr? full base head with
+      | none =>
+          simp [hHere] at hEmit
+      | some here =>
+          cases hThere : emitFrom? full rest (base + head.byteSize) with
+          | none =>
+              simp [hHere, hThere] at hEmit
+          | some there =>
+              simp [hHere, hThere] at hEmit
+              subst code
+              cases head with
+              | label name =>
+                  by_cases hEq : name = label
+                  · unfold Program.labelPcFrom at hLabel
+                    simp [hEq] at hLabel
+                    subst pc
+                    simp [emitInstr?] at hHere
+                    subst here
+                    simp
+                  · unfold Program.labelPcFrom at hLabel
+                    simp [hEq] at hLabel
+                    exact List.mem_append_right here (ih hThere hLabel)
+              | prim op =>
+                  unfold Program.labelPcFrom at hLabel
+                  exact List.mem_append_right here (ih hThere hLabel)
+              | push value =>
+                  unfold Program.labelPcFrom at hLabel
+                  exact List.mem_append_right here (ih hThere hLabel)
+              | jump target =>
+                  unfold Program.labelPcFrom at hLabel
+                  exact List.mem_append_right here (ih hThere hLabel)
+              | jumpi target =>
+                  unfold Program.labelPcFrom at hLabel
+                  exact List.mem_append_right here (ih hThere hLabel)
+
+theorem emit_labelPc_jumpdest_mem
+    {program : Program} {code : List LocatedTarget} {label : Label}
+    {pc : Nat}
+    (hEmit : emit? program = some code)
+    (hLabel : Program.labelPc program label = some pc) :
+    ({ pc := pc, instr := TargetInstr.jumpdest } : LocatedTarget) ∈
+      code := by
+  exact
+    emitFrom_labelPcFrom_jumpdest_mem
+      (full := program) (suffix := program) (base := 0)
+      (code := code) hEmit (by simpa [Program.labelPc] using hLabel)
+
+theorem assemble_labelPc_jumpdest_mem
+    {program : Program} {target : TargetProgram} {label : Label}
+    {pc : Nat}
+    (hAsm : assemble? program = some target)
+    (hLabel : Program.labelPc program label = some pc) :
+    ({ pc := pc, instr := TargetInstr.jumpdest } : LocatedTarget) ∈
+      target.code := by
+  obtain ⟨code, hEmit, hTargetCode⟩ :=
+    Preservation.assemble_emits_code hAsm
+  rw [hTargetCode]
+  exact emit_labelPc_jumpdest_mem hEmit hLabel
+
+theorem jumpTargetAllowed_of_jumpdestCorrect_mem
+    {target : TargetProgram} {pc : Nat}
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hMem :
+      ({ pc := pc, instr := TargetInstr.jumpdest } : LocatedTarget) ∈
+        target.code) :
+    jumpTargetAllowed (some (EvmYul.UInt256.ofNat pc)) (validJumps target) := by
+  simpa [jumpTargetAllowed, validJumps, Bytecode.jumpdestListed,
+    Bytecode.jumpdestListed?] using
+      hJumpdest.jumpdests
+        ({ pc := pc, instr := TargetInstr.jumpdest } : LocatedTarget)
+        hMem rfl
+
+theorem jumpTargetAllowed_of_assemble_labelPc
+    {program : Program} {target : TargetProgram} {label : Label}
+    {pc : Nat}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hLabel : Program.labelPc program label = some pc) :
+    jumpTargetAllowed (some (EvmYul.UInt256.ofNat pc)) (validJumps target) :=
+  jumpTargetAllowed_of_jumpdestCorrect_mem hJumpdest
+    (assemble_labelPc_jumpdest_mem hAsm hLabel)
+
+
 /--
 The non-gas exceptional-halting checks performed by `EVM.X` before it calls
 `EVM.step`. These are not made true by giving the machine more gas; they must
@@ -4489,11 +4997,204 @@ def XNonGasChecksPass (validJumps : Array Word) (state : EVMState)
                 (op.isCreate = true →
                   state.stack.getD 2 ⟨0⟩ ≤ ⟨49152⟩)
 
+def XNonGasCoreChecksPass (validJumps : Array Word) (state : EVMState)
+    (op : EVMOp) : Prop :=
+  EvmYul.EVM.δ op ≠ none ∧
+    state.stack.length ≥ (EvmYul.EVM.δ op).getD 0 ∧
+      (op = EvmYul.Operation.JUMP →
+        jumpTargetAllowed state.stack[0]? validJumps) ∧
+        (op = EvmYul.Operation.JUMPI →
+          state.stack[1]? ≠ some ⟨0⟩ →
+            jumpTargetAllowed state.stack[0]? validJumps) ∧
+          state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+              (EvmYul.EVM.α op).getD 0 ≤ 1024 ∧
+            (state.executionEnv.perm = false →
+              ¬ staticWriteSensitive op state.stack)
+
+def XCoreStackAndJumpInputsReady (validJumps : Array Word)
+    (state : EVMState) (op : EVMOp) : Prop :=
+  EvmYul.EVM.δ op ≠ none ∧
+    state.stack.length ≥ (EvmYul.EVM.δ op).getD 0 ∧
+      (op = EvmYul.Operation.JUMP →
+        jumpTargetAllowed state.stack[0]? validJumps) ∧
+        (op = EvmYul.Operation.JUMPI →
+          state.stack[1]? ≠ some ⟨0⟩ →
+            jumpTargetAllowed state.stack[0]? validJumps)
+
+theorem EVM_alpha_getD_le_17 (op : EVMOp) :
+    (EvmYul.EVM.α op).getD 0 ≤ 17 := by
+  cases op with
+  | StopArith op => cases op <;> simp [EvmYul.EVM.α]
+  | CompBit op => cases op <;> simp [EvmYul.EVM.α]
+  | Keccak op =>
+      cases op
+      simp [EvmYul.EVM.α]
+  | Env op => cases op <;> simp [EvmYul.EVM.α]
+  | Block op => cases op <;> simp [EvmYul.EVM.α]
+  | StackMemFlow op => cases op <;> simp [EvmYul.EVM.α]
+  | Push n => simp [EvmYul.EVM.α]
+  | Dup op => cases op <;> simp [EvmYul.EVM.α]
+  | Exchange op => cases op <;> simp [EvmYul.EVM.α]
+  | Log op => cases op <;> simp [EvmYul.EVM.α]
+  | System op => cases op <;> simp [EvmYul.EVM.α]
+
+theorem XNonGasCoreChecksPass.of_inputs_overflow_static
+    {validJumps : Array Word} {state : EVMState} {op : EVMOp}
+    (hInputs : XCoreStackAndJumpInputsReady validJumps state op)
+    (hOverflow :
+      state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+          (EvmYul.EVM.α op).getD 0 ≤ 1024)
+    (hStatic :
+      state.executionEnv.perm = false →
+        ¬ staticWriteSensitive op state.stack) :
+    XNonGasCoreChecksPass validJumps state op := by
+  rcases hInputs with ⟨hDelta, hStack, hJump, hJumpi⟩
+  exact ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
+
+theorem XNonGasCoreChecksPass.of_inputs_bounded_stack
+    {validJumps : Array Word} {state : EVMState} {op : EVMOp}
+    (hInputs : XCoreStackAndJumpInputsReady validJumps state op)
+    (hStackBound : state.stack.length ≤ 16)
+    (hStatic :
+      state.executionEnv.perm = false →
+        ¬ staticWriteSensitive op state.stack) :
+    XNonGasCoreChecksPass validJumps state op := by
+  rcases hInputs with ⟨hDelta, hStack, hJump, hJumpi⟩
+  refine ⟨hDelta, hStack, hJump, hJumpi, ?_, hStatic⟩
+  have hAlpha := EVM_alpha_getD_le_17 op
+  omega
+
+theorem XNonGasCoreChecksPass.of_inputs_bounded_stack_writable
+    {validJumps : Array Word} {state : EVMState} {op : EVMOp}
+    (hInputs : XCoreStackAndJumpInputsReady validJumps state op)
+    (hStackBound : state.stack.length ≤ 16)
+    (hWritable : state.executionEnv.perm = true) :
+    XNonGasCoreChecksPass validJumps state op :=
+  XNonGasCoreChecksPass.of_inputs_bounded_stack hInputs hStackBound (by
+    intro hStatic
+    rw [hWritable] at hStatic
+    cases hStatic)
+
+theorem XNonGasChecksPass.intro' {validJumps : Array Word}
+    {state : EVMState} {op : EVMOp}
+    (hDelta : EvmYul.EVM.δ op ≠ none)
+    (hStack :
+      state.stack.length ≥ (EvmYul.EVM.δ op).getD 0)
+    (hJump :
+      op = EvmYul.Operation.JUMP →
+        jumpTargetAllowed state.stack[0]? validJumps)
+    (hJumpi :
+      op = EvmYul.Operation.JUMPI →
+        state.stack[1]? ≠ some ⟨0⟩ →
+          jumpTargetAllowed state.stack[0]? validJumps)
+    (hReturnData :
+      op = EvmYul.Operation.RETURNDATACOPY →
+        (state.stack.getD 1 ⟨0⟩).toNat +
+            (state.stack.getD 2 ⟨0⟩).toNat ≤
+          state.returnData.size)
+    (hOverflow :
+      state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+          (EvmYul.EVM.α op).getD 0 ≤ 1024)
+    (hStatic :
+      state.executionEnv.perm = false →
+        ¬ staticWriteSensitive op state.stack)
+    (hCreate :
+      op.isCreate = true →
+        state.stack.getD 2 ⟨0⟩ ≤ ⟨49152⟩) :
+    XNonGasChecksPass validJumps state op :=
+  ⟨hDelta, hStack, hJump, hJumpi, hReturnData, hOverflow, hStatic, hCreate⟩
+
+theorem XNonGasChecksPass.of_core_no_returnDataCopy_no_create
+    {validJumps : Array Word}
+    {state : EVMState} {op : EVMOp}
+    (hCore : XNonGasCoreChecksPass validJumps state op)
+    (hNoReturnDataCopy : op ≠ EvmYul.Operation.RETURNDATACOPY)
+    (hNoCreate : op.isCreate = false) :
+    XNonGasChecksPass validJumps state op := by
+  rcases hCore with
+    ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
+  refine
+    XNonGasChecksPass.intro' hDelta hStack hJump hJumpi ?_
+      hOverflow hStatic ?_
+  · intro hOp
+    exact False.elim (hNoReturnDataCopy hOp)
+  · intro hCreate
+    rw [hNoCreate] at hCreate
+    cases hCreate
+
+theorem XNonGasChecksPass.of_no_returnDataCopy_no_create
+    {validJumps : Array Word}
+    {state : EVMState} {op : EVMOp}
+    (hDelta : EvmYul.EVM.δ op ≠ none)
+    (hStack :
+      state.stack.length ≥ (EvmYul.EVM.δ op).getD 0)
+    (hJump :
+      op = EvmYul.Operation.JUMP →
+        jumpTargetAllowed state.stack[0]? validJumps)
+    (hJumpi :
+      op = EvmYul.Operation.JUMPI →
+        state.stack[1]? ≠ some ⟨0⟩ →
+          jumpTargetAllowed state.stack[0]? validJumps)
+    (hNoReturnDataCopy : op ≠ EvmYul.Operation.RETURNDATACOPY)
+    (hOverflow :
+      state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+          (EvmYul.EVM.α op).getD 0 ≤ 1024)
+    (hStatic :
+      state.executionEnv.perm = false →
+        ¬ staticWriteSensitive op state.stack)
+    (hNoCreate : op.isCreate = false) :
+    XNonGasChecksPass validJumps state op := by
+  refine
+    XNonGasChecksPass.intro' hDelta hStack hJump hJumpi ?_
+      hOverflow hStatic ?_
+  · intro hOp
+    exact False.elim (hNoReturnDataCopy hOp)
+  · intro hCreate
+    rw [hNoCreate] at hCreate
+    cases hCreate
+
+theorem XNonGasChecksPass.of_no_returnDataCopy_no_create_writable
+    {validJumps : Array Word}
+    {state : EVMState} {op : EVMOp}
+    (hDelta : EvmYul.EVM.δ op ≠ none)
+    (hStack :
+      state.stack.length ≥ (EvmYul.EVM.δ op).getD 0)
+    (hJump :
+      op = EvmYul.Operation.JUMP →
+        jumpTargetAllowed state.stack[0]? validJumps)
+    (hJumpi :
+      op = EvmYul.Operation.JUMPI →
+        state.stack[1]? ≠ some ⟨0⟩ →
+          jumpTargetAllowed state.stack[0]? validJumps)
+    (hNoReturnDataCopy : op ≠ EvmYul.Operation.RETURNDATACOPY)
+    (hOverflow :
+      state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+          (EvmYul.EVM.α op).getD 0 ≤ 1024)
+    (hWritable : state.executionEnv.perm = true)
+    (hNoCreate : op.isCreate = false) :
+    XNonGasChecksPass validJumps state op :=
+  XNonGasChecksPass.of_no_returnDataCopy_no_create
+    hDelta hStack hJump hJumpi hNoReturnDataCopy hOverflow
+    (by
+      intro hStatic
+      rw [hWritable] at hStatic
+      cases hStatic)
+    hNoCreate
+
 theorem XNonGasChecksPass_iff_of_gasExecRel {validJumps : Array Word}
     {full target : EVMState} {op : EVMOp}
     (hRel : GasExecRel full target) :
     XNonGasChecksPass validJumps full op ↔
       XNonGasChecksPass validJumps target op := by
+  rw [hRel]
+  cases target
+  rfl
+
+theorem XNonGasCoreChecksPass_iff_of_gasExecRel {validJumps : Array Word}
+    {full target : EVMState} {op : EVMOp}
+    (hRel : GasExecRel full target) :
+    XNonGasCoreChecksPass validJumps full op ↔
+      XNonGasCoreChecksPass validJumps target op := by
   rw [hRel]
   cases target
   rfl
@@ -4662,6 +5363,15 @@ theorem XNonGasChecksPass_stop {validJumps : Array Word}
   simp [XNonGasChecksPass, jumpTargetAllowed, staticWriteSensitive,
     EvmYul.EVM.δ, EvmYul.EVM.α, EvmYul.Operation.isCreate, hStack]
 
+theorem XGasRequiredAt_stop_eq_zero (state : EVMState) :
+    XGasRequiredAt state EvmYul.Operation.STOP = 0 := by
+  simp [XGasRequiredAt, sstoreStipendExtra, memoryGasState,
+    EvmYul.EVM.memoryExpansionCost, EvmYul.EVM.memoryExpansionCost.μᵢ']
+  cases state
+  simp [EvmYul.EVM.C', EvmYul.EVM.InstructionGasGroups.Wcopy,
+    EvmYul.EVM.InstructionGasGroups.Wextaccount,
+    EvmYul.EVM.InstructionGasGroups.Wzero, GasConstants.Gzero]
+
 theorem XStepChecksPass_stop_of_required_le {validJumps : Array Word}
     {state : EVMState}
     (hStack : state.stack.length ≤ 1024)
@@ -4669,6 +5379,14 @@ theorem XStepChecksPass_stop_of_required_le {validJumps : Array Word}
       XGasRequiredAt state EvmYul.Operation.STOP ≤ state.gasAvailable.toNat) :
     XStepChecksPass validJumps state EvmYul.Operation.STOP :=
   ⟨XNonGasChecksPass_stop hStack, XGasChecksPassAt.of_required_le hRequired⟩
+
+theorem XStepChecksPass_stop {validJumps : Array Word}
+    {state : EVMState}
+    (hStack : state.stack.length ≤ 1024) :
+    XStepChecksPass validJumps state EvmYul.Operation.STOP := by
+  refine XStepChecksPass_stop_of_required_le hStack ?_
+  rw [XGasRequiredAt_stop_eq_zero]
+  exact Nat.zero_le _
 
 theorem XStepChecksPass.of_nonGas_required_le {validJumps : Array Word}
     {state : EVMState} {op : EVMOp}
@@ -5960,6 +6678,42 @@ def XRunListSuffixNonGasReady (validJumps : Array Word)
               XNonGasChecksPass validJumps fullState instr.op ∧
                 targetInstrUsesCallCreate instr = false
 
+def XRunListSuffixCoreNonGasReady (validJumps : Array Word)
+    (code : List TargetInstr) : Prop :=
+  ∀ {instr : TargetInstr} {rest : List TargetInstr}
+      {targetState : EVMState} {blockResult : StepResult},
+    (∃ pre : List TargetInstr, code = pre ++ (instr :: rest)) →
+      Target.runListResult (instr :: rest) targetState = .ok blockResult →
+        ∀ {fullState : EVMState},
+          GasExecRel fullState targetState →
+            XNonGasCoreChecksPass validJumps fullState instr.op
+
+def XRunListSuffixCoreInputsReady (validJumps : Array Word)
+    (code : List TargetInstr) : Prop :=
+  ∀ {instr : TargetInstr} {rest : List TargetInstr}
+      {targetState : EVMState} {blockResult : StepResult},
+      (∃ pre : List TargetInstr, code = pre ++ (instr :: rest)) →
+      Target.runListResult (instr :: rest) targetState = .ok blockResult →
+        ∀ {fullState : EVMState},
+          GasExecRel fullState targetState →
+            XCoreStackAndJumpInputsReady validJumps fullState instr.op ∧
+              fullState.stack.length -
+                    (EvmYul.EVM.δ instr.op).getD 0 +
+                  (EvmYul.EVM.α instr.op).getD 0 ≤ 1024 ∧
+                (fullState.executionEnv.perm = false →
+                  ¬ staticWriteSensitive instr.op fullState.stack)
+
+theorem XRunListSuffixCoreNonGasReady.of_inputs
+    {validJumps : Array Word} {code : List TargetInstr}
+    (hInputs : XRunListSuffixCoreInputsReady validJumps code) :
+    XRunListSuffixCoreNonGasReady validJumps code := by
+  intro instr rest targetState blockResult hSuffix hRun fullState hRel
+  rcases hInputs hSuffix hRun hRel with
+    ⟨hStepInputs, hOverflow, hStatic⟩
+  exact
+    XNonGasCoreChecksPass.of_inputs_overflow_static
+      hStepInputs hOverflow hStatic
+
 def XRunListSuffixGasReady (code : List TargetInstr) : Prop :=
   ∀ {instr : TargetInstr} {rest : List TargetInstr}
       {targetState : EVMState} {blockResult : StepResult},
@@ -5969,6 +6723,454 @@ def XRunListSuffixGasReady (code : List TargetInstr) : Prop :=
           GasExecRel fullState targetState →
             XGasRequiredAt fullState instr.op ≤
               fullState.gasAvailable.toNat
+
+def PrimStepPreservesCode : PrimStep → Prop
+  | .unaryState f =>
+      ∀ state arg, (f state arg).1.executionEnv.code =
+        state.executionEnv.code
+  | .binaryState f =>
+      ∀ state left right, (f state left right).executionEnv.code =
+        state.executionEnv.code
+  | .ternaryCopy f =>
+      ∀ shared a b c, (f shared a b c).executionEnv.code =
+        shared.executionEnv.code
+  | .quaternaryCopy f =>
+      ∀ shared a b c d, (f shared a b c d).executionEnv.code =
+        shared.executionEnv.code
+  | _ => True
+
+theorem State_sstore_preserves_code
+    (state : EvmYul.State EvmYul.OperationType.EVM) (left right : Word) :
+    (EvmYul.State.sstore state left right).executionEnv.code =
+      state.executionEnv.code := by
+  simp [EvmYul.State.sstore, EvmYul.State.setAccount,
+    EvmYul.State.addAccessedStorageKey, EvmYul.State.lookupAccount]
+  cases hAcc :
+      Batteries.RBMap.find? state.accountMap state.executionEnv.codeOwner <;>
+    rfl
+
+theorem State_tstore_preserves_code
+    (state : EvmYul.State EvmYul.OperationType.EVM) (left right : Word) :
+    (EvmYul.State.tstore state left right).executionEnv.code =
+      state.executionEnv.code := by
+  simp [EvmYul.State.tstore, EvmYul.State.updateAccount,
+    EvmYul.State.lookupAccount]
+  cases hAcc :
+      Batteries.RBMap.find? state.accountMap state.executionEnv.codeOwner <;>
+    rfl
+
+theorem PrimStepPreservesCode.of_continuingStep
+    {op : PrimOp} {step : PrimStep}
+    (hStep : op.continuingStep? = some step) :
+    PrimStepPreservesCode step := by
+  cases op <;> simp [PrimOp.continuingStep?] at hStep <;>
+    subst step <;>
+    simp [PrimStepPreservesCode, State_sstore_preserves_code,
+      State_tstore_preserves_code, EvmYul.State.balance,
+      EvmYul.State.sload, EvmYul.State.tload, EvmYul.State.extCodeSize,
+      EvmYul.State.extCodeHash, EvmYul.State.addAccessedAccount,
+      EvmYul.State.addAccessedStorageKey, EvmYul.State.lookupAccount,
+      EvmYul.SharedState.calldatacopy, EvmYul.SharedState.codeCopy,
+      EvmYul.SharedState.extCodeCopy'] <;>
+    intros <;>
+    repeat split <;>
+    simp
+
+theorem PrimStep.run_preserves_code
+    {step : PrimStep} {state post : EVMState}
+    (hPreserve : PrimStepPreservesCode step)
+    (hRun : step.run state = .ok post) :
+    post.executionEnv.code = state.executionEnv.code := by
+  cases step with
+  | bin f =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, EvmYul.EVM.execBinOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.execBinOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | un f =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, EvmYul.EVM.execUnOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.execUnOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | tri f =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, EvmYul.EVM.execTriOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.execTriOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | executionEnv f =>
+      simp [PrimStep.run, EvmYul.EVM.executionEnvOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | unaryExecutionEnv f =>
+      cases hPop : state.stack.pop with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | machineState f =>
+      simp [PrimStep.run, EvmYul.EVM.machineStateOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | binaryMachineState f =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | binaryMachineStateWithResult f =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp', hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp', hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | ternaryMachineState f =>
+      cases hPop : state.stack.pop3 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.ternaryMachineStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.ternaryMachineStateOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | state f =>
+      simp [PrimStep.run, EvmYul.EVM.stateOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | unaryState f =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, EvmYul.EVM.unaryStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.unaryStateOp, hPop] at hRun
+          cases hRun
+          simp [PrimStepPreservesCode] at hPreserve
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, hPreserve]
+  | binaryState f =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, EvmYul.EVM.binaryStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryStateOp, hPop] at hRun
+          cases hRun
+          simp [PrimStepPreservesCode] at hPreserve
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, hPreserve]
+  | ternaryCopy f =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, EvmYul.EVM.ternaryCopyOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.ternaryCopyOp, hPop] at hRun
+          cases hRun
+          simp [PrimStepPreservesCode] at hPreserve
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, hPreserve]
+  | quaternaryCopy f =>
+      cases hPop : state.stack.pop4 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.quaternaryCopyOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d⟩
+          simp [PrimStep.run, EvmYul.EVM.quaternaryCopyOp, hPop] at hRun
+          cases hRun
+          simp [PrimStepPreservesCode] at hPreserve
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, hPreserve]
+  | pop =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | mload =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, offset⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | returndatacopy =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | dup n =>
+      by_cases hLen : n ≤ state.stack.length
+      · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
+  | swap n =>
+      by_cases hLen : n + 1 ≤ state.stack.length
+      · simp [PrimStep.run, EvmYul.swap, hLen] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [PrimStep.run, EvmYul.swap, hLen] at hRun
+  | log0 =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.SharedState.logOp,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log1 =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.SharedState.logOp,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log2 =>
+      cases hPop : state.stack.pop4 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.SharedState.logOp,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log3 =>
+      cases hPop : state.stack.pop5 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d, e⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.SharedState.logOp,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | log4 =>
+      cases hPop : state.stack.pop6 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d, e, f⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.SharedState.logOp,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | invalid =>
+      simp [PrimStep.run] at hRun
+
+theorem PrimOp.step_preserves_code_of_no_call_create
+    {op : PrimOp} {state post : EVMState}
+    (hNoCallCreate : op.isCallCreate = false)
+    (hRun : op.step state = .ok post) :
+    post.executionEnv.code = state.executionEnv.code := by
+  unfold PrimOp.step at hRun
+  cases hStep : op.continuingStep? with
+  | some step =>
+      simp [hStep] at hRun
+      exact
+        PrimStep.run_preserves_code
+          (PrimStepPreservesCode.of_continuingStep hStep) hRun
+  | none =>
+      simp [hStep] at hRun
+      cases op <;>
+        simp [PrimOp.continuingStep?, PrimOp.isCallCreate, PrimOp.toEVM] at hStep hNoCallCreate hRun
+      · have hStop :
+            EvmYul.step (τ := .EVM) EvmYul.Operation.STOP none state =
+              .ok
+                { state with
+                  toMachineState :=
+                    (state.toMachineState.setReturnData
+                      ByteArray.empty).setHReturn ByteArray.empty } := by
+          rfl
+        rw [hStop] at hRun
+        cases hRun
+        simp [EvmYul.MachineState.setReturnData,
+          EvmYul.MachineState.setHReturn]
+      · have hPc :
+            EvmYul.step (τ := .EVM) EvmYul.Operation.PC none state =
+              .ok
+                (EvmYul.EVM.State.replaceStackAndIncrPC state
+                  (state.stack.push state.pc)) := by
+          rfl
+        rw [hPc] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · change
+          (PrimStep.binaryMachineState EvmYul.MachineState.evmReturn).run
+              state =
+            .ok post at hRun
+        exact
+          PrimStep.run_preserves_code
+            (step := PrimStep.binaryMachineState EvmYul.MachineState.evmReturn)
+            trivial hRun
+      · change
+          (PrimStep.binaryMachineState EvmYul.MachineState.evmRevert).run
+              state =
+            .ok post at hRun
+        exact
+          PrimStep.run_preserves_code
+            (step := PrimStep.binaryMachineState EvmYul.MachineState.evmRevert)
+            trivial hRun
+      · cases hPop : state.stack.pop with
+        | none =>
+            rw [EvmYul_step_selfdestruct_stackUnderflow_of_pop_none hPop]
+              at hRun
+            cases hRun
+        | some popped =>
+            rcases popped with ⟨stack, recipient⟩
+            have hStack : state.stack = recipient :: stack :=
+              stack_eq_cons_of_pop hPop
+            rw [EvmYul.EVM.step_selfdestruct_of_stack
+              state recipient stack hStack] at hRun
+            cases hRun
+            simp [EvmYul.EVM.selfdestructState,
+              EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC,
+              EvmYul.MachineState.setHReturn]
+
+theorem Target.stepInstr_preserves_code_of_no_call_create
+    {instr : TargetInstr} {state post : EVMState}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hStep : Target.stepInstr instr state = .ok post) :
+    post.executionEnv.code = state.executionEnv.code := by
+  cases instr with
+  | push32 value =>
+      simp [Target.stepInstr] at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | jump =>
+      cases hPop : state.stack.pop with
+      | none =>
+          simp [Target.stepInstr, hPop] at hStep
+      | some popped =>
+          rcases popped with ⟨stack, dest⟩
+          simp [Target.stepInstr, hPop] at hStep
+          cases hStep
+          rfl
+  | jumpi =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [Target.stepInstr, hPop] at hStep
+      | some popped =>
+          rcases popped with ⟨stack, dest, cond⟩
+          simp [Target.stepInstr, hPop] at hStep
+          cases hStep
+          rfl
+  | jumpdest =>
+      simp [Target.stepInstr] at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.incrPC]
+  | prim op =>
+      change op.step state = .ok post at hStep
+      exact
+        PrimOp.step_preserves_code_of_no_call_create
+          (by simpa [targetInstrUsesCallCreate] using hNoCallCreate)
+          hStep
+
+theorem Target.stepInstrResult_running_preserves_code_of_no_call_create
+    {instr : TargetInstr} {state post : EVMState}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hStepResult :
+      Target.stepInstrResult instr state = .ok (.running post)) :
+    post.executionEnv.code = state.executionEnv.code := by
+  exact
+    Target.stepInstr_preserves_code_of_no_call_create hNoCallCreate
+      (Target.stepInstrResult_running_stepInstr hStepResult).1
+
+theorem Target.stepInstrResult_halted_preserves_code_of_no_call_create
+    {instr : TargetInstr} {state : EVMState} {halt : Halt}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hStepResult :
+      Target.stepInstrResult instr state = .ok (.halted halt)) :
+    halt.state.executionEnv.code = state.executionEnv.code := by
+  exact
+    Target.stepInstr_preserves_code_of_no_call_create hNoCallCreate
+      (Target.stepInstrResult_halted_stepInstr hStepResult).1
+
+theorem Target.runListResult_preserves_code_of_no_call_create :
+    ∀ {code : List TargetInstr} {state : EVMState} {result : StepResult},
+      Target.runListResult code state = .ok result →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      match result with
+      | .running post =>
+          post.executionEnv.code = state.executionEnv.code
+      | .halted halt =>
+          halt.state.executionEnv.code = state.executionEnv.code := by
+  intro code
+  induction code with
+  | nil =>
+      intro state result hRun _hNoCall
+      simp [Target.runListResult] at hRun
+      cases hRun
+      rfl
+  | cons instr rest ih =>
+      intro state result hRun hNoCall
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCall instr (by simp)
+      rcases Target.runListResult_cons_ok_cases hRun with
+        ⟨post, hStepResult, hRunRest⟩ | ⟨halt, hStepResult, hResult⟩
+      · have hHeadCode :
+            post.executionEnv.code = state.executionEnv.code :=
+          Target.stepInstrResult_running_preserves_code_of_no_call_create
+            hNoCallInstr hStepResult
+        have hNoCallRest :
+            ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+          intro instr' hMem
+          exact hNoCall instr' (by simp [hMem])
+        have hTailCode :=
+          ih hRunRest hNoCallRest
+        cases result with
+        | running final =>
+            exact hTailCode.trans hHeadCode
+        | halted halt =>
+            exact hTailCode.trans hHeadCode
+      · subst result
+        exact
+          Target.stepInstrResult_halted_preserves_code_of_no_call_create
+            hNoCallInstr hStepResult
 
 def TargetInstrBodyPreservesGas (instr : TargetInstr) : Prop :=
   ∀ {state post : EVMState},
@@ -6140,6 +7342,1749 @@ def XRunListPathReady (validJumps : Array Word) :
             result = .halted halt
         | .error _ =>
             False
+
+def XRunListPathDecodeReady :
+    List TargetInstr → EVMState → EVMState → StepResult → Prop
+  | [], _target, _full, _result => True
+  | instr :: rest, target, full, result =>
+      EvmYul.EVM.decode full.executionEnv.code full.pc =
+        some (instr.op, instr.arg) ∧
+        match Target.stepInstrResult instr target with
+        | .ok (.running targetPost) =>
+            ∀ {stepFuel : Nat} {fullPost : EVMState},
+              EvmYul.EVM.step stepFuel.succ
+                  (EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  (some (instr.op, instr.arg))
+                  (memoryGasState full instr.op) =
+                .ok fullPost →
+              XRunListPathDecodeReady rest targetPost fullPost result
+        | .ok (.halted _halt) =>
+            True
+        | .error _ =>
+            False
+
+def XRunListPathChecksReady (validJumps : Array Word) :
+    List TargetInstr → EVMState → EVMState → StepResult → Prop
+  | [], target, full, result =>
+      result = .running target ∧ GasExecRel full target
+  | instr :: rest, target, full, result =>
+      GasExecRel full target ∧
+        XNonGasChecksPass validJumps full instr.op ∧
+        targetInstrUsesCallCreate instr = false ∧
+        match Target.stepInstrResult instr target with
+        | .ok (.running targetPost) =>
+            ∀ {stepFuel : Nat} {fullPost : EVMState},
+              EvmYul.EVM.step stepFuel.succ
+                  (EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  (some (instr.op, instr.arg))
+                  (memoryGasState full instr.op) =
+                .ok fullPost →
+              XRunListPathChecksReady validJumps rest targetPost fullPost result
+        | .ok (.halted halt) =>
+            result = .halted halt
+        | .error _ =>
+            False
+
+def XRunListPathCoreChecksReady (validJumps : Array Word) :
+    List TargetInstr → EVMState → EVMState → StepResult → Prop
+  | [], target, full, result =>
+      result = .running target ∧ GasExecRel full target
+  | instr :: rest, target, full, result =>
+      GasExecRel full target ∧
+        XNonGasCoreChecksPass validJumps full instr.op ∧
+        match Target.stepInstrResult instr target with
+        | .ok (.running targetPost) =>
+            ∀ {stepFuel : Nat} {fullPost : EVMState},
+              EvmYul.EVM.step stepFuel.succ
+                  (EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  (some (instr.op, instr.arg))
+                  (memoryGasState full instr.op) =
+                .ok fullPost →
+              XRunListPathCoreChecksReady validJumps rest targetPost
+                fullPost result
+        | .ok (.halted halt) =>
+            result = .halted halt
+        | .error _ =>
+            False
+
+/--
+Gasless target execution with the non-gas `EVM.X` core checks made explicit.
+
+This is the thin intermediate layer between `Target.runListResult` and the
+gas-aware replay proof: it follows the same target instructions, but records
+the stack/jump/static checks that `EVM.X` performs before delegating to
+`EVM.step`.
+-/
+inductive CoreRunListResult (validJumps : Array Word) :
+    List TargetInstr → EVMState → StepResult → Prop where
+  | nil (state : EVMState) :
+      CoreRunListResult validJumps [] state (.running state)
+  | stepRunning {instr : TargetInstr} {rest : List TargetInstr}
+      {state mid : EVMState} {result : StepResult}
+      (hCore : XNonGasCoreChecksPass validJumps state instr.op)
+      (hStep :
+        Target.stepInstrResult instr state = .ok (.running mid))
+      (hRest : CoreRunListResult validJumps rest mid result) :
+      CoreRunListResult validJumps (instr :: rest) state result
+  | stepHalted {instr : TargetInstr} {rest : List TargetInstr}
+      {state : EVMState} {halt : Halt}
+      (hCore : XNonGasCoreChecksPass validJumps state instr.op)
+      (hStep :
+        Target.stepInstrResult instr state = .ok (.halted halt)) :
+      CoreRunListResult validJumps (instr :: rest) state (.halted halt)
+
+theorem CoreRunListResult.to_runListResult {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {state : EVMState} {result : StepResult},
+      CoreRunListResult validJumps code state result →
+        Target.runListResult code state = .ok result := by
+  intro code state result hCore
+  induction hCore with
+  | nil state =>
+      rfl
+  | stepRunning hCoreStep hStep hRest ih =>
+      rw [Target.runListResult, hStep]
+      simpa using ih
+  | stepHalted hCoreStep hStep =>
+      rw [Target.runListResult, hStep]
+      rfl
+
+theorem CoreRunListResult.singleton_of_core
+    {validJumps : Array Word} {instr : TargetInstr}
+    {state : EVMState} {result : StepResult}
+    (hCore : XNonGasCoreChecksPass validJumps state instr.op)
+    (hRun : Target.runListResult [instr] state = .ok result) :
+    CoreRunListResult validJumps [instr] state result := by
+  rcases Target.runListResult_cons_ok_cases hRun with
+    ⟨mid, hStep, hRest⟩ | ⟨halt, hStep, hResult⟩
+  · simp [Target.runListResult] at hRest
+    subst result
+    exact
+      CoreRunListResult.stepRunning hCore hStep
+        (CoreRunListResult.nil (validJumps := validJumps) mid)
+  · subst result
+    exact CoreRunListResult.stepHalted hCore hStep
+
+theorem XCoreStackAndJumpInputsReady.push32
+    {validJumps : Array Word} {state : EVMState} {value : Word} :
+    XCoreStackAndJumpInputsReady validJumps state
+      (TargetInstr.push32 value).op := by
+  simp [XCoreStackAndJumpInputsReady, TargetInstr.op, EvmYul.EVM.δ]
+
+theorem XNonGasCoreChecksPass.push32_of_stack
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    (hStack : state.stack.length + 1 ≤ 1024) :
+    XNonGasCoreChecksPass validJumps state (TargetInstr.push32 value).op := by
+  exact
+    XNonGasCoreChecksPass.of_inputs_overflow_static
+      (XCoreStackAndJumpInputsReady.push32
+        (validJumps := validJumps) (state := state) (value := value))
+      (by
+        simpa [TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α] using hStack)
+      (by
+        intro _hStatic hWrite
+        simp [staticWriteSensitive, TargetInstr.op] at hWrite)
+
+theorem XNonGasCoreChecksPass.jumpdest_of_stack
+    {validJumps : Array Word} {state : EVMState}
+    (hStack : state.stack.length ≤ 1024) :
+    XNonGasCoreChecksPass validJumps state TargetInstr.jumpdest.op := by
+  refine
+    XNonGasCoreChecksPass.of_inputs_overflow_static ?_ ?_ ?_
+  · simp [XCoreStackAndJumpInputsReady, TargetInstr.op, EvmYul.EVM.δ]
+  · simpa [TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α] using hStack
+  · intro _hStatic hWrite
+    simp [staticWriteSensitive, TargetInstr.op] at hWrite
+
+theorem CoreRunListResult.jumpdest_of_stack
+    {validJumps : Array Word} {state : EVMState} {result : StepResult}
+    (hStack : state.stack.length ≤ 1024)
+    (hRun :
+      Target.runListResult [TargetInstr.jumpdest] state = .ok result) :
+    CoreRunListResult validJumps [TargetInstr.jumpdest] state result :=
+  CoreRunListResult.singleton_of_core
+    (XNonGasCoreChecksPass.jumpdest_of_stack
+      (validJumps := validJumps) (state := state) hStack)
+    hRun
+
+theorem CoreRunListResult.push32_of_stack
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    {result : StepResult}
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult [TargetInstr.push32 value] state = .ok result) :
+    CoreRunListResult validJumps [TargetInstr.push32 value] state result :=
+  CoreRunListResult.singleton_of_core
+    (XNonGasCoreChecksPass.push32_of_stack
+      (validJumps := validJumps) (state := state) (value := value) hStack)
+    hRun
+
+theorem XNonGasCoreChecksPass.jump_after_push32_of_allowed
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    (hAllowed : jumpTargetAllowed (some value) validJumps)
+    (hStack : state.stack.length + 1 ≤ 1024) :
+    XNonGasCoreChecksPass validJumps
+      (EvmYul.EVM.State.replaceStackAndIncrPC state
+        (state.stack.push value) (pcΔ := 33))
+      TargetInstr.jump.op := by
+  refine
+    XNonGasCoreChecksPass.of_inputs_overflow_static ?_ ?_ ?_
+  · refine ⟨?_, ?_, ?_, ?_⟩
+    · simp [TargetInstr.op, EvmYul.EVM.δ]
+    · simp [TargetInstr.op, EvmYul.EVM.δ, EvmYul.Stack.push,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+    · intro _hOp
+      simpa [jumpTargetAllowed, EvmYul.Stack.push,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] using hAllowed
+    · intro hOp
+      simp [TargetInstr.op] at hOp
+  · simp [TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α,
+      EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+    omega
+  · intro _hStatic hWrite
+    simp [staticWriteSensitive, TargetInstr.op] at hWrite
+
+theorem XNonGasCoreChecksPass.jumpi_after_push32_of_allowed
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    (hStackNonempty : 1 ≤ state.stack.length)
+    (hAllowed :
+      state.stack[0]? ≠ some ⟨0⟩ →
+        jumpTargetAllowed (some value) validJumps)
+    (hStack : state.stack.length + 1 ≤ 1024) :
+    XNonGasCoreChecksPass validJumps
+      (EvmYul.EVM.State.replaceStackAndIncrPC state
+        (state.stack.push value) (pcΔ := 33))
+      TargetInstr.jumpi.op := by
+  refine
+    XNonGasCoreChecksPass.of_inputs_overflow_static ?_ ?_ ?_
+  · refine ⟨?_, ?_, ?_, ?_⟩
+    · simp [TargetInstr.op, EvmYul.EVM.δ]
+    · simp [TargetInstr.op, EvmYul.EVM.δ, EvmYul.Stack.push,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+      omega
+    · intro hOp
+      simp [TargetInstr.op] at hOp
+    · intro _hOp hCond
+      exact hAllowed (by
+        simpa [EvmYul.Stack.push,
+          EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] using hCond)
+  · simp [TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α,
+      EvmYul.Stack.push, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+    omega
+  · intro _hStatic hWrite
+    simp [staticWriteSensitive, TargetInstr.op] at hWrite
+
+theorem CoreRunListResult.push32_jump_of_allowed
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    {result : StepResult}
+    (hAllowed : jumpTargetAllowed (some value) validJumps)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult [TargetInstr.push32 value, TargetInstr.jump]
+        state = .ok result) :
+    CoreRunListResult validJumps
+      [TargetInstr.push32 value, TargetInstr.jump] state result := by
+  let mid :=
+    EvmYul.EVM.State.replaceStackAndIncrPC state
+      (state.stack.push value) (pcΔ := 33)
+  have hPushStep :
+      Target.stepInstrResult (TargetInstr.push32 value) state =
+        .ok (.running mid) := by
+    rfl
+  have hRunRest :
+      Target.runListResult [TargetInstr.jump] mid = .ok result := by
+    simpa [mid, Target.runListResult, Target.stepInstrResult,
+      Target.stepInstr] using hRun
+  exact
+    CoreRunListResult.stepRunning
+      (XNonGasCoreChecksPass.push32_of_stack
+        (validJumps := validJumps) (state := state) (value := value)
+        hStack)
+      hPushStep
+      (CoreRunListResult.singleton_of_core
+        (XNonGasCoreChecksPass.jump_after_push32_of_allowed
+          (validJumps := validJumps) (state := state) (value := value)
+          hAllowed hStack)
+        hRunRest)
+
+theorem CoreRunListResult.push32_jumpi_of_allowed
+    {validJumps : Array Word} {state : EVMState} {value : Word}
+    {result : StepResult}
+    (hStackNonempty : 1 ≤ state.stack.length)
+    (hAllowed :
+      state.stack[0]? ≠ some ⟨0⟩ →
+        jumpTargetAllowed (some value) validJumps)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult [TargetInstr.push32 value, TargetInstr.jumpi]
+        state = .ok result) :
+    CoreRunListResult validJumps
+      [TargetInstr.push32 value, TargetInstr.jumpi] state result := by
+  let mid :=
+    EvmYul.EVM.State.replaceStackAndIncrPC state
+      (state.stack.push value) (pcΔ := 33)
+  have hPushStep :
+      Target.stepInstrResult (TargetInstr.push32 value) state =
+        .ok (.running mid) := by
+    rfl
+  have hRunRest :
+      Target.runListResult [TargetInstr.jumpi] mid = .ok result := by
+    simpa [mid, Target.runListResult, Target.stepInstrResult,
+      Target.stepInstr] using hRun
+  exact
+    CoreRunListResult.stepRunning
+      (XNonGasCoreChecksPass.push32_of_stack
+        (validJumps := validJumps) (state := state) (value := value)
+        hStack)
+      hPushStep
+      (CoreRunListResult.singleton_of_core
+        (XNonGasCoreChecksPass.jumpi_after_push32_of_allowed
+          (validJumps := validJumps) (state := state) (value := value)
+          hStackNonempty hAllowed hStack)
+        hRunRest)
+
+theorem CoreRunListResult.push32_jump_of_labelPc
+    {program : Program} {target : TargetProgram} {label : Label}
+    {dest : Nat} {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hDest : Program.labelPc program label = some dest)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult
+          [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+          , TargetInstr.jump ]
+        state = .ok result) :
+    CoreRunListResult (validJumps target)
+      [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+      , TargetInstr.jump ]
+      state result :=
+  CoreRunListResult.push32_jump_of_allowed
+    (validJumps := validJumps target) (state := state)
+    (value := EvmYul.UInt256.ofNat dest)
+    (jumpTargetAllowed_of_assemble_labelPc hAsm hJumpdest hDest)
+    hStack hRun
+
+theorem CoreRunListResult.push32_jumpi_of_labelPc
+    {program : Program} {target : TargetProgram} {label : Label}
+    {dest : Nat} {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hDest : Program.labelPc program label = some dest)
+    (hStackNonempty : 1 ≤ state.stack.length)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult
+          [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+          , TargetInstr.jumpi ]
+        state = .ok result) :
+    CoreRunListResult (validJumps target)
+      [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+      , TargetInstr.jumpi ]
+      state result :=
+  CoreRunListResult.push32_jumpi_of_allowed
+    (validJumps := validJumps target) (state := state)
+    (value := EvmYul.UInt256.ofNat dest)
+    hStackNonempty
+    (fun _hCond =>
+      jumpTargetAllowed_of_assemble_labelPc hAsm hJumpdest hDest)
+    hStack hRun
+
+theorem CoreRunListResult.of_emitInstr_jump
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {label : Label} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hEmit : emitInstr? program pc (.jump label) = some emitted)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult (validJumps target)
+      (emitted.map LocatedTarget.instr) state result := by
+  cases hDest : Program.labelPc program label with
+  | none =>
+      simp [emitInstr?, hDest] at hEmit
+  | some dest =>
+      simp [emitInstr?, hDest] at hEmit
+      subst emitted
+      exact
+        CoreRunListResult.push32_jump_of_labelPc
+          (program := program) (target := target) (label := label)
+          (dest := dest) hAsm hJumpdest hDest hStack
+          (by simpa using hRun)
+
+theorem CoreRunListResult.of_emitInstr_jumpi
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {label : Label} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hEmit : emitInstr? program pc (.jumpi label) = some emitted)
+    (hStackNonempty : 1 ≤ state.stack.length)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult (validJumps target)
+      (emitted.map LocatedTarget.instr) state result := by
+  cases hDest : Program.labelPc program label with
+  | none =>
+      simp [emitInstr?, hDest] at hEmit
+  | some dest =>
+      simp [emitInstr?, hDest] at hEmit
+      subst emitted
+      exact
+        CoreRunListResult.push32_jumpi_of_labelPc
+          (program := program) (target := target) (label := label)
+          (dest := dest) hAsm hJumpdest hDest hStackNonempty hStack
+          (by simpa using hRun)
+
+theorem CoreRunListResult.of_emitInstr_label
+    {validJumps : Array Word} {program : Program} {pc : Nat}
+    {label : Label} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hEmit : emitInstr? program pc (.label label) = some emitted)
+    (hStack : state.stack.length ≤ 1024)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult validJumps
+      (emitted.map LocatedTarget.instr) state result := by
+  simp [emitInstr?] at hEmit
+  subst emitted
+  exact
+    CoreRunListResult.jumpdest_of_stack
+      (validJumps := validJumps) hStack (by simpa using hRun)
+
+theorem CoreRunListResult.of_emitInstr_push
+    {validJumps : Array Word} {program : Program} {pc : Nat}
+    {value : Word} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hEmit : emitInstr? program pc (.push value) = some emitted)
+    (hStack : state.stack.length + 1 ≤ 1024)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult validJumps
+      (emitted.map LocatedTarget.instr) state result := by
+  simp [emitInstr?] at hEmit
+  subst emitted
+  exact
+    CoreRunListResult.push32_of_stack
+      (validJumps := validJumps) hStack (by simpa using hRun)
+
+def InstrControlCoreStackReady (instr : Instr) (state : EVMState) : Prop :=
+  match instr with
+  | .label _ => state.stack.length ≤ 1024
+  | .push _ | .jump _ => state.stack.length + 1 ≤ 1024
+  | .jumpi _ => 1 ≤ state.stack.length ∧ state.stack.length + 1 ≤ 1024
+  | .prim _ => False
+
+def InstrCoreBlockReady (target : TargetProgram) (instr : Instr)
+    (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      XNonGasCoreChecksPass (validJumps target) state
+        (TargetInstr.prim op).op
+  | _ => InstrControlCoreStackReady instr state
+
+def InstrCoreBlockInputsReady (target : TargetProgram) (instr : Instr)
+    (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      let evmOp := (TargetInstr.prim op).op
+      XCoreStackAndJumpInputsReady (validJumps target) state evmOp ∧
+        state.stack.length - (EvmYul.EVM.δ evmOp).getD 0 +
+            (EvmYul.EVM.α evmOp).getD 0 ≤ 1024 ∧
+          (state.executionEnv.perm = false →
+            ¬ staticWriteSensitive evmOp state.stack)
+  | _ => InstrControlCoreStackReady instr state
+
+def InstrControlCoreInputsReady (instr : Instr) (state : EVMState) : Prop :=
+  match instr with
+  | .prim _ => True
+  | _ => InstrControlCoreStackReady instr state
+
+def InstrPrimitiveStackJumpInputsReady
+    (target : TargetProgram) (instr : Instr) (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      XCoreStackAndJumpInputsReady (validJumps target) state
+        (TargetInstr.prim op).op
+  | _ => True
+
+def InstrPrimitiveOverflowInputsReady
+    (_target : TargetProgram) (instr : Instr) (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      let evmOp := (TargetInstr.prim op).op
+      state.stack.length - (EvmYul.EVM.δ evmOp).getD 0 +
+          (EvmYul.EVM.α evmOp).getD 0 ≤ 1024
+  | _ => True
+
+def InstrPrimitiveStaticInputsReady
+    (_target : TargetProgram) (instr : Instr) (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      let evmOp := (TargetInstr.prim op).op
+      state.executionEnv.perm = false →
+        ¬ staticWriteSensitive evmOp state.stack
+  | _ => True
+
+structure XBlockInstrCoreInputResources
+    (program : Program) (target : TargetProgram) : Prop where
+  controlStack :
+    ∀ {pc : Nat} {instr : Instr}
+        {emitted before after : List LocatedTarget}
+        {blockState : EVMState} {blockResult : StepResult},
+      Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+        emitInstr? program pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+            Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+              .ok blockResult →
+            InstrControlCoreInputsReady instr blockState
+  primitiveStackJump :
+    ∀ {pc : Nat} {instr : Instr}
+        {emitted before after : List LocatedTarget}
+        {blockState : EVMState} {blockResult : StepResult},
+      Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+        emitInstr? program pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+            Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+              .ok blockResult →
+            InstrPrimitiveStackJumpInputsReady target instr blockState
+  primitiveOverflow :
+    ∀ {pc : Nat} {instr : Instr}
+        {emitted before after : List LocatedTarget}
+        {blockState : EVMState} {blockResult : StepResult},
+      Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+        emitInstr? program pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+            Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+              .ok blockResult →
+            InstrPrimitiveOverflowInputsReady target instr blockState
+  primitiveStatic :
+    ∀ {pc : Nat} {instr : Instr}
+        {emitted before after : List LocatedTarget}
+        {blockState : EVMState} {blockResult : StepResult},
+      Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+        emitInstr? program pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+            Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+              .ok blockResult →
+            InstrPrimitiveStaticInputsReady target instr blockState
+
+def InstrPrimitiveCoreReady (target : TargetProgram) (instr : Instr)
+    (state : EVMState) : Prop :=
+  match instr with
+  | .prim op =>
+      XNonGasCoreChecksPass (validJumps target) state
+        (TargetInstr.prim op).op
+  | _ => True
+
+def XBlockInstrCoreReady (program : Program) (target : TargetProgram) :
+    Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          InstrCoreBlockReady target instr blockState
+
+def XBlockInstrCoreInputsReady
+    (program : Program) (target : TargetProgram) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          InstrCoreBlockInputsReady target instr blockState
+
+inductive InstrCoreBlockTraceReadyFor
+    {program : Program} (target : TargetProgram) :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : StepResult} →
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult → Prop where
+  | done (state : EVMState) :
+      InstrCoreBlockTraceReadyFor target
+        (Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : StepResult}
+      {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Preservation.BlockTraceResult program target fuel mid result)
+      (hReady : InstrCoreBlockReady target instr state)
+      (hRestReady : InstrCoreBlockTraceReadyFor target hRest) :
+      InstrCoreBlockTraceReadyFor target
+        (Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Halt}
+      {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hReady : InstrCoreBlockReady target instr state) :
+      InstrCoreBlockTraceReadyFor target
+        (Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+inductive InstrCoreBlockTraceInputsReadyFor
+    {program : Program} (target : TargetProgram) :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : StepResult} →
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult → Prop where
+  | done {state : EVMState} :
+      InstrCoreBlockTraceInputsReadyFor target
+        (Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : StepResult}
+      {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Preservation.BlockTraceResult program target fuel mid result)
+      (hInputs : InstrCoreBlockInputsReady target instr state)
+      (hRestReady : InstrCoreBlockTraceInputsReadyFor target hRest) :
+      InstrCoreBlockTraceInputsReadyFor target
+        (Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Halt}
+      {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hInputs : InstrCoreBlockInputsReady target instr state) :
+      InstrCoreBlockTraceInputsReadyFor target
+        (Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+theorem InstrCoreBlockReady.of_inputs_ready
+    {target : TargetProgram} {instr : Instr} {state : EVMState}
+    (hInputs : InstrCoreBlockInputsReady target instr state) :
+    InstrCoreBlockReady target instr state := by
+  cases instr with
+  | label label =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hInputs
+  | prim op =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using
+        XNonGasCoreChecksPass.of_inputs_overflow_static
+          hInputs.1 hInputs.2.1 hInputs.2.2
+  | push value =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hInputs
+  | jump targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hInputs
+  | jumpi targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hInputs
+
+theorem InstrCoreBlockInputsReady.of_ready
+    {target : TargetProgram} {instr : Instr} {state : EVMState}
+    (hReady : InstrCoreBlockReady target instr state) :
+    InstrCoreBlockInputsReady target instr state := by
+  cases instr with
+  | label label =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hReady
+  | prim op =>
+      rcases hReady with
+        ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
+      exact
+        ⟨⟨hDelta, hStack, hJump, hJumpi⟩, hOverflow, hStatic⟩
+  | push value =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hReady
+  | jump targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hReady
+  | jumpi targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrCoreBlockReady] using hReady
+
+theorem instrCoreBlockInputsReady_iff_ready
+    {target : TargetProgram} {instr : Instr} {state : EVMState} :
+    InstrCoreBlockInputsReady target instr state ↔
+      InstrCoreBlockReady target instr state :=
+  ⟨InstrCoreBlockReady.of_inputs_ready,
+    InstrCoreBlockInputsReady.of_ready⟩
+
+theorem XBlockInstrCoreReady.of_inputs
+    {program : Program} {target : TargetProgram}
+    (hInputs : XBlockInstrCoreInputsReady program target) :
+    XBlockInstrCoreReady program target := by
+  intro pc instr emitted before after blockState blockResult
+    hAt hEmit hTargetBlock hRun
+  exact
+    InstrCoreBlockReady.of_inputs_ready
+      (hInputs hAt hEmit hTargetBlock hRun)
+
+theorem XBlockInstrCoreInputsReady.of_ready
+    {program : Program} {target : TargetProgram}
+    (hReady : XBlockInstrCoreReady program target) :
+    XBlockInstrCoreInputsReady program target := by
+  intro pc instr emitted before after blockState blockResult
+    hAt hEmit hTargetBlock hRun
+  exact
+    InstrCoreBlockInputsReady.of_ready
+      (hReady hAt hEmit hTargetBlock hRun)
+
+theorem XBlockInstrCoreInputsReady.of_resources
+    {program : Program} {target : TargetProgram}
+    (hResources : XBlockInstrCoreInputResources program target) :
+    XBlockInstrCoreInputsReady program target := by
+  intro pc instr emitted before after blockState blockResult
+    hAt hEmit hTargetBlock hRun
+  cases instr with
+  | label label =>
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreInputsReady] using
+        hResources.controlStack hAt hEmit hTargetBlock hRun
+  | prim op =>
+      exact
+        ⟨by
+          simpa [InstrPrimitiveStackJumpInputsReady] using
+            hResources.primitiveStackJump hAt hEmit hTargetBlock hRun,
+         by
+          simpa [InstrPrimitiveOverflowInputsReady] using
+            hResources.primitiveOverflow hAt hEmit hTargetBlock hRun,
+         by
+          simpa [InstrPrimitiveStaticInputsReady] using
+            hResources.primitiveStatic hAt hEmit hTargetBlock hRun⟩
+  | push value =>
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreInputsReady] using
+        hResources.controlStack hAt hEmit hTargetBlock hRun
+  | jump targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreInputsReady] using
+        hResources.controlStack hAt hEmit hTargetBlock hRun
+  | jumpi targetLabel =>
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreInputsReady] using
+        hResources.controlStack hAt hEmit hTargetBlock hRun
+
+theorem XBlockInstrCoreInputResources.of_inputs_ready
+    {program : Program} {target : TargetProgram}
+    (hInputs : XBlockInstrCoreInputsReady program target) :
+    XBlockInstrCoreInputResources program target where
+  controlStack := by
+    intro pc instr emitted before after blockState blockResult
+      hAt hEmit hTargetBlock hRun
+    have hBlock := hInputs hAt hEmit hTargetBlock hRun
+    cases instr with
+    | label label =>
+        simpa [InstrControlCoreInputsReady, InstrCoreBlockInputsReady]
+          using hBlock
+    | prim op =>
+        simp [InstrControlCoreInputsReady]
+    | push value =>
+        simpa [InstrControlCoreInputsReady, InstrCoreBlockInputsReady]
+          using hBlock
+    | jump targetLabel =>
+        simpa [InstrControlCoreInputsReady, InstrCoreBlockInputsReady]
+          using hBlock
+    | jumpi targetLabel =>
+        simpa [InstrControlCoreInputsReady, InstrCoreBlockInputsReady]
+          using hBlock
+  primitiveStackJump := by
+    intro pc instr emitted before after blockState blockResult
+      hAt hEmit hTargetBlock hRun
+    have hBlock := hInputs hAt hEmit hTargetBlock hRun
+    cases instr with
+    | label label =>
+        simp [InstrPrimitiveStackJumpInputsReady]
+    | prim op =>
+        simpa [InstrPrimitiveStackJumpInputsReady,
+          InstrCoreBlockInputsReady] using hBlock.1
+    | push value =>
+        simp [InstrPrimitiveStackJumpInputsReady]
+    | jump targetLabel =>
+        simp [InstrPrimitiveStackJumpInputsReady]
+    | jumpi targetLabel =>
+        simp [InstrPrimitiveStackJumpInputsReady]
+  primitiveOverflow := by
+    intro pc instr emitted before after blockState blockResult
+      hAt hEmit hTargetBlock hRun
+    have hBlock := hInputs hAt hEmit hTargetBlock hRun
+    cases instr with
+    | label label =>
+        simp [InstrPrimitiveOverflowInputsReady]
+    | prim op =>
+        simpa [InstrPrimitiveOverflowInputsReady,
+          InstrCoreBlockInputsReady] using hBlock.2.1
+    | push value =>
+        simp [InstrPrimitiveOverflowInputsReady]
+    | jump targetLabel =>
+        simp [InstrPrimitiveOverflowInputsReady]
+    | jumpi targetLabel =>
+        simp [InstrPrimitiveOverflowInputsReady]
+  primitiveStatic := by
+    intro pc instr emitted before after blockState blockResult
+      hAt hEmit hTargetBlock hRun
+    have hBlock := hInputs hAt hEmit hTargetBlock hRun
+    cases instr with
+    | label label =>
+        simp [InstrPrimitiveStaticInputsReady]
+    | prim op =>
+        simpa [InstrPrimitiveStaticInputsReady,
+          InstrCoreBlockInputsReady] using hBlock.2.2
+    | push value =>
+        simp [InstrPrimitiveStaticInputsReady]
+    | jump targetLabel =>
+        simp [InstrPrimitiveStaticInputsReady]
+    | jumpi targetLabel =>
+        simp [InstrPrimitiveStaticInputsReady]
+
+theorem InstrCoreBlockReady.of_stack_bound16_and_primitive
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {instr : Instr} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hStack : state.stack.length ≤ 16)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result)
+    (hPrimitive : InstrPrimitiveCoreReady target instr state) :
+    InstrCoreBlockReady target instr state := by
+  cases instr with
+  | label label =>
+      simpa [InstrCoreBlockReady, InstrControlCoreStackReady] using
+        (show state.stack.length ≤ 1024 by omega)
+  | prim op =>
+      simpa [InstrCoreBlockReady, InstrPrimitiveCoreReady] using hPrimitive
+  | push value =>
+      simpa [InstrCoreBlockReady, InstrControlCoreStackReady] using
+        (show state.stack.length + 1 ≤ 1024 by omega)
+  | jump label =>
+      simpa [InstrCoreBlockReady, InstrControlCoreStackReady] using
+        (show state.stack.length + 1 ≤ 1024 by omega)
+  | jumpi label =>
+      cases hDest : Program.labelPc program label with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          have hNonempty : 1 ≤ state.stack.length := by
+            cases hStackEq : state.stack with
+            | nil =>
+                have hRunErr :
+                    Target.runListResult
+                        [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+                        , TargetInstr.jumpi ] state =
+                      .error EvmYul.EVM.ExecutionException.StackUnderflow := by
+                  rw [Preservation.run_push_jumpi_result dest state]
+                  simp [hStackEq, EvmYul.Stack.pop]
+                have hRunPlain :
+                    Target.runListResult
+                        [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+                        , TargetInstr.jumpi ] state =
+                      .ok result := by
+                  simpa using hRun
+                rw [hRunErr] at hRunPlain
+                cases hRunPlain
+            | cons head tail =>
+                simp
+          simp [InstrCoreBlockReady, InstrControlCoreStackReady,
+            hNonempty]
+          omega
+
+theorem InstrCoreBlockTraceReadyFor.of_inputs_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hInputs : InstrCoreBlockTraceInputsReadyFor target hTrace) :
+    InstrCoreBlockTraceReadyFor target hTrace := by
+  induction hInputs with
+  | done =>
+      rename_i state
+      exact InstrCoreBlockTraceReadyFor.done (target := target) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest
+      hInputs _ ih =>
+      exact InstrCoreBlockTraceReadyFor.stepRunning
+        (target := target)
+        hAt hEmit hTargetBlock hRun hRest
+        (InstrCoreBlockReady.of_inputs_ready hInputs)
+        ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hInputs =>
+      exact InstrCoreBlockTraceReadyFor.stepHalted
+        (target := target)
+        fuel
+        hAt hEmit hTargetBlock hRun
+        (InstrCoreBlockReady.of_inputs_ready hInputs)
+
+theorem InstrCoreBlockTraceInputsReadyFor.of_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hReady : InstrCoreBlockTraceReadyFor target hTrace) :
+    InstrCoreBlockTraceInputsReadyFor target hTrace := by
+  induction hReady with
+  | done =>
+      rename_i state
+      exact InstrCoreBlockTraceInputsReadyFor.done (target := target)
+  | stepRunning hAt hEmit hTargetBlock hRun hRest
+      hBlockReady _ ih =>
+      exact InstrCoreBlockTraceInputsReadyFor.stepRunning
+        (target := target)
+        hAt hEmit hTargetBlock hRun hRest
+        (InstrCoreBlockInputsReady.of_ready hBlockReady)
+        ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hBlockReady =>
+      exact InstrCoreBlockTraceInputsReadyFor.stepHalted
+        (target := target)
+        fuel
+        hAt hEmit hTargetBlock hRun
+        (InstrCoreBlockInputsReady.of_ready hBlockReady)
+
+theorem instrCoreBlockTraceInputsReadyFor_iff_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult} :
+    InstrCoreBlockTraceInputsReadyFor target hTrace ↔
+      InstrCoreBlockTraceReadyFor target hTrace :=
+  ⟨InstrCoreBlockTraceReadyFor.of_inputs_ready,
+    InstrCoreBlockTraceInputsReadyFor.of_ready⟩
+
+theorem InstrCoreBlockTraceInputsReadyFor.of_block_instr_inputs_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hInputs : XBlockInstrCoreInputsReady program target) :
+    InstrCoreBlockTraceInputsReadyFor target hTrace := by
+  induction hTrace with
+  | done state =>
+      exact InstrCoreBlockTraceInputsReadyFor.done (target := target)
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      exact InstrCoreBlockTraceInputsReadyFor.stepRunning
+        (target := target)
+        hAt hEmit hTargetBlock hRun hRest
+        (hInputs hAt hEmit hTargetBlock hRun)
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact InstrCoreBlockTraceInputsReadyFor.stepHalted
+        (target := target)
+        fuel
+        hAt hEmit hTargetBlock hRun
+        (hInputs hAt hEmit hTargetBlock hRun)
+
+theorem CoreRunListResult.of_emitInstr_control
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {instr : Instr} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hReady : InstrControlCoreStackReady instr state)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult (validJumps target)
+      (emitted.map LocatedTarget.instr) state result := by
+  cases instr with
+  | label label =>
+      exact
+        CoreRunListResult.of_emitInstr_label
+          (validJumps := validJumps target) hEmit hReady hRun
+  | prim op =>
+      cases hReady
+  | push value =>
+      exact
+        CoreRunListResult.of_emitInstr_push
+          (validJumps := validJumps target) hEmit hReady hRun
+  | jump label =>
+      exact
+        CoreRunListResult.of_emitInstr_jump
+          (program := program) (target := target)
+          (pc := pc) (label := label) hAsm hJumpdest hEmit hReady hRun
+  | jumpi label =>
+      exact
+        CoreRunListResult.of_emitInstr_jumpi
+          (program := program) (target := target)
+          (pc := pc) (label := label) hAsm hJumpdest hEmit
+          hReady.1 hReady.2 hRun
+
+theorem CoreRunListResult.of_emitInstr_coreBlockReady
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {instr : Instr} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hReady : InstrCoreBlockReady target instr state)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    CoreRunListResult (validJumps target)
+      (emitted.map LocatedTarget.instr) state result := by
+  cases instr with
+  | label label =>
+      exact
+        CoreRunListResult.of_emitInstr_control
+          (program := program) (target := target) (pc := pc)
+          (instr := .label label) hAsm hJumpdest hEmit hReady hRun
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      exact
+        CoreRunListResult.singleton_of_core hReady (by simpa using hRun)
+  | push value =>
+      exact
+        CoreRunListResult.of_emitInstr_control
+          (program := program) (target := target) (pc := pc)
+          (instr := .push value) hAsm hJumpdest hEmit hReady hRun
+  | jump label =>
+      exact
+        CoreRunListResult.of_emitInstr_control
+          (program := program) (target := target) (pc := pc)
+          (instr := .jump label) hAsm hJumpdest hEmit hReady hRun
+  | jumpi label =>
+      exact
+        CoreRunListResult.of_emitInstr_control
+          (program := program) (target := target) (pc := pc)
+          (instr := .jumpi label) hAsm hJumpdest hEmit hReady hRun
+
+theorem CoreRunListResult.of_suffix_core {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {state : EVMState} {result : StepResult},
+      Target.runListResult code state = .ok result →
+      XRunListSuffixCoreNonGasReady validJumps code →
+        CoreRunListResult validJumps code state result := by
+  intro code
+  induction code with
+  | nil =>
+      intro state result hRun _hCore
+      simp [Target.runListResult] at hRun
+      subst result
+      exact CoreRunListResult.nil (validJumps := validJumps) state
+  | cons instr rest ih =>
+      intro state result hRun hCore
+      have hCoreStep :
+          XNonGasCoreChecksPass validJumps state instr.op :=
+        hCore
+          (instr := instr) (rest := rest)
+          (targetState := state) (blockResult := result)
+          ⟨[], by simp⟩ hRun (GasExecRel.refl state)
+      rcases Target.runListResult_cons_ok_cases hRun with
+        ⟨mid, hStep, hRunRest⟩ | ⟨halt, hStep, hResult⟩
+      · have hCoreRest :
+            XRunListSuffixCoreNonGasReady validJumps rest := by
+          intro instr' rest' targetState blockResult hSuffix hRunSuffix
+          intro fullState hRelState
+          rcases hSuffix with ⟨pre, hPrefix⟩
+          exact
+            hCore
+              (instr := instr') (rest := rest')
+              (targetState := targetState)
+              (blockResult := blockResult)
+              ⟨instr :: pre, by simp [hPrefix]⟩
+              hRunSuffix hRelState
+        exact CoreRunListResult.stepRunning hCoreStep hStep
+          (ih hRunRest hCoreRest)
+      · subst result
+        exact CoreRunListResult.stepHalted hCoreStep hStep
+
+theorem CoreRunListResult.to_path_core_checks
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      CoreRunListResult validJumps code target targetResult →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathCoreChecksReady validJumps code target full
+        targetResult := by
+  intro code target full targetResult hCore
+  induction hCore generalizing full with
+  | nil state =>
+      intro _hNoCall hRel
+      exact ⟨rfl, hRel⟩
+  | stepRunning hCoreStep hStep hRest ih =>
+      rename_i instr rest state mid result
+      intro hNoCall hRel
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCall instr (by simp)
+      have hNoCallRest :
+          ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+        intro instr' hMemRest
+        exact hNoCall instr' (by simp [hMemRest])
+      have hCoreFull :
+          XNonGasCoreChecksPass validJumps full instr.op :=
+        (XNonGasCoreChecksPass_iff_of_gasExecRel hRel).2 hCoreStep
+      simp [XRunListPathCoreChecksReady, hRel, hCoreFull, hStep]
+      intro stepFuel fullPost hStepFull
+      have hTargetStep :
+          Target.stepInstr instr state = .ok mid :=
+        (Target.stepInstrResult_running_stepInstr hStep).1
+      have hRelPost : GasExecRel fullPost mid :=
+        EVM_step_targetInstr_preserves_gasExecRel_of_ok
+          (fuel := stepFuel.succ)
+          (gasCost :=
+            EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+          hNoCallInstr (hRel.memoryGasState_left (op := instr.op))
+          hTargetStep hStepFull
+      exact ih hNoCallRest hRelPost
+  | stepHalted hCoreStep hStep =>
+      rename_i instr rest state halt
+      intro _hNoCall hRel
+      have hCoreFull :
+          XNonGasCoreChecksPass validJumps full instr.op :=
+        (XNonGasCoreChecksPass_iff_of_gasExecRel hRel).2 hCoreStep
+      simp [XRunListPathCoreChecksReady, hRel, hCoreFull, hStep]
+
+theorem XRunListPathChecksReady.of_path_core_noReturnDataCopy_noCallCreate
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      XRunListPathCoreChecksReady validJumps code target full targetResult →
+      (∀ instr ∈ code, targetInstrNoReturnDataCopy instr = true) →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      XRunListPathChecksReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hCore _hNoReturnDataCopy _hNoCallCreate
+      simpa [XRunListPathCoreChecksReady, XRunListPathChecksReady] using hCore
+  | cons instr rest ih =>
+      intro target full targetResult hCore hNoReturnDataCopy hNoCallCreate
+      have hMem : instr ∈ instr :: rest := by simp
+      have hNoReturnOp :
+          instr.op ≠ EvmYul.Operation.RETURNDATACOPY :=
+        targetInstr_op_ne_returnDataCopy_of_noReturnDataCopy
+          (hNoReturnDataCopy instr hMem)
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr hMem
+      have hNoCreate : instr.op.isCreate = false :=
+        targetInstr_op_isCreate_false_of_usesCallCreate_false hNoCallInstr
+      have hNoReturnRest :
+          ∀ instr' ∈ rest, targetInstrNoReturnDataCopy instr' = true := by
+        intro instr' hMemRest
+        exact hNoReturnDataCopy instr' (by simp [hMemRest])
+      have hNoCallRest :
+          ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+        intro instr' hMemRest
+        exact hNoCallCreate instr' (by simp [hMemRest])
+      simp [XRunListPathCoreChecksReady] at hCore
+      rcases hCore with ⟨hRel, hCoreStep, hTail⟩
+      have hNonGasStep :
+          XNonGasChecksPass validJumps full instr.op :=
+        XNonGasChecksPass.of_core_no_returnDataCopy_no_create
+          hCoreStep hNoReturnOp hNoCreate
+      simp [XRunListPathChecksReady, hRel, hNonGasStep, hNoCallInstr]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [hStepResult] at hTail
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [hStepResult] at hTail
+              exact hTail
+          | running targetPost =>
+              simp [hStepResult] at hTail
+              intro stepFuel fullPost hStep
+              exact ih (hTail hStep) hNoReturnRest hNoCallRest
+
+theorem XRunListPathCoreChecksReady.of_suffix_core_noCallCreate
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      XRunListSuffixCoreNonGasReady validJumps code →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathCoreChecksReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hCore _hNoCallCreate hRel
+      simp [Target.runListResult] at hRun
+      subst targetResult
+      exact ⟨rfl, hRel⟩
+  | cons instr rest ih =>
+      intro target full targetResult hRun hCore hNoCallCreate hRel
+      have hCoreStep :
+          XNonGasCoreChecksPass validJumps full instr.op :=
+        hCore
+          (instr := instr) (rest := rest)
+          (targetState := target) (blockResult := targetResult)
+          ⟨[], by simp⟩ hRun hRel
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr (by simp)
+      simp [XRunListPathCoreChecksReady, hRel, hCoreStep]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          change False
+          rw [Target.runListResult, hStepResult] at hRun
+          change
+            (Except.error err : Except EVMException StepResult) =
+              .ok targetResult at hRun
+          cases hRun
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              change targetResult = .halted halt
+              rw [Target.runListResult, hStepResult] at hRun
+              change
+                (Except.ok (.halted halt) : Except EVMException StepResult) =
+                  .ok targetResult at hRun
+              cases hRun
+              rfl
+          | running targetPost =>
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hRelPost :
+                  GasExecRel fullPost targetPost :=
+                EVM_step_targetInstr_preserves_gasExecRel_of_ok
+                  (fuel := stepFuel.succ)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  hNoCallInstr (hRel.memoryGasState_left (op := instr.op))
+                  (Target.stepInstrResult_running_stepInstr
+                    hStepResult).1 hStep
+              have hCoreRest :
+                  XRunListSuffixCoreNonGasReady validJumps rest := by
+                intro instr' rest' targetState blockResult hSuffix hRunSuffix
+                intro fullState hRelState
+                rcases hSuffix with ⟨pre, hPrefix⟩
+                exact
+                  hCore
+                    (instr := instr') (rest := rest')
+                    (targetState := targetState)
+                    (blockResult := blockResult)
+                    ⟨instr :: pre, by simp [hPrefix]⟩
+                    hRunSuffix hRelState
+              have hNoCallRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrUsesCallCreate instr' = false := by
+                intro instr' hMemRest
+                exact hNoCallCreate instr' (by simp [hMemRest])
+              exact ih hRun hCoreRest hNoCallRest hRelPost
+
+theorem XRunListPathDecodeReady.singleton_of_decode
+    {instr : TargetInstr} {target full : EVMState} {result : StepResult}
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc =
+        some (instr.op, instr.arg))
+    (hRun : Target.runListResult [instr] target = .ok result) :
+    XRunListPathDecodeReady [instr] target full result := by
+  simp [XRunListPathDecodeReady, hDecode]
+  cases hStepResult : Target.stepInstrResult instr target with
+  | error err =>
+      simp [Target.runListResult, hStepResult] at hRun
+      cases hRun
+  | ok stepResult =>
+      cases stepResult <;> simp
+
+theorem XRunListPathDecodeReady.push32_pair
+    {value : Word} {next : TargetInstr}
+    {target full : EVMState} {result : StepResult}
+    (hDecode :
+      EvmYul.EVM.decode full.executionEnv.code full.pc =
+        some ((TargetInstr.push32 value).op, (TargetInstr.push32 value).arg))
+    (hDecodeNext :
+      ∀ {stepFuel : Nat} {fullPost : EVMState},
+        EvmYul.EVM.step stepFuel.succ
+            (EvmYul.EVM.C' (memoryGasState full (TargetInstr.push32 value).op)
+              (TargetInstr.push32 value).op)
+            (some ((TargetInstr.push32 value).op,
+              (TargetInstr.push32 value).arg))
+            (memoryGasState full (TargetInstr.push32 value).op) =
+          .ok fullPost →
+        EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+          some (next.op, next.arg))
+    (hRun :
+      Target.runListResult [TargetInstr.push32 value, next] target =
+        .ok result) :
+    XRunListPathDecodeReady [TargetInstr.push32 value, next] target full
+      result := by
+  let targetPost :=
+    EvmYul.EVM.State.replaceStackAndIncrPC target
+      (target.stack.push value) (pcΔ := 33)
+  have hRunRest :
+      Target.runListResult [next] targetPost = .ok result := by
+    simpa [targetPost, Target.runListResult, Target.stepInstrResult,
+      Target.stepInstr] using hRun
+  change
+    EvmYul.EVM.decode full.executionEnv.code full.pc =
+        some ((TargetInstr.push32 value).op, (TargetInstr.push32 value).arg) ∧
+      (∀ {stepFuel : Nat} {fullPost : EVMState},
+        EvmYul.EVM.step stepFuel.succ
+            (EvmYul.EVM.C'
+              (memoryGasState full (TargetInstr.push32 value).op)
+              (TargetInstr.push32 value).op)
+            (some ((TargetInstr.push32 value).op,
+              (TargetInstr.push32 value).arg))
+            (memoryGasState full (TargetInstr.push32 value).op) =
+          .ok fullPost →
+        XRunListPathDecodeReady [next] targetPost fullPost result)
+  refine ⟨hDecode, ?_⟩
+  intro stepFuel fullPost hStep
+  exact
+    XRunListPathDecodeReady.singleton_of_decode
+      (hDecodeNext hStep) hRunRest
+
+theorem XRunListPathDecodeReady.of_emitInstr
+    {program : Program} {target : TargetProgram}
+    {targetState fullState : EVMState}
+    {pc : Nat} {instr : Instr}
+    {emitted before after : List LocatedTarget} {blockResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt : Program.instrAtPc program targetState.pc.toNat = some (pc, instr))
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) targetState =
+        .ok blockResult)
+    (hRel : GasExecRel fullState targetState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target) :
+    XRunListPathDecodeReady (emitted.map LocatedTarget.instr) targetState
+      fullState blockResult := by
+  cases instr with
+  | label name =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hDecode :
+          EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+            some (TargetInstr.jumpdest.op, TargetInstr.jumpdest.arg) :=
+        decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+          (located := { pc := pc, instr := TargetInstr.jumpdest })
+          hEncoding hSafety hAt hTargetBlock (by simp) rfl hRel hCode
+      exact XRunListPathDecodeReady.singleton_of_decode hDecode (by simpa using hRun)
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hDecode :
+          EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+            some ((TargetInstr.prim op).op, (TargetInstr.prim op).arg) :=
+        decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+          (located := { pc := pc, instr := TargetInstr.prim op })
+          hEncoding hSafety hAt hTargetBlock (by simp) rfl hRel hCode
+      exact XRunListPathDecodeReady.singleton_of_decode hDecode (by simpa using hRun)
+  | push value =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hDecode :
+          EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+            some ((TargetInstr.push32 value).op,
+              (TargetInstr.push32 value).arg) :=
+        decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+          (located := { pc := pc, instr := TargetInstr.push32 value })
+          hEncoding hSafety hAt hTargetBlock (by simp) rfl hRel hCode
+      exact XRunListPathDecodeReady.singleton_of_decode hDecode (by simpa using hRun)
+  | jump label =>
+      cases hDest : Program.labelPc program label with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          have hEmitPair :
+              emitInstr? program pc (Instr.jump label) =
+                some
+                  [ { pc := pc,
+                      instr := TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest) },
+                    { pc := pc + Instr.push32Size,
+                      instr := TargetInstr.jump } ] := by
+            simp [emitInstr?, hDest]
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          have hHeadDecode :
+              EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+                some
+                  ((TargetInstr.push32 (EvmYul.UInt256.ofNat dest)).op,
+                    (TargetInstr.push32 (EvmYul.UInt256.ofNat dest)).arg) :=
+            decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+              (located :=
+                { pc := pc,
+                  instr := TargetInstr.push32
+                    (EvmYul.UInt256.ofNat dest) })
+              hEncoding hSafety hAt hTargetBlock (by simp) rfl hRel hCode
+          have hNextDecode :
+              ∀ {stepFuel : Nat} {fullPost : EVMState},
+                EvmYul.EVM.step stepFuel.succ
+                    (EvmYul.EVM.C'
+                      (memoryGasState fullState
+                        (TargetInstr.push32
+                          (EvmYul.UInt256.ofNat dest)).op)
+                      (TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op)
+                    (some
+                      ((TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op,
+                        (TargetInstr.push32
+                          (EvmYul.UInt256.ofNat dest)).arg))
+                    (memoryGasState fullState
+                      (TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op) =
+                  .ok fullPost →
+                EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+                  some (TargetInstr.jump.op, TargetInstr.jump.arg) := by
+            intro stepFuel fullPost hStep
+            exact
+              decode_jump_after_push32_step_of_emitInstr
+                hEncoding hSafety hAt hDest hEmitPair hTargetBlock hRel
+                hCode hStep
+          exact
+            XRunListPathDecodeReady.push32_pair hHeadDecode hNextDecode
+              (by simpa using hRun)
+  | jumpi label =>
+      cases hDest : Program.labelPc program label with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          have hEmitPair :
+              emitInstr? program pc (Instr.jumpi label) =
+                some
+                  [ { pc := pc,
+                      instr := TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest) },
+                    { pc := pc + Instr.push32Size,
+                      instr := TargetInstr.jumpi } ] := by
+            simp [emitInstr?, hDest]
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          have hHeadDecode :
+              EvmYul.EVM.decode fullState.executionEnv.code fullState.pc =
+                some
+                  ((TargetInstr.push32 (EvmYul.UInt256.ofNat dest)).op,
+                    (TargetInstr.push32 (EvmYul.UInt256.ofNat dest)).arg) :=
+            decode_of_gasExecRel_instrAt_mem_emitted_of_safety
+              (located :=
+                { pc := pc,
+                  instr := TargetInstr.push32
+                    (EvmYul.UInt256.ofNat dest) })
+              hEncoding hSafety hAt hTargetBlock (by simp) rfl hRel hCode
+          have hNextDecode :
+              ∀ {stepFuel : Nat} {fullPost : EVMState},
+                EvmYul.EVM.step stepFuel.succ
+                    (EvmYul.EVM.C'
+                      (memoryGasState fullState
+                        (TargetInstr.push32
+                          (EvmYul.UInt256.ofNat dest)).op)
+                      (TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op)
+                    (some
+                      ((TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op,
+                        (TargetInstr.push32
+                          (EvmYul.UInt256.ofNat dest)).arg))
+                    (memoryGasState fullState
+                      (TargetInstr.push32
+                        (EvmYul.UInt256.ofNat dest)).op) =
+                  .ok fullPost →
+                EvmYul.EVM.decode fullPost.executionEnv.code fullPost.pc =
+                  some (TargetInstr.jumpi.op, TargetInstr.jumpi.arg) := by
+            intro stepFuel fullPost hStep
+            exact
+              decode_jumpi_after_push32_step_of_emitInstr
+                hEncoding hSafety hAt hDest hEmitPair hTargetBlock hRel
+                hCode hStep
+          exact
+            XRunListPathDecodeReady.push32_pair hHeadDecode hNextDecode
+              (by simpa using hRun)
+
+theorem XRunListPathReady.of_decode_checks_and_budget
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      XRunListPathDecodeReady code target full targetResult →
+      XRunListPathChecksReady validJumps code target full targetResult →
+      XRunListBodyPreservesGas code →
+      XRunListGasBudget code target ≤ full.gasAvailable.toNat →
+      XRunListPathReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hDecode hChecks _hBody _hBudget
+      simpa [Target.runListResult] using hChecks
+  | cons instr rest ih =>
+      intro target full targetResult hRun hDecodeReady hChecksReady hBody
+        hBudget
+      rcases hBody with ⟨hBodyInstr, hBodyRest⟩
+      rcases hDecodeReady with ⟨hDecode, hDecodeRest⟩
+      rcases hChecksReady with
+        ⟨hRel, hNonGasStep, hNoCallCreate, hChecksRest⟩
+      have hReqBudget :
+          XGasRequiredAt target instr.op ≤
+            XRunListGasBudget (instr :: rest) target := by
+        simp [XRunListGasBudget]
+      have hRequired :
+          XGasRequiredAt full instr.op ≤ full.gasAvailable.toNat := by
+        rw [XGasRequiredAt_eq_of_gasExecRel_of_targetInstr_no_call_create
+          hNoCallCreate hRel]
+        exact le_trans hReqBudget hBudget
+      simp only [XRunListPathReady]
+      refine
+        ⟨hRel, hDecode, hNonGasStep, hRequired, hNoCallCreate, ?_⟩
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [hStepResult] at hChecksRest
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [hStepResult] at hChecksRest
+              exact hChecksRest
+          | running targetPost =>
+              simp [hStepResult] at hDecodeRest hChecksRest
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hBudgetRun :
+                  XRunListGasBudget (instr :: rest) target =
+                    XGasRequiredAt target instr.op +
+                      XRunListGasBudget rest targetPost := by
+                simp [XRunListGasBudget, hStepResult]
+              have hBudgetStep :
+                  XGasRequiredAt full instr.op +
+                      XRunListGasBudget rest targetPost ≤
+                    full.gasAvailable.toNat := by
+                rw [hBudgetRun] at hBudget
+                rw [←
+                  XGasRequiredAt_eq_of_gasExecRel_of_targetInstr_no_call_create
+                    hNoCallCreate hRel] at hBudget
+                exact hBudget
+              have hStepBody :
+                  EvmYul.step instr.op instr.arg
+                      (xBodyState full instr.op) =
+                    .ok fullPost := by
+                rw [← EVM_step_targetInstr_eq_xBodyState
+                  (fuel := stepFuel) (state := full) (instr := instr)
+                  hNoCallCreate]
+                exact hStep
+              have hRestBudgetBody :
+                  XRunListGasBudget rest targetPost ≤
+                    (xBodyState full instr.op).gasAvailable.toNat :=
+                xBodyState_gasAvailable_toNat_of_required hBudgetStep
+              have hRestBudget :
+                  XRunListGasBudget rest targetPost ≤
+                    fullPost.gasAvailable.toNat := by
+                rw [hBodyInstr hStepBody]
+                exact hRestBudgetBody
+              exact
+                ih hRun (hDecodeRest hStep) (hChecksRest hStep) hBodyRest
+                  hRestBudget
+
+theorem XRunListPathReady.of_emitInstr_checks_and_budget
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word}
+    {blockState fullState : EVMState}
+    {pc : Nat} {instr : Instr}
+    {emitted before after : List LocatedTarget} {blockResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hAt : Program.instrAtPc program blockState.pc.toNat = some (pc, instr))
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+        .ok blockResult)
+    (hRel : GasExecRel fullState blockState)
+    (hCode : fullState.executionEnv.code = Bytecode.encodeTarget target)
+    (hChecks :
+      XRunListPathChecksReady validJumps (emitted.map LocatedTarget.instr)
+        blockState fullState blockResult)
+    (hNoCallCreate :
+      ∀ targetInstr ∈ emitted.map LocatedTarget.instr,
+        targetInstrUsesCallCreate targetInstr = false)
+    (hBudget :
+      XRunListGasBudget (emitted.map LocatedTarget.instr) blockState ≤
+        fullState.gasAvailable.toNat) :
+    XRunListPathReady validJumps (emitted.map LocatedTarget.instr)
+      blockState fullState blockResult := by
+  have hDecode :
+      XRunListPathDecodeReady (emitted.map LocatedTarget.instr)
+        blockState fullState blockResult :=
+    XRunListPathDecodeReady.of_emitInstr hEncoding hSafety hAt hEmit
+      hTargetBlock hRun hRel hCode
+  exact
+    XRunListPathReady.of_decode_checks_and_budget
+      (validJumps := validJumps)
+      hRun hDecode hChecks
+      (XRunListBodyPreservesGas.of_all_no_call_create hNoCallCreate)
+      hBudget
+
+theorem XRunListPathChecksReady.of_suffix_nonGas
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      XRunListSuffixNonGasReady validJumps code →
+      GasExecRel full target →
+      XRunListPathChecksReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hNonGas hRel
+      simp [Target.runListResult] at hRun
+      subst targetResult
+      exact ⟨rfl, hRel⟩
+  | cons instr rest ih =>
+      intro target full targetResult hRun hNonGas hRel
+      obtain ⟨_hDecode, hNonGasStep, hNoCallCreate⟩ :=
+        hNonGas
+          (instr := instr) (rest := rest)
+          (targetState := target) (blockResult := targetResult)
+          ⟨[], by simp⟩ hRun hRel
+      simp [XRunListPathChecksReady, hRel, hNonGasStep, hNoCallCreate]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [Target.runListResult, hStepResult] at hRun
+          cases hRun
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [Target.runListResult, hStepResult] at hRun
+              cases hRun
+              rfl
+          | running targetPost =>
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hRelPost :
+                  GasExecRel fullPost targetPost :=
+                EVM_step_targetInstr_preserves_gasExecRel_of_ok
+                  (fuel := stepFuel.succ)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  hNoCallCreate (hRel.memoryGasState_left (op := instr.op))
+                  (Target.stepInstrResult_running_stepInstr
+                    hStepResult).1 hStep
+              have hNonGasRest :
+                  XRunListSuffixNonGasReady validJumps rest := by
+                intro instr' rest' targetState blockResult hSuffix hRunSuffix
+                intro fullState hRelState
+                rcases hSuffix with ⟨pre, hPrefix⟩
+                exact
+                  hNonGas
+                    (instr := instr') (rest := rest')
+                    (targetState := targetState)
+                    (blockResult := blockResult)
+                    ⟨instr :: pre, by simp [hPrefix]⟩
+                    hRunSuffix hRelState
+              exact ih hRun hNonGasRest hRelPost
+
+theorem XRunListPathChecksReady.of_suffix_core_noReturnDataCopy_noCallCreate
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full : EVMState}
+      {targetResult : StepResult},
+      Target.runListResult code target = .ok targetResult →
+      XRunListSuffixCoreNonGasReady validJumps code →
+      (∀ instr ∈ code, targetInstrNoReturnDataCopy instr = true) →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      GasExecRel full target →
+      XRunListPathChecksReady validJumps code target full targetResult := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetResult hRun _hCore _hNoReturnDataCopy
+        _hNoCallCreate hRel
+      simp [Target.runListResult] at hRun
+      subst targetResult
+      exact ⟨rfl, hRel⟩
+  | cons instr rest ih =>
+      intro target full targetResult hRun hCore hNoReturnDataCopy
+        hNoCallCreate hRel
+      have hCoreStep :
+          XNonGasCoreChecksPass validJumps full instr.op :=
+        hCore
+          (instr := instr) (rest := rest)
+          (targetState := target) (blockResult := targetResult)
+          ⟨[], by simp⟩ hRun hRel
+      have hMem : instr ∈ instr :: rest := by simp
+      have hNoReturnOp :
+          instr.op ≠ EvmYul.Operation.RETURNDATACOPY :=
+        targetInstr_op_ne_returnDataCopy_of_noReturnDataCopy
+          (hNoReturnDataCopy instr hMem)
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCallCreate instr hMem
+      have hNoCreate : instr.op.isCreate = false :=
+        targetInstr_op_isCreate_false_of_usesCallCreate_false hNoCallInstr
+      have hNonGasStep :
+          XNonGasChecksPass validJumps full instr.op :=
+        XNonGasChecksPass.of_core_no_returnDataCopy_no_create
+          hCoreStep hNoReturnOp hNoCreate
+      simp [XRunListPathChecksReady, hRel, hNonGasStep, hNoCallInstr]
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [Target.runListResult, hStepResult] at hRun
+          cases hRun
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [Target.runListResult, hStepResult] at hRun
+              cases hRun
+              rfl
+          | running targetPost =>
+              simp [Target.runListResult, hStepResult] at hRun
+              intro stepFuel fullPost hStep
+              have hRelPost :
+                  GasExecRel fullPost targetPost :=
+                EVM_step_targetInstr_preserves_gasExecRel_of_ok
+                  (fuel := stepFuel.succ)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op) instr.op)
+                  hNoCallInstr (hRel.memoryGasState_left (op := instr.op))
+                  (Target.stepInstrResult_running_stepInstr
+                    hStepResult).1 hStep
+              have hCoreRest :
+                  XRunListSuffixCoreNonGasReady validJumps rest := by
+                intro instr' rest' targetState blockResult hSuffix hRunSuffix
+                intro fullState hRelState
+                rcases hSuffix with ⟨pre, hPrefix⟩
+                exact
+                  hCore
+                    (instr := instr') (rest := rest')
+                    (targetState := targetState)
+                    (blockResult := blockResult)
+                    ⟨instr :: pre, by simp [hPrefix]⟩
+                    hRunSuffix hRelState
+              have hNoReturnRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrNoReturnDataCopy instr' = true := by
+                intro instr' hMemRest
+                exact hNoReturnDataCopy instr' (by simp [hMemRest])
+              have hNoCallRest :
+                  ∀ instr' ∈ rest,
+                    targetInstrUsesCallCreate instr' = false := by
+                intro instr' hMemRest
+                exact hNoCallCreate instr' (by simp [hMemRest])
+              exact
+                ih hRun hCoreRest hNoReturnRest hNoCallRest hRelPost
 
 theorem XRunListPathReady.of_suffix_ready {validJumps : Array Word} :
     ∀ {code : List TargetInstr} {target full : EVMState}
@@ -6555,6 +9500,120 @@ theorem XRunListPathReady.running_prefix {validJumps : Array Word} :
                 ⟨fuelTail.succ, fullFinal, hRelFinal,
                   XPrefixTrace.running hDecode hChecks hStepAll hNoHalt
                     hPrefixTail⟩
+
+theorem XRunListPathReady.running_prefix_with_budget
+    {validJumps : Array Word} :
+    ∀ {code : List TargetInstr} {target full targetFinal : EVMState}
+      {restBudget : Nat},
+      XRunListPathReady validJumps code target full (.running targetFinal) →
+      XRunListGasBudget code target + restBudget ≤
+        full.gasAvailable.toNat →
+      ∃ prefixFuel fullFinal,
+        GasExecRel fullFinal targetFinal ∧
+          XPrefixTrace validJumps prefixFuel full fullFinal ∧
+          restBudget ≤ fullFinal.gasAvailable.toNat := by
+  intro code
+  induction code with
+  | nil =>
+      intro target full targetFinal restBudget hReady hBudget
+      rcases hReady with ⟨hResult, hRel⟩
+      cases hResult
+      simp [XRunListGasBudget] at hBudget
+      exact ⟨0, full, hRel, XPrefixTrace.done full, by simpa using hBudget⟩
+  | cons instr rest ih =>
+      intro target full targetFinal restBudget hReady hBudget
+      rcases hReady with
+        ⟨hRel, hDecode, hNonGas, hGas, hNoCallCreate, hStepReady⟩
+      cases hStepResult : Target.stepInstrResult instr target with
+      | error err =>
+          simp [hStepResult] at hStepReady
+      | ok stepResult =>
+          cases stepResult with
+          | halted halt =>
+              simp [hStepResult] at hStepReady
+          | running targetPost =>
+              simp [hStepResult] at hStepReady
+              have hBudgetRun :
+                  XRunListGasBudget (instr :: rest) target =
+                    XGasRequiredAt target instr.op +
+                      XRunListGasBudget rest targetPost := by
+                simp [XRunListGasBudget, hStepResult]
+              have hBudgetStep :
+                  XGasRequiredAt full instr.op +
+                      (XRunListGasBudget rest targetPost + restBudget) ≤
+                    full.gasAvailable.toNat := by
+                rw [hBudgetRun] at hBudget
+                rw [←
+                  XGasRequiredAt_eq_of_gasExecRel_of_targetInstr_no_call_create
+                    hNoCallCreate hRel] at hBudget
+                omega
+              have hChecks :
+                  XStepChecksPass validJumps full instr.op :=
+                XStepChecksPass.of_nonGas_required_le hNonGas hGas
+              obtain ⟨hTargetStep, hKind⟩ :=
+                Target.stepInstrResult_running_stepInstr hStepResult
+              obtain ⟨fullPost, hStep, hRelPost⟩ :=
+                EVM_step_targetInstr_exists_gasExecRel
+                  (fuel := 0)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op)
+                      instr.op)
+                  hNoCallCreate
+                  (hRel.memoryGasState_left (op := instr.op))
+                  hTargetStep
+              have hStepBody :
+                  EvmYul.step instr.op instr.arg
+                      (xBodyState full instr.op) =
+                    .ok fullPost := by
+                rw [← EVM_step_targetInstr_eq_xBodyState
+                  (fuel := 0) (state := full) (instr := instr)
+                  hNoCallCreate]
+                exact hStep
+              have hRestBudgetBody :
+                  XRunListGasBudget rest targetPost + restBudget ≤
+                    (xBodyState full instr.op).gasAvailable.toNat :=
+                xBodyState_gasAvailable_toNat_of_required hBudgetStep
+              have hRestBudget :
+                  XRunListGasBudget rest targetPost + restBudget ≤
+                    fullPost.gasAvailable.toNat := by
+                rw [TargetInstrBodyPreservesGas.of_no_call_create
+                  hNoCallCreate hStepBody]
+                exact hRestBudgetBody
+              obtain
+                ⟨fuelTail, fullFinal, hRelFinal, hPrefixTail,
+                  hRestFinal⟩ :=
+                ih (hStepReady hStep) hRestBudget
+              have hStepAll :
+                  ∀ tailFuel : Nat,
+                    EvmYul.EVM.step tailFuel.succ
+                        (EvmYul.EVM.C' (memoryGasState full instr.op)
+                          instr.op)
+                        (some (instr.op, instr.arg))
+                        (memoryGasState full instr.op) =
+                      .ok fullPost := by
+                intro tailFuel
+                rw [EVM_step_targetInstr_eq_of_no_call_create
+                  (fuel := tailFuel)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op)
+                      instr.op)
+                  (state := memoryGasState full instr.op)
+                  (instr := instr) hNoCallCreate]
+                rw [EVM_step_targetInstr_eq_of_no_call_create
+                  (fuel := 0)
+                  (gasCost :=
+                    EvmYul.EVM.C' (memoryGasState full instr.op)
+                      instr.op)
+                  (state := memoryGasState full instr.op)
+                  (instr := instr) hNoCallCreate] at hStep
+                exact hStep
+              have hNoHalt : XHaltOutput? instr.op fullPost = none :=
+                XHaltOutput?_none_of_targetInstr_haltKind_none hKind
+              exact
+                ⟨fuelTail.succ, fullFinal, hRelFinal,
+                  XPrefixTrace.running hDecode hChecks hStepAll hNoHalt
+                    hPrefixTail,
+                  hRestFinal⟩
 
 theorem runListResult_with_continuation_exists_agrees_of_path_ready
     {validJumps : Array Word} :
@@ -7007,6 +10066,77 @@ def XBlockReplayNonGasReady
           XRunListSuffixNonGasReady validJumps
             (emitted.map LocatedTarget.instr)
 
+def XBlockReplayCoreNonGasReady
+    (program : Program) (target : TargetProgram)
+    (validJumps : Array Word) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          XRunListSuffixCoreNonGasReady validJumps
+            (emitted.map LocatedTarget.instr)
+
+def XBlockReplayCoreInputsReady
+    (program : Program) (target : TargetProgram)
+    (validJumps : Array Word) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          XRunListSuffixCoreInputsReady validJumps
+            (emitted.map LocatedTarget.instr)
+
+theorem XBlockReplayCoreNonGasReady.of_inputs
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word}
+    (hInputs : XBlockReplayCoreInputsReady program target validJumps) :
+    XBlockReplayCoreNonGasReady program target validJumps := by
+  intro pc instr emitted before after blockState blockResult
+    hAt hEmit hTargetBlock hRun
+  exact
+    XRunListSuffixCoreNonGasReady.of_inputs
+      (hInputs hAt hEmit hTargetBlock hRun)
+
+def XBlockPathChecksReady
+    (program : Program) (target : TargetProgram)
+    (validJumps : Array Word) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState fullState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          GasExecRel fullState blockState →
+            XRunListPathChecksReady validJumps
+              (emitted.map LocatedTarget.instr) blockState fullState
+              blockResult
+
+def XBlockPathCoreChecksReady
+    (program : Program) (target : TargetProgram)
+    (validJumps : Array Word) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState fullState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          GasExecRel fullState blockState →
+            XRunListPathCoreChecksReady validJumps
+              (emitted.map LocatedTarget.instr) blockState fullState
+              blockResult
+
 def XBlockReplayGasReady
     (program : Program) (target : TargetProgram) : Prop :=
   ∀ {pc : Nat} {instr : Instr}
@@ -7043,6 +10173,96 @@ theorem XBlockReplayNoCallCreate.of_program_no_call_create
   exact targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
     hNoCallCreate hAt hEmit hLocatedMem
 
+def XBlockReplayNoReturnDataCopy
+    (program : Program) (target : TargetProgram) : Prop :=
+  ∀ {pc : Nat} {instr : Instr}
+      {emitted before after : List LocatedTarget}
+      {blockState : EVMState} {blockResult : StepResult},
+    Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+      emitInstr? program pc instr = some emitted →
+        target.code = before ++ emitted ++ after →
+          Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+            .ok blockResult →
+          ∀ targetInstr ∈ emitted.map LocatedTarget.instr,
+            targetInstrNoReturnDataCopy targetInstr = true
+
+theorem XBlockReplayNoReturnDataCopy.of_target_noReturnDataCopy
+    {program : Program} {target : TargetProgram}
+    (hNoReturnDataCopy : targetProgramNoReturnDataCopy target) :
+    XBlockReplayNoReturnDataCopy program target := by
+  intro pc instr emitted before after blockState blockResult _hAt _hEmit
+    hTargetBlock _hRun targetInstr hMem
+  rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+  subst targetInstr
+  exact hNoReturnDataCopy (by
+    rw [hTargetBlock]
+    exact List.mem_append_left after
+      (List.mem_append_right before hLocatedMem))
+
+theorem targetInstr_mem_of_suffix {code : List TargetInstr}
+    {instr : TargetInstr} {rest : List TargetInstr}
+    (hSuffix : ∃ pre : List TargetInstr, code = pre ++ (instr :: rest)) :
+    instr ∈ code := by
+  rcases hSuffix with ⟨pre, hCode⟩
+  rw [hCode]
+  exact List.mem_append_right pre (by simp)
+
+theorem XBlockReplayNoReturnDataCopy.op_ne_returnDataCopy_of_suffix
+    {program : Program} {target : TargetProgram}
+    (hNoReturnDataCopy : XBlockReplayNoReturnDataCopy program target)
+    {pc : Nat} {instr : Instr}
+    {emitted before after : List LocatedTarget}
+    {blockState : EVMState} {blockResult : StepResult}
+    {targetInstr : TargetInstr} {rest : List TargetInstr}
+    (hAt : Program.instrAtPc program blockState.pc.toNat = some (pc, instr))
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) blockState =
+        .ok blockResult)
+    (hSuffix :
+      ∃ pre : List TargetInstr,
+        emitted.map LocatedTarget.instr = pre ++ (targetInstr :: rest)) :
+    targetInstr.op ≠ EvmYul.Operation.RETURNDATACOPY :=
+  targetInstr_op_ne_returnDataCopy_of_noReturnDataCopy
+    (hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr
+      (targetInstr_mem_of_suffix hSuffix))
+
+theorem XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word}
+    (hCore : XBlockReplayCoreNonGasReady program target validJumps)
+    (hNoReturnDataCopy : XBlockReplayNoReturnDataCopy program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockPathChecksReady program target validJumps := by
+  intro pc instr emitted before after blockState fullState blockResult hAt hEmit
+    hTargetBlock hRun hRel
+  exact
+    XRunListPathChecksReady.of_suffix_core_noReturnDataCopy_noCallCreate
+      hRun
+      (hCore hAt hEmit hTargetBlock hRun)
+      (fun targetInstr hMem =>
+        hNoReturnDataCopy hAt hEmit hTargetBlock hRun targetInstr hMem)
+      (fun targetInstr hMem =>
+        hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hRel
+
+theorem XBlockPathCoreChecksReady.of_core_noCallCreate
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word}
+    (hCore : XBlockReplayCoreNonGasReady program target validJumps)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockPathCoreChecksReady program target validJumps := by
+  intro pc instr emitted before after blockState fullState blockResult hAt hEmit
+    hTargetBlock hRun hRel
+  exact
+    XRunListPathCoreChecksReady.of_suffix_core_noCallCreate
+      hRun
+      (hCore hAt hEmit hTargetBlock hRun)
+      (fun targetInstr hMem =>
+        hNoCallCreate hAt hEmit hTargetBlock hRun targetInstr hMem)
+      hRel
+
 def XBlockTraceGasBudget (program : Program) :
     Nat → EVMState → StepResult → Nat
   | 0, _state, _result => 0
@@ -7062,6 +10282,16 @@ def XBlockTraceGasBudget (program : Program) :
                   XRunListGasBudget code state
               | .error _ => 0
 
+/--
+The concrete gas bridge only needs the finite gas budget computed from the
+gasless block trace to fit in a `UInt256`.  This is a resource bound, not a
+semantic replay certificate.
+-/
+def XTraceGasBudgetFits (program : Program) (targetFuel : Nat)
+    (state : EVMState) (targetResult : StepResult) : Prop :=
+  XBlockTraceGasBudget program targetFuel state targetResult <
+    EvmYul.UInt256.size
+
 theorem XBlockReplayReady.of_parts {program : Program}
     {target : TargetProgram} {validJumps : Array Word}
     (hNonGas : XBlockReplayNonGasReady program target validJumps)
@@ -7073,6 +10303,16 @@ theorem XBlockReplayReady.of_parts {program : Program}
     XRunListSuffixReady.of_parts
       (hNonGas hAt hEmit hTargetBlock hRun)
       (hGas hAt hEmit hTargetBlock hRun)
+
+theorem XBlockPathChecksReady.of_replay_nonGas {program : Program}
+    {target : TargetProgram} {validJumps : Array Word}
+    (hNonGas : XBlockReplayNonGasReady program target validJumps) :
+    XBlockPathChecksReady program target validJumps := by
+  intro pc instr emitted before after blockState fullState blockResult
+    hAt hEmit hTargetBlock hRun hRel
+  exact
+    XRunListPathChecksReady.of_suffix_nonGas hRun
+      (hNonGas hAt hEmit hTargetBlock hRun) hRel
 
 theorem XBlockReplayReady.nonGas {program : Program}
     {target : TargetProgram} {validJumps : Array Word}
@@ -7100,8 +10340,135 @@ def XTraceDoneContinuation
         ∀ fullFinal,
           GasExecRel fullFinal finalState →
             ∃ evmResult,
-              XStepTrace validJumps fuel.succ fullFinal evmResult ∧
+            XStepTrace validJumps fuel.succ fullFinal evmResult ∧
                 XResultAgrees result evmResult
+
+/--
+If the gasless target trace has already halted, there is no fuel-exhausted
+target continuation for the gas-aware bridge to replay.
+-/
+theorem XTraceDoneContinuation.halted {validJumps : Array Word}
+    {halt : Halt} :
+    XTraceDoneContinuation validJumps (.halted halt) := by
+  intro finalState hResult
+  cases hResult
+
+/--
+Honest finalization condition for a gasless trace that stops with a running
+state because the source-level execution has completed.
+
+`EVM.X` observes a running state only by taking one more fallthrough `STOP`
+step.  That step is gas-free in EVMYulLean, but it can still update the
+machine's return-data fields, so higher layers must prove the STOP result is
+the same observation they intend to expose for the gasless running state.
+-/
+def XFallthroughStopContinuationReady (target : EVMState) : Prop :=
+  ∀ full : EVMState,
+    GasExecRel full target →
+      EvmYul.EVM.decode full.executionEnv.code full.pc = none ∧
+        full.stack.length ≤ 1024 ∧
+          ∃ post : EVMState,
+            EvmYul.EVM.step 1
+                (EvmYul.EVM.C'
+                  (memoryGasState full EvmYul.Operation.STOP)
+                  EvmYul.Operation.STOP)
+                (some (EvmYul.Operation.STOP, none))
+                (memoryGasState full EvmYul.Operation.STOP) =
+              .ok post ∧
+            XHaltOutput? EvmYul.Operation.STOP post =
+              some ByteArray.empty ∧
+            XResultAgrees (.running target)
+              (EvmYul.EVM.ExecutionResult.success post ByteArray.empty)
+
+def XFallthroughStopCleanReady (target : EVMState) : Prop :=
+  (∀ full : EVMState,
+      GasExecRel full target →
+        EvmYul.EVM.decode full.executionEnv.code full.pc = none) ∧
+    target.stack.length ≤ 1024 ∧
+      (target.toMachineState.setReturnData ByteArray.empty).setHReturn
+          ByteArray.empty =
+        target.toMachineState
+
+structure XBlockTraceFinalizationReady
+    (validJumps : Array Word) (program : Program) (target : TargetProgram)
+    (initial : EVMState) : Prop where
+  cleanRunning :
+    ∀ {targetFuel targetState},
+      Preservation.BlockTraceResult program target targetFuel initial
+        (.running targetState) →
+        XFallthroughStopCleanReady targetState
+
+theorem XFallthroughStopContinuationReady.of_clean_stop_fallthrough
+    {target : EVMState}
+    (hDecodeNone :
+      ∀ full : EVMState,
+        GasExecRel full target →
+          EvmYul.EVM.decode full.executionEnv.code full.pc = none)
+    (hStack : target.stack.length ≤ 1024)
+    (hCleanReturn :
+      (target.toMachineState.setReturnData ByteArray.empty).setHReturn
+          ByteArray.empty =
+        target.toMachineState) :
+    XFallthroughStopContinuationReady target := by
+  intro full hRel
+  refine ⟨hDecodeNone full hRel, ?_, ?_⟩
+  · rw [hRel.stack_eq]
+    exact hStack
+  · let fullStop := memoryGasState full EvmYul.Operation.STOP
+    let chargedStop : EVMState :=
+      { fullStop with
+        execLength := fullStop.execLength + 1,
+        gasAvailable :=
+          fullStop.gasAvailable -
+            EvmYul.UInt256.ofNat
+              (EvmYul.EVM.C' fullStop EvmYul.Operation.STOP) }
+    let post : EVMState :=
+      { chargedStop with
+        toMachineState :=
+          (chargedStop.toMachineState.setReturnData ByteArray.empty).setHReturn
+            ByteArray.empty }
+    refine ⟨post, ?_, ?_, ?_⟩
+    · rfl
+    · simp [XHaltOutput?]
+    · apply XResultAgrees_running_success_of_gasExecRel
+      have hTargetReturnData : target.returnData = ByteArray.empty := by
+        symm
+        simpa [EvmYul.MachineState.setReturnData,
+          EvmYul.MachineState.setHReturn] using
+          congrArg EvmYul.MachineState.returnData hCleanReturn
+      have hTargetHReturn : target.H_return = ByteArray.empty := by
+        symm
+        simpa [EvmYul.MachineState.setReturnData,
+          EvmYul.MachineState.setHReturn] using
+          congrArg EvmYul.MachineState.H_return hCleanReturn
+      dsimp [GasExecRel, post, chargedStop, fullStop, memoryGasState]
+      rw [hRel]
+      simp [EvmYul.MachineState.setReturnData,
+        EvmYul.MachineState.setHReturn,
+        hTargetReturnData, hTargetHReturn]
+
+theorem XFallthroughStopContinuationReady.of_clean
+    {target : EVMState}
+    (hReady : XFallthroughStopCleanReady target) :
+    XFallthroughStopContinuationReady target :=
+  XFallthroughStopContinuationReady.of_clean_stop_fallthrough
+    hReady.1 hReady.2.1 hReady.2.2
+
+theorem XTraceDoneContinuation.running_of_fallthrough_stop
+    {validJumps : Array Word} {target : EVMState}
+    (hReady : XFallthroughStopContinuationReady target) :
+    XTraceDoneContinuation validJumps (.running target) := by
+  intro finalState hResult
+  cases hResult
+  refine ⟨1, ?_⟩
+  intro fullFinal hRel
+  obtain ⟨hDecodeNone, hStack, post, hStep, hHalt, hAgree⟩ :=
+    hReady fullFinal hRel
+  exact
+    ⟨EvmYul.EVM.ExecutionResult.success post ByteArray.empty,
+      XStepTrace.fallthroughStop hDecodeNone
+        (XStepChecksPass_stop hStack) hStep hHalt,
+      hAgree⟩
 
 def XTracePathDoneContinuation
     (validJumps : Array Word) (result : StepResult) : Prop :=
@@ -7120,6 +10487,683 @@ theorem XTraceDoneContinuation.to_path {validJumps : Array Word}
   obtain ⟨fuel, hAll⟩ := hDone finalState hResult
   obtain ⟨evmResult, hTrace, hAgree⟩ := hAll fullFinal hRel
   exact ⟨fuel, evmResult, hTrace, hAgree⟩
+
+theorem XBlockTraceFinalizationReady.to_done_continuation
+    {validJumps : Array Word} {program : Program} {target : TargetProgram}
+    {initial : EVMState}
+    (hReady :
+      XBlockTraceFinalizationReady validJumps program target initial) :
+    ∀ {targetFuel targetOutcome},
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome →
+      XTraceDoneContinuation validJumps targetOutcome := by
+  intro targetFuel targetOutcome hTrace
+  cases targetOutcome with
+  | running targetState =>
+      exact
+        XTraceDoneContinuation.running_of_fallthrough_stop
+          (XFallthroughStopContinuationReady.of_clean
+            (hReady.cleanRunning hTrace))
+  | halted halt =>
+      exact XTraceDoneContinuation.halted
+
+theorem XBlockTraceFinalizationReady.of_clean_running
+    {validJumps : Array Word} {program : Program} {target : TargetProgram}
+    {initial : EVMState}
+    (hClean :
+      ∀ {targetFuel targetState},
+        Preservation.BlockTraceResult program target targetFuel initial
+          (.running targetState) →
+          XFallthroughStopCleanReady targetState) :
+    XBlockTraceFinalizationReady validJumps program target initial where
+  cleanRunning := hClean
+
+/--
+Trace-local core non-gas `EVM.X` path safety for a particular gasless block
+trace.
+
+This is intentionally weaker than `XBlockReplayCoreNonGasReady`: it follows
+only the concrete states reached by the gasless trace, so emitted two-instruction
+blocks such as `push32 label; jump` can prove jump safety after the push has
+actually executed.
+-/
+inductive XBlockTraceCoreChecksReadyFor
+    {program : Program} {target : TargetProgram}
+    (validJumps : Array Word) :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : StepResult} →
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult → Prop where
+  | done (state : EVMState) :
+      XBlockTraceCoreChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning (fuel : Nat) (state mid : EVMState)
+      (result : StepResult)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Preservation.BlockTraceResult program target fuel mid result)
+      (hChecks :
+      (∀ {fullState : EVMState},
+        GasExecRel fullState state →
+          XRunListPathCoreChecksReady validJumps
+            (emitted.map LocatedTarget.instr) state fullState
+            (.running mid)))
+      (hRestChecks :
+        XBlockTraceCoreChecksReadyFor validJumps hRest) :
+      XBlockTraceCoreChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) (state : EVMState) (halt : Halt)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hChecks :
+      ∀ {fullState : EVMState},
+        GasExecRel fullState state →
+          XRunListPathCoreChecksReady validJumps
+            (emitted.map LocatedTarget.instr) state fullState
+            (.halted halt)) :
+      XBlockTraceCoreChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+/--
+The actual gasless block trace, checked through the intermediate core-safe
+target layer. Unlike `XBlockTraceCoreChecksReadyFor`, this predicate talks in
+terms of a target execution relation (`CoreRunListResult`) rather than the
+gas-aware path predicate consumed by `EVM.X`.
+-/
+inductive CoreBlockTraceResultFor
+    {program : Program} {target : TargetProgram}
+    (validJumps : Array Word) :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : StepResult} →
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult → Prop where
+  | done (state : EVMState) :
+      CoreBlockTraceResultFor validJumps
+        (Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning (fuel : Nat) (state mid : EVMState)
+      (result : StepResult)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Preservation.BlockTraceResult program target fuel mid result)
+      (hCoreRun :
+        CoreRunListResult validJumps (emitted.map LocatedTarget.instr)
+          state (.running mid))
+      (hRestCore :
+        CoreBlockTraceResultFor validJumps hRest) :
+      CoreBlockTraceResultFor validJumps
+        (Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) (state : EVMState) (halt : Halt)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hCoreRun :
+        CoreRunListResult validJumps (emitted.map LocatedTarget.instr)
+          state (.halted halt)) :
+      CoreBlockTraceResultFor validJumps
+        (Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+theorem CoreBlockTraceResultFor.of_block_replay_core
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hCore : XBlockReplayCoreNonGasReady program target validJumps) :
+    CoreBlockTraceResultFor validJumps hTrace := by
+  induction hTrace with
+  | done state =>
+      exact CoreBlockTraceResultFor.done
+        (validJumps := validJumps) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      rename_i fuel state mid result pc instr emitted before after
+      exact CoreBlockTraceResultFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (CoreRunListResult.of_suffix_core hRun
+          (hCore hAt hEmit hTargetBlock hRun))
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact CoreBlockTraceResultFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (CoreRunListResult.of_suffix_core hRun
+          (hCore hAt hEmit hTargetBlock hRun))
+
+theorem CoreBlockTraceResultFor.of_block_replay_core_inputs
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hInputs : XBlockReplayCoreInputsReady program target validJumps) :
+    CoreBlockTraceResultFor validJumps hTrace :=
+  CoreBlockTraceResultFor.of_block_replay_core hTrace
+    (XBlockReplayCoreNonGasReady.of_inputs hInputs)
+
+theorem CoreBlockTraceResultFor.of_instr_core_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hReady :
+      ∀ {pc : Nat} {instr : Instr}
+        {emitted before after : List LocatedTarget}
+        {blockState : EVMState} {blockResult : StepResult},
+        Program.instrAtPc program blockState.pc.toNat = some (pc, instr) →
+          emitInstr? program pc instr = some emitted →
+            target.code = before ++ emitted ++ after →
+              Target.runListResult (emitted.map LocatedTarget.instr)
+                  blockState =
+                .ok blockResult →
+                InstrCoreBlockReady target instr blockState) :
+    CoreBlockTraceResultFor (validJumps target) hTrace := by
+  induction hTrace with
+  | done state =>
+      exact CoreBlockTraceResultFor.done
+        (validJumps := validJumps target) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      rename_i fuel state mid result pc instr emitted before after
+      exact CoreBlockTraceResultFor.stepRunning
+        (validJumps := validJumps target)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (CoreRunListResult.of_emitInstr_coreBlockReady
+          hAsm hJumpdest hEmit
+          (hReady hAt hEmit hTargetBlock hRun) hRun)
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact CoreBlockTraceResultFor.stepHalted
+        (validJumps := validJumps target)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (CoreRunListResult.of_emitInstr_coreBlockReady
+          hAsm hJumpdest hEmit
+          (hReady hAt hEmit hTargetBlock hRun) hRun)
+
+theorem CoreBlockTraceResultFor.of_trace_instr_core_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hReady : InstrCoreBlockTraceReadyFor target hTrace) :
+    CoreBlockTraceResultFor (validJumps target) hTrace := by
+  induction hReady with
+  | done state =>
+      exact CoreBlockTraceResultFor.done
+        (validJumps := validJumps target) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest
+      hBlockReady hRestReady ih =>
+      exact CoreBlockTraceResultFor.stepRunning
+        (validJumps := validJumps target)
+        _ _ _ _ _ _ _ _ _
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (CoreRunListResult.of_emitInstr_coreBlockReady
+          hAsm hJumpdest hEmit hBlockReady hRun)
+        ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hBlockReady =>
+      exact CoreBlockTraceResultFor.stepHalted
+        (validJumps := validJumps target)
+        fuel _ _ _ _ _ _ _
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (CoreRunListResult.of_emitInstr_coreBlockReady
+          hAsm hJumpdest hEmit hBlockReady hRun)
+
+theorem CoreBlockTraceResultFor.of_block_instr_core_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    (hAsm : assemble? program = some target)
+    (hJumpdest : Bytecode.JumpdestCorrect target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hReady : XBlockInstrCoreReady program target) :
+    CoreBlockTraceResultFor (validJumps target) hTrace :=
+  CoreBlockTraceResultFor.of_instr_core_ready
+    hAsm hJumpdest hTrace
+    (fun hAt hEmit hTargetBlock hRun =>
+      hReady hAt hEmit hTargetBlock hRun)
+
+theorem CoreBlockTraceResultFor.to_trace_core_checks
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hCore : CoreBlockTraceResultFor validJumps hTrace)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockTraceCoreChecksReadyFor validJumps hTrace := by
+  induction hCore with
+  | done state =>
+      exact XBlockTraceCoreChecksReadyFor.done
+        (validJumps := validJumps) state
+  | stepRunning fuel state mid result pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hRest hCoreRun _hRestCore ih =>
+      exact XBlockTraceCoreChecksReadyFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (fun hRel =>
+          CoreRunListResult.to_path_core_checks hCoreRun
+            (fun targetInstr hMem =>
+              hNoCallCreate hAt hEmit hTargetBlock hRun
+                targetInstr hMem)
+            hRel)
+        ih
+  | stepHalted fuel state halt pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hCoreRun =>
+      exact XBlockTraceCoreChecksReadyFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (fun hRel =>
+          CoreRunListResult.to_path_core_checks hCoreRun
+            (fun targetInstr hMem =>
+              hNoCallCreate hAt hEmit hTargetBlock hRun
+                targetInstr hMem)
+            hRel)
+
+theorem XBlockTraceCoreChecksReadyFor.of_block_path_core_checks
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hChecks : XBlockPathCoreChecksReady program target validJumps) :
+    XBlockTraceCoreChecksReadyFor validJumps hTrace := by
+  induction hTrace with
+  | done state =>
+      exact XBlockTraceCoreChecksReadyFor.done
+        (validJumps := validJumps) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      rename_i fuel state mid result pc instr emitted before after
+      exact XBlockTraceCoreChecksReadyFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (fun hRel => hChecks hAt hEmit hTargetBlock hRun hRel)
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact XBlockTraceCoreChecksReadyFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (fun hRel => hChecks hAt hEmit hTargetBlock hRun hRel)
+
+/--
+Trace-local non-gas `EVM.X` path safety for a particular gasless block trace.
+
+This is the small intermediate layer between the gasless target trace and the
+gas-aware runner.  It deliberately follows one concrete `BlockTraceResult`
+rather than asking for a global replay certificate over every possible target
+state.  The remaining obligation for higher compiler layers is to construct
+this predicate for the trace they produce, using source/runtime safety facts
+such as return-data-copy bounds and static-mode write exclusion.
+-/
+inductive XBlockTraceChecksReadyFor
+    {program : Program} {target : TargetProgram}
+    (validJumps : Array Word) :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : StepResult} →
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult → Prop where
+  | done (state : EVMState) :
+      XBlockTraceChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning (fuel : Nat) (state mid : EVMState)
+      (result : StepResult)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Preservation.BlockTraceResult program target fuel mid result)
+      (hChecks :
+      (∀ {fullState : EVMState},
+        GasExecRel fullState state →
+          XRunListPathChecksReady validJumps
+            (emitted.map LocatedTarget.instr) state fullState
+            (.running mid)))
+      (hRestChecks :
+        XBlockTraceChecksReadyFor validJumps hRest) :
+      XBlockTraceChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) (state : EVMState) (halt : Halt)
+      (pc : Nat) (instr : Instr)
+      (emitted before after : List LocatedTarget)
+      (hAt : Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Target.runListResult (emitted.map LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hChecks :
+      ∀ {fullState : EVMState},
+        GasExecRel fullState state →
+          XRunListPathChecksReady validJumps
+            (emitted.map LocatedTarget.instr) state fullState
+            (.halted halt)) :
+      XBlockTraceChecksReadyFor validJumps
+        (Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+theorem XBlockTraceChecksReadyFor.of_trace_core_noReturnDataCopy_noCallCreate
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hCore : XBlockTraceCoreChecksReadyFor validJumps hTrace)
+    (hNoReturnDataCopy : XBlockReplayNoReturnDataCopy program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target) :
+    XBlockTraceChecksReadyFor validJumps hTrace := by
+  induction hCore with
+  | done state =>
+      exact XBlockTraceChecksReadyFor.done (validJumps := validJumps) state
+  | stepRunning fuel state mid result pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hRest hChecks _hRestChecks ih =>
+      exact XBlockTraceChecksReadyFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (fun hRel =>
+          XRunListPathChecksReady.of_path_core_noReturnDataCopy_noCallCreate
+            (hChecks hRel)
+            (fun targetInstr hMem =>
+              hNoReturnDataCopy hAt hEmit hTargetBlock hRun
+                targetInstr hMem)
+            (fun targetInstr hMem =>
+              hNoCallCreate hAt hEmit hTargetBlock hRun
+                targetInstr hMem))
+        ih
+  | stepHalted fuel state halt pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hChecks =>
+      exact XBlockTraceChecksReadyFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (fun hRel =>
+          XRunListPathChecksReady.of_path_core_noReturnDataCopy_noCallCreate
+            (hChecks hRel)
+            (fun targetInstr hMem =>
+              hNoReturnDataCopy hAt hEmit hTargetBlock hRun
+                targetInstr hMem)
+            (fun targetInstr hMem =>
+              hNoCallCreate hAt hEmit hTargetBlock hRun
+                targetInstr hMem))
+
+theorem XBlockTraceChecksReadyFor.of_block_path_checks
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hChecks : XBlockPathChecksReady program target validJumps) :
+    XBlockTraceChecksReadyFor validJumps hTrace := by
+  induction hTrace with
+  | done state =>
+      exact XBlockTraceChecksReadyFor.done (validJumps := validJumps) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      rename_i fuel state mid result pc instr emitted before after
+      exact XBlockTraceChecksReadyFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (fun hRel => hChecks hAt hEmit hTargetBlock hRun hRel)
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact XBlockTraceChecksReadyFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (fun hRel => hChecks hAt hEmit hTargetBlock hRun hRel)
+
+theorem XBlockTraceChecksReadyFor.of_block_replay_nonGas
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {state : EVMState} {targetResult : StepResult}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult)
+    (hNonGas : XBlockReplayNonGasReady program target validJumps) :
+    XBlockTraceChecksReadyFor validJumps hTrace := by
+  induction hTrace with
+  | done state =>
+      exact XBlockTraceChecksReadyFor.done (validJumps := validJumps) state
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      rename_i fuel state mid result pc instr emitted before after
+      exact XBlockTraceChecksReadyFor.stepRunning
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (mid := mid)
+        (result := result)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (hRest := hRest)
+        (fun hRel =>
+          XRunListPathChecksReady.of_suffix_nonGas hRun
+            (hNonGas hAt hEmit hTargetBlock hRun) hRel)
+        ih
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      rename_i fuel state halt pc instr emitted before after
+      exact XBlockTraceChecksReadyFor.stepHalted
+        (validJumps := validJumps)
+        (fuel := fuel)
+        (state := state)
+        (halt := halt)
+        (pc := pc)
+        (instr := instr)
+        (emitted := emitted)
+        (before := before)
+        (after := after)
+        (hAt := hAt)
+        (hEmit := hEmit)
+        (hTargetBlock := hTargetBlock)
+        (hRun := hRun)
+        (fun hRel =>
+          XRunListPathChecksReady.of_suffix_nonGas hRun
+            (hNonGas hAt hEmit hTargetBlock hRun) hRel)
 
 inductive XBlockTracePathReady
     (program : Program) (target : TargetProgram)
@@ -7290,6 +11334,418 @@ theorem blockTraceResult_exists_agrees_of_nonGas_no_call_create_and_budget
       · intro targetFinal fullFinal hImpossible _hRelFinal
         cases hImpossible
 
+theorem blockTraceResult_exists_agrees_of_path_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} :
+    ∀ {targetFuel : Nat} {state full : EVMState}
+      {targetResult : StepResult},
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult →
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) →
+      Bytecode.DecodeSafety target →
+      XBlockPathChecksReady program target validJumps →
+      XBlockReplayNoCallCreate program target →
+      XBlockTraceGasBudget program targetFuel state targetResult ≤
+        full.gasAvailable.toNat →
+      GasExecRel full state →
+      full.executionEnv.code = Bytecode.encodeTarget target →
+      XTracePathDoneContinuation validJumps targetResult →
+      ∃ fuel : Nat, ∃ evmResult,
+        XStepTrace validJumps fuel.succ full evmResult ∧
+          XResultAgrees targetResult evmResult := by
+  intro targetFuel state full targetResult hTrace
+  induction hTrace generalizing full with
+  | done state =>
+      intro _hEncoding _hSafety _hChecks _hNoCall _hBudget hRel _hCode
+        hDoneContinue
+      exact hDoneContinue state full rfl hRel
+  | stepRunning hAt hEmit hTargetBlock hRun hRest ih =>
+      intro hEncoding hSafety hChecks hNoCall hBudget hRel hCode
+        hDoneContinue
+      rename_i fuel state mid result pc instr emitted before after
+      let code := emitted.map LocatedTarget.instr
+      have hChecksCode :
+          XRunListPathChecksReady validJumps code state full (.running mid) := by
+        dsimp [code]
+        exact hChecks hAt hEmit hTargetBlock hRun hRel
+      have hNoCallCode :
+          ∀ targetInstr ∈ code,
+            targetInstrUsesCallCreate targetInstr = false := by
+        dsimp [code]
+        exact hNoCall hAt hEmit hTargetBlock hRun
+      have hBudgetBlockRest :
+          XRunListGasBudget code state +
+              XBlockTraceGasBudget program fuel mid result ≤
+            full.gasAvailable.toNat := by
+        simpa [XBlockTraceGasBudget, hAt, hEmit, hRun, code,
+          Nat.add_comm] using hBudget
+      have hBudgetBlock :
+          XRunListGasBudget code state ≤ full.gasAvailable.toNat := by
+        omega
+      have hBlockPath :
+          XRunListPathReady validJumps code state full (.running mid) :=
+        XRunListPathReady.of_emitInstr_checks_and_budget
+          (program := program)
+          (target := target)
+          (validJumps := validJumps)
+          (blockState := state)
+          (fullState := full)
+          hEncoding hSafety hAt hEmit hTargetBlock
+          (by simpa [code] using hRun)
+          hRel hCode hChecksCode hNoCallCode hBudgetBlock
+      obtain ⟨prefixFuel, fullMid, hRelMid, hPrefix, hRestBudget⟩ :=
+        XRunListPathReady.running_prefix_with_budget
+          (validJumps := validJumps)
+          (code := code)
+          (target := state)
+          (full := full)
+          (targetFinal := mid)
+          (restBudget := XBlockTraceGasBudget program fuel mid result)
+          hBlockPath hBudgetBlockRest
+      have hStateCode :
+          state.executionEnv.code = Bytecode.encodeTarget target :=
+        (GasExecRel.code_eq hRel).symm.trans hCode
+      have hMidCode :
+          mid.executionEnv.code = Bytecode.encodeTarget target := by
+        have hMidStateCode :
+            mid.executionEnv.code = state.executionEnv.code :=
+          Target.runListResult_preserves_code_of_no_call_create
+            (code := code)
+            (state := state)
+            (result := .running mid)
+            (by simpa [code] using hRun)
+            hNoCallCode
+        exact hMidStateCode.trans hStateCode
+      have hFullMidCode :
+          fullMid.executionEnv.code = Bytecode.encodeTarget target :=
+        (GasExecRel.code_eq hRelMid).trans hMidCode
+      obtain ⟨restFuel, evmResult, hRestTrace, hAgree⟩ :=
+        ih hEncoding hSafety hChecks hNoCall hRestBudget hRelMid
+          hFullMidCode hDoneContinue
+      obtain ⟨fuelAll, hTraceAll⟩ :=
+        XPrefixTrace.then_stepTrace hPrefix hRestTrace
+      exact ⟨fuelAll, evmResult, hTraceAll, hAgree⟩
+  | stepHalted hAt hEmit hTargetBlock hRun =>
+      intro hEncoding hSafety hChecks hNoCall hBudget hRel hCode
+        _hDoneContinue
+      rename_i fuel state halt pc instr emitted before after
+      let code := emitted.map LocatedTarget.instr
+      have hChecksCode :
+          XRunListPathChecksReady validJumps code state full (.halted halt) := by
+        dsimp [code]
+        exact hChecks hAt hEmit hTargetBlock hRun hRel
+      have hNoCallCode :
+          ∀ targetInstr ∈ code,
+            targetInstrUsesCallCreate targetInstr = false := by
+        dsimp [code]
+        exact hNoCall hAt hEmit hTargetBlock hRun
+      have hBudgetBlock :
+          XRunListGasBudget code state ≤ full.gasAvailable.toNat := by
+        simpa [XBlockTraceGasBudget, hAt, hEmit, hRun, code,
+          Nat.add_comm] using hBudget
+      have hBlockPath :
+          XRunListPathReady validJumps code state full (.halted halt) :=
+        XRunListPathReady.of_emitInstr_checks_and_budget
+          (program := program)
+          (target := target)
+          (validJumps := validJumps)
+          (blockState := state)
+          (fullState := full)
+          hEncoding hSafety hAt hEmit hTargetBlock
+          (by simpa [code] using hRun)
+          hRel hCode hChecksCode hNoCallCode hBudgetBlock
+      refine
+        runListResult_with_path_continuation_exists_agrees_of_path_ready
+          hBlockPath ?_ ?_
+      · intro halt' hEq
+        cases hEq
+        rfl
+      · intro targetFinal fullFinal hImpossible _hRelFinal
+        cases hImpossible
+
+theorem blockTraceResult_exists_agrees_of_trace_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} :
+    ∀ {targetFuel : Nat} {state full : EVMState}
+      {targetResult : StepResult}
+      (hTrace :
+        Preservation.BlockTraceResult program target targetFuel state
+          targetResult),
+      XBlockTraceChecksReadyFor validJumps hTrace →
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target) →
+      Bytecode.DecodeSafety target →
+      XBlockReplayNoCallCreate program target →
+      XBlockTraceGasBudget program targetFuel state targetResult ≤
+        full.gasAvailable.toNat →
+      GasExecRel full state →
+      full.executionEnv.code = Bytecode.encodeTarget target →
+      XTracePathDoneContinuation validJumps targetResult →
+      ∃ fuel : Nat, ∃ evmResult,
+          XStepTrace validJumps fuel.succ full evmResult ∧
+          XResultAgrees targetResult evmResult := by
+  intro targetFuel state full targetResult hTrace hTraceChecks
+  induction hTraceChecks generalizing full with
+  | done state =>
+      intro _hEncoding _hSafety _hNoCall _hBudget hRel _hCode
+        hDoneContinue
+      exact hDoneContinue state full rfl hRel
+  | stepRunning fuel state mid result pc instr emitted before after hAt hEmit
+      hTargetBlock hRun hRest hChecksCodeFor hRestChecks ih =>
+      intro hEncoding hSafety hNoCall hBudget hRel hCode
+        hDoneContinue
+      let code := emitted.map LocatedTarget.instr
+      have hChecksCode :
+          XRunListPathChecksReady validJumps code state full
+            (.running mid) := by
+        dsimp [code]
+        exact hChecksCodeFor hRel
+      have hNoCallCode :
+          ∀ targetInstr ∈ code,
+            targetInstrUsesCallCreate targetInstr = false := by
+        dsimp [code]
+        exact hNoCall hAt hEmit hTargetBlock hRun
+      have hBudgetBlockRest :
+          XRunListGasBudget code state +
+              XBlockTraceGasBudget program fuel mid result ≤
+            full.gasAvailable.toNat := by
+        simpa [XBlockTraceGasBudget, hAt, hEmit, hRun, code,
+          Nat.add_comm] using hBudget
+      have hBudgetBlock :
+          XRunListGasBudget code state ≤ full.gasAvailable.toNat := by
+        omega
+      have hBlockPath :
+          XRunListPathReady validJumps code state full (.running mid) :=
+        XRunListPathReady.of_emitInstr_checks_and_budget
+          (program := program)
+          (target := target)
+          (validJumps := validJumps)
+          (blockState := state)
+          (fullState := full)
+          hEncoding hSafety hAt hEmit hTargetBlock
+          (by simpa [code] using hRun)
+          hRel hCode hChecksCode hNoCallCode hBudgetBlock
+      obtain ⟨prefixFuel, fullMid, hRelMid, hPrefix, hRestBudget⟩ :=
+        XRunListPathReady.running_prefix_with_budget
+          (validJumps := validJumps)
+          (code := code)
+          (target := state)
+          (full := full)
+          (targetFinal := mid)
+          (restBudget := XBlockTraceGasBudget program fuel mid result)
+          hBlockPath hBudgetBlockRest
+      have hStateCode :
+          state.executionEnv.code = Bytecode.encodeTarget target :=
+        (GasExecRel.code_eq hRel).symm.trans hCode
+      have hMidCode :
+          mid.executionEnv.code = Bytecode.encodeTarget target := by
+        have hMidStateCode :
+            mid.executionEnv.code = state.executionEnv.code :=
+          Target.runListResult_preserves_code_of_no_call_create
+            (code := code)
+            (state := state)
+            (result := .running mid)
+            (by simpa [code] using hRun)
+            hNoCallCode
+        exact hMidStateCode.trans hStateCode
+      have hFullMidCode :
+          fullMid.executionEnv.code = Bytecode.encodeTarget target :=
+        (GasExecRel.code_eq hRelMid).trans hMidCode
+      obtain ⟨restFuel, evmResult, hRestTrace, hAgree⟩ :=
+        ih hEncoding hSafety hNoCall hRestBudget hRelMid
+          hFullMidCode hDoneContinue
+      obtain ⟨fuelAll, hTraceAll⟩ :=
+        XPrefixTrace.then_stepTrace hPrefix hRestTrace
+      exact ⟨fuelAll, evmResult, hTraceAll, hAgree⟩
+  | stepHalted fuel state halt pc instr emitted before after hAt hEmit
+      hTargetBlock hRun hChecksCodeFor =>
+      intro hEncoding hSafety hNoCall hBudget hRel hCode
+        _hDoneContinue
+      let code := emitted.map LocatedTarget.instr
+      have hChecksCode :
+          XRunListPathChecksReady validJumps code state full
+            (.halted halt) := by
+        dsimp [code]
+        exact hChecksCodeFor hRel
+      have hNoCallCode :
+          ∀ targetInstr ∈ code,
+            targetInstrUsesCallCreate targetInstr = false := by
+        dsimp [code]
+        exact hNoCall hAt hEmit hTargetBlock hRun
+      have hBudgetBlock :
+          XRunListGasBudget code state ≤ full.gasAvailable.toNat := by
+        simpa [XBlockTraceGasBudget, hAt, hEmit, hRun, code,
+          Nat.add_comm] using hBudget
+      have hBlockPath :
+          XRunListPathReady validJumps code state full (.halted halt) :=
+        XRunListPathReady.of_emitInstr_checks_and_budget
+          (program := program)
+          (target := target)
+          (validJumps := validJumps)
+          (blockState := state)
+          (fullState := full)
+          hEncoding hSafety hAt hEmit hTargetBlock
+          (by simpa [code] using hRun)
+          hRel hCode hChecksCode hNoCallCode hBudgetBlock
+      refine
+        runListResult_with_path_continuation_exists_agrees_of_path_ready
+          hBlockPath ?_ ?_
+      · intro halt' hEq
+        cases hEq
+        rfl
+      · intro targetFinal fullFinal hImpossible _hRelFinal
+        cases hImpossible
+
+theorem blockTraceResult_stepTrace_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hTraceChecks :
+      XBlockTraceChecksReadyFor (validJumps target) hTrace)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      XStepTrace (validJumps target) evmFuel
+          (installCodeAndGas target gas initial) evmResult ∧
+        EvmYul.EVM.X evmFuel (validJumps target)
+            (installCodeAndGas target gas initial) =
+          .ok evmResult ∧
+        XResultAgrees targetResult evmResult := by
+  let gasBound := XBlockTraceGasBudget program targetFuel initial targetResult
+  have hBudget :
+      gasBound ≤
+        (installCodeAndGas target gas initial).gasAvailable.toNat := by
+    rw [installCodeAndGas_gasAvailable_toNat hGasFits]
+    exact hGasAtLeast
+  have hInstalledCode :
+      (installCodeAndGas target gas initial).executionEnv.code =
+        Bytecode.encodeTarget target := by
+    simp [installCodeAndGas]
+  obtain ⟨fuel, evmResult, hTraceX, hAgree⟩ :=
+    blockTraceResult_exists_agrees_of_trace_checks_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (validJumps := validJumps target)
+      hTrace hTraceChecks hEncoding hSafety hNoCallCreate hBudget
+      (GasExecRel.installCodeAndGas_of_code_eq hCode)
+      hInstalledCode
+      hDoneContinue
+  exact ⟨fuel.succ, evmResult, hTraceX, hTraceX.run, hAgree⟩
+
+theorem blockTraceResult_runs_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hTraceChecks :
+      XBlockTraceChecksReadyFor (validJumps target) hTrace)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      EvmYul.EVM.X evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok evmResult ∧
+      XResultAgrees targetResult evmResult := by
+  obtain ⟨evmFuel, evmResult, _hTraceX, hRun, hAgree⟩ :=
+    blockTraceResult_stepTrace_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (initial := initial)
+      (targetFuel := targetFuel)
+      (targetResult := targetResult)
+      hEncoding hSafety hCode hTrace hTraceChecks hNoCallCreate
+      hDoneContinue hGasAtLeast hGasFits
+  exact ⟨evmFuel, evmResult, hRun, hAgree⟩
+
+theorem blockTraceResult_runs_at_or_above_computed_gas_of_nonGas_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hNonGas :
+      XBlockReplayNonGasReady program target (validJumps target))
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      EvmYul.EVM.X evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok evmResult ∧
+      XResultAgrees targetResult evmResult := by
+  let gasBound := XBlockTraceGasBudget program targetFuel initial targetResult
+  have hBudget :
+      gasBound ≤
+        (installCodeAndGas target gas initial).gasAvailable.toNat := by
+    rw [installCodeAndGas_gasAvailable_toNat hGasFits]
+    exact hGasAtLeast
+  obtain ⟨fuel, evmResult, hTraceX, hAgree⟩ :=
+    blockTraceResult_exists_agrees_of_nonGas_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (validJumps := validJumps target)
+      hTrace hNonGas hNoCallCreate hBudget
+      (GasExecRel.installCodeAndGas_of_code_eq hCode)
+      hDoneContinue
+  exact ⟨fuel.succ, evmResult, hTraceX.run, hAgree⟩
+
+theorem blockTraceResult_runs_at_or_above_computed_gas_of_core_noReturnDataCopy_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hCore :
+      XBlockReplayCoreNonGasReady program target (validJumps target))
+    (hNoReturnDataCopy : XBlockReplayNoReturnDataCopy program target)
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      EvmYul.EVM.X evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok evmResult ∧
+      XResultAgrees targetResult evmResult :=
+  blockTraceResult_runs_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+    hEncoding hSafety hCode hTrace
+    (XBlockTraceChecksReadyFor.of_block_path_checks hTrace
+      (XBlockPathChecksReady.of_core_noReturnDataCopy_noCallCreate
+        hCore hNoReturnDataCopy hNoCallCreate))
+    hNoCallCreate hDoneContinue hGasAtLeast hGasFits
+
 theorem blockTraceResult_concrete_gas_of_nonGas_no_call_create_and_budget
     {program : Program} {target : TargetProgram}
     {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
@@ -7298,8 +11754,7 @@ theorem blockTraceResult_concrete_gas_of_nonGas_no_call_create_and_budget
       Preservation.BlockTraceResult program target targetFuel initial
         targetResult)
     (hGasBoundFits :
-      XBlockTraceGasBudget program targetFuel initial targetResult <
-        EvmYul.UInt256.size)
+      XTraceGasBudgetFits program targetFuel initial targetResult)
     (hNonGas :
       XBlockReplayNonGasReady program target (validJumps target))
     (hNoCallCreate : XBlockReplayNoCallCreate program target)
@@ -7325,6 +11780,160 @@ theorem blockTraceResult_concrete_gas_of_nonGas_no_call_create_and_budget
       (GasExecRel.installCodeAndGas_of_code_eq hCode)
       hDoneContinue
   exact ⟨fuel.succ, gasBound, evmResult, hGasBoundFits, hTraceX.run, hAgree⟩
+
+theorem blockTraceResult_concrete_gas_of_path_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hGasBoundFits :
+      XTraceGasBudgetFits program targetFuel initial targetResult)
+    (hChecks :
+      XBlockPathChecksReady program target (validJumps target))
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult) :
+    ∃ evmFuel gasValue evmResult,
+      gasValue < EvmYul.UInt256.size ∧
+        EvmYul.EVM.X evmFuel (validJumps target)
+            (installCodeAndGas target gasValue initial) =
+          .ok evmResult ∧
+        XResultAgrees targetResult evmResult := by
+  let gasBound := XBlockTraceGasBudget program targetFuel initial targetResult
+  have hBudget :
+      gasBound ≤
+        (installCodeAndGas target gasBound initial).gasAvailable.toNat := by
+    rw [installCodeAndGas_gasAvailable_toNat hGasBoundFits]
+  have hInstalledCode :
+      (installCodeAndGas target gasBound initial).executionEnv.code =
+        Bytecode.encodeTarget target := by
+    simp [installCodeAndGas]
+  have hTraceChecks :
+      XBlockTraceChecksReadyFor (validJumps target) hTrace :=
+    XBlockTraceChecksReadyFor.of_block_path_checks hTrace hChecks
+  obtain ⟨fuel, evmResult, hTraceX, hAgree⟩ :=
+    blockTraceResult_exists_agrees_of_trace_checks_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (validJumps := validJumps target)
+      hTrace hTraceChecks hEncoding hSafety hNoCallCreate hBudget
+      (GasExecRel.installCodeAndGas_of_code_eq hCode)
+      hInstalledCode
+      hDoneContinue
+  exact ⟨fuel.succ, gasBound, evmResult, hGasBoundFits, hTraceX.run, hAgree⟩
+
+/--
+Concrete-gas bridge specialized to the finite budget computed from the gasless
+block trace.  This is the witness used by the public compiler theorem: the
+chosen installed gas is exactly `XBlockTraceGasBudget`.
+-/
+theorem blockTraceResult_computed_gas_of_path_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hGasBoundFits :
+      XTraceGasBudgetFits program targetFuel initial targetResult)
+    (hChecks :
+      XBlockPathChecksReady program target (validJumps target))
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult) :
+    ∃ evmFuel evmResult,
+      XBlockTraceGasBudget program targetFuel initial targetResult <
+        EvmYul.UInt256.size ∧
+        EvmYul.EVM.X evmFuel (validJumps target)
+            (installCodeAndGas target
+              (XBlockTraceGasBudget program targetFuel initial targetResult)
+              initial) =
+          .ok evmResult ∧
+        XResultAgrees targetResult evmResult := by
+  let gasBound := XBlockTraceGasBudget program targetFuel initial targetResult
+  have hBudget :
+      gasBound ≤
+        (installCodeAndGas target gasBound initial).gasAvailable.toNat := by
+    rw [installCodeAndGas_gasAvailable_toNat hGasBoundFits]
+  have hInstalledCode :
+      (installCodeAndGas target gasBound initial).executionEnv.code =
+        Bytecode.encodeTarget target := by
+    simp [installCodeAndGas]
+  have hTraceChecks :
+      XBlockTraceChecksReadyFor (validJumps target) hTrace :=
+    XBlockTraceChecksReadyFor.of_block_path_checks hTrace hChecks
+  obtain ⟨fuel, evmResult, hTraceX, hAgree⟩ :=
+    blockTraceResult_exists_agrees_of_trace_checks_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (validJumps := validJumps target)
+      hTrace hTraceChecks hEncoding hSafety hNoCallCreate hBudget
+      (GasExecRel.installCodeAndGas_of_code_eq hCode)
+      hInstalledCode
+      hDoneContinue
+  exact ⟨fuel.succ, evmResult, hGasBoundFits, hTraceX.run, hAgree⟩
+
+/--
+Sufficient-gas version of the computed-budget bridge.  The finite budget
+computed from the gasless block trace is a lower bound: any installed UInt256
+gas value above it makes the gas-aware `X` run follow the same checked path and
+produce an agreeing result.
+-/
+theorem blockTraceResult_runs_at_or_above_computed_gas_of_path_checks_no_call_create_and_budget
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState} {targetResult : StepResult}
+    (hEncoding :
+      Bytecode.EncodingCorrect target (Bytecode.encodeTarget target))
+    (hSafety : Bytecode.DecodeSafety target)
+    (hCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetResult)
+    (hChecks :
+      XBlockPathChecksReady program target (validJumps target))
+    (hNoCallCreate : XBlockReplayNoCallCreate program target)
+    (hDoneContinue :
+      XTracePathDoneContinuation (validJumps target) targetResult)
+    {gas : Nat}
+    (hGasAtLeast :
+      XBlockTraceGasBudget program targetFuel initial targetResult ≤ gas)
+    (hGasFits : gas < EvmYul.UInt256.size) :
+    ∃ evmFuel evmResult,
+      EvmYul.EVM.X evmFuel (validJumps target)
+          (installCodeAndGas target gas initial) =
+        .ok evmResult ∧
+      XResultAgrees targetResult evmResult := by
+  let gasBound := XBlockTraceGasBudget program targetFuel initial targetResult
+  have hBudget :
+      gasBound ≤
+        (installCodeAndGas target gas initial).gasAvailable.toNat := by
+    rw [installCodeAndGas_gasAvailable_toNat hGasFits]
+    exact hGasAtLeast
+  have hInstalledCode :
+      (installCodeAndGas target gas initial).executionEnv.code =
+        Bytecode.encodeTarget target := by
+    simp [installCodeAndGas]
+  have hTraceChecks :
+      XBlockTraceChecksReadyFor (validJumps target) hTrace :=
+    XBlockTraceChecksReadyFor.of_block_path_checks hTrace hChecks
+  obtain ⟨fuel, evmResult, hTraceX, hAgree⟩ :=
+    blockTraceResult_exists_agrees_of_trace_checks_no_call_create_and_budget
+      (program := program)
+      (target := target)
+      (validJumps := validJumps target)
+      hTrace hTraceChecks hEncoding hSafety hNoCallCreate hBudget
+      (GasExecRel.installCodeAndGas_of_code_eq hCode)
+      hInstalledCode
+      hDoneContinue
+  exact ⟨fuel.succ, evmResult, hTraceX.run, hAgree⟩
 
 theorem blockTraceResult_with_continuation_exists_agrees_of_block_ready
     {program : Program} {target : TargetProgram}

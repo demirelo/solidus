@@ -890,6 +890,9 @@ def externalBoundaryExceptCALLPrimitive (op : EvmYul.Operation .Yul) : Prop :=
   | .System .CALL => True
   | _ => externalBoundaryPrimitive op
 
+def returnDataCopyBoundaryPrimitive (op : EvmYul.Operation .Yul) : Prop :=
+  op ≠ .Env .RETURNDATACOPY
+
 def objectBuiltinUserCall (functionName : Name) : Prop :=
   ObjectBuiltin.unsupported? functionName = false
 
@@ -901,6 +904,9 @@ def externalBoundaryExpr : AstExpr → Prop :=
 
 def externalBoundaryExceptCALLExpr : AstExpr → Prop :=
   Family.expr externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
+def returnDataCopyBoundaryExpr : AstExpr → Prop :=
+  Family.expr returnDataCopyBoundaryPrimitive Family.anyUserCall
 
 def objectBuiltinExpr : AstExpr → Prop :=
   Family.expr Family.anyPrimitive objectBuiltinUserCall
@@ -914,6 +920,9 @@ def externalBoundaryExprs : List AstExpr → Prop :=
 def externalBoundaryExceptCALLExprs : List AstExpr → Prop :=
   Family.exprs externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
+def returnDataCopyBoundaryExprs : List AstExpr → Prop :=
+  Family.exprs returnDataCopyBoundaryPrimitive Family.anyUserCall
+
 def objectBuiltinExprs : List AstExpr → Prop :=
   Family.exprs Family.anyPrimitive objectBuiltinUserCall
 
@@ -925,6 +934,9 @@ def externalBoundaryStmt : AstStmt → Prop :=
 
 def externalBoundaryExceptCALLStmt : AstStmt → Prop :=
   Family.stmt externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
+def returnDataCopyBoundaryStmt : AstStmt → Prop :=
+  Family.stmt returnDataCopyBoundaryPrimitive Family.anyUserCall
 
 def objectBuiltinStmt : AstStmt → Prop :=
   Family.stmt Family.anyPrimitive objectBuiltinUserCall
@@ -938,6 +950,9 @@ def externalBoundaryStmts : List AstStmt → Prop :=
 def externalBoundaryExceptCALLStmts : List AstStmt → Prop :=
   Family.stmts externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
+def returnDataCopyBoundaryStmts : List AstStmt → Prop :=
+  Family.stmts returnDataCopyBoundaryPrimitive Family.anyUserCall
+
 def objectBuiltinStmts : List AstStmt → Prop :=
   Family.stmts Family.anyPrimitive objectBuiltinUserCall
 
@@ -949,6 +964,9 @@ def externalBoundaryCases : List (Word × List AstStmt) → Prop :=
 
 def externalBoundaryExceptCALLCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
+def returnDataCopyBoundaryCases : List (Word × List AstStmt) → Prop :=
+  Family.casesSafe returnDataCopyBoundaryPrimitive Family.anyUserCall
 
 def objectBuiltinCases : List (Word × List AstStmt) → Prop :=
   Family.casesSafe Family.anyPrimitive objectBuiltinUserCall
@@ -966,6 +984,10 @@ def externalBoundaryExceptCALLFunctionDefinition :
   Family.functionDefinition externalBoundaryExceptCALLPrimitive
     Family.anyUserCall
 
+def returnDataCopyBoundaryFunctionDefinition :
+    AstFunctionDefinition → Prop :=
+  Family.functionDefinition returnDataCopyBoundaryPrimitive Family.anyUserCall
+
 def objectBuiltinFunctionDefinition :
     AstFunctionDefinition → Prop :=
   Family.functionDefinition Family.anyPrimitive objectBuiltinUserCall
@@ -982,6 +1004,10 @@ def externalBoundaryExceptCALLFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries externalBoundaryExceptCALLPrimitive Family.anyUserCall
 
+def returnDataCopyBoundaryFunctionEntries :
+    List (Name × AstFunctionDefinition) → Prop :=
+  Family.functionEntries returnDataCopyBoundaryPrimitive Family.anyUserCall
+
 def objectBuiltinFunctionEntries :
     List (Name × AstFunctionDefinition) → Prop :=
   Family.functionEntries Family.anyPrimitive objectBuiltinUserCall
@@ -997,6 +1023,10 @@ noncomputable def externalBoundaryContract :
 noncomputable def externalBoundaryExceptCALLContract :
     AstContract → Prop :=
   Family.contract externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
+noncomputable def returnDataCopyBoundaryContract :
+    AstContract → Prop :=
+  Family.contract returnDataCopyBoundaryPrimitive Family.anyUserCall
 
 noncomputable def objectBuiltinContract :
     AstContract → Prop :=
@@ -1025,6 +1055,10 @@ noncomputable def externalBoundaryProgram :
 noncomputable def externalBoundaryExceptCALLProgram :
     Program → Prop :=
   Family.program externalBoundaryExceptCALLPrimitive Family.anyUserCall
+
+noncomputable def returnDataCopyBoundaryProgram :
+    Program → Prop :=
+  Family.program returnDataCopyBoundaryPrimitive Family.anyUserCall
 
 noncomputable def objectBuiltinProgram :
     Program → Prop :=
@@ -1056,6 +1090,10 @@ def externalBoundaryExceptCALLPrimitive? : EvmYul.Operation .Yul → Bool
   | .System .CALLCODE => false
   | .System .DELEGATECALL => false
   | .System .STATICCALL => false
+  | _ => true
+
+def returnDataCopyBoundaryPrimitive? : EvmYul.Operation .Yul → Bool
+  | .Env .RETURNDATACOPY => false
   | _ => true
 
 theorem localCodeImagePrimitive_of_check {op : EvmYul.Operation .Yul}
@@ -1101,6 +1139,16 @@ theorem externalBoundaryExceptCALLPrimitive_of_check
     simp [externalBoundaryExceptCALLPrimitive?,
       externalBoundaryExceptCALLPrimitive, externalBoundaryPrimitive,
       Safe.externalCallBoundaryPrimitive] at hCheck ⊢
+
+theorem returnDataCopyBoundaryPrimitive_of_check
+    {op : EvmYul.Operation .Yul}
+    (hCheck : returnDataCopyBoundaryPrimitive? op = true) :
+    returnDataCopyBoundaryPrimitive op := by
+  cases op <;> simp [returnDataCopyBoundaryPrimitive?,
+    returnDataCopyBoundaryPrimitive] at hCheck ⊢ <;>
+    try rename_i subop <;> cases subop <;>
+    simp [returnDataCopyBoundaryPrimitive?,
+      returnDataCopyBoundaryPrimitive] at hCheck ⊢
 
 namespace Family
 
@@ -1487,6 +1535,11 @@ noncomputable def externalBoundaryExceptCALLProgram? (program : Program) :
   Family.program? externalBoundaryExceptCALLPrimitive? Family.anyUserCall?
     program
 
+noncomputable def returnDataCopyBoundaryProgram? (program : Program) :
+    Bool :=
+  Family.program? returnDataCopyBoundaryPrimitive? Family.anyUserCall?
+    program
+
 noncomputable def checked? (program : Program) : Bool :=
   localCodeImageProgram? program &&
     (externalCodeImageProgram? program &&
@@ -1526,6 +1579,13 @@ theorem externalBoundaryExceptCALLProgram_of_check {program : Program}
     externalBoundaryExceptCALLProgram program :=
   Family.program_of_check
     (fun _op hOp => externalBoundaryExceptCALLPrimitive_of_check hOp)
+    (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
+
+theorem returnDataCopyBoundaryProgram_of_check {program : Program}
+    (hCheck : returnDataCopyBoundaryProgram? program = true) :
+    returnDataCopyBoundaryProgram program :=
+  Family.program_of_check
+    (fun _op hOp => returnDataCopyBoundaryPrimitive_of_check hOp)
     (fun _functionName hCall => Family.anyUserCall_of_check hCall) hCheck
 
 theorem checked?_sound {program : Program}
