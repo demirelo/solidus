@@ -2212,6 +2212,60 @@ theorem let_user_lookup_args_length
   cases hLookup
   exact hArgsLen
 
+theorem assign_single_user_call_exprOk_of_stmtOk
+    {contract : AstContract} {name : EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr}
+    (hStmt :
+      StmtOk contract (.Assign [name] (.Call (.inr functionName) args))) :
+    ExprOk contract (.Call (.inr functionName) args) := by
+  rcases hStmt with ⟨hCall, hArgsOk⟩
+  rcases hCall with
+    ⟨params, returns, body, hLookup, hTargetsLen, hArgsLen⟩
+  exact
+    ⟨⟨params, returns, body, hLookup, by
+        simpa using hTargetsLen.symm, hArgsLen⟩, hArgsOk⟩
+
+theorem assign_single_user_call_stmtOk_of_exprOk
+    {contract : AstContract} {name : EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr}
+    (hExpr :
+      ExprOk contract (.Call (.inr functionName) args)) :
+    StmtOk contract (.Assign [name] (.Call (.inr functionName) args)) := by
+  rcases hExpr with ⟨hCall, hArgsOk⟩
+  rcases hCall with
+    ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
+  exact
+    ⟨⟨params, returns, body, hLookup, by
+        simpa using hReturnsLen.symm, hArgsLen⟩, hArgsOk⟩
+
+theorem let_single_user_call_exprOk_of_stmtOk
+    {contract : AstContract} {name : EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr}
+    (hStmt :
+      StmtOk contract (.Let [name]
+        (some (.Call (.inr functionName) args)))) :
+    ExprOk contract (.Call (.inr functionName) args) := by
+  rcases hStmt with ⟨hCall, hArgsOk⟩
+  rcases hCall with
+    ⟨params, returns, body, hLookup, hTargetsLen, hArgsLen⟩
+  exact
+    ⟨⟨params, returns, body, hLookup, by
+        simpa using hTargetsLen.symm, hArgsLen⟩, hArgsOk⟩
+
+theorem let_single_user_call_stmtOk_of_exprOk
+    {contract : AstContract} {name : EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr}
+    (hExpr :
+      ExprOk contract (.Call (.inr functionName) args)) :
+    StmtOk contract (.Let [name]
+      (some (.Call (.inr functionName) args))) := by
+  rcases hExpr with ⟨hCall, hArgsOk⟩
+  rcases hCall with
+    ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
+  exact
+    ⟨⟨params, returns, body, hLookup, by
+        simpa using hReturnsLen.symm, hArgsLen⟩, hArgsOk⟩
+
 end UserCallArity
 
 /--
@@ -77341,12 +77395,9 @@ theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_program_accepted_re
       have hStmtOk :
           UserCallArity.StmtOk yulProgram.contract
             (.Let [tmp] (some (.Call (.inr functionName) args))) := by
-        rcases hExprOk with ⟨hCallOk, hArgsOk⟩
-        rcases hCallOk with
-          ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
         exact
-          ⟨⟨params, returns, body, hLookup, by simpa using hReturnsLen.symm,
-              hArgsLen⟩, hArgsOk⟩
+          UserCallArity.let_single_user_call_stmtOk_of_exprOk
+            (name := tmp) hExprOk
       have hLowerArgsLength : lowerArgs.length = args.length :=
         Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
       have hTargetContains :
@@ -77611,12 +77662,9 @@ theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_programCALL_accepte
       have hStmtOk :
           UserCallArity.StmtOk yulProgram.contract
             (.Let [tmp] (some (.Call (.inr functionName) args))) := by
-        rcases hExprOk with ⟨hCallOk, hArgsOk⟩
-        rcases hCallOk with
-          ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
         exact
-          ⟨⟨params, returns, body, hLookup, by simpa using hReturnsLen.symm,
-              hArgsLen⟩, hArgsOk⟩
+          UserCallArity.let_single_user_call_stmtOk_of_exprOk
+            (name := tmp) hExprOk
       have hLowerArgsLength : lowerArgs.length = args.length :=
         Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
       have hTargetContains :
@@ -77871,12 +77919,9 @@ theorem sourceExprEvalPreludeSound_user_call_generated_ok_of_program_accepted_re
       have hStmtOk :
           UserCallArity.StmtOk yulProgram.contract
             (.Let [tmp] (some (.Call (.inr functionName) args))) := by
-        rcases hExprOk with ⟨hCallOk, hArgsOk⟩
-        rcases hCallOk with
-          ⟨params, returns, body, hLookup, hReturnsLen, hArgsLen⟩
         exact
-          ⟨⟨params, returns, body, hLookup, by simpa using hReturnsLen.symm,
-              hArgsLen⟩, hArgsOk⟩
+          UserCallArity.let_single_user_call_stmtOk_of_exprOk
+            (name := tmp) hExprOk
       have hLowerArgsLength : lowerArgs.length = args.length :=
         Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
       have hTargetContains :
