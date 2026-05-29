@@ -21976,6 +21976,31 @@ inductive OpenResultDoneInvariant {ε α : Type*}
 
 namespace OpenResultDoneInvariant
 
+theorem any
+    {ε α : Type*}
+    {doneInv : Except ε α → Prop}
+    (hDone : ∀ doneResult, doneInv doneResult) :
+    ∀ result : OpenExternal.OpenResult ε α,
+      OpenResultDoneInvariant doneInv result := by
+  intro result
+  exact
+    OpenExternal.OpenResult.rec
+      (motive_1 := fun result =>
+        OpenResultDoneInvariant doneInv result)
+      (motive_2 := fun externalCall =>
+        ∀ response,
+          OpenResultDoneInvariant doneInv (externalCall.resume response))
+      (done := by
+        intro doneResult
+        exact OpenResultDoneInvariant.done (hDone doneResult))
+      (call := by
+        intro _ hResume
+        exact OpenResultDoneInvariant.call hResume)
+      (mk := by
+        intro _ _ ih response
+        exact ih response)
+      result
+
 theorem imp
     {ε α : Type*}
     {doneInv doneInv' : Except ε α → Prop}
@@ -21988,6 +22013,27 @@ theorem imp
       exact OpenResultDoneInvariant.done (hImp hDone)
   | call _hResume ih =>
       exact OpenResultDoneInvariant.call ih
+
+theorem and
+    {ε α : Type*}
+    {doneInv₁ doneInv₂ : Except ε α → Prop}
+    {result : OpenExternal.OpenResult ε α}
+    (hLeft : OpenResultDoneInvariant doneInv₁ result)
+    (hRight : OpenResultDoneInvariant doneInv₂ result) :
+    OpenResultDoneInvariant
+      (fun doneResult => doneInv₁ doneResult ∧ doneInv₂ doneResult)
+      result := by
+  induction hLeft with
+  | done hDoneLeft =>
+      cases hRight with
+      | done hDoneRight =>
+          exact OpenResultDoneInvariant.done ⟨hDoneLeft, hDoneRight⟩
+  | call _hResumeLeft ih =>
+      cases hRight with
+      | call hResumeRight =>
+          exact OpenResultDoneInvariant.call (by
+            intro response
+            exact ih response (hResumeRight response))
 
 theorem bind
     {ε α β : Type*}
@@ -22406,6 +22452,117 @@ theorem evalArgs_reverse_of_eval
     hDomain
 
 end YulOpenResultStateStoreDomainExact
+
+theorem yulOpen_consResult_toOpenResult_doneInvariant_length
+    {arg : Word} {result : OpenExternal.YulOpenResult (State × List Word)}
+    {expectedLength : Nat}
+    (hResult :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              values.length = expectedLength)
+        (OpenExternal.YulOpenResult.toOpenResult result)) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            values.length = expectedLength.succ)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.consResult arg result)) := by
+  simp [OpenExternal.YulOpen.consResult,
+    OpenExternal.YulOpenResult.map,
+    OpenExternal.YulOpenResult.toOpenResult_bind]
+  refine OpenResultDoneInvariant.bind hResult ?_ ?_
+  · intro resultPair hDone
+    rcases resultPair with ⟨stateAfter, values⟩
+    exact OpenResultDoneInvariant.done (by
+      intro stateAfter' values' hOk
+      cases hOk
+      simp [hDone rfl])
+  · intro err _hErr
+    intro stateAfter values hOk
+    cases hOk
+
+/--
+Open argument evaluation preserves the number of argument values even when a
+nested expression suspends at an external CALL and later resumes.
+-/
+theorem yulOpenEvalArgs_toOpenResult_doneInvariant_length
+    (fuel : Nat) :
+    ∀ {args : List AstExpr} {codeOverride : Option AstContract}
+      {state : State},
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              values.length = args.length)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args codeOverride state)) := by
+  induction fuel using Nat.strong_induction_on with
+  | h fuel ih =>
+      intro args codeOverride state
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error]
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter values hOk
+            cases hOk)
+      | succ fuel' =>
+          cases args with
+          | nil =>
+              simp [OpenExternal.YulOpen.evalArgs,
+                OpenExternal.YulOpenResult.ok]
+              exact OpenResultDoneInvariant.done (by
+                intro stateAfter values hOk
+                cases hOk
+                rfl)
+          | cons head tail =>
+              unfold OpenExternal.YulOpen.evalArgs
+              simp only [Nat.succ_eq_add_one, List.length_cons]
+              unfold OpenExternal.YulOpen.evalTail
+              rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+              refine
+                OpenResultDoneInvariant.bind
+                  (OpenResultDoneInvariant.any
+                    (doneInv :=
+                      fun _doneResult :
+                        Except EvmYul.Yul.Exception (State × Word) => True)
+                    (fun _ => trivial)
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.eval fuel' head codeOverride
+                        state)))
+                  ?_ ?_
+              · intro headResult _hHead
+                rcases headResult with ⟨stateAfterHead, headValue⟩
+                cases fuel' with
+                | zero =>
+                    simp [OpenExternal.YulOpenResult.error]
+                    exact OpenResultDoneInvariant.done (by
+                      intro stateAfter values hOk
+                      cases hOk)
+                | succ fuelTail =>
+                    have hTail :
+                        OpenResultDoneInvariant
+                          (fun doneResult =>
+                            ∀ {stateAfter : State} {values : List Word},
+                              doneResult = .ok (stateAfter, values) →
+                                values.length = tail.length)
+                          (OpenExternal.YulOpenResult.toOpenResult
+                            (OpenExternal.YulOpen.evalArgs fuelTail tail
+                              codeOverride stateAfterHead)) :=
+                      ih fuelTail (by omega)
+                    simpa [OpenExternal.YulOpen.evalTail] using
+                      yulOpen_consResult_toOpenResult_doneInvariant_length
+                        (arg := headValue)
+                        (result :=
+                          OpenExternal.YulOpen.evalArgs fuelTail tail
+                            codeOverride stateAfterHead)
+                        (expectedLength := tail.length) hTail
+              · intro err _hErr
+                intro stateAfter values hOk
+                cases hOk
 
 /--
 Open local-domain contract for a reversed Yul argument list.
@@ -31566,6 +31723,22 @@ def yulPrimitiveOpenResultAfterArgs
         (EvmYul.Yul.primCall sourceFuel sourceResult.1
           kind.toYulOperation sourceResult.2.reverse)
 
+def yulPrimitiveOpenResultAfterArgsPrim
+    (sourceFuel : Nat) (prim : EvmYul.Operation .Yul)
+    (sourceResult : State × List Word) :
+    OpenExternal.OpenResult Exception (State × List Word) :=
+  match
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+        sourceResult.1 prim sourceResult.2.reverse with
+  | some call =>
+      .call
+        { site := call.site
+          resume := fun response => .done (call.resume response) }
+  | none =>
+      .done
+        (EvmYul.Yul.primCall sourceFuel sourceResult.1 prim
+          sourceResult.2.reverse)
+
 theorem openResult_bind_assoc_sourceBridge
     {ε α β γ : Type*}
     (result : OpenExternal.OpenResult ε α)
@@ -31607,6 +31780,38 @@ theorem openResult_bind_assoc_sourceBridge
         exact ih response next next')
       result) next next'
 
+theorem yulOpen_toOpenResult_evalValues_prim_eq_bind_args
+    {sourceFuel : Nat} {prim : EvmYul.Operation .Yul}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {source : State} :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl prim) args) codeOverride source) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            codeOverride source))
+        (fun sourceResult =>
+          yulPrimitiveOpenResultAfterArgsPrim sourceFuel prim sourceResult) := by
+  simp [OpenExternal.YulOpen.evalValues,
+    OpenExternal.YulOpen.reverseResult,
+    OpenExternal.YulOpenResult.map,
+    OpenExternal.YulOpenResult.toOpenResult_bind,
+    OpenExternal.YulOpenResult.ok,
+    yulPrimitiveOpenResultAfterArgsPrim]
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro sourceResult
+  cases sourceResult with
+  | mk sourceAfter values =>
+      generalize hCall? :
+          OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+            sourceAfter prim values.reverse = call?
+      cases call? <;>
+        simp [OpenExternal.OpenResult.bind,
+          OpenExternal.YulOpenResult.toOpenResult,
+          OpenExternal.YulOpenResult.liftExceptCall, hCall?]
+
 theorem yulOpen_toOpenResult_evalValues_call_toYulOperation_eq_bind_args
     {sourceFuel : Nat} {kind : OpenExternal.CallKind}
     {args : List AstExpr} {codeOverride : Option AstContract}
@@ -31638,6 +31843,168 @@ theorem yulOpen_toOpenResult_evalValues_call_toYulOperation_eq_bind_args
         simp [OpenExternal.OpenResult.bind,
           OpenExternal.YulOpenResult.toOpenResult,
           OpenExternal.YulOpenResult.liftExceptCall, hCall?]
+
+theorem yulOpenEvalValues_call_toYulOperation_doneInvariant_domain_single
+    {layout : List Name} {sourceFuel : Nat}
+    {kind : OpenExternal.CallKind} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hArgDomain :
+      YulOpenResultStateStoreDomainExact layout (List Word)
+        (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+          state))
+    (hArity : args.length = kind.inputArity) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            StateStoreDomainExact layout stateAfter ∧
+              ∃ value, values = [value])
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride state)) := by
+  rw [yulOpen_toOpenResult_evalValues_call_toYulOperation_eq_bind_args]
+  have hArgDomainInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              StateStoreDomainExact layout stateAfter)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            state)) :=
+    YulOpenResultStateStoreDomainExact.toOpenResult_doneInvariant hArgDomain
+  have hArgLengthInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              values.length = args.reverse.length)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            state)) :=
+    yulOpenEvalArgs_toOpenResult_doneInvariant_length
+      (fuel := sourceFuel) (args := args.reverse)
+  have hArgInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          (∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              StateStoreDomainExact layout stateAfter) ∧
+          (∀ {stateAfter : State} {values : List Word},
+            doneResult = .ok (stateAfter, values) →
+              values.length = args.reverse.length))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            state)) :=
+    OpenResultDoneInvariant.and hArgDomainInv hArgLengthInv
+  refine OpenResultDoneInvariant.bind hArgInv ?_ ?_
+  · intro sourceResult hDone
+    rcases sourceResult with ⟨stateAfterArgs, values⟩
+    rcases hDone with ⟨hDomainDone, hLengthDone⟩
+    have hDomainAfterArgs : StateStoreDomainExact layout stateAfterArgs :=
+      hDomainDone rfl
+    have hLengthReverse : values.length = args.reverse.length :=
+      hLengthDone rfl
+    have hLength : values.length = kind.inputArity := by
+      simpa [List.length_reverse, hArity] using hLengthReverse
+    rcases
+        OpenExternal.CallKind.exists_operands_of_reverse_args_length
+          kind hLength with
+      ⟨operands, hValues⟩
+    have hValuesReverse : values.reverse = kind.args operands := by
+      rw [hValues]
+      simp
+    cases hCall :
+        OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          stateAfterArgs kind.toYulOperation values.reverse with
+    | none =>
+        exfalso
+        simp [OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?,
+          OpenExternal.CallKind.ofYulOperation?_toYulOperation,
+          OpenExternal.CallKind.yulOpenCall?,
+          OpenExternal.CallKind.yulCallSite?, hValuesReverse] at hCall
+    | some call =>
+        simp [yulPrimitiveOpenResultAfterArgs, hCall]
+        exact OpenResultDoneInvariant.call (by
+          intro response
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter valuesAfter hOk
+            rcases
+                yulPrimitiveEvalValuesOpenCall?_resume_state_domain_exact_status
+                  (layout := layout) (state := stateAfterArgs)
+                  hDomainAfterArgs hCall response with
+              ⟨_stateAfter, hResume, hDomainAfter⟩
+            rw [hResume] at hOk
+            cases hOk
+            exact ⟨hDomainAfter, ⟨response.statusWord, rfl⟩⟩))
+  · intro err _hErr
+    intro stateAfter values hOk
+    cases hOk
+
+theorem yulOpenEvalValues_call_toYulOperation_doneInvariant_domain_single_of_contract
+    {layout : List Name} {sourceFuel : Nat}
+    {kind : OpenExternal.CallKind} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hContract :
+      YulOpenEvalArgsReverseStateDomainExactContract layout sourceFuel args
+        codeOverride)
+    (hDomain : StateStoreDomainExact layout state)
+    (hArity : args.length = kind.inputArity) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            StateStoreDomainExact layout stateAfter ∧
+              ∃ value, values = [value])
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride state)) :=
+  yulOpenEvalValues_call_toYulOperation_doneInvariant_domain_single
+    (layout := layout) (sourceFuel := sourceFuel) (kind := kind)
+    (args := args) (codeOverride := codeOverride) (state := state)
+    (hContract.evalArgsResult hDomain) hArity
+
+theorem yulOpenEvalValues_call_toYulOperation_doneInvariant_domain_single_of_callSafe
+    {layout : List Name} {sourceFuel : Nat}
+    {kind : OpenExternal.CallKind} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafeArgs : Safe.CallSafe.exprs args)
+    (hDomain : StateStoreDomainExact layout state)
+    (hArity : args.length = kind.inputArity) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            StateStoreDomainExact layout stateAfter ∧
+              ∃ value, values = [value])
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inl kind.toYulOperation) args) codeOverride state)) :=
+  yulOpenEvalValues_call_toYulOperation_doneInvariant_domain_single_of_contract
+    (layout := layout) (sourceFuel := sourceFuel) (kind := kind)
+    (args := args) (codeOverride := codeOverride) (state := state)
+    (YulOpenEvalArgsReverseStateDomainExactContract.of_callSafe_primitiveFamilies
+      (layout := layout) (fuel := sourceFuel) (args := args)
+      (codeOverride := codeOverride) hSafeArgs)
+    hDomain hArity
+
+theorem compilerOpen_primitive_openCall?_none_of_safe_primitive
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {state : Objects.Source.State} {values : List Word}
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op) :
+    CompilerOpen.Primitive.openCall? state op values = none := by
+  have hNoKind : OpenExternal.CallKind.ofBasicOp? op = none := by
+    cases yulPrim <;>
+      rename_i subop <;>
+      cases subop <;>
+      simp [Safe.primitive, Prim.toBasicOp?] at hSafe hBasic ⊢
+    all_goals
+      try contradiction
+    all_goals
+      subst op
+      simp [OpenExternal.CallKind.ofBasicOp?]
+  simp [CompilerOpen.Primitive.openCall?, hNoKind]
 
 theorem sourceExprPreludeOpen_run_prim_eq_arg_prelude_bind
     {prim : Objects.Source.PrimitiveSemantics}
