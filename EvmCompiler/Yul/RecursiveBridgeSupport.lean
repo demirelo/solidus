@@ -50162,6 +50162,86 @@ def runAssignTarget
       | .brk | .cont | .leave | .halt _ =>
           OpenExternal.OpenResult.ok preResult)
 
+theorem runLetTarget_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre suffix tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runLetTarget prim program ctx (pre ++ suffix) name lowerExpr tail
+        tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + (suffix.length + tailFuel.succ)) { stmts := pre }
+          compiler)
+        (fun preResult =>
+          match preResult.1.mode with
+          | .regular =>
+              runLetTarget prim program preResult.2 suffix name lowerExpr tail
+                tailFuel preResult.1.state
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok preResult) := by
+  unfold runLetTarget
+  have hFuel :
+      (pre ++ suffix).length + tailFuel.succ =
+        pre.length + (suffix.length + tailFuel.succ) := by
+    simp [List.length_append]
+    omega
+  rw [hFuel]
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (suffix := suffix) (state := compiler)
+    (suffixFuel := suffix.length + tailFuel.succ)]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode <;>
+        simp [runLetTarget, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok]
+
+theorem runAssignTarget_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre suffix tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runAssignTarget prim program ctx (pre ++ suffix) name lowerExpr tail
+        tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + (suffix.length + tailFuel.succ)) { stmts := pre }
+          compiler)
+        (fun preResult =>
+          match preResult.1.mode with
+          | .regular =>
+              runAssignTarget prim program preResult.2 suffix name lowerExpr
+                tail tailFuel preResult.1.state
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok preResult) := by
+  unfold runAssignTarget
+  have hFuel :
+      (pre ++ suffix).length + tailFuel.succ =
+        pre.length + (suffix.length + tailFuel.succ) := by
+    simp [List.length_append]
+    omega
+  rw [hFuel]
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (suffix := suffix) (state := compiler)
+    (suffixFuel := suffix.length + tailFuel.succ)]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode <;>
+        simp [runAssignTarget, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok]
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :

@@ -225,6 +225,10 @@ Checked base we can rely on:
   expressions. These remove the `ExprNoUserCalls`/generated-prelude gate from
   checked statement decomposition, exposing the real continuation-aware
   expression-head proof obligation needed for nested internal user calls.
+- [x] Added raw append laws for `SourceExprSeqPreludeOpen.runLetTarget` and
+  `runAssignTarget`. These let the expression-recursive route peel arbitrary
+  generated/internal-user-call target prefixes while preserving suspended and
+  nonregular prefix outcomes.
 
 Remaining work:
 
