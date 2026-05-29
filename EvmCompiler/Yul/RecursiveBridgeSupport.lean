@@ -43109,6 +43109,239 @@ theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude
             apply hCallResponse
             simpa using hResponse
 
+theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_prim_expr_prelude_of_lower
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel lowerFuel : Nat} {name : EvmYul.Identifier}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {lowerHead : List Functions.Stmt} {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {tailFuel : Nat} {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Let [name] (some (.Call (.inl yulPrim) args))) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hPreShape : GeneratedPrelude pre)
+    (hFresh : identName name ∉ layout)
+    (hExpr :
+      SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) (pre.length + tailFuel.succ)
+        exprCallResponseRel)
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues sourceFuel.succ
+                (.Call (.inl yulPrim) args) codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          sourceFuel.succ.succ rest codeOverride lowerTail tailFuel allowed
+          seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          codeOverride sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  match target.values with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        { target.ctx with
+                          scope := identName name :: target.ctx.scope }
+                        tailFuel { stmts := lowerTail.stmts }
+                        (target.state.insert (identName name) value)
+                  | _ => CompilerOpen.invalid) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ.succ
+      (.Let [name] (some (.Call (.inl yulPrim) args)) :: rest)
+      codeOverride { stmts := lowerHead ++ lowerTail.stmts }
+      (pre.length + tailFuel.succ) allowed seqCallResponseRel := by
+  rcases
+      BridgeFacts.toFunctionsListFuel?_let_prim_single_components hLower with
+    ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
+  have hLowerExprExpected :
+      Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') :=
+    Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  have hTuple :
+      (pre, Expr.cast hOutputs (.prim op seq), freshState') =
+        (lowerPre, lowerValue, freshState') := by
+    simpa [hLowerExprExpected] using hLowerExpr
+  cases hTuple
+  intro source compiler hInitial
+  simpa [hHeadEq, List.append_assoc] using
+    ((sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_expr_prelude
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (exprFuel := sourceFuel.succ)
+      (name := name) (sourceExpr := .Call (.inl yulPrim) args)
+      (rest := rest) (codeOverride := codeOverride) (pre := pre)
+      (lowerExpr := Expr.cast hOutputs (.prim op seq))
+      (lowerTail := lowerTail) (tailFuel := tailFuel)
+      (allowed := allowed) (exprCallResponseRel := exprCallResponseRel)
+      (seqCallResponseRel := seqCallResponseRel)
+      hPreShape hFresh hExpr hExprDone hTail hCallResponse) hInitial)
+
+theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_prim_expr_prelude_of_lower
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel lowerFuel : Nat} {name : EvmYul.Identifier}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {lowerHead : List Functions.Stmt} {lowerTail : Functions.Block}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {tailFuel : Nat} {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hLower :
+      Stmt.toFunctionsListFuel? lowerFuel.succ freshState
+          (.Assign [name] (.Call (.inl yulPrim) args)) =
+        some (lowerHead, freshState'))
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hPreShape : GeneratedPrelude pre)
+    (hTargetMem : identName name ∈ layout)
+    (hExpr :
+      SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) (pre.length + tailFuel.succ)
+        exprCallResponseRel)
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues sourceFuel.succ
+                (.Call (.inl yulPrim) args) codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter sourceFuel.succ.succ rest
+          codeOverride lowerTail tailFuel allowed seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq sourceFuel.succ.succ rest
+                          codeOverride sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  match target.values with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        target.ctx tailFuel { stmts := lowerTail.stmts }
+                        (target.state.insert (identName name) value)
+                  | _ => CompilerOpen.invalid) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ.succ
+      (.Assign [name] (.Call (.inl yulPrim) args) :: rest)
+      codeOverride { stmts := lowerHead ++ lowerTail.stmts }
+      (pre.length + tailFuel.succ) allowed seqCallResponseRel := by
+  rcases
+      BridgeFacts.toFunctionsListFuel?_assign_prim_single_components hLower
+    with
+    ⟨lowerPre, lowerValue, hLowerExpr, hHeadEq⟩
+  have hLowerExprExpected :
+      Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') :=
+    Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  have hTuple :
+      (pre, Expr.cast hOutputs (.prim op seq), freshState') =
+        (lowerPre, lowerValue, freshState') := by
+    simpa [hLowerExprExpected] using hLowerExpr
+  cases hTuple
+  intro source compiler hInitial
+  simpa [hHeadEq, List.append_assoc] using
+    ((sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (exprFuel := sourceFuel.succ)
+      (name := name) (sourceExpr := .Call (.inl yulPrim) args)
+      (rest := rest) (codeOverride := codeOverride) (pre := pre)
+      (lowerExpr := Expr.cast hOutputs (.prim op seq))
+      (lowerTail := lowerTail) (tailFuel := tailFuel)
+      (allowed := allowed) (exprCallResponseRel := exprCallResponseRel)
+      (seqCallResponseRel := seqCallResponseRel)
+      hPreShape hTargetMem hExpr hExprDone hTail hCallResponse) hInitial)
+
 /-- Open compiler expression shape for an output-one primitive cast. -/
 theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
     {prim : Objects.Source.PrimitiveSemantics}
