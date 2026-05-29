@@ -36330,6 +36330,63 @@ theorem compilerOpen_exprSeq_eval_of_toStackSeq?_argList_eval_var_map
     (by simpa [Expr.List.toStackSeq?, List.map_reverse] using hSeq)
     (by simpa [List.map_reverse] using hEval)
 
+/--
+Open target argument-list evaluation agrees with closed source argument-list
+evaluation for generated variable-only argument lists.
+
+The recursive generated-argument proof records the closed
+`Functions.Source.ArgList.eval` fact in its raw done relation, while the open
+target call statement consumes `CompilerOpen.FunctionsOpen.ArgList.eval`.  This
+lemma connects those two views for the exact variable lists emitted by the
+argument prelude.
+-/
+theorem compilerOpen_functionsArgList_eval_var_map_of_source
+    {prim : Objects.Source.PrimitiveSemantics} :
+    ∀ {names : List Name} {state : Objects.Source.State} {values : List Word},
+      Functions.Source.ArgList.eval prim
+          (names.map (fun name => (.var name : Locals.Expr 1))) state =
+        .ok (state, values) →
+      CompilerOpen.FunctionsOpen.ArgList.eval prim
+          (names.map (fun name => (.var name : Locals.Expr 1))) state =
+        .done (.ok (state, values))
+  | [], state, values, hEval => by
+      simpa [Functions.Source.ArgList.eval,
+        CompilerOpen.FunctionsOpen.ArgList.eval,
+        OpenExternal.OpenResult.ok] using hEval.symm
+  | name :: rest, state, values, hEval => by
+      unfold Functions.Source.ArgList.eval at hEval
+      cases hLookup : state.vars name with
+      | none =>
+          simp [Functions.Source.Expr.evalOne, Locals.Source.Expr.evalOne,
+            Locals.Source.Expr.eval, hLookup, Functions.Source.invalid,
+            Locals.Source.invalid, Structured.invalid] at hEval
+      | some value =>
+          simp [Functions.Source.Expr.evalOne, Locals.Source.Expr.evalOne,
+            Locals.Source.Expr.eval, hLookup] at hEval
+          cases hTail :
+              Functions.Source.ArgList.eval prim
+                (rest.map (fun name => (.var name : Locals.Expr 1)))
+                state with
+          | error err =>
+              simp [hTail] at hEval
+          | ok tailResult =>
+              rcases tailResult with ⟨stateAfterTail, tailValues⟩
+              simp [hTail] at hEval
+              rcases hEval with ⟨hStateAfter, hValues⟩
+              subst stateAfterTail
+              subst values
+              have hTailOpen :
+                  CompilerOpen.FunctionsOpen.ArgList.eval prim
+                      (rest.map (fun name => (.var name : Locals.Expr 1)))
+                      state =
+                    .done (.ok (state, tailValues)) :=
+                compilerOpen_functionsArgList_eval_var_map_of_source hTail
+              simp [CompilerOpen.FunctionsOpen.ArgList.eval,
+                CompilerOpen.LocalsExpr.evalOne,
+                CompilerOpen.LocalsExpr.eval, hLookup,
+                OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                hTailOpen]
+
 theorem sourceArgList_eval_var_map_of_toSeq?_compilerOpen_evalSeq_done
     {prim : Objects.Source.PrimitiveSemantics} :
     ∀ {names : List Name} {results : Nat} {seq : Locals.ExprSeq results}

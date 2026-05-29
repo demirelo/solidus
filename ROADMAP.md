@@ -258,6 +258,10 @@ Checked base we can rely on:
   `compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function`, exposing
   the open `Stmt.call` execution as argument evaluation, resolved open callee
   body execution, return assignment, or terminal propagation.
+- [x] Added closed-to-open variable argument-list bridge
+  `compilerOpen_functionsArgList_eval_var_map_of_source`, so the raw
+  generated-argument relation can feed its checked closed `ArgList.eval` fact
+  into the open target internal-call statement.
 
 Remaining work:
 
