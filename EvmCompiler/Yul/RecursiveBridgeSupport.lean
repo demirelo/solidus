@@ -23979,6 +23979,188 @@ theorem yulOpen_execCall_user_succ_eq_bind_args
             .done (EvmYul.Yul.multifill' vars (.ok callResult)) := by
   simp [OpenExternal.YulOpen.execCall]
 
+theorem yulOpenResult_restoreCaller_returnValues_length
+    {caller : State} {result : OpenExternal.YulOpenResult State}
+    {rets : List EvmYul.Identifier} :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            values.length = rets.length)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpenResult.bind result fun state₂ =>
+          let state₃ :=
+            EvmYul.Yul.State.setStore
+              (EvmYul.Yul.State.overwrite?
+                (EvmYul.Yul.State.reviveJump state₂) caller)
+              caller
+          .ok (state₃, List.map state₂.lookup! rets))) := by
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  refine
+    OpenResultDoneInvariant.bind
+      (OpenResultDoneInvariant.any
+        (ε := Exception) (α := State) (doneInv := fun _ => True)
+        (by intro _; trivial)
+        (OpenExternal.YulOpenResult.toOpenResult result))
+      ?_ ?_
+  · intro state₂ _hInv
+    simp [OpenExternal.YulOpenResult.toOpenResult,
+      OpenExternal.YulOpenResult.ok]
+    exact OpenResultDoneInvariant.done (by
+      intro stateAfter values hOk
+      cases hOk
+      simp)
+  · intro err _hInv
+    intro stateAfter values hOk
+    cases hOk
+
+theorem yulOpenCall_doneInvariant_returnValues_length_of_function
+    {fuel : Nat} {state : State} {args : List Word}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {contract : AstContract} {f : EvmYul.Yul.Ast.FunctionDefinition}
+    (hFunction :
+      OpenExternal.YulOpen.callFunction? (some functionName) contract =
+        some f) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            values.length = f.rets.length)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call fuel args functionName
+          (some contract) state)) := by
+  cases fuel with
+  | zero =>
+      simp [OpenExternal.YulOpen.call, OpenExternal.YulOpenResult.error,
+        OpenExternal.YulOpenResult.toOpenResult]
+      exact OpenResultDoneInvariant.done (by
+        intro stateAfter values hOk
+        cases hOk)
+  | succ fuel' =>
+      unfold OpenExternal.YulOpen.call
+      cases hFind :
+          state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      | none =>
+          simp [hFind, OpenExternal.YulOpenResult.error,
+            OpenExternal.YulOpenResult.toOpenResult]
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter values hOk
+            cases hOk)
+      | some yulContract =>
+          simp [hFind, hFunction]
+          exact
+            yulOpenResult_restoreCaller_returnValues_length
+              (caller := state) (rets := f.rets)
+
+theorem yulOpenCall_doneInvariant_single_of_exprOk
+    {fuel : Nat} {state : State} {argValues : List Word}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {args : List AstExpr} {contract : AstContract}
+    (hExprOk :
+      UserCallArity.ExprOk contract (.Call (.inr functionName) args)) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            ∃ value, values = [value])
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call fuel argValues functionName
+          (some contract) state)) := by
+  cases hFunction :
+      OpenExternal.YulOpen.callFunction? (some functionName) contract with
+  | none =>
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.call, OpenExternal.YulOpenResult.error,
+            OpenExternal.YulOpenResult.toOpenResult]
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter values hOk
+            cases hOk)
+      | succ fuel' =>
+          unfold OpenExternal.YulOpen.call
+          cases hFind :
+              state.sharedState.accountMap.find?
+                state.executionEnv.codeOwner with
+          | none =>
+              simp [hFind, OpenExternal.YulOpenResult.error,
+                OpenExternal.YulOpenResult.toOpenResult]
+              exact OpenResultDoneInvariant.done (by
+                intro stateAfter values hOk
+                cases hOk)
+          | some yulContract =>
+              simp [hFind, hFunction, OpenExternal.YulOpenResult.error,
+                OpenExternal.YulOpenResult.toOpenResult]
+              exact OpenResultDoneInvariant.done (by
+                intro stateAfter values hOk
+                cases hOk)
+  | some f =>
+      have hLength :
+          f.rets.length = 1 := by
+        cases f with
+        | Def params returns body =>
+            have hLookup :
+                contract.functions.lookup functionName =
+                  some (.Def params returns body) := by
+              simpa [OpenExternal.YulOpen.callFunction?] using hFunction
+            exact
+              UserCallArity.expr_user_lookup_returns_length_one
+                hExprOk hLookup
+      exact
+        OpenResultDoneInvariant.imp
+          (yulOpenCall_doneInvariant_returnValues_length_of_function
+            (fuel := fuel) (state := state) (args := argValues)
+            (functionName := functionName) (contract := contract)
+            (f := f) hFunction)
+          (by
+            intro doneResult hDone stateAfter values hOk
+            have hValuesLen : values.length = 1 := by
+              simpa [hLength] using hDone hOk
+            cases values with
+            | nil =>
+                simp at hValuesLen
+            | cons value rest =>
+                cases rest with
+                | nil =>
+                    exact ⟨value, rfl⟩
+                | cons value₂ rest =>
+                    simp at hValuesLen)
+
+theorem yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk
+    {sourceFuel : Nat} {state : State}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {args : List AstExpr} {contract : AstContract}
+    (hExprOk :
+      UserCallArity.ExprOk contract (.Call (.inr functionName) args)) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            ∃ value, values = [value])
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inr functionName) args) (some contract) state)) := by
+  rw [yulOpen_evalValues_user_call_succ_eq_bind_args]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  refine
+    OpenResultDoneInvariant.bind
+      (OpenResultDoneInvariant.any
+        (ε := Exception) (α := State × List Word) (doneInv := fun _ => True)
+        (by intro _; trivial)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.reverseResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              (some contract) state))))
+      ?_ ?_
+  · intro pair _hInv
+    exact
+      yulOpenCall_doneInvariant_single_of_exprOk
+        (fuel := sourceFuel) (state := pair.1) (argValues := pair.2)
+        (functionName := functionName) (args := args)
+        (contract := contract) hExprOk
+  · intro err _hInv
+    intro stateAfter values hOk
+    cases hOk
+
 /--
 `YulOpen.evalValues`-shaped CALL suspension/resume preservation.
 
@@ -39900,6 +40082,89 @@ theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_l
           (by
             intro sourceDone hBoth sourceAfter values hOk
             exact ⟨hBoth.1 hOk, hBoth.2 hOk⟩)
+
+theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat}
+    {expr : AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState'))
+    (hUserOk :
+      ∀ {functionName : Name} {args : List AstExpr},
+        expr = .Call (.inr functionName) args →
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args)) :
+    ∀ {source compiler},
+      SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ expr
+              (some contract) source)) :=
+  lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases
+    (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+    (expr := expr) (codeOverride := some contract)
+    (freshState := freshState) (freshState' := freshState')
+    (pre := pre) (lower := lower) hSafe hScoped hLower
+    (by
+      intro functionName args hEq _hSafeUser _hScopedUser _hLowerUser
+        source compiler _hInitial
+      exact
+        yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk
+          (sourceFuel := sourceFuel) (state := source)
+          (functionName := functionName) (args := args)
+          (contract := contract) (hUserOk hEq))
+
+theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat}
+    {expr : AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState'))
+    (hUserOk :
+      ∀ {functionName : Name} {args : List AstExpr},
+        expr = .Call (.inr functionName) args →
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args)) :
+    ∀ {source compiler},
+      SourceStateExactRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                StateStoreDomainExact layout sourceAfter ∧
+                  ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ expr
+              (some contract) source)) :=
+  lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases
+    (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+    (expr := expr) (codeOverride := some contract)
+    (freshState := freshState) (freshState' := freshState')
+    (pre := pre) (lower := lower) hSafe hScoped hLower
+    (by
+      intro functionName args hEq _hSafeUser _hScopedUser _hLowerUser
+        source compiler hInitial
+      exact
+        lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity
+          (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+          (expr := .Call (.inr functionName) args)
+          (contract := contract) (freshState := freshState)
+          (freshState' := freshState') (pre := pre) (lower := lower)
+          _hSafeUser _hScopedUser _hLowerUser (fun hEq' => hUserOk (by
+            cases hEq'
+            exact hEq)) hInitial)
 
 /--
 Open CALL-family expression bridge for generated argument preludes.
