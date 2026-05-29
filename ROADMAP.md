@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 13:19 PDT.
+Last updated: 2026-05-29 13:29 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -217,6 +217,10 @@ Checked base we can rely on:
   `SourceExprPreludeOpen.run` invalidation adapter. The assignment wrapper now
   derives its prefix-containment invariant from `SourceWritesDisjoint`, so this
   path is ready to consume checked expression-lowering write-disjointness.
+- [x] Factored the older generated-prelude let/assign sequence constructors
+  through `SourceExprSeqPreludeOpen`; the duplicated bind proof is gone, and
+  existing checked no-user expression frontiers now pass through the same raw
+  sequence boundary that internal user-call expression preludes need.
 
 Remaining work:
 
