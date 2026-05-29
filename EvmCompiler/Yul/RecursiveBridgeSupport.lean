@@ -51147,6 +51147,147 @@ theorem sourceExprPreludeOpen_user_call_lower1?_eq_open_call
           simp [suffix, OpenExternal.OpenResult.bind, CompilerOpen.invalid,
             Functions.Source.invalid, Structured.invalid]
 
+/--
+Checked expression-prelude target decomposition for an internal user-call
+expression, with the target `Stmt.call` itself unfolded through the resolved
+callee body.
+
+This is the target-side bind shape that the source `YulOpen.call` proof must
+match: generated/open argument prelude first, hidden result-slot initialization,
+open lowered-argument evaluation, open callee body, caller return assignment,
+and finally a regular temp read.
+-/
+theorem sourceExprPreludeOpen_user_call_lower1?_eq_open_call_body_of_find_function
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {fn : Functions.FunDef}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      SourceExprPreludeOpen.run prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                OpenExternal.OpenResult.bind
+                  (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+                    (preResult.1.state.insert tmp Expr.zero))
+                  (fun argResult =>
+                    OpenExternal.OpenResult.bind
+                      (CompilerOpen.FunctionsOpen.FunDef.runBody prim program
+                        fn argResult.2 tailFuel argResult.1.shared)
+                      (fun callResult =>
+                        match callResult with
+                        | .returned sharedAfterCall returnValues =>
+                            match Functions.Source.Store.assignMany [tmp]
+                                returnValues argResult.1.vars with
+                            | none => CompilerOpen.invalid
+                            | some returnStore =>
+                                OpenExternal.OpenResult.map
+                                  (fun exprResult =>
+                                    { state := exprResult.1
+                                      ctx :=
+                                        { preResult.2 with
+                                          scope :=
+                                            tmp :: preResult.2.scope }
+                                      values := exprResult.2 })
+                                  (CompilerOpen.LocalsExpr.eval prim
+                                    (.var tmp)
+                                    { shared := sharedAfterCall
+                                      vars := returnStore })
+                        | .halted _kind _haltedState =>
+                            CompilerOpen.invalid))
+            | .brk | .cont | .leave | .halt _ =>
+                CompilerOpen.invalid) := by
+  rcases
+      sourceExprPreludeOpen_user_call_lower1?_eq_open_call
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (tailFuel := tailFuel)
+        (compiler := compiler) hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hTarget⟩
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  rw [hTarget]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode with
+      | regular =>
+          rw [compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
+            (prim := prim) (program := program)
+            (ctx := { ctxAfter with scope := tmp :: ctxAfter.scope })
+            (targets := [tmp]) (functionName := functionName)
+            (args := lowerArgs) (state := compilerAfter.insert tmp Expr.zero)
+            (fuel := tailFuel) (fn := fn)
+            (by simp) hFind]
+          rw [openResult_bind_assoc]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro argResult
+          rw [openResult_bind_assoc]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro callResult
+          cases callResult with
+          | returned sharedAfterCall returnValues =>
+              cases hAssign :
+                  Functions.Source.Store.assignMany [tmp] returnValues
+                    argResult.1.vars with
+              | none =>
+                  simp [hAssign, CompilerOpen.invalid,
+                    Functions.Source.invalid, Structured.invalid,
+                    OpenExternal.OpenResult.bind]
+              | some returnStore =>
+                  simp [hAssign, OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+                    Functions.Source.Outcome.regular,
+                    Locals.Source.Outcome.regular]
+          | halted kind haltedState =>
+              simp [CompilerOpen.invalid, Functions.Source.invalid,
+                Structured.invalid, OpenExternal.OpenResult.bind,
+                OpenExternal.OpenResult.ok, Functions.Source.Outcome.halt,
+                Locals.Source.Outcome.halt]
+      | brk =>
+          simp [CompilerOpen.invalid, Functions.Source.invalid,
+            Structured.invalid, OpenExternal.OpenResult.bind]
+      | cont =>
+          simp [CompilerOpen.invalid, Functions.Source.invalid,
+            Structured.invalid, OpenExternal.OpenResult.bind]
+      | leave =>
+          simp [CompilerOpen.invalid, Functions.Source.invalid,
+            Structured.invalid, OpenExternal.OpenResult.bind]
+      | halt kind =>
+          simp [CompilerOpen.invalid, Functions.Source.invalid,
+            Structured.invalid, OpenExternal.OpenResult.bind]
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :

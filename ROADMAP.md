@@ -269,6 +269,11 @@ Checked base we can rely on:
   `Expr.lower1?` result as `preArgs`, hidden temp initialization, open
   `Stmt.call`, and regular temp read without going through let/assign
   statement frontiers.
+- [x] Added resolved-callee target bind shape
+  `sourceExprPreludeOpen_user_call_lower1?_eq_open_call_body_of_find_function`,
+  which unfolds the checked expression-level target `Stmt.call` through open
+  lowered-argument evaluation, open `FunDef.runBody`, return assignment, and
+  regular temp read.
 
 Remaining work:
 
