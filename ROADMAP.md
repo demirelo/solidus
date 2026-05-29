@@ -1,5 +1,411 @@
 # Roadmap
 
+## Active CALL Remaining Checklist
+
+This is the full remaining checklist for adding ordinary `CALL` to the main
+compiler proof spine while keeping the outside world abstract. The existing
+no-CALL theorem may stay as a proved fallback while this is in flight, but the
+preferred public spine should admit ordinary `CALL` once the checklist closes.
+Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
+concrete external-world model to finish these steps.
+
+Last updated: 2026-05-29 12:15 PDT.
+
+Definition of done: the preferred checked compiler theorem admits accepted Yul
+programs containing ordinary `CALL`, proves that imported-Yul execution and
+compiled EVM execution expose the same external call requests, and relates
+continuations for every shared abstract response. The proof must not model a
+concrete callee, chain world, precompile dispatcher, child-code branch, or
+callee semantics. Requested gas may stay opaque, but it must be threaded
+consistently as a call operand. The response may carry arbitrary
+caller-account/storage mutation; both sides require only the same response and
+the shared-state relation demanded by the open boundary.
+
+Checked base we can rely on:
+
+- [x] Generated-variable open stack/final-prelude adapters.
+- [x] Empty open argument-prelude case.
+- [x] Single-word expression-head adapter from `YulOpen.evalValues` to
+  `YulOpen.eval`.
+- [x] Source-side singleton, append-singleton, reverse-cons, and `consResult`
+  open-bind equations for scheduled `YulOpen.evalArgs`.
+- [x] Target-side open append equations for generated preludes, including
+  `preHead ++ [let tmp := lowerHead]` and
+  `preTail ++ (preHead ++ [let tmp := lowerHead])` followed by final generated
+  variable replay.
+- [x] Generic `OpenResultRel` tail/head/final bind composition plus the
+  concrete scheduled reverse-cons wrapper.
+- [x] Done-branch final replay adapter from hidden temp insertion plus checked
+  final `evalSeq`.
+- [x] General `SourceArgPreludeOpen.run` open append equation, so the
+  generated-cons target split no longer assumes the tail prelude is generated.
+- [x] Arbitrary open `SourceWritesDisjoint` invariant for source preludes,
+  including internal source-call statements; the generated-cons target split no
+  longer assumes the head prelude is generated either.
+- [x] Tail `toStackSeq?` witness construction for recursive generated-cons
+  packaging, so the lowerBound component wrapper no longer requires the caller
+  to guess the tail stack sequence.
+- [x] Checked `lowerBound1?` cons decomposition, so future recursive
+  generated-argument constructors can recover tail lowering, head lowering, and
+  hidden-temp freshness from the compiler output instead of assuming them.
+- [x] Full `lowerBound1?` cons-result wrapper for the open generated-argument
+  constructor, so callers can consume compiler output plus final `toStackSeq?`
+  instead of exposing tail/head/fresh compiler components.
+- [x] Compiler-output nil wrapper for the open generated-argument constructor,
+  so the recursive argument proof has checked base and cons constructors over
+  actual `lowerBound1?`/`toStackSeq?` output.
+- [x] CALL-family source head single-value invariant from checked
+  `lowerBound1?`/`toStackSeq?` arity, so generated argument cons callers can
+  derive `hHeadSingle` for primitive CALL heads without a concrete-world or
+  store-domain premise.
+- [x] Primitive CALL `lower1?` decomposition plus direct
+  `sourceHeadSingle` wrapper, so generated argument cons callers with only the
+  checked head-lowering equation can recover the CALL argument lowering
+  internally.
+- [x] CALL-specialized generated-cons wrapper over compiler `lowerBound1?`
+  output, so the recursive argument proof can consume a primitive CALL head
+  without separately threading `hHeadSingle`.
+- [x] Canonical response relation for the expression-head
+  `evalValues`-to-`eval` adapter, so generated-cons constructors no longer
+  expose a separate `hHeadEvalResponse` plumbing premise.
+- [x] Canonical response relation for the primitive-CALL argument prelude,
+  so CALL expression wrappers no longer expose a separate `hPreludeResponse`
+  plumbing premise.
+- [x] CALL-head generated-cons wrapper that derives the head expression proof
+  from the head CALL's own open argument-prelude proof, primitive response
+  relation, and checked `Expr.lower1?` decomposition.
+- [x] Canonical response relation for safe non-CALL primitive argument
+  preludes, so the safe primitive expression wrapper no longer exposes a
+  separate `hPreludeResponse` plumbing premise.
+- [x] Safe primitive generated-cons wrapper that derives the head expression
+  proof and source single-result invariant from the head primitive's own open
+  argument-prelude proof, checked lowering, no-error invariant, and primitive
+  stack-soundness theorem.
+- [x] CALL-safe primitive generated-cons dispatcher that consumes
+  `Safe.CallSafe.primitive` and internally splits primitive heads into the
+  already-safe route or the ordinary-`CALL` route.
+- [x] Canonical `beforeCallSafePrimitive` response relation plus generated-cons
+  wrapper, so recursive primitive-head callers can provide one head-argument
+  prelude proof and let the checked `Safe.CallSafe.primitive` split choose the
+  safe or ordinary-`CALL` continuation relation.
+- [x] Primitive-head `Safe.CallSafe.expr` generated-cons wrapper, so recursive
+  argument-list induction can consume the actual head safety fact and extract
+  both primitive-family safety and argument-list safety internally.
+- [x] Primitive-head `Safe.CallSafe.exprs` generated-cons wrapper, so recursive
+  argument-list induction can pass the cons-list safety fact directly and let
+  the wrapper split head and tail safety.
+- [x] Generic `Safe.CallSafe.exprs` generated-cons wrapper, so recursive
+  argument-list induction can pass list safety directly while the head proof is
+  supplied by the expression-level open preservation route.
+- [x] Expression-level `Safe.CallSafe.primitive` dispatcher over the canonical
+  `beforeCallSafePrimitive` argument-prelude relation, so safe primitive heads
+  and ordinary `CALL` heads share one primitive-expression wrapper once the
+  recursive argument-prelude proof is supplied.
+- [x] Expression-level `Safe.CallSafe.expr` primitive wrapper over checked
+  `Expr.lower1?` output, so recursive expression preservation can consume the
+  actual expression safety/lowering facts and recover the primitive op,
+  argument lowering, stack sequence, and one-result cast internally.
+- [x] Open literal expression-prelude preservation plus a checked `lower1?`
+  wrapper, giving the recursive expression route a direct non-CALL base case.
+- [x] Open scoped-variable expression-prelude preservation plus a checked
+  `lower1?` wrapper, with the variable-presence/store-domain premise kept
+  explicit instead of folded into `SourceStateRel`.
+- [x] Checked expression-level `Safe.CallSafe.expr` dispatcher over
+  `Expr.lower1?`, so literals, scoped variables, and primitive heads all enter
+  the open expression-prelude proof through one interface. Internal user calls
+  now have a live open-body `YulOpen` semantic target; their preservation still
+  needs the recursive function-body bridge.
+- [x] Checked expression-level single-result invariant dispatcher over
+  `Expr.lower1?`, so generated argument cons can derive the head one-value fact
+  through the same literal/variable/primitive/user-call case split as expression
+  preservation.
+- [x] Checked expression-level done invariant combining exact source
+  store-domain preservation with the single-result fact, so open let/assign
+  sequence constructors can consume one expression-head completed-branch
+  theorem instead of separately rebuilding domain and result-count facts.
+- [x] Safe one-output primitive singleton/domain invariants no longer consume
+  primitive no-error evidence. If the source primitive errors, the singleton
+  postcondition is vacuous; the remaining no-error boundary is confined to the
+  strict primitive expression-preservation relation.
+- [x] Allowed-aware expression-prelude sequence relation plus strict-to-sequence
+  adapter, so expression preservation can be weakened at sequence frontiers
+  without baking source primitive errors into the strict expression relation.
+- [x] Open let/assign expression-prelude sequence constructors now consume the
+  allowed-aware expression relation directly. The relation only admits source
+  expression errors against target expression errors, avoiding an unsound
+  source-error/target-success continuation.
+- [x] Checked generated-argument cons wrapper using the expression-level
+  dispatchers, so `Safe.CallSafe.exprs (head :: tail)`, source scoping,
+  checked `lowerBound1?`, final `toStackSeq?`, freshness, and recursive
+  head/tail premises feed one `SourceArgStackPreludeOpenSoundAtExactTarget`
+  cons step.
+- [x] Target-fuel-parametric expression-level dispatcher, so sequence-frontier
+  proofs can request expression preservation at their exact `pre.length +
+  tailFuel.succ` fuel instead of the older fixed `pre.length + 2` fuel.
+- [x] Open let/assign sequence-head constructors now derive expression
+  preservation and done-domain/singleton invariants from checked
+  `Safe.CallSafe.expr` lowering, instead of taking separate `hExpr` and
+  `hExprDone` premises.
+- [x] Removed the now-stale primitive-specific open let/assign sequence
+  scaffolds; the live sequence-head route is the generic expression-level
+  `Safe.CallSafe.expr` wrapper.
+- [x] Non-user-call checked statement decomposition for `let/assign x := expr`,
+  separating expression-lowered heads from the internal-user-call
+  statement-lowering branch.
+- [x] No-internal-user-call generated-prelude bridge for expressions, so
+  checked non-user-call let/assign heads can recover `GeneratedPrelude pre`
+  from `Expr.lower1?` instead of assuming it.
+- [x] Checked no-internal-user-call let/assign sequence-frontier constructors,
+  so expression-lowered heads can derive the generic `Safe.CallSafe.expr`
+  sequence proof from checked compiler output, generated-prelude recovery, and
+  the recursive argument-prelude premise at the exact tail fuel.
+- [x] Live safe non-CALL primitive expression and sequence-frontier routes no
+  longer take primitive no-error as a premise. Checked argument evaluation now
+  carries arity plus positive-fuel as a done invariant, and
+  `SourcePrimitiveCallNoErrorAt.of_safe_one_output_positive_fuel` constructs
+  the `.Ok`/actual-args no-error fact only at the primitive done branch.
+- [x] Checked internal user-call expression lowering decomposition:
+  `lower1?_user_call_some_components` exposes the unsupported-object-builtin
+  rejection, the direct-argument fast path versus generated argument prelude,
+  the generated `let tmp := 0; call [tmp] f ...` shape, final temp variable,
+  and fresh state. `CallSafe`/lexical user-call projection lemmas now expose
+  argument safety, argument scope, and builtin support explicitly. The
+  `directCallArgsSafe?` path is now proved to be exactly the nil-argument case.
+- [x] Existing internal user-call expression success bridges now consume
+  `lower1?_user_call_some_components` instead of re-unfolding
+  `Expr.lower1?`/`Expr.lower?`, so the closed/direct and generated argument
+  cases share the same checked compiler decomposition that the open branch will
+  use.
+- [x] Current `YulOpen` internal user-call boundary is explicit:
+  `yulOpen_evalValues_user_call_succ_eq_bind_args` and
+  `yulOpen_execCall_user_succ_eq_bind_args` show that user-call arguments are
+  evaluated with open external-CALL suspension, and completed arguments enter
+  `OpenExternal.YulOpen.call` so CALL-family primitives inside user function
+  bodies stay visible.
+- [x] Added the target open-body internal call semantics:
+  `OpenExternal.YulOpen.call` mirrors imported `Yul.call` but runs the selected
+  function body through `YulOpen.exec`, so CALL-family primitives inside the
+  callee body can suspend. The live `YulOpen.evalValues` and `YulOpen.execCall`
+  user-call branches now route through this open-body function.
+- [x] Factored the open internal-call function selector as
+  `OpenExternal.YulOpen.callFunction?` and checked
+  `call_succ_eq_bind_body_of_find_function`, exposing the successful branch as
+  exactly open callee-body execution followed by imported call restoration.
+- [x] Added checked done-branch closed-agreement helpers for the surrounding
+  user-call migration: `reverseResult_evalArgs_done_eq_closed`,
+  `execPrimCall_done_eq_closed`, `execCall_done_eq_closed`,
+  `execSeq_done_eq_closed`, `exec_done_eq_closed`, `loop_done_eq_closed`, and
+  `call_done_eq_closed`.
+
+Remaining work:
+
+1. [ ] Close the recursive generated-argument theorem.
+   - [x] Prove the immediate generated-variable replay lemma from the
+     `lowerBound1?` cons shape: after the tail variables are evaluated, the
+     head prelude runs, and the fresh hidden temp is inserted, final
+     `toStackSeq?` evaluation replays the tail variables and appends the head
+     value in the exact stack order.
+   - [x] Derive the replay lemma from the existing closed invariants:
+     generated-variable shape, temp freshness, disjoint generated writes,
+     local-domain preservation, `SourceVarsAgree`, tail replay after head
+     insertion, and final value-order agreement.
+   - [x] Instantiate the checked final replay done adapter with that generated
+     `evalSeq` fact, rather than taking final replay as an external proof.
+   - [x] Prove the recursive source-side `YulOpen.evalArgs (head :: tail).reverse`
+     tail/head split: tail calls suspend first, completed tails continue into
+     the head, and completed heads continue into final generated-variable
+     replay.
+   - [x] Prove all three branches of that split: done, suspended tail, and
+     suspended head. The done branch should mirror the closed
+     `evalArgs_reverse_cons_ok_split_lt` fuel split and recover the bounded
+     head-fuel fact needed by recursive expression preservation.
+   - [x] Compose the source split with the checked target-side
+     `preTail ++ preHead ++ [let tmp := lowerHead]` open equations through
+     `OpenResultRel`, preserving the response relation at every bind boundary.
+   - [x] Port the proof route of
+     `sourceArgListPreludeRegularAt_cons_of_tail_head` to the open theorem,
+     replacing closed `Exists`/`ok` splits with open bind composition.
+   - [x] Package the cons induction step for `Expr.List.lowerBound1?`,
+     `Expr.List.toStackSeq?`, `Safe.CallSafe.exprs`, scoping, arity, and
+     freshness into `SourceArgStackPreludeOpenSoundAtExactTarget`.
+   - [x] Package the expression-head done invariant needed by open sequence
+     heads: exact source store-domain preservation plus one-result completion.
+  - [x] Shrink the primitive no-error boundary to
+     `SourcePrimitiveCallNoErrorAt`, indexed only by source fuel, Yul
+     primitive, and checked `BasicOp` arity. The older open-argument-run
+     no-error predicates were removed rather than kept as compatibility
+     wrappers.
+  - [x] Transport the safe non-CALL primitive no-error fact without a premise:
+     argument completion supplies checked arity plus `0 < sourceFuel`, the
+     argument-prelude done relation supplies the `.Ok` source state, and
+     `SourcePrimitiveCallNoErrorAt.of_safe_one_output_positive_fuel` closes the
+     primitive error branch from existing `PrimSemantics.primCall_*_ok` lemmas.
+     The stale hNoError-taking safe-primitive expression wrappers were removed.
+  - [ ] Continue transporting the remaining strict-preservation facts consumed
+     by safe non-CALL primitive heads through the recursive frontier:
+     primitive stack soundness/result relatability, state relation, storage
+     equality, result equality, and local preservation. These now sit in the
+     primitive stack-soundness and recursive frontier packages, not in a raw
+     primitive no-error assumption.
+  - [x] Factor the current open internal-user-call semantics boundary into
+     checked equations, so the next user-call expression wrapper can use the
+     open argument route and then enter the live open-body call semantics.
+  - [x] Add a real `YulOpen.call` open-body semantic target for internal
+     user-function calls, and migrate the live `YulOpen.evalValues` /
+     `YulOpen.execCall` user-call branches from closed `Yul.call` to this
+     open-body function.
+  - [x] Prove the full `execSeq`/`exec`/`loop`/`call` done-branch agreement
+     with imported closed Yul, extending the already-checked argument and
+     primitive/user-call helper agreement lemmas.
+  - [x] Add local-domain preservation for live open internal user calls:
+     completed or resumed callee bodies restore the caller varstore via the
+     imported call-return state operation, while external suspensions recurse
+     through the open result.
+   - [x] Run
+     `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` and record
+     the checked theorem names in `PROGRESS_LOG.md`.
+
+2. [ ] Move CALL support to expression-level open preservation.
+   - [x] Identify the canonical recursive expression theorem that replaces the
+     direct let-CALL/assign-CALL route.
+   - [x] Make primitive expression preservation depend on the recursive open
+     argument-prelude theorem for every primitive head, including ordinary
+     `CALL`.
+   - [x] Prove safe non-CALL primitive preservation through the same route,
+     with primitive-error exclusion kept explicit.
+   - [x] Prove ordinary `CALL` primitive preservation through the same route,
+     so the enclosing abstract CALL request appears only after all argument
+     expressions have completed.
+   - [x] Factor the compiler side of internal user-call expression lowering,
+     including the direct-argument fast path and generated-argument prelude, so
+     the open user-call expression branch can consume checked components
+     instead of re-opening `Expr.lower1?`.
+   - [x] Refactor the existing internal user-call expression success bridges to
+     use that checked decomposition, reducing the next open theorem to a
+     semantic argument-prelude/function-body problem rather than compiler
+     case analysis.
+   - [ ] Recurse through compound expression contexts, including cases like
+     `add(call(...), x)`, so nested CALLs are handled by expression structure
+     rather than by direct statement-shape lemmas.
+   - [ ] Adapt internal user-call expression preservation when arguments may
+     suspend, then connect completed argument states to the recursive
+     function-body bridge.
+   - [ ] Relate or rule out expression error and out-of-fuel branches using
+     existing acceptedness/resource premises.
+   - [ ] Delete direct let-CALL and assign-CALL scaffolding as soon as the
+     expression theorem subsumes it; do not leave compatibility aliases.
+   - [ ] Run the focused Lean check and log the exact removed theorem names.
+
+3. [ ] Thread expression preservation through open sequence frontiers.
+   - [x] Update no-internal-user-call expression `let` and assignment sequence
+     constructors to derive expression evidence internally from checked
+     lowering plus the recursive argument-prelude route.
+   - [ ] Add matching sequence constructors for internal user-call
+     declarations and assignments whose arguments may suspend.
+   - [ ] Thread open expression preservation through block sequencing without
+     falling back to closed source execution after a suspended call.
+   - [ ] Update sequence done-relations so they include the strengthened
+     storage equality and result equality facts now required by the main spine.
+   - [ ] Thread open preservation through `if`, `switch`, loop conditions,
+     loop bodies, `break`, `continue`, `leave`, terminal statements, handler
+     sequences, and kont/callee-return continuations.
+   - [ ] Close `CALLOpenSeqLoweringFrontierAt` for the exact successor-fuel
+     step using the recursive induction hypothesis.
+   - [ ] Prove successor-fuel and all-bounds wrappers for the open sequence
+     frontier without adding all-callees-preserve, replay, or concrete-world
+     premises.
+   - [ ] Replace closed `CALLSeqKontFrontierAt` dependencies with open
+     handler/kont frontiers wherever calls can hide in conditions, user-call
+     arguments, generated preludes, or recursive continuations.
+
+4. [ ] Compose the recursive CALL source bridge.
+   - [ ] Audit every source bridge assumption and classify it as fundamental
+     source acceptedness/resource input, constructed compiler evidence, or
+     stale proof scaffold to remove.
+   - [ ] Replace the remaining closed `CALLSeqLoweringFrontierAt` dependency
+     in the all-bounds bridge with `CALLOpenSeqLoweringFrontierAt`.
+   - [ ] Thread the recursive open argument-prelude bundle through the
+     accepted recursive source bridge so it is constructed at each source-fuel
+     bound instead of assumed.
+   - [ ] Prove the all-bounds CALL-admitting recursive source bridge with no
+     public all-callees-preserve, replay, direct let/assign CALL, or concrete
+     external-world premise.
+   - [ ] Preserve the Solidity frontend path and planned Yul-object path while
+     deleting only stale proof internals.
+   - [ ] Keep `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, `CREATE2`,
+     and external account-code inspection rejected by explicit checked feature
+     coverage until each has its own open-boundary semantics and proof.
+
+5. [ ] Connect the open CALL boundary to the EVM target.
+   - [ ] Audit `OpenExternal.OpenCallRel` and request projections for every
+     ordinary `CALL` observable: call kind, caller/context address, target/code
+     address, value, calldata bytes, static permission, return-copy window, and
+     opaque requested-gas operand.
+   - [ ] Prove that the source/Yul open primitive request is related to the
+     compiler-open primitive request after argument lowering.
+   - [ ] Use `OpenPrimitiveCallSound` to relate the source-tower CALL boundary
+     to the compiler-open primitive boundary.
+   - [ ] Use `OpenPrimitiveEVMCallSound` to relate the compiler-open primitive
+     boundary to the EVM stack/CALL boundary.
+   - [ ] Keep the response relation universal over all shared responses and
+     arbitrary caller-account/storage mutation; no concrete callee, precompile,
+     account-map transition, or child-code interpreter may reappear.
+   - [ ] Prove response continuations update status-word results, return data,
+     memory return-copy regions, storage/account state, terminal results, and
+     revert observations consistently across imported Yul, source,
+     compiler-open, and EVM layers.
+
+6. [ ] Add ordinary CALL to the public compiler spine.
+   - [ ] Update checked feature coverage so ordinary `CALL` is admitted by the
+     preferred public theorem while unproved external families remain rejected.
+   - [ ] Add the CALL-capable public theorem over the open CALL observation
+     model and universally related responses.
+   - [ ] Keep the existing no-CALL theorem only as a proved fragment until the
+     CALL theorem has passed the same audit gates.
+   - [ ] Rename public no-CALL runtime/spine names where they become
+     misleading once CALL is admitted; remove old compatibility aliases.
+   - [ ] Route `LayerAudit` to the CALL-capable public theorem once the bridge
+     is fully checked.
+   - [ ] Confirm the public theorem proves storage equality and result equality
+     through the strengthened storage/result relation in the main spine.
+   - [ ] Confirm the public theorem has no stale compiler-generated evidence,
+     replay certificate, all-callees-preserve premise, direct CALL statement
+     scaffold, concrete external-world assumption, or hidden checker shortcut.
+
+7. [ ] Remove stale proof internals after CALL wiring.
+   - [ ] Delete direct let-CALL and assign-CALL lemmas no longer used by the
+     expression-level proof route.
+   - [ ] Delete leftover concrete external-world helpers, precompile branches,
+     child-code branches, created-account machinery, or world-model transition
+     lemmas not used by the open CALL spine.
+   - [ ] Remove stale no-CALL-only wrappers once the CALL theorem replaces
+     their public role.
+   - [ ] Preserve infrastructure used by the Solidity frontend and planned Yul
+     object support.
+   - [ ] Grep the public theorem spine for stale names and concepts:
+     `NoCall`, `World`, `Precompile`, `Child`, `createdAccounts`, `Replay`,
+     `Certificate`, `Obligation`, `CallPreserves`, and direct let/assign CALL
+     scaffold names.
+
+8. [ ] Run verification, audits, documentation, and commits.
+   - [ ] Run focused checks during proof work:
+     `lake env lean EvmCompiler/Yul/RecursiveBridgeSupport.lean` and
+     `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`.
+   - [ ] Run public-spine checks after final wiring:
+     `lake env lean EvmCompiler/LayerAudit.lean` and the relevant `lake build`
+     targets touched by the CALL route.
+   - [ ] Run a scoped placeholder scan over touched proof files for `sorry`,
+     `admit`, `axiom`, and unjustified `unsafe`.
+   - [ ] Run a public theorem-surface audit for assumptions that could be
+     compiler-generated, especially layout records, replay/certificate
+     witnesses, callee-preservation obligations, return-layout facts,
+     generated label/token uniqueness tables, and proof-carrying emitted-code
+     segments.
+   - [ ] Update `PROGRESS_LOG.md` at each checked proof checkpoint and keep
+     `ROADMAP.md` synchronized with completed checklist items.
+   - [ ] Commit coherent verified checkpoints after meaningful proof progress,
+     cleanup, or public-spine rewiring.
+
 ## Audit Concerns To Fully Discharge
 
 This is the current active goal. These items are not complete until the public
@@ -355,17 +761,144 @@ actual modules rather than preserved through audit aliases.
 
 3. [ ] Derive gas-aware `EVM.X` sufficient-gas evidence
    - [x] Audit `Assembly.GasAware.XResultPreconditionAssumptions` and split
-     fundamental gas/oracle assumptions from compiler-derived execution
+     fundamental resource assumptions from compiler-derived execution
      evidence. The compiler theorem still derives the concrete
-     `BlockTraceResult` internally. The preferred public wrapper now takes the
-     exact trace-to-`X` gas-precondition callback consumed by the lower
-     gas-aware bridge.
-   - [ ] Prove the needed `XResultPreconditionAssumptions` from the checked
-     bytecode trace, target encoding/jumpdest correctness, gas oracle,
-     out-of-gas policy, and explicit sufficient-gas bound.
-   - [ ] Strengthen the preferred gas-aware top theorem so it existentially
-     derives the gas bound and `EVM.X` agreement without taking an external
-     `hTargetGasForX` certificate.
+     `BlockTraceResult` internally.
+   - [x] Prove the decoded-bytecode path and explicit concrete-gas bridge for
+     the no-CALL/no-CREATE fragment from `EncodingCorrect`, `DecodeSafety`,
+     code-image preservation, and the finite `XBlockTraceGasBudget`.
+   - [x] Strengthen the preferred gas-aware top theorem so it no longer takes
+     an external `hTargetGasForX`/`XResultPreconditionAssumptions` certificate:
+     the public boundary is now split into gas-budget fit, path-local non-gas
+     `EVM.X` checks, and clean fallthrough finalization for running target
+     traces.
+   - [x] Expose the concrete gas witness in the budgeted public theorem as
+     exactly `XBlockTraceGasBudget asm targetFuel initial targetOutcome`
+     (specialized to `canonicalEntryState initial` in the preferred wrapper),
+     rather than merely existentially producing some gas value.
+   - [x] Prove the sufficient-gas strengthening at the assembly bridge:
+     `blockTraceResult_runs_at_or_above_computed_gas_of_path_checks_no_call_create_and_budget`
+     shows that any UInt256 gas value at least the computed
+     `XBlockTraceGasBudget` follows the same checked `EVM.X` path and returns
+     an agreeing result.
+   - [x] Expose the decoded-path witness directly:
+     `blockTraceResult_stepTrace_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget`
+     returns an `XStepTrace` for the installed sufficiently-large gas value,
+     so the path proof is not merely implicit in the final `EVM.X = .ok`
+     equation. The corresponding run theorem now projects through this trace
+     witness.
+   - [x] Add the non-gas replay adapter:
+     `XBlockTraceChecksReadyFor.of_block_replay_nonGas` constructs trace-local
+     checks from the older `XBlockReplayNonGasReady` package, and
+     `blockTraceResult_runs_at_or_above_computed_gas_of_nonGas_no_call_create_and_budget`
+     gives the same sufficient-gas result directly from non-gas replay,
+     no-CALL/no-CREATE, and the explicit budget lower bound.
+  - [x] Thread the sufficient-gas bridge through the no-CALL public theorem
+     spine. `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`
+     now points to the `existsSourceFuel_sufficientGas_stepTrace_..._X`
+     theorem, whose conclusion quantifies over every installed UInt256 gas
+     value above the computed `XBlockTraceGasBudget` and produces both the
+     `XStepTrace` path witness and an agreeing `EVM.X` run.
+   - [x] Route the audit-facing no-out-of-gas companion through the same
+     trace-local sufficient-gas theorem, so the preferred public no-out root no
+     longer points at the older `XResultPreconditionAssumptions` route.
+   - [x] Strengthen the preferred no-CALL gas-aware public roots with a checked
+     no-`RETURNDATACOPY` wrapper:
+     `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?`.
+     This keeps the public fragment honest while the source/gasless target
+     semantics do not yet model the return-data bounds enforced by `EVM.X`.
+     The assembly bridge now also has compositional
+     `XNonGasChecksPass.intro'` and
+     `XNonGasChecksPass.of_no_returnDataCopy_no_create` helpers for the next
+     trace-check discharge step.
+   - [x] Make that no-`RETURNDATACOPY` wrapper check the emitted target program
+     too, not just the source tree. The checked compile theorem now derives
+     `targetProgramNoReturnDataCopy target` and
+     `XBlockReplayNoReturnDataCopy asm target`, with a suffix-local helper
+     producing the exact `instr.op ≠ RETURNDATACOPY` fact needed by the
+     gas-aware non-gas checks. `XNonGasChecksPass` also has a writable-state
+     constructor for the static-mode subcheck.
+   - [x] Split the remaining assembly-level non-gas obligation into a checked
+     core predicate plus compiler-derived side conditions:
+     `XBlockReplayCoreNonGasReady` combines with
+     `XBlockReplayNoReturnDataCopy` and `XBlockReplayNoCallCreate` to build
+     `XBlockPathChecksReady`, and the sufficient-gas bridge has a corresponding
+     core-based wrapper. The core predicate deliberately does not include
+     decoded-bytecode agreement; decode remains proved from
+     `EncodingCorrect`/`DecodeSafety` inside
+     `XRunListPathReady.of_emitInstr_checks_and_budget`.
+   - [x] Wire the core predicate through the preferred public no-CALL roots.
+     `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and its
+     no-out companion now point at the strict no-`RETURNDATACOPY` core theorem,
+     so checked compiler facts discharge no-CALL/CREATE and no-RDC internally.
+   - [x] Make running-target fallthrough finalization concrete and satisfiable.
+     `XTraceDoneContinuation.running_of_fallthrough_stop` now uses the one
+     fuel step required by `EVM.step`, and the preferred public roots take
+     `XFallthroughStopCleanReady` rather than an opaque continuation package.
+  - [x] Internalize the remaining path-local non-gas `EVM.X` checks behind a
+    checked intermediate target-trace layer. `CoreRunListResult` and
+    `CoreBlockTraceResultFor` mirror the gasless target trace while recording
+    the core `EVM.X` pre-step checks at each instruction, and the preferred
+    public roots now consume that layer rather than exposing raw
+    `XBlockTraceCoreChecksReadyFor`.
+  - [ ] Derive `CoreBlockTraceResultFor` for compiled no-CALL/no-GAS target
+    traces from compiler/source safety facts. These are no longer
+    decoded-bytecode, gas-oracle, no-CALL/CREATE, or no-`RETURNDATACOPY` facts:
+    they are the real non-gas exceptional checks performed by `EVM.X` before
+    `step`, such as jumpdest validity, stack underflow/overflow checks,
+    static-mode writes, and create-size limits.
+    - [x] Prove the assembler/bytecode side of generated jump safety:
+      `labelPc` labels emit concrete `JUMPDEST`s in target code, and
+      `Bytecode.JumpdestCorrect` turns those emitted labels into
+      `validJumps` membership. The core layer now has checked constructors for
+      emitted label/push blocks and generated `push32 label; jump`/`jumpi`
+      blocks, with exact stack-overflow premises instead of the too-strong
+      "stack <= 16 at every internal instruction" shape.
+    - [x] Add the trace builder around the new local shape:
+      `InstrCoreBlockReady` discharges non-primitive instructions from control
+      stack facts and leaves primitive instructions as explicit
+      `XNonGasCoreChecksPass` obligations, while
+      `CoreBlockTraceResultFor.of_instr_core_ready` lifts those per-block facts
+      over a concrete `BlockTraceResult`.
+    - [x] Add the trace-local input wrapper:
+      `InstrCoreBlockTraceInputsReadyFor` records exact
+      `InstrCoreBlockInputsReady` evidence on the same `BlockTraceResult`
+      constructor. For primitives this is the actual `EVM.X` non-gas core
+      input package: delta/stack/jump inputs, the precise stack-overflow
+      inequality, and static-write exclusion. For control instructions it is
+      the control-specific stack precondition. The older `stack <= 16` helper
+      is only a sufficient compatibility lemma, not the preferred theorem
+      boundary. Keeping this evidence trace-local deliberately avoids
+      independent per-trace `Prop` annotations: because `BlockTraceResult` is
+      proof-valued, separate annotations can lose the connection to the same
+      hidden emitted block data under proof irrelevance. The preferred
+      `LayerAudit` gas-aware roots now point at the `traceInputsReady` public
+      wrappers, not the older direct `traceInstrCoreReady` wrappers.
+    - [x] Make the exact-input boundary interconvert cleanly with the older
+      core-ready layer. Checked lemmas
+      `instrCoreBlockInputsReady_iff_ready` and
+      `instrCoreBlockTraceInputsReadyFor_iff_ready` show that the refactor did
+      not weaken the existing core-safe trace story; it only exposes the real
+      stack/jump/static inputs before packing them into
+      `XNonGasCoreChecksPass`. The block-local
+      `XBlockInstrCoreInputsReady` predicate and
+      `InstrCoreBlockTraceInputsReadyFor.of_block_instr_inputs_ready` now give
+      a reusable hook for a future compiler/source invariant without changing
+      the preferred public theorem boundary.
+    - [ ] Connect source/frame stack bounds and static-mode source facts to
+      `InstrCoreBlockTraceInputsReadyFor` for whole traces. This is now the
+      remaining derivation boundary for non-gas core checks. The frame/access
+      proofs give active-frame reachability, but structured procedure calls
+      materialize hidden return frames under the visible frame, so the total
+      EVM stack resource fact must be proved as the exact overflow inequality
+      (or exposed as an explicit resource premise) rather than as a blanket
+      `stack <= 16` claim. Primitive write/static readiness must likewise come
+      from the source/run safety facts on the exact trace constructor, then the
+      preferred public root can route through
+      `InstrCoreBlockTraceReadyFor.of_inputs_ready`.
+   - [ ] Derive the `UInt256` gas-budget fit from checked resource bounds for
+     the exact-budget/existence theorem where possible, leaving only an
+     explicit code-size/resource bound when needed.
 
 ## Final Nethermind Yul Bridge Completion Steps
 
@@ -654,9 +1187,9 @@ Current assumption-cleanup checkpoint:
   gas-aware alias.
   - [x] `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and
     `recursiveBridgeTopNoCallToGasAwareEVM` now point at the source-compile
-    no-call/create canonical-observation result-level `EVM.X` theorem, with
-    the bytecode decode-window and jumpdest-scanner premises constructed from
-    `compileCheckedAssemblyTargetBytecode?`.
+    no-call/create canonical-observation result-level `EVM.X` theorem. This
+    has since been strengthened to expose the sufficient-gas `XStepTrace`
+    witness at the preferred public alias.
   - [x] The older gasless result bridge remains as an internal spine theorem,
     but is no longer exported as an alternate `LayerAudit` route.
 - [x] Run final proof-hygiene audit for the current public theorem surface.
@@ -2241,8 +2774,8 @@ Successor theorem readiness gate:
     assumption packages, checked compile-and-assemble boundary, and the
     remaining current boundary packages. The current default
     `recursiveBridgeTopToGasAwareEVM` alias is the stricter source-compile
-    no-call/create result-level `EVM.X` theorem; alternate runtime-bundled and
-    gasless compatibility exports have been removed.
+    no-call/create sufficient-gas `XStepTrace`/`EVM.X` theorem; alternate
+    runtime-bundled and gasless compatibility exports have been removed.
     Checks:
     `/tmp/evm_layeraudit_top_alias_check2.log`,
     `/tmp/evm_top_after_layeraudit_alias_axioms_check1.log`.
@@ -2595,8 +3128,9 @@ Successor theorem readiness gate:
 - [x] Historical duplicate successor/all-bounds/dispatcher/gas-aware checklist
   superseded by the checked top-of-file bridge checklist above. The actual
   public theorem is
-  `compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X`,
-  exported through `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`;
+  the current source-compile no-call/create sufficient-gas `XStepTrace`/`EVM.X`
+  root exported through
+  `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`;
   its preferred source-compile no-call/create assumption package no longer
   exposes recursive bridge evidence, replay or call obligations, generated
   layout evidence, dispatcher certificates, or a caller-supplied external-call
@@ -3235,9 +3769,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
     safe-expression checkpoint theorem, leaving only the successful
     `.OutOfFuel` resource case pending a sufficient-source-fuel or
     actual-run-scoped theorem.
-  - [x] The public route exposes the exact trace-to-`X` gas-precondition callback
-    for the compiler-derived block trace, pending the real sufficient-gas proof
-    below the compiler.
+  - [x] The public route now exposes an explicit trace-local non-gas safety
+    premise plus a checked finite gas-budget lower-bound theorem, rather than
+    the older trace-to-`X` gas-precondition callback.
 - [x] Layer audit gate: build, proof-hole scan, theorem names, remaining assumptions, and progress-log entry.
 - [x] Root imports `EvmCompiler.LayerAudit`, a checked theorem-spine tripwire for
   the current public imported-Yul gas-aware theorem roots.
@@ -3248,7 +3782,9 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
 
 ## Proof Hardening
 
-- [ ] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
+- [x] Derive sufficient-gas witnesses from finite traces instead of taking them only as assumptions.
+- [ ] Derive the remaining trace-local non-gas `EVM.X` safety checks from
+  checked source/compiler facts or a checked target-core safety layer.
 - [ ] Complete the CALL-family open external semantics spine: requests are
   forwarded-gas-free at the outside-world boundary while preserving the
   requested-gas operand, and the argument-prelude source/compiler,

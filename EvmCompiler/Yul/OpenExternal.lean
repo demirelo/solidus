@@ -1126,6 +1126,14 @@ def consResult (arg : Word)
     (fun pair => (pair.1, arg :: pair.2))
     result
 
+def callFunction? (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
+    (code : Contract) : Option EvmYul.Yul.Ast.FunctionDefinition :=
+  match functionName? with
+  | none =>
+      some (EvmYul.Yul.Ast.FunctionDefinition.Def [] []
+        [code.dispatcher])
+  | some functionName => code.functions.lookup functionName
+
 mutual
 
 /--
@@ -1162,9 +1170,11 @@ def evalTail (fuel : Nat) (args : List Expr)
 /--
 Open analogue of imported `Yul.evalValues`.
 
-Non-external primitive calls and user calls still delegate to the imported
-closed semantics after their arguments are evaluated. CALL-family primitive
-calls instead suspend at `CallKind.yulPrimitiveEvalValuesOpenCall?`.
+Non-external primitive calls still delegate to the imported closed primitive
+semantics after their arguments are evaluated. CALL-family primitive calls
+suspend at `CallKind.yulPrimitiveEvalValuesOpenCall?`, and internal user calls
+run through `YulOpen.call` so CALL-family operations in callee bodies remain
+visible to the open boundary.
 -/
 def evalValues (fuel : Nat) (expr : Expr)
     (codeOverride : Option Contract) (state : State) :
@@ -1186,8 +1196,7 @@ def evalValues (fuel : Nat) (expr : Expr)
           YulOpenResult.bind
             (reverseResult (evalArgs fuel' args.reverse codeOverride state))
             fun pair =>
-              .done (EvmYul.Yul.call fuel' pair.2 functionName
-                codeOverride pair.1)
+              call fuel' pair.2 functionName codeOverride pair.1
       | .Var id =>
           match state.lookup? id with
           | some value => .ok (state, [value])
@@ -1200,8 +1209,6 @@ def eval (fuel : Nat) (expr : Expr)
     (codeOverride : Option Contract) (state : State) :
     YulOpenResult (State × Word) :=
   headResult (evalValues fuel expr codeOverride state)
-
-end
 
 def execPrimCall (fuel : Nat) (prim : EvmYul.Operation .Yul)
     (vars : List EvmYul.Identifier)
@@ -1225,10 +1232,10 @@ def execCall (fuel : Nat) (functionName : EvmYul.Yul.Ast.YulFunctionName)
     match fuel with
     | 0 => .error .OutOfFuel
     | .succ fuel' =>
-        .done (EvmYul.Yul.multifill' vars
-          (EvmYul.Yul.call fuel' pair.2 functionName codeOverride pair.1))
-
-mutual
+        YulOpenResult.bind
+          (call fuel' pair.2 functionName codeOverride pair.1)
+          fun callResult =>
+            .done (EvmYul.Yul.multifill' vars (.ok callResult))
 
 /--
 Open analogue of imported `Yul.execSeq`.
@@ -1353,7 +1360,68 @@ def loop (fuel : Nat) (cond : Expr) (post body : List Stmt)
                                 .ok
                                   (EvmYul.Yul.State.overwrite? loopResult state)
 
+/--
+Open analogue of imported `Yul.call` for internal user functions.
+
+This runs the selected callee body through `YulOpen.exec`, so CALL-family
+primitive operations inside the callee body remain visible as open external
+interactions.
+-/
+def call (fuel : Nat) (args : List Word)
+    (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
+    (codeOverride : Option Contract) (state : State) :
+    YulOpenResult (State × List Word) :=
+  match fuel with
+  | 0 => .error .OutOfFuel
+  | .succ fuel' =>
+      match state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      | none =>
+          .error (.MissingContract (s!"{state.executionEnv.codeOwner}"))
+      | some yulContract =>
+          let code : Contract := codeOverride.getD yulContract.code
+          match callFunction? functionName? code with
+          | none =>
+              .error (.MissingContractFunction (functionName?.getD ".none"))
+          | some f =>
+              let state₁ :=
+                EvmYul.Yul.State.mkOk
+                  (EvmYul.Yul.State.initcall f.params f.rets args state)
+              YulOpenResult.bind
+                (exec fuel' (.Block f.body) codeOverride state₁)
+                fun state₂ =>
+                  let state₃ :=
+                    EvmYul.Yul.State.setStore
+                      (EvmYul.Yul.State.overwrite?
+                        (EvmYul.Yul.State.reviveJump state₂) state)
+                      state
+                  .ok (state₃, List.map state₂.lookup! f.rets)
+
 end
+
+theorem call_succ_eq_bind_body_of_find_function
+    (fuel : Nat) (args : List Word)
+    (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
+    (codeOverride : Option Contract) (state : State)
+    {yulContract : EvmYul.Account .Yul} {f : EvmYul.Yul.Ast.FunctionDefinition}
+    (hFind :
+      state.sharedState.accountMap.find? state.executionEnv.codeOwner =
+        some yulContract)
+    (hFunction :
+      callFunction? functionName? (codeOverride.getD yulContract.code) =
+        some f) :
+    call fuel.succ args functionName? codeOverride state =
+      YulOpenResult.bind
+        (exec fuel (.Block f.body) codeOverride
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall f.params f.rets args state)))
+        fun state₂ =>
+          let state₃ :=
+            EvmYul.Yul.State.setStore
+              (EvmYul.Yul.State.overwrite?
+                (EvmYul.Yul.State.reviveJump state₂) state)
+              state
+          .ok (state₃, List.map state₂.lookup! f.rets) := by
+  simp [call, hFind, hFunction]
 
 theorem evalValues_prim_call_suspends_of_evalArgs_done
     {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
@@ -1391,6 +1459,52 @@ theorem evalValues_prim_call_closed_of_evalArgs_done_no_open
   simp [evalValues, reverseResult, YulOpenResult.map, YulOpenResult.bind,
     YulOpenResult.ok, hArgs, hCall]
 
+theorem execPrimCall_done_eq_closed
+    {fuel : Nat} {prim : EvmYul.Operation .Yul}
+    {vars : List EvmYul.Identifier}
+    {argsResult : YulOpenResult (State × List Word)}
+    {closedArgs : Except Exception (State × List Word)}
+    {result : Except Exception State}
+    (hArgs : argsResult = .done closedArgs)
+    (hOpen :
+      execPrimCall fuel prim vars argsResult = .done result) :
+    EvmYul.Yul.execPrimCall fuel prim vars closedArgs = result := by
+  subst argsResult
+  cases closedArgs with
+  | error err =>
+      simpa [execPrimCall, EvmYul.Yul.execPrimCall, YulOpenResult.bind]
+        using hOpen
+  | ok pair =>
+      rcases pair with ⟨stateAfterArgs, values⟩
+      cases hCall :
+          CallKind.yulPrimitiveEvalValuesOpenCall?
+            stateAfterArgs prim values with
+      | none =>
+          simp [execPrimCall, EvmYul.Yul.execPrimCall, YulOpenResult.bind,
+            hCall] at hOpen ⊢
+          exact hOpen
+      | some call =>
+          simp [execPrimCall, YulOpenResult.bind, hCall] at hOpen
+
+def overwriteLoopResult (state : State) :
+    Except Exception State → Except Exception State
+  | .error err => .error err
+  | .ok loopState =>
+      .ok (EvmYul.Yul.State.overwrite? loopState state)
+
+theorem bind_done_overwrite_result_eq_closed
+    {state : State} {loopResult result : Except Exception State}
+    (h :
+      YulOpenResult.bind (.done loopResult)
+          (fun loopState =>
+            YulOpenResult.ok
+              (EvmYul.Yul.State.overwrite? loopState state)) =
+        .done result) :
+    overwriteLoopResult state loopResult = result := by
+  cases loopResult <;>
+    simpa [YulOpenResult.bind, YulOpenResult.ok, overwriteLoopResult] using h
+
+set_option maxHeartbeats 800000 in
 mutual
   theorem evalArgs_done_eq_closed
       {fuel : Nat} {args : List Expr} {codeOverride : Option Contract}
@@ -1546,9 +1660,23 @@ mutual
                         exact hOpen
                     | ok argsPair =>
                         rcases argsPair with ⟨stateAfterArgs, values⟩
-                        simp [hArgs, hArgsClosed, YulOpenResult.bind,
-                          YulOpenResult.ok, EvmYul.Yul.reverse'] at hOpen ⊢
-                        exact hOpen
+                        cases hCall :
+                            call fuel' values.reverse (some functionName)
+                              codeOverride stateAfterArgs with
+                        | done callResult =>
+                            have hCallClosed :
+                                EvmYul.Yul.call fuel' values.reverse
+                                    (some functionName) codeOverride
+                                    stateAfterArgs =
+                                  callResult :=
+                              call_done_eq_closed hCall
+                            simp [hArgs, hArgsClosed, hCall, hCallClosed,
+                              YulOpenResult.bind, YulOpenResult.ok,
+                              EvmYul.Yul.reverse'] at hOpen ⊢
+                            exact hOpen
+                        | call externalCall =>
+                            simp [hArgs, hCall, YulOpenResult.bind,
+                              YulOpenResult.ok] at hOpen
                 | call call =>
                     simp [hArgs, YulOpenResult.bind] at hOpen
 
@@ -1578,7 +1706,951 @@ mutual
             exact hOpen
     | call call =>
         simp [hValues, YulOpenResult.bind] at hOpen
+
+  theorem execCall_done_eq_closed
+      {fuel : Nat} {functionName : EvmYul.Yul.Ast.YulFunctionName}
+      {vars : List EvmYul.Identifier} {codeOverride : Option Contract}
+      {argsResult : YulOpenResult (State × List Word)}
+      {closedArgs : Except Exception (State × List Word)}
+      {result : Except Exception State}
+      (hArgs : argsResult = .done closedArgs)
+      (hOpen :
+        execCall fuel functionName vars codeOverride argsResult =
+          .done result) :
+      EvmYul.Yul.execCall fuel functionName vars codeOverride closedArgs =
+        result := by
+    subst argsResult
+    cases closedArgs with
+    | error err =>
+        simpa [execCall, EvmYul.Yul.execCall, YulOpenResult.bind] using hOpen
+    | ok pair =>
+        rcases pair with ⟨stateAfterArgs, values⟩
+        cases fuel with
+        | zero =>
+            simpa [execCall, EvmYul.Yul.execCall, YulOpenResult.bind,
+              YulOpenResult.error] using hOpen
+        | succ fuel' =>
+            cases hCall :
+                call fuel' values (some functionName) codeOverride
+                  stateAfterArgs with
+            | done callResult =>
+                have hCallClosed :
+                    EvmYul.Yul.call fuel' values (some functionName)
+                        codeOverride stateAfterArgs =
+                      callResult :=
+                  call_done_eq_closed hCall
+                cases callResult with
+                | error err =>
+                    simp [execCall, EvmYul.Yul.execCall, hCall, hCallClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok callPair =>
+                    simp [execCall, EvmYul.Yul.execCall, hCall, hCallClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+            | call externalCall =>
+                simp [execCall, hCall, YulOpenResult.bind] at hOpen
+
+  theorem execSeq_done_eq_closed
+      {fuel : Nat} {stmts : List Stmt} {codeOverride : Option Contract}
+      {state : State} {result : Except Exception State}
+      (hOpen :
+        execSeq fuel stmts codeOverride state = .done result) :
+      EvmYul.Yul.execSeq fuel stmts codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [execSeq, EvmYul.Yul.execSeq, YulOpenResult.error] using hOpen
+    | succ fuel' =>
+        cases stmts with
+        | nil =>
+            simpa [execSeq, EvmYul.Yul.execSeq, YulOpenResult.ok] using hOpen
+        | cons stmt rest =>
+            cases hHead : exec fuel' stmt codeOverride state with
+            | done headResult =>
+                have hHeadClosed :
+                    EvmYul.Yul.exec fuel' stmt codeOverride state =
+                      headResult :=
+                  exec_done_eq_closed hHead
+                cases headResult with
+                | error err =>
+                    simp [execSeq, EvmYul.Yul.execSeq, hHead, hHeadClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok stateAfter =>
+                    cases stateAfter with
+                    | Ok shared store =>
+                        have hTailOpen :
+                            execSeq fuel' rest codeOverride
+                                (.Ok shared store) =
+                              .done result := by
+                          simpa [execSeq, hHead, YulOpenResult.bind] using hOpen
+                        have hTailClosed :
+                            EvmYul.Yul.execSeq fuel' rest codeOverride
+                                (.Ok shared store) =
+                              result :=
+                          execSeq_done_eq_closed hTailOpen
+                        simpa [EvmYul.Yul.execSeq, hHeadClosed]
+                          using hTailClosed
+                    | OutOfFuel =>
+                        simp [execSeq, EvmYul.Yul.execSeq, hHead, hHeadClosed,
+                          YulOpenResult.bind, YulOpenResult.ok] at hOpen ⊢
+                        exact hOpen
+                    | Checkpoint jump =>
+                        simp [execSeq, EvmYul.Yul.execSeq, hHead, hHeadClosed,
+                          YulOpenResult.bind, YulOpenResult.ok] at hOpen ⊢
+                        exact hOpen
+            | call call =>
+                simp [execSeq, YulOpenResult.bind, hHead] at hOpen
+
+  theorem exec_done_eq_closed
+      {fuel : Nat} {stmt : Stmt} {codeOverride : Option Contract}
+      {state : State} {result : Except Exception State}
+      (hOpen :
+        exec fuel stmt codeOverride state = .done result) :
+      EvmYul.Yul.exec fuel stmt codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [exec, EvmYul.Yul.exec, YulOpenResult.error] using hOpen
+    | succ fuel' =>
+        cases stmt with
+        | Block stmts =>
+            cases hSeq : execSeq fuel' stmts codeOverride state with
+            | done seqResult =>
+                have hSeqClosed :
+                    EvmYul.Yul.execSeq fuel' stmts codeOverride state =
+                      seqResult :=
+                  execSeq_done_eq_closed hSeq
+                cases seqResult with
+                | error err =>
+                    simp [exec, EvmYul.Yul.exec, hSeq, hSeqClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok stateAfter =>
+                    simp [exec, EvmYul.Yul.exec, hSeq, hSeqClosed,
+                      YulOpenResult.bind, YulOpenResult.ok] at hOpen ⊢
+                    exact hOpen
+            | call call =>
+                simp [exec, YulOpenResult.bind, hSeq] at hOpen
+        | Let vars exprOption =>
+            cases hCheck : EvmYul.Yul.checkDeclaration state vars with
+            | error err =>
+                have hOpen' : Except.error err = result := by
+                  rw [exec.eq_def] at hOpen
+                  simpa [hCheck, YulOpenResult.error] using hOpen
+                have hClosed :
+                    EvmYul.Yul.exec fuel'.succ (.Let vars exprOption)
+                        codeOverride state =
+                      Except.error err := by
+                  cases exprOption with
+                  | none =>
+                      rw [EvmYul.Yul.exec.eq_def]
+                      simp [hCheck]
+                  | some expr =>
+                      cases expr with
+                      | Lit value =>
+                          rw [EvmYul.Yul.exec.eq_def]
+                          simp [hCheck]
+                      | Var id =>
+                          rw [EvmYul.Yul.exec.eq_def]
+                          simp [hCheck]
+                      | Call callee args =>
+                          cases callee with
+                          | inl prim =>
+                              rw [EvmYul.Yul.exec.eq_def]
+                              simp [hCheck]
+                          | inr functionName =>
+                              rw [EvmYul.Yul.exec.eq_def]
+                              simp [hCheck]
+                exact hClosed.trans hOpen'
+            | ok unit =>
+                cases exprOption with
+                | none =>
+                    simpa [exec, EvmYul.Yul.exec, hCheck, YulOpenResult.ok]
+                      using hOpen
+                | some expr =>
+                    cases hValues : evalValues fuel' expr codeOverride state with
+                    | done valuesResult =>
+                        have hValuesClosed :
+                            EvmYul.Yul.evalValues fuel' expr codeOverride state =
+                              valuesResult :=
+                          evalValues_done_eq_closed hValues
+                        cases valuesResult with
+                        | error err =>
+                            simp [exec, EvmYul.Yul.exec, hCheck, hValues,
+                              hValuesClosed, YulOpenResult.bind] at hOpen ⊢
+                            exact hOpen
+                        | ok valuesPair =>
+                            rcases valuesPair with ⟨stateAfter, values⟩
+                            simp [exec, EvmYul.Yul.exec, hCheck, hValues,
+                              hValuesClosed, YulOpenResult.bind] at hOpen ⊢
+                            exact hOpen
+                    | call call =>
+                        simp [exec, hCheck, hValues, YulOpenResult.bind]
+                          at hOpen
+        | Assign vars expr =>
+            cases hCheck : EvmYul.Yul.checkAssignment state vars with
+            | error err =>
+                have hOpen' : Except.error err = result := by
+                  simpa [exec, hCheck, YulOpenResult.error] using hOpen
+                have hClosed :
+                    EvmYul.Yul.exec fuel'.succ (.Assign vars expr)
+                        codeOverride state =
+                      Except.error err := by
+                  rw [EvmYul.Yul.exec.eq_def]
+                  simp [hCheck]
+                exact hClosed.trans hOpen'
+            | ok unit =>
+                cases hValues : evalValues fuel' expr codeOverride state with
+                | done valuesResult =>
+                    have hValuesClosed :
+                        EvmYul.Yul.evalValues fuel' expr codeOverride state =
+                          valuesResult :=
+                      evalValues_done_eq_closed hValues
+                    cases valuesResult with
+                    | error err =>
+                        simp [exec, EvmYul.Yul.exec, hCheck, hValues,
+                          hValuesClosed, YulOpenResult.bind] at hOpen ⊢
+                        exact hOpen
+                    | ok valuesPair =>
+                        rcases valuesPair with ⟨stateAfter, values⟩
+                        simp [exec, EvmYul.Yul.exec, hCheck, hValues,
+                          hValuesClosed, YulOpenResult.bind] at hOpen ⊢
+                        exact hOpen
+                | call call =>
+                    simp [exec, hCheck, hValues, YulOpenResult.bind] at hOpen
+        | ExprStmtCall expr =>
+            cases expr with
+            | Lit value =>
+                simpa [exec, EvmYul.Yul.exec, YulOpenResult.error] using hOpen
+            | Var id =>
+                simpa [exec, EvmYul.Yul.exec, YulOpenResult.error] using hOpen
+            | Call callee args =>
+                cases callee with
+                | inl prim =>
+                    cases hArgs :
+                        reverseResult
+                          (evalArgs fuel' args.reverse codeOverride state) with
+                    | done closedArgs =>
+                        have hArgsClosed :
+                            EvmYul.Yul.reverse'
+                              (EvmYul.Yul.evalArgs fuel' args.reverse
+                                codeOverride state) =
+                              closedArgs :=
+                          by
+                            simp [reverseResult, YulOpenResult.map]
+                              at hArgs ⊢
+                            cases hEvalArgs :
+                                evalArgs fuel' args.reverse codeOverride
+                                  state with
+                            | done argsResult =>
+                                have hEvalArgsClosed :
+                                    EvmYul.Yul.evalArgs fuel' args.reverse
+                                        codeOverride state =
+                                      argsResult :=
+                                  evalArgs_done_eq_closed hEvalArgs
+                                cases argsResult with
+                                | error err =>
+                                    simp [hEvalArgs, hEvalArgsClosed,
+                                      YulOpenResult.bind, EvmYul.Yul.reverse']
+                                      at hArgs ⊢
+                                    exact hArgs
+                                | ok argsPair =>
+                                    rcases argsPair with
+                                      ⟨stateAfterArgs, values⟩
+                                    simp [hEvalArgs, hEvalArgsClosed,
+                                      YulOpenResult.bind, YulOpenResult.ok,
+                                      EvmYul.Yul.reverse'] at hArgs ⊢
+                                    exact hArgs
+                            | call call =>
+                                simp [hEvalArgs, YulOpenResult.bind] at hArgs
+                        have hExecPrim :
+                            EvmYul.Yul.execPrimCall fuel' prim [] closedArgs =
+                              result :=
+                          execPrimCall_done_eq_closed
+                            (hArgs := hArgs)
+                            (hOpen := by
+                              simpa [exec, hArgs] using hOpen)
+                        simpa [exec, EvmYul.Yul.exec, hArgsClosed]
+                          using hExecPrim
+                    | call call =>
+                        simp [exec, execPrimCall, hArgs, YulOpenResult.bind]
+                          at hOpen
+                | inr functionName =>
+                    cases hArgs :
+                        reverseResult
+                          (evalArgs fuel' args.reverse codeOverride state) with
+                    | done closedArgs =>
+                        have hArgsClosed :
+                            EvmYul.Yul.reverse'
+                              (EvmYul.Yul.evalArgs fuel' args.reverse
+                                codeOverride state) =
+                              closedArgs :=
+                          by
+                            simp [reverseResult, YulOpenResult.map]
+                              at hArgs ⊢
+                            cases hEvalArgs :
+                                evalArgs fuel' args.reverse codeOverride
+                                  state with
+                            | done argsResult =>
+                                have hEvalArgsClosed :
+                                    EvmYul.Yul.evalArgs fuel' args.reverse
+                                        codeOverride state =
+                                      argsResult :=
+                                  evalArgs_done_eq_closed hEvalArgs
+                                cases argsResult with
+                                | error err =>
+                                    simp [hEvalArgs, hEvalArgsClosed,
+                                      YulOpenResult.bind, EvmYul.Yul.reverse']
+                                      at hArgs ⊢
+                                    exact hArgs
+                                | ok argsPair =>
+                                    rcases argsPair with
+                                      ⟨stateAfterArgs, values⟩
+                                    simp [hEvalArgs, hEvalArgsClosed,
+                                      YulOpenResult.bind, YulOpenResult.ok,
+                                      EvmYul.Yul.reverse'] at hArgs ⊢
+                                    exact hArgs
+                            | call call =>
+                                simp [hEvalArgs, YulOpenResult.bind] at hArgs
+                        have hExecCall :
+                            EvmYul.Yul.execCall fuel' functionName []
+                                codeOverride closedArgs =
+                              result :=
+                          execCall_done_eq_closed
+                            (hArgs := hArgs)
+                            (hOpen := by
+                              simpa [exec, hArgs] using hOpen)
+                        simpa [exec, EvmYul.Yul.exec, hArgsClosed]
+                          using hExecCall
+                    | call call =>
+                        simp [exec, execCall, hArgs, YulOpenResult.bind]
+                          at hOpen
+        | Switch cond cases defaultBody =>
+            cases hCond : eval fuel' cond codeOverride state with
+            | done condResult =>
+                have hCondClosed :
+                    EvmYul.Yul.eval fuel' cond codeOverride state =
+                      condResult :=
+                  eval_done_eq_closed hCond
+                cases condResult with
+                | error err =>
+                    simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok condPair =>
+                    rcases condPair with ⟨stateAfterCond, value⟩
+                    cases hBody :
+                        exec fuel'
+                          (.Block
+                            (EvmYul.Yul.selectSwitchCase value defaultBody
+                              cases))
+                          codeOverride stateAfterCond with
+                    | done bodyResult =>
+                        have hBodyClosed :
+                            EvmYul.Yul.exec fuel'
+                              (.Block
+                                (EvmYul.Yul.selectSwitchCase value defaultBody
+                                  cases))
+                              codeOverride stateAfterCond =
+                              bodyResult :=
+                          exec_done_eq_closed hBody
+                        simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
+                          hBody, hBodyClosed, YulOpenResult.bind] at hOpen ⊢
+                        exact hOpen
+                    | call call =>
+                        simp [exec, hCond, hBody, YulOpenResult.bind] at hOpen
+            | call call =>
+                simp [exec, hCond, YulOpenResult.bind] at hOpen
+        | For cond post body =>
+            have hLoopClosed :
+                EvmYul.Yul.loop fuel' cond post body codeOverride state =
+                  result :=
+              loop_done_eq_closed
+                (fuel := fuel') (cond := cond) (post := post) (body := body)
+                (codeOverride := codeOverride) (state := state)
+                (by simpa [exec] using hOpen)
+            rw [EvmYul.Yul.exec.eq_def]
+            exact hLoopClosed
+        | If cond body =>
+            cases hCond : eval fuel' cond codeOverride state with
+            | done condResult =>
+                have hCondClosed :
+                    EvmYul.Yul.eval fuel' cond codeOverride state =
+                      condResult :=
+                  eval_done_eq_closed hCond
+                cases condResult with
+                | error err =>
+                    simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok condPair =>
+                    rcases condPair with ⟨stateAfterCond, value⟩
+                    by_cases hZero : value = EvmYul.UInt256.ofNat 0
+                    · simp [exec, EvmYul.Yul.exec, hCond, hCondClosed, hZero,
+                        YulOpenResult.bind, YulOpenResult.ok] at hOpen ⊢
+                      exact hOpen
+                    · have hNonzero :
+                          value ≠ EvmYul.UInt256.ofNat 0 := hZero
+                      have hZeroStruct :
+                          value ≠ ({ val := 0 } : Word) := by
+                        simpa [EvmYul.UInt256.ofNat] using hZero
+                      cases hBody :
+                          exec fuel' (.Block body) codeOverride
+                            stateAfterCond with
+                      | done bodyResult =>
+                          have hBodyClosed :
+                              EvmYul.Yul.exec fuel' (.Block body) codeOverride
+                                  stateAfterCond =
+                                bodyResult :=
+                            exec_done_eq_closed hBody
+                          simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
+                            hZero, hNonzero, hZeroStruct, hBody, hBodyClosed,
+                            YulOpenResult.bind] at hOpen ⊢
+                          exact hOpen
+                      | call call =>
+                          simp [exec, hCond, hZero, hNonzero, hZeroStruct,
+                            hBody,
+                            YulOpenResult.bind] at hOpen
+            | call call =>
+                simp [exec, hCond, YulOpenResult.bind] at hOpen
+        | Continue =>
+            simpa [exec, EvmYul.Yul.exec, YulOpenResult.ok] using hOpen
+        | Break =>
+            simpa [exec, EvmYul.Yul.exec, YulOpenResult.ok] using hOpen
+        | Leave =>
+            simpa [exec, EvmYul.Yul.exec, YulOpenResult.ok] using hOpen
+
+  theorem loop_done_eq_closed
+      {fuel : Nat} {cond : Expr} {post body : List Stmt}
+      {codeOverride : Option Contract} {state : State}
+      {result : Except Exception State}
+      (hOpen :
+        loop fuel cond post body codeOverride state = .done result) :
+      EvmYul.Yul.loop fuel cond post body codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [loop, EvmYul.Yul.loop, YulOpenResult.error] using hOpen
+    | succ fuel₁ =>
+        cases fuel₁ with
+        | zero =>
+            simpa [loop, EvmYul.Yul.loop, YulOpenResult.error] using hOpen
+        | succ fuel' =>
+            cases hCond :
+                eval fuel' cond codeOverride
+                  (EvmYul.Yul.State.mkOk state) with
+            | done condResult =>
+                have hCondClosed :
+                    EvmYul.Yul.eval fuel' cond codeOverride
+                        (EvmYul.Yul.State.mkOk state) =
+                      condResult :=
+                  eval_done_eq_closed hCond
+                cases condResult with
+                | error err =>
+                    simp [loop, EvmYul.Yul.loop, hCond, hCondClosed,
+                      YulOpenResult.bind] at hOpen ⊢
+                    exact hOpen
+                | ok condPair =>
+                    rcases condPair with ⟨stateAfterCond, value⟩
+                    by_cases hZero : value = EvmYul.UInt256.ofNat 0
+                    · simp [loop, EvmYul.Yul.loop, hCond, hCondClosed, hZero,
+                        YulOpenResult.bind, YulOpenResult.ok] at hOpen ⊢
+                      exact hOpen
+                    · have hZeroStruct :
+                          value ≠ ({ val := 0 } : Word) := by
+                        simpa [EvmYul.UInt256.ofNat] using hZero
+                      cases hBody :
+                          exec fuel' (.Block body) codeOverride
+                            stateAfterCond with
+                      | done bodyResult =>
+                          have hBodyClosed :
+                              EvmYul.Yul.exec fuel' (.Block body) codeOverride
+                                  stateAfterCond =
+                                bodyResult :=
+                            exec_done_eq_closed hBody
+                          cases bodyResult with
+                          | error err =>
+                              simp [loop, EvmYul.Yul.loop, hCond, hCondClosed,
+                                hZero, hZeroStruct, hBody, hBodyClosed,
+                                YulOpenResult.bind] at hOpen ⊢
+                              exact hOpen
+                          | ok bodyState =>
+                              cases bodyState with
+                              | OutOfFuel =>
+                                  simp [loop, EvmYul.Yul.loop, hCond,
+                                    hCondClosed, hZero, hZeroStruct, hBody,
+                                    hBodyClosed, YulOpenResult.bind,
+                                    YulOpenResult.ok] at hOpen ⊢
+                                  exact hOpen
+                              | Checkpoint jump =>
+                                  cases jump with
+                                  | Break shared store =>
+                                      simp [loop, EvmYul.Yul.loop, hCond,
+                                        hCondClosed, hZero, hZeroStruct, hBody,
+                                        hBodyClosed, YulOpenResult.bind,
+                                        YulOpenResult.ok] at hOpen ⊢
+                                      exact hOpen
+                                  | Leave shared store =>
+                                      simp [loop, EvmYul.Yul.loop, hCond,
+                                        hCondClosed, hZero, hZeroStruct, hBody,
+                                        hBodyClosed, YulOpenResult.bind,
+                                        YulOpenResult.ok] at hOpen ⊢
+                                      exact hOpen
+                                  | Continue shared store =>
+                                      cases hPost :
+                                          exec fuel' (.Block post) codeOverride
+                                            (EvmYul.Yul.State.reviveJump
+                                              (.Checkpoint
+                                                (.Continue shared store))) with
+                                      | done postResult =>
+                                          have hPostClosed :
+                                              EvmYul.Yul.exec fuel'
+                                                  (.Block post) codeOverride
+                                                  (EvmYul.Yul.State.reviveJump
+                                                    (.Checkpoint
+                                                      (.Continue shared store))) =
+                                                postResult :=
+                                            exec_done_eq_closed
+                                              (fuel := fuel')
+                                              (stmt := .Block post)
+                                              (codeOverride := codeOverride)
+                                              (state :=
+                                                EvmYul.Yul.State.reviveJump
+                                                  (.Checkpoint
+                                                    (.Continue shared store)))
+                                              (result := postResult)
+                                              hPost
+                                          cases postResult with
+                                          | error err =>
+                                              simp [loop, EvmYul.Yul.loop,
+                                                hCond, hCondClosed, hZero,
+                                                hZeroStruct, hBody,
+                                                hBodyClosed, hPost,
+                                                hPostClosed,
+                                                YulOpenResult.bind]
+                                                at hOpen ⊢
+                                              exact hOpen
+                                          | ok postState =>
+                                              let stateAfterPost :=
+                                                EvmYul.Yul.State.overwrite?
+                                                  postState state
+                                              cases postState with
+                                              | OutOfFuel =>
+                                                  simp [loop, EvmYul.Yul.loop,
+                                                    hCond, hCondClosed, hZero,
+                                                    hZeroStruct, hBody,
+                                                    hBodyClosed, hPost,
+                                                    hPostClosed,
+                                                    YulOpenResult.bind,
+                                                    YulOpenResult.ok]
+                                                    at hOpen ⊢
+                                                  exact hOpen
+                                              | Checkpoint postJump =>
+                                                  cases postJump with
+                                                  | Leave ps pv =>
+                                                      simp [loop,
+                                                        EvmYul.Yul.loop,
+                                                        hCond, hCondClosed,
+                                                        hZero, hZeroStruct,
+                                                        hBody, hBodyClosed,
+                                                        hPost, hPostClosed,
+                                                        YulOpenResult.bind,
+                                                        YulOpenResult.ok]
+                                                        at hOpen ⊢
+                                                      exact hOpen
+                                                  | Break ps pv =>
+                                                      cases hLoop :
+                                                          exec fuel'
+                                                            (.For cond post body)
+                                                            codeOverride
+                                                            stateAfterPost with
+                                                      | done loopResult =>
+                                                          have hLoopClosed :
+                                                              EvmYul.Yul.exec fuel'
+                                                                  (.For cond post body)
+                                                                  codeOverride
+                                                                  stateAfterPost =
+                                                                loopResult :=
+                                                            exec_done_eq_closed hLoop
+                                                          simp [loop,
+                                                            EvmYul.Yul.loop,
+                                                            hCond, hCondClosed,
+                                                            hZero, hZeroStruct,
+                                                            hBody, hBodyClosed,
+                                                            hPost, hPostClosed,
+                                                            hLoop, hLoopClosed,
+                                                            stateAfterPost,
+                                                            YulOpenResult.bind,
+                                                            YulOpenResult.ok]
+                                                            at hOpen ⊢
+                                                          exact
+                                                            by
+                                                              simpa [overwriteLoopResult] using
+                                                                bind_done_overwrite_result_eq_closed
+                                                                  hOpen
+                                                      | call call =>
+                                                          simp [loop, hCond,
+                                                            hZero, hZeroStruct,
+                                                            hBody, hPost, hLoop,
+                                                            stateAfterPost,
+                                                            YulOpenResult.bind]
+                                                            at hOpen
+                                                  | Continue ps pv =>
+                                                      cases hLoop :
+                                                          exec fuel'
+                                                            (.For cond post body)
+                                                            codeOverride
+                                                            stateAfterPost with
+                                                      | done loopResult =>
+                                                          have hLoopClosed :
+                                                              EvmYul.Yul.exec fuel'
+                                                                  (.For cond post body)
+                                                                  codeOverride
+                                                                  stateAfterPost =
+                                                                loopResult :=
+                                                            exec_done_eq_closed hLoop
+                                                          simp [loop,
+                                                            EvmYul.Yul.loop,
+                                                            hCond, hCondClosed,
+                                                            hZero, hZeroStruct,
+                                                            hBody, hBodyClosed,
+                                                            hPost, hPostClosed,
+                                                            hLoop, hLoopClosed,
+                                                            stateAfterPost,
+                                                            YulOpenResult.bind,
+                                                            YulOpenResult.ok]
+                                                            at hOpen ⊢
+                                                          exact
+                                                            by
+                                                              simpa [overwriteLoopResult] using
+                                                                bind_done_overwrite_result_eq_closed
+                                                                  hOpen
+                                                      | call call =>
+                                                          simp [loop, hCond,
+                                                            hZero, hZeroStruct,
+                                                            hBody, hPost, hLoop,
+                                                            stateAfterPost,
+                                                            YulOpenResult.bind]
+                                                            at hOpen
+                                              | Ok ps pv =>
+                                                  cases hLoop :
+                                                      exec fuel'
+                                                        (.For cond post body)
+                                                        codeOverride
+                                                        stateAfterPost with
+                                                  | done loopResult =>
+                                                      have hLoopClosed :
+                                                          EvmYul.Yul.exec fuel'
+                                                              (.For cond post body)
+                                                              codeOverride
+                                                              stateAfterPost =
+                                                            loopResult :=
+                                                        exec_done_eq_closed hLoop
+                                                      simp [loop,
+                                                        EvmYul.Yul.loop,
+                                                        hCond, hCondClosed,
+                                                        hZero, hZeroStruct,
+                                                        hBody, hBodyClosed,
+                                                        hPost, hPostClosed,
+                                                        hLoop, hLoopClosed,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind,
+                                                        YulOpenResult.ok]
+                                                        at hOpen ⊢
+                                                      exact
+                                                        by
+                                                          simpa [overwriteLoopResult] using
+                                                            bind_done_overwrite_result_eq_closed
+                                                              hOpen
+                                                  | call call =>
+                                                      simp [loop, hCond, hZero,
+                                                        hZeroStruct, hBody,
+                                                        hPost, hLoop,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind]
+                                                        at hOpen
+                                      | call call =>
+                                          simp [loop, hCond, hZero,
+                                            hZeroStruct, hBody, hPost,
+                                            YulOpenResult.bind] at hOpen
+                              | Ok shared store =>
+                                  cases hPost :
+                                      exec fuel' (.Block post) codeOverride
+                                        (EvmYul.Yul.State.reviveJump
+                                          (.Ok shared store)) with
+                                  | done postResult =>
+                                      have hPostClosed :
+                                          EvmYul.Yul.exec fuel' (.Block post)
+                                              codeOverride
+                                              (EvmYul.Yul.State.reviveJump
+                                                (.Ok shared store)) =
+                                            postResult :=
+                                        exec_done_eq_closed hPost
+                                      cases postResult with
+                                      | error err =>
+                                          simp [loop, EvmYul.Yul.loop, hCond,
+                                            hCondClosed, hZero, hZeroStruct,
+                                            hBody, hBodyClosed, hPost,
+                                            hPostClosed, YulOpenResult.bind]
+                                            at hOpen ⊢
+                                          exact hOpen
+                                      | ok postState =>
+                                          let stateAfterPost :=
+                                            EvmYul.Yul.State.overwrite?
+                                              postState state
+                                          cases postState with
+                                          | OutOfFuel =>
+                                              simp [loop, EvmYul.Yul.loop,
+                                                hCond, hCondClosed, hZero,
+                                                hZeroStruct, hBody,
+                                                hBodyClosed, hPost,
+                                                hPostClosed,
+                                                YulOpenResult.bind,
+                                                YulOpenResult.ok] at hOpen ⊢
+                                              exact hOpen
+                                          | Checkpoint postJump =>
+                                              cases postJump with
+                                              | Leave ps pv =>
+                                                  simp [loop, EvmYul.Yul.loop,
+                                                    hCond, hCondClosed, hZero,
+                                                    hZeroStruct, hBody,
+                                                    hBodyClosed, hPost,
+                                                    hPostClosed,
+                                                    YulOpenResult.bind,
+                                                    YulOpenResult.ok]
+                                                    at hOpen ⊢
+                                                  exact hOpen
+                                              | Break ps pv =>
+                                                  cases hLoop :
+                                                      exec fuel'
+                                                        (.For cond post body)
+                                                        codeOverride
+                                                        stateAfterPost with
+                                                  | done loopResult =>
+                                                      have hLoopClosed :
+                                                          EvmYul.Yul.exec fuel'
+                                                              (.For cond post body)
+                                                              codeOverride
+                                                              stateAfterPost =
+                                                            loopResult :=
+                                                        exec_done_eq_closed hLoop
+                                                      simp [loop,
+                                                        EvmYul.Yul.loop,
+                                                        hCond, hCondClosed,
+                                                        hZero, hZeroStruct,
+                                                        hBody, hBodyClosed,
+                                                        hPost, hPostClosed,
+                                                        hLoop, hLoopClosed,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind,
+                                                        YulOpenResult.ok]
+                                                        at hOpen ⊢
+                                                      exact
+                                                        by
+                                                          simpa [overwriteLoopResult] using
+                                                            bind_done_overwrite_result_eq_closed
+                                                              hOpen
+                                                  | call call =>
+                                                      simp [loop, hCond, hZero,
+                                                        hZeroStruct, hBody,
+                                                        hPost, hLoop,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind]
+                                                        at hOpen
+                                              | Continue ps pv =>
+                                                  cases hLoop :
+                                                      exec fuel'
+                                                        (.For cond post body)
+                                                        codeOverride
+                                                        stateAfterPost with
+                                                  | done loopResult =>
+                                                      have hLoopClosed :
+                                                          EvmYul.Yul.exec fuel'
+                                                              (.For cond post body)
+                                                              codeOverride
+                                                              stateAfterPost =
+                                                            loopResult :=
+                                                        exec_done_eq_closed hLoop
+                                                      simp [loop,
+                                                        EvmYul.Yul.loop,
+                                                        hCond, hCondClosed,
+                                                        hZero, hZeroStruct,
+                                                        hBody, hBodyClosed,
+                                                        hPost, hPostClosed,
+                                                        hLoop, hLoopClosed,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind,
+                                                        YulOpenResult.ok]
+                                                        at hOpen ⊢
+                                                      exact
+                                                        by
+                                                          simpa [overwriteLoopResult] using
+                                                            bind_done_overwrite_result_eq_closed
+                                                              hOpen
+                                                  | call call =>
+                                                      simp [loop, hCond, hZero,
+                                                        hZeroStruct, hBody,
+                                                        hPost, hLoop,
+                                                        stateAfterPost,
+                                                        YulOpenResult.bind]
+                                                        at hOpen
+                                          | Ok ps pv =>
+                                              cases hLoop :
+                                                  exec fuel'
+                                                    (.For cond post body)
+                                                    codeOverride
+                                                    stateAfterPost with
+                                              | done loopResult =>
+                                                  have hLoopClosed :
+                                                      EvmYul.Yul.exec fuel'
+                                                          (.For cond post body)
+                                                          codeOverride
+                                                          stateAfterPost =
+                                                        loopResult :=
+                                                    exec_done_eq_closed hLoop
+                                                  simp [loop, EvmYul.Yul.loop,
+                                                    hCond, hCondClosed, hZero,
+                                                    hZeroStruct, hBody,
+                                                    hBodyClosed, hPost,
+                                                    hPostClosed, hLoop,
+                                                    stateAfterPost,
+                                                    hLoopClosed,
+                                                    YulOpenResult.bind,
+                                                    YulOpenResult.ok]
+                                                    at hOpen ⊢
+                                                  exact
+                                                    by
+                                                      simpa [overwriteLoopResult] using
+                                                        bind_done_overwrite_result_eq_closed
+                                                          hOpen
+                                              | call call =>
+                                                  simp [loop, hCond, hZero,
+                                                    hZeroStruct, hBody, hPost,
+                                                    hLoop, stateAfterPost,
+                                                    YulOpenResult.bind]
+                                                    at hOpen
+                                  | call call =>
+                                      simp [loop, hCond, hZero, hZeroStruct,
+                                        hBody, hPost, YulOpenResult.bind]
+                                        at hOpen
+                      | call call =>
+                          simp [loop, hCond, hZero, hZeroStruct, hBody,
+                            YulOpenResult.bind] at hOpen
+            | call call =>
+                simp [loop, hCond, YulOpenResult.bind] at hOpen
+  theorem call_done_eq_closed
+      {fuel : Nat} {args : List Word}
+      {functionName? : Option EvmYul.Yul.Ast.YulFunctionName}
+      {codeOverride : Option Contract} {state : State}
+      {result : Except Exception (State × List Word)}
+      (hOpen :
+        call fuel args functionName? codeOverride state = .done result) :
+      EvmYul.Yul.call fuel args functionName? codeOverride state = result := by
+    cases fuel with
+    | zero =>
+        simpa [call, EvmYul.Yul.call, YulOpenResult.error] using hOpen
+    | succ fuel' =>
+        cases hFind :
+            state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+        | none =>
+            simpa [call, EvmYul.Yul.call, callFunction?, hFind,
+              YulOpenResult.error] using hOpen
+        | some yulContract =>
+            cases functionName? with
+            | none =>
+                let f : EvmYul.Yul.Ast.FunctionDefinition :=
+                  EvmYul.Yul.Ast.FunctionDefinition.Def [] []
+                    [(codeOverride.getD yulContract.code).dispatcher]
+                cases hBody :
+                    exec fuel' (.Block f.body) codeOverride
+                      (EvmYul.Yul.State.mkOk
+                        (EvmYul.Yul.State.initcall f.params f.rets args state)) with
+                | done bodyResult =>
+                    have hBodyClosed :
+                        EvmYul.Yul.exec fuel' (.Block f.body) codeOverride
+                            (EvmYul.Yul.State.mkOk
+                              (EvmYul.Yul.State.initcall f.params f.rets args
+                                state)) =
+                          bodyResult :=
+                      exec_done_eq_closed hBody
+                    cases bodyResult with
+                    | error err =>
+                        simp [call, EvmYul.Yul.call, callFunction?, hFind, f,
+                          hBody, hBodyClosed, YulOpenResult.bind] at hOpen ⊢
+                        exact hOpen
+                    | ok stateAfterBody =>
+                        simp [call, EvmYul.Yul.call, callFunction?, hFind, f,
+                          hBody, hBodyClosed, YulOpenResult.bind,
+                          YulOpenResult.ok] at hOpen ⊢
+                        exact hOpen
+                | call externalCall =>
+                    simp [call, callFunction?, hFind, f, hBody,
+                      YulOpenResult.bind] at hOpen
+            | some functionName =>
+                cases hFunction :
+                    (codeOverride.getD yulContract.code).functions.lookup
+                      functionName with
+                | none =>
+                    simpa [call, EvmYul.Yul.call, callFunction?, hFind,
+                      hFunction, YulOpenResult.error] using hOpen
+                | some f =>
+                    cases hBody :
+                        exec fuel' (.Block f.body) codeOverride
+                          (EvmYul.Yul.State.mkOk
+                            (EvmYul.Yul.State.initcall f.params f.rets args
+                              state)) with
+                    | done bodyResult =>
+                        have hBodyClosed :
+                            EvmYul.Yul.exec fuel' (.Block f.body) codeOverride
+                                (EvmYul.Yul.State.mkOk
+                                  (EvmYul.Yul.State.initcall f.params f.rets
+                                    args state)) =
+                              bodyResult :=
+                          exec_done_eq_closed hBody
+                        cases bodyResult with
+                        | error err =>
+                            simp [call, EvmYul.Yul.call, callFunction?, hFind,
+                              hFunction, hBody, hBodyClosed, YulOpenResult.bind]
+                              at hOpen ⊢
+                            exact hOpen
+                        | ok stateAfterBody =>
+                            simp [call, EvmYul.Yul.call, callFunction?, hFind,
+                              hFunction, hBody, hBodyClosed, YulOpenResult.bind,
+                              YulOpenResult.ok] at hOpen ⊢
+                            exact hOpen
+                    | call externalCall =>
+                        simp [call, callFunction?, hFind, hFunction, hBody,
+                          YulOpenResult.bind] at hOpen
+
 end
+
+theorem reverseResult_evalArgs_done_eq_closed
+    {fuel : Nat} {args : List Expr} {codeOverride : Option Contract}
+    {state : State}
+    {result : Except Exception (State × List Word)}
+    (hOpen :
+      reverseResult (evalArgs fuel args codeOverride state) =
+        .done result) :
+    EvmYul.Yul.reverse'
+        (EvmYul.Yul.evalArgs fuel args codeOverride state) =
+      result := by
+  simp [reverseResult, YulOpenResult.map] at hOpen ⊢
+  cases hArgs : evalArgs fuel args codeOverride state with
+  | done argsResult =>
+      have hArgsClosed :
+          EvmYul.Yul.evalArgs fuel args codeOverride state = argsResult :=
+        evalArgs_done_eq_closed hArgs
+      cases argsResult with
+      | error err =>
+          simp [hArgs, hArgsClosed, YulOpenResult.bind,
+            EvmYul.Yul.reverse'] at hOpen ⊢
+          exact hOpen
+      | ok argsPair =>
+          rcases argsPair with ⟨stateAfterArgs, values⟩
+          simp [hArgs, hArgsClosed, YulOpenResult.bind,
+            YulOpenResult.ok, EvmYul.Yul.reverse'] at hOpen ⊢
+          exact hOpen
+  | call call =>
+      simp [hArgs, YulOpenResult.bind] at hOpen
 
 end YulOpen
 
