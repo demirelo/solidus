@@ -4237,6 +4237,71 @@ theorem SourceStateRel.insert_hidden
       exact SourceStateRel.ok hShared
         (sourceStoreRel_insert_hidden hVars hFresh)
 
+/--
+Restoring a caller after an internal user call keeps the caller local store,
+while the compiler side may update a hidden result slot.
+
+The source-visible layout cannot observe that hidden slot, so the final relation
+uses the callee body's shared-state relation and the caller's local-store
+relation.
+-/
+theorem SourceStateRel.callRestore_insert_hidden
+    {cfg : StateRelConfig} {layout bodyLayout : List Name}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler bodyCompiler : Objects.Source.State}
+    {bodyState : State} {tmp : Name} {value : Word}
+    (hCaller :
+      SourceStateRel cfg layout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hBody :
+      SourceStateRel cfg bodyLayout
+        (EvmYul.Yul.State.reviveJump bodyState) bodyCompiler)
+    (hFresh : tmp ∉ layout) :
+    SourceStateRel cfg layout
+      (EvmYul.Yul.State.setStore
+        (EvmYul.Yul.State.overwrite?
+          (EvmYul.Yul.State.reviveJump bodyState)
+          (.Ok callerShared callerStore))
+        (.Ok callerShared callerStore))
+      (Locals.Source.State.withShared (callerCompiler.insert tmp value)
+        bodyCompiler.shared) := by
+  cases hCaller with
+  | ok hCallerShared hCallerVars =>
+      cases bodyState with
+      | Ok bodyShared bodyStore =>
+          cases hBody with
+          | ok hBodyShared _hBodyVars =>
+              simpa [EvmYul.Yul.State.reviveJump,
+                EvmYul.Yul.State.overwrite?, EvmYul.Yul.State.setStore,
+                Locals.Source.State.withShared,
+                Locals.Source.State.insert] using
+                (SourceStateRel.ok
+                  (source :=
+                    Locals.Source.State.withShared
+                      (callerCompiler.insert tmp value)
+                      bodyCompiler.shared)
+                  hBodyShared
+                  (sourceStoreRel_insert_hidden hCallerVars hFresh))
+      | OutOfFuel =>
+          cases hBody
+      | Checkpoint jump =>
+          cases jump <;>
+            cases hBody with
+            | ok hBodyShared _hBodyVars =>
+                simpa [EvmYul.Yul.State.reviveJump,
+                  EvmYul.Yul.State.revive, EvmYul.Yul.State.overwrite?,
+                  EvmYul.Yul.State.setStore,
+                  Locals.Source.State.withShared,
+                  Locals.Source.State.insert] using
+                  (SourceStateRel.ok
+                    (source :=
+                      Locals.Source.State.withShared
+                        (callerCompiler.insert tmp value)
+                        bodyCompiler.shared)
+                    hBodyShared
+                    (sourceStoreRel_insert_hidden hCallerVars hFresh))
+
 theorem SourceStateExactRel.of_initial_scope_default
     {cfg : StateRelConfig} {layout : List Name}
     {shared : EvmYul.SharedState .Yul}
