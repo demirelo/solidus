@@ -49493,6 +49493,71 @@ theorem sourceArgPreludeOpen_append_eq
               (lower := lower) (suffixFuel := suffixFuel))
 
 /--
+Open append law for expression preludes at the `SourceExprPreludeOpen.run`
+level.
+
+This is the expression-level sibling of `sourceArgPreludeOpen_append_eq`.  It
+is valid for arbitrary prefixes, including prefixes that contain internal user
+calls whose callee bodies may suspend on external CALL.
+-/
+theorem sourceExprPreludeOpen_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} :
+    ∀ {pre suffix : List Functions.Stmt}
+      {ctx : Functions.Source.Ctx} {state : Objects.Source.State}
+      {results : Nat} {lower : Locals.Expr results}
+      {suffixFuel : Nat},
+      SourceExprPreludeOpen.run prim program ctx
+          (pre.length + suffixFuel) (pre ++ suffix) lower state =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (pre.length + suffixFuel) { stmts := pre } state)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                SourceExprPreludeOpen.run prim program preResult.2 suffixFuel
+                  suffix lower preResult.1.state
+            | .brk | .cont | .leave | .halt _ => CompilerOpen.invalid) := by
+  intro pre
+  induction pre with
+  | nil =>
+      intro suffix ctx state results lower suffixFuel
+      cases suffixFuel <;>
+        simp [SourceExprPreludeOpen.run,
+          CompilerOpen.FunctionsOpen.Block.runOpen,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.map,
+          OpenExternal.OpenResult.ok, CompilerOpen.invalid,
+          Functions.Source.invalid, Structured.invalid,
+          Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+  | cons stmt rest ih =>
+      intro suffix ctx state results lower suffixFuel
+      have hFuel :
+          (stmt :: rest).length + suffixFuel =
+            (rest.length + suffixFuel).succ := by
+        simp
+        omega
+      rw [hFuel]
+      simp only [List.cons_append]
+      unfold SourceExprPreludeOpen.run
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [openResult_bind_assoc]
+      rw [openResult_bind_assoc]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro stmtResult
+      rcases stmtResult with ⟨stmtOutcome, stmtCtx⟩
+      cases stmtOutcome with
+      | mk stmtState mode =>
+          cases mode <;>
+            simp [CompilerOpen.invalid, Functions.Source.invalid,
+              Structured.invalid, OpenExternal.OpenResult.bind,
+              OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+              Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+          simpa [SourceExprPreludeOpen.run] using
+            (ih (suffix := suffix) (ctx := stmtCtx) (state := stmtState)
+              (lower := lower) (suffixFuel := suffixFuel))
+
+/--
 Open append law for arbitrary compiler-open blocks.
 
 This is the raw block-level version of `sourceArgPreludeOpen_append_eq`.
@@ -50905,6 +50970,182 @@ theorem compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
                   .ok (Functions.Source.Outcome.halt kind haltedState, ctx))) := by
   simp [CompilerOpen.FunctionsOpen.Stmt.run, hTargets, hFind]
   rfl
+
+/--
+Exact target-side shape of the hidden result-slot suffix emitted for an
+internal user-call expression at the expression-prelude level.
+
+The suffix initializes the fresh temporary, runs the open function-call
+statement, and only on regular return reads the temporary as the expression
+value.  Nonregular call outcomes are invalid at this strict expression-prelude
+boundary.
+-/
+theorem sourceExprPreludeOpen_user_call_suffix_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tmp functionName : Name}
+    {lowerArgs : List (Locals.Expr 1)}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    SourceExprPreludeOpen.run prim program ctx
+        ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ)
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs]
+        (.var tmp) compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Stmt.run prim program
+          { ctx with scope := tmp :: ctx.scope } tailFuel.succ
+          (Functions.Stmt.call [tmp] functionName lowerArgs)
+          (compiler.insert tmp Expr.zero))
+        (fun callResult =>
+          match callResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.map
+                (fun exprResult =>
+                  { state := exprResult.1
+                    ctx := callResult.2
+                    values := exprResult.2 })
+                (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                  callResult.1.state)
+          | .brk | .cont | .leave | .halt _ =>
+              CompilerOpen.invalid) := by
+  unfold SourceExprPreludeOpen.run
+  have hFuel :
+      [Functions.Stmt.let_ tmp (.lit Expr.zero),
+        Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ =
+        tailFuel.succ.succ.succ := by
+    simp
+    omega
+  conv_lhs =>
+    rw [hFuel]
+    rw [compilerOpen_block_runOpen_cons_succ]
+    simp [CompilerOpen.FunctionsOpen.Stmt.run,
+      CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+      OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+      Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+      Locals.Source.State.insert]
+    rw [compilerOpen_block_runOpen_cons_succ]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro callResult
+  rcases callResult with ⟨callOutcome, callCtx⟩
+  cases callOutcome with
+  | mk callState mode =>
+      cases mode <;>
+        simp [SourceExprPreludeOpen.run, CompilerOpen.invalid,
+          Functions.Source.invalid, Structured.invalid,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.map,
+          OpenExternal.OpenResult.ok, Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          CompilerOpen.LocalsExpr.eval, Locals.Source.State.insert,
+          compilerOpen_block_runOpen_nil_succ]
+
+/--
+Checked expression-prelude target decomposition for an internal user-call
+expression, peeled to the open target call statement.
+-/
+theorem sourceExprPreludeOpen_user_call_lower1?_eq_open_call
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState')) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      SourceExprPreludeOpen.run prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                OpenExternal.OpenResult.bind
+                  (CompilerOpen.FunctionsOpen.Stmt.run prim program
+                    { preResult.2 with
+                      scope := tmp :: preResult.2.scope }
+                    tailFuel.succ
+                    (Functions.Stmt.call [tmp] functionName lowerArgs)
+                    (preResult.1.state.insert tmp Expr.zero))
+                  (fun callResult =>
+                    match callResult.1.mode with
+                    | .regular =>
+                        OpenExternal.OpenResult.map
+                          (fun exprResult =>
+                            { state := exprResult.1
+                              ctx := callResult.2
+                              values := exprResult.2 })
+                          (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                            callResult.1.state)
+                    | .brk | .cont | .leave | .halt _ =>
+                        CompilerOpen.invalid)
+            | .brk | .cont | .leave | .halt _ =>
+                CompilerOpen.invalid) := by
+  rcases lower1?_user_call_some_components hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hPreEq, hLowerEq⟩
+  subst pre
+  subst lowerExpr
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  let suffix : List Functions.Stmt :=
+    [Functions.Stmt.let_ tmp (.lit Expr.zero),
+      Functions.Stmt.call [tmp] functionName lowerArgs]
+  have hFuel :
+      (preArgs ++ suffix).length + tailFuel.succ =
+        preArgs.length + (suffix.length + tailFuel.succ) := by
+    simp [suffix, List.length_append]
+    omega
+  rw [hFuel]
+  rw [sourceExprPreludeOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := preArgs) (suffix := suffix) (lower := (.var tmp))
+    (state := compiler) (suffixFuel := suffix.length + tailFuel.succ)]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode with
+      | regular =>
+          simpa [suffix, Nat.succ_eq_add_one] using
+            (sourceExprPreludeOpen_user_call_suffix_eq
+              (prim := prim) (program := program) (ctx := ctxAfter)
+              (tmp := tmp) (functionName := functionName)
+              (lowerArgs := lowerArgs) (tailFuel := tailFuel)
+              (compiler := compilerAfter))
+      | brk =>
+          simp [suffix, OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+            Functions.Source.invalid, Structured.invalid]
+      | cont =>
+          simp [suffix, OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+            Functions.Source.invalid, Structured.invalid]
+      | leave =>
+          simp [suffix, OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+            Functions.Source.invalid, Structured.invalid]
+      | halt kind =>
+          simp [suffix, OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+            Functions.Source.invalid, Structured.invalid]
 
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)

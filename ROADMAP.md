@@ -262,6 +262,13 @@ Checked base we can rely on:
   `compilerOpen_functionsArgList_eval_var_map_of_source`, so the raw
   generated-argument relation can feed its checked closed `ArgList.eval` fact
   into the open target internal-call statement.
+- [x] Added expression-level target decomposition for internal user-call
+  lowering: `sourceExprPreludeOpen_append_eq`,
+  `sourceExprPreludeOpen_user_call_suffix_eq`, and
+  `sourceExprPreludeOpen_user_call_lower1?_eq_open_call` expose the checked
+  `Expr.lower1?` result as `preArgs`, hidden temp initialization, open
+  `Stmt.call`, and regular temp read without going through let/assign
+  statement frontiers.
 
 Remaining work:
 
