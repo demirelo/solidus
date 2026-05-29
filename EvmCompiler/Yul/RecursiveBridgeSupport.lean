@@ -33935,6 +33935,182 @@ theorem yulOpenEvalArgs_toOpenResult_doneInvariant_stack_arity_of_lowerBound1?_t
       simpa [List.length_reverse, hArgsLen] using hValuesLen)
 
 /--
+Combine checked-lowering arity with a primitive no-error invariant for the
+source argument evaluator.
+
+The primitive error fact is still an explicit frontier here, but arity is now
+computed from the compiler lowering rather than supplied as a separate
+semantic assumption.
+-/
+theorem yulOpenEvalArgs_doneInvariant_arityAndNoError_of_lowerBound1?_toStackSeq?
+    {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {source : State} {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {op : Structured.BasicOp}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hNoErrorInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceResult : State × List Word} {err},
+            doneResult = .ok sourceResult →
+              EvmYul.Yul.primCall fuel sourceResult.1 yulPrim
+                  sourceResult.2.reverse ≠
+                .error err)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+            source))) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {sourceResult : State × List Word},
+          doneResult = .ok sourceResult →
+            sourceResult.2.length =
+              Expressions.Structured.BasicOp.inputs op ∧
+            ∀ {err},
+              EvmYul.Yul.primCall fuel sourceResult.1 yulPrim
+                  sourceResult.2.reverse ≠
+                .error err)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          source)) := by
+  have hArityInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceAfter : State} {values : List Word},
+            doneResult = .ok (sourceAfter, values) →
+              values.length = Expressions.Structured.BasicOp.inputs op)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+            source)) :=
+    yulOpenEvalArgs_toOpenResult_doneInvariant_stack_arity_of_lowerBound1?_toStackSeq?
+      (fuel := fuel) (args := args) (codeOverride := codeOverride)
+      (source := source) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (argExprs := argExprs)
+      (op := op) (seq := seq) hLowerArgs hSeq
+  exact
+    OpenResultDoneInvariant.imp
+      (OpenResultDoneInvariant.and hArityInv hNoErrorInv)
+      (by
+        intro doneResult hBoth sourceResult hOk
+        constructor
+        · exact hBoth.1 hOk
+        · intro err
+          exact
+            hBoth.2 (sourceResult := sourceResult) (err := err) hOk)
+
+/--
+Checked lowering wrapper for safe one-result primitive expression heads in the
+open CALL spine.
+
+The produced expression proof is fully expression-level and recursive in its
+arguments: nested CALLs are handled by `hPrelude`, while arity is derived from
+`lowerBound1?`/`toStackSeq?`.  The only remaining primitive-head premise is the
+honest source-side no-error invariant for the accepted/result-ok frontier.
+-/
+theorem lower1?_prim_sourceExprPreludeOpenSoundAtExactTarget_safe_of_lowerBound1?_arg_prelude_open
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hNoErrorInv :
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun doneResult =>
+            ∀ {sourceResult : State × List Word} {err},
+              doneResult = .ok sourceResult →
+                EvmYul.Yul.primCall sourceFuel sourceResult.1 yulPrim
+                    sourceResult.2.reverse ≠
+                  .error err)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source)))
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre seq targetFuel
+        preludeCallResponseRel)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim op target.state
+                      target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) targetFuel callResponseRel := by
+  constructor
+  · exact
+      Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      sourceExprPreludeOpenSoundAtExactTarget_prim_safe_of_arg_prelude_open_doneInvariant
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+        (yulPrim := yulPrim) (op := op) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (results := 1)
+        (lowerArgs := seq)
+        (preludeCallResponseRel := preludeCallResponseRel)
+        (callResponseRel := callResponseRel)
+        hSafe hBasic hOutputs
+        (by
+          intro source compiler hInitial
+          exact
+            yulOpenEvalArgs_doneInvariant_arityAndNoError_of_lowerBound1?_toStackSeq?
+              (fuel := sourceFuel) (yulPrim := yulPrim) (args := args)
+              (codeOverride := codeOverride) (source := source)
+              (freshState := freshState) (freshState' := freshState')
+              (pre := pre) (argExprs := argExprs) (op := op) (seq := seq)
+              hLowerArgs hSeq
+              (hNoErrorInv (source := source) (compiler := compiler)
+                hInitial))
+        hPrelude hPrim hPreludeResponse
+
+/--
 Open CALL-family expression bridge for generated argument preludes.
 
 `ExprValuePreludeSound` is intentionally a closed-expression contract: it
