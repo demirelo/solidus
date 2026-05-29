@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 16:02 PDT.
+Last updated: 2026-05-29 16:12 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -340,6 +340,12 @@ Checked base we can rely on:
   caller restoration keeps the source-visible caller locals related while the
   target updates only the hidden result temporary and adopts the callee body's
   related shared state.
+- [x] Added the returned-body internal-user-call composition bridge:
+  `sourceOpenResultSeqDoneRel_reviveJump_stateRel_of_regular_leave` extracts
+  the revived callee state relation from a completed open body, and
+  `sourceArgStackPreludeOpenResultRel_user_call_body_returned_single` composes
+  return-list agreement, caller restoration, hidden-slot assignment, and final
+  variable replay into the expression done relation.
 
 Remaining work:
 

@@ -49777,6 +49777,52 @@ theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo
       (names := returns) (scope := scope) (state := source) hScope
   exact hValues.trans hRestrict.symm
 
+/--
+Completed regular/leave open bodies remain related after imported Yul revives
+the callee jump state for caller restoration.
+-/
+theorem sourceOpenResultSeqDoneRel_reviveJump_stateRel_of_regular_leave
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {source : State} {outcome : Objects.Source.Outcome}
+    {ctx : Functions.Source.Ctx}
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel allowed
+        (.ok source) (.ok (outcome, ctx)))
+    (hAllowed : allowed (.ok source))
+    (hMode : outcome.mode = .regular ∨ outcome.mode = .leave) :
+    SourceStateRel cfg layout (EvmYul.Yul.State.reviveJump source)
+      outcome.state := by
+  have hOutcomeRel :
+      SourceResultOutcomeRel cfg layout terminalRel revertRel (.ok source)
+        outcome :=
+    hDone hAllowed
+  cases hOutcomeRel with
+  | ok hOk =>
+      cases hOk with
+      | regular hStateRel =>
+          cases hStateRel with
+          | ok hShared hVars =>
+              simpa [EvmYul.Yul.State.reviveJump] using
+                (SourceStateRel.ok hShared hVars)
+      | brk hStateRel =>
+          cases hMode with
+          | inl hRegular => cases hRegular
+          | inr hLeave => cases hLeave
+      | cont hStateRel =>
+          cases hMode with
+          | inl hRegular => cases hRegular
+          | inr hLeave => cases hLeave
+      | leave hStateRel =>
+          cases hStateRel with
+          | ok hShared hVars =>
+              simpa [EvmYul.Yul.State.reviveJump,
+                EvmYul.Yul.State.revive] using
+                (SourceStateRel.ok hShared hVars)
+
 theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
@@ -52120,6 +52166,160 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_returned_single
     (sharedAfterCall := sharedAfterCall) (argVars := argVars)
     (returnStore := returnStore) (ctxAfter := ctxAfter) hAssign]
   exact OpenExternal.OpenResultRel.done ⟨hRel, rfl⟩
+
+/--
+Completed singleton internal user-call bodies restore the caller and replay the
+hidden result slot into the expression done relation.
+-/
+theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
+    {cfg : StateRelConfig} {callerLayout bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args : List Word} {fuel : Nat}
+    {paramStore : Locals.Source.Store}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler : Objects.Source.State}
+    {bodySource : State} {bodyOutcome : Objects.Source.Outcome}
+    {bodyCtx replayCtx : Functions.Source.Ctx}
+    {tmp : Name} {value : Word}
+    {scope : EvmYul.Yul.VarStore}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hCaller :
+      SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel allowed
+        (.ok bodySource) (.ok (bodyOutcome, bodyCtx)))
+    (hAllowed : allowed (.ok bodySource))
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBody :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          fuel fn.body
+          ({ shared := callerCompiler.shared
+             vars :=
+              Functions.Source.Store.initReturns fn.returns paramStore } :
+            Objects.Source.State) =
+        .done (.ok (bodyOutcome, bodyCtx)))
+    (hMode : bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave)
+    (hReturns : ∀ name, name ∈ fn.returns → name ∈ bodyLayout)
+    (hScope :
+      ∀ name, name ∈ fn.returns → (scope.lookup name).isSome = true)
+    (hLookup :
+      Functions.Source.Store.lookupMany fn.returns
+          bodyOutcome.state.vars =
+        some [value])
+    (hFresh : tmp ∉ callerLayout)
+    (hContains : callerCompiler.vars.contains tmp = true) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg callerLayout)
+      (OpenExternal.OpenResult.ok
+        (EvmYul.Yul.State.setStore
+          (EvmYul.Yul.State.overwrite?
+            (EvmYul.Yul.State.reviveJump bodySource)
+            (.Ok callerShared callerStore))
+          (.Ok callerShared callerStore),
+          [value]))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+          fuel.succ callerCompiler.shared)
+        (fun callResult =>
+          match callResult with
+          | .returned sharedAfterCall returnValues =>
+              match Functions.Source.Store.assignMany [tmp] returnValues
+                  callerCompiler.vars with
+              | none => CompilerOpen.invalid
+              | some returnStore =>
+                  OpenExternal.OpenResult.map
+                    (fun exprResult =>
+                      { state := exprResult.1
+                        ctx := replayCtx
+                        values := exprResult.2 })
+                    (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                      { shared := sharedAfterCall
+                        vars := returnStore })
+          | .halted _kind _haltedState =>
+              CompilerOpen.invalid)) := by
+  have hValues :
+      [value] =
+        fn.returns.map fun name =>
+          EvmYul.Yul.State.lookup! name
+            (EvmYul.Yul.State.restrictStoreTo scope bodySource) :=
+    sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo
+      (cfg := cfg) (layout := bodyLayout) (returns := fn.returns)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (source := bodySource) (scope := scope)
+      (outcome := bodyOutcome) (ctx := bodyCtx) (values := [value])
+      hDone hAllowed hMode hReturns hScope hLookup
+  have hRunBody :
+      CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+          fuel.succ callerCompiler.shared =
+        .done
+          (.ok
+            (Functions.Source.CallResult.returned
+              bodyOutcome.state.shared [value])) := by
+    simpa [← hValues] using
+      (compilerOpen_funDef_runBody_succ_returned_of_body_done_rel
+        (cfg := cfg) (layout := bodyLayout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (allowed := allowed)
+        (source := bodySource) (scope := scope) (prim := prim)
+        (program := program) (fn := fn) (args := args)
+        (values := [value]) (fuel := fuel)
+        (shared := callerCompiler.shared) (paramStore := paramStore)
+        (bodyOutcome := bodyOutcome) (ctxAfter := bodyCtx)
+        hDone hAllowed hInsert hBody hMode hReturns hScope hLookup)
+  rw [hRunBody]
+  have hBodyRel :
+      SourceStateRel cfg bodyLayout
+        (EvmYul.Yul.State.reviveJump bodySource) bodyOutcome.state :=
+    sourceOpenResultSeqDoneRel_reviveJump_stateRel_of_regular_leave
+      (cfg := cfg) (layout := bodyLayout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (allowed := allowed)
+      (source := bodySource) (outcome := bodyOutcome) (ctx := bodyCtx)
+      hDone hAllowed hMode
+  have hRestored :
+      SourceStateRel cfg callerLayout
+        (EvmYul.Yul.State.setStore
+          (EvmYul.Yul.State.overwrite?
+            (EvmYul.Yul.State.reviveJump bodySource)
+            (.Ok callerShared callerStore))
+          (.Ok callerShared callerStore))
+        (Locals.Source.State.withShared (callerCompiler.insert tmp value)
+          bodyOutcome.state.shared) :=
+    SourceStateRel.callRestore_insert_hidden hCaller hBodyRel hFresh
+  have hAssign :
+      Functions.Source.Store.assignMany [tmp] [value]
+          callerCompiler.vars =
+        some (Locals.Source.Store.insert callerCompiler.vars tmp value) :=
+    functionsStore_assignMany_single_of_contains hContains
+  exact
+    sourceArgStackPreludeOpenResultRel_user_call_returned_single
+      (cfg := cfg) (layout := callerLayout) (prim := prim)
+      (tmp := tmp) (value := value)
+      (sourceAfter :=
+        EvmYul.Yul.State.setStore
+          (EvmYul.Yul.State.overwrite?
+            (EvmYul.Yul.State.reviveJump bodySource)
+            (.Ok callerShared callerStore))
+          (.Ok callerShared callerStore))
+      (sharedAfterCall := bodyOutcome.state.shared)
+      (argVars := callerCompiler.vars)
+      (returnStore := Locals.Source.Store.insert callerCompiler.vars tmp value)
+      (ctxAfter := replayCtx) (callResponseRel := callResponseRel)
+      (by
+        simpa [Locals.Source.State.withShared, Locals.Source.State.insert]
+          using hRestored)
+      hAssign
 
 /--
 Target-side open shape of an internal function-call statement after the callee
