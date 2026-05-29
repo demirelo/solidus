@@ -15367,6 +15367,68 @@ theorem sourceStateExactRel_initcall_of_insertMany
   exact SourceStateExactRel.ofRelDomain hRel hDomain
 
 /--
+Package the callee-entry relation in the shape needed by open internal
+user-call bodies.
+
+After the open argument prelude has related the caller states and the lowered
+argument list has inserted parameters into the source function frame, the
+callee body starts from exactly the same visible return/parameter layout on
+both sides.  This theorem hides the AST/lowered-name transport that older
+closed user-call proofs repeated inline.
+-/
+theorem sourceStateExactRel_initcall_of_lowerFun_insertMany
+    {cfg : StateRelConfig} {layout : List Name}
+    {sharedYul : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerTarget : Objects.Source.State}
+    {params rets : List EvmYul.Identifier}
+    {args : List Word} {paramStore : Locals.Source.Store}
+    {lowerFn : Functions.FunDef}
+    (hCaller :
+      SourceStateRel cfg layout (.Ok sharedYul callerStore) callerTarget)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params args
+        Locals.Source.Store.empty = some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames rets)
+    (hParamsNoDup : (identNames params).Nodup)
+    (hRetsNoDup : (identNames rets).Nodup)
+    (hDisjoint :
+      ∀ name, name ∈ identNames params → name ∉ identNames rets) :
+    SourceStateExactRel cfg (lowerFn.returns ++ lowerFn.params)
+      (EvmYul.Yul.State.mkOk
+        (EvmYul.Yul.State.initcall params rets args
+          (.Ok sharedYul callerStore)))
+      ({ shared := callerTarget.shared,
+         vars :=
+          Functions.Source.Store.initReturns lowerFn.returns paramStore } :
+        Objects.Source.State) := by
+  cases hCaller with
+  | ok hShared _hVars =>
+      have hInsertRaw :
+          Functions.Source.Store.insertMany (identNames params) args
+              Locals.Source.Store.empty =
+            some paramStore := by
+        simpa [hLowerParams] using hInsert
+      have hInitialRaw :
+          SourceStateExactRel cfg
+            (identNames rets ++ identNames params)
+            (EvmYul.Yul.State.initcall params rets args
+              (.Ok sharedYul callerStore))
+            ({ shared := callerTarget.shared,
+               vars :=
+                Functions.Source.Store.initReturns (identNames rets)
+                  paramStore } : Objects.Source.State) :=
+        sourceStateExactRel_initcall_of_insertMany
+          (cfg := cfg) (sharedYul := sharedYul)
+          (sharedSource := callerTarget.shared)
+          (callerStore := callerStore) (params := params)
+          (rets := rets) (args := args) (paramStore := paramStore)
+          hShared hInsertRaw hParamsNoDup hRetsNoDup hDisjoint
+      simpa [hLowerReturns, hLowerParams, EvmYul.Yul.State.mkOk,
+        initcall_ok_insertPairs] using hInitialRaw
+
+/--
 Restricting an imported Yul state to a store with exact domain `layout`
 produces a state with exact domain `layout`.
 
@@ -51556,6 +51618,36 @@ theorem compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
   apply OpenExternal.OpenResult.bind_congr_next
   intro bodyResult
   cases bodyResult.1.mode <;> rfl
+
+/--
+Target-side final replay for singleton internal user-call expressions.
+
+Once a one-return user call has assigned its returned word into the hidden
+temporary, reading that temporary as the expression result deterministically
+produces the same singleton value.
+-/
+theorem compilerOpen_eval_var_of_assignMany_single
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {value : Word}
+    {shared : EvmYul.SharedState .EVM}
+    {vars returnStore : Locals.Source.Store}
+    (hAssign :
+      Functions.Source.Store.assignMany [tmp] [value] vars =
+        some returnStore) :
+    CompilerOpen.LocalsExpr.eval prim (.var tmp)
+        ({ shared := shared, vars := returnStore } :
+          Objects.Source.State) =
+      .done
+        (.ok
+          (({ shared := shared, vars := returnStore } :
+            Objects.Source.State), [value])) := by
+  unfold Functions.Source.Store.assignMany at hAssign
+  by_cases hContains : vars.contains tmp
+  · simp [hContains] at hAssign
+    cases hAssign
+    simp [CompilerOpen.LocalsExpr.eval, OpenExternal.OpenResult.ok,
+      Locals.Source.Store.insert_self]
+  · simp [hContains] at hAssign
 
 /--
 Target-side open shape of an internal function-call statement after the callee
