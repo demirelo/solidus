@@ -34111,6 +34111,370 @@ theorem lower1?_prim_sourceExprPreludeOpenSoundAtExactTarget_safe_of_lowerBound1
         hPrelude hPrim hPreludeResponse
 
 /--
+Done-branch open relation for a CALL-family primitive head.
+
+Once the generated argument prelude has completed, the source and compiler
+states/argument words are related.  The remaining CALL-family step exposes the
+same open call on both sides; every response is related by the caller-supplied
+abstract response relation.
+-/
+theorem callPrimitiveOpenDoneRel_of_callKind
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics} {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    {sourceResult : State × List Word}
+    {target : SourceArgPreludeOpenTarget}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hDone :
+      SourceArgStackPreludeOpenDoneRel cfg layout
+        (.ok sourceResult) (.ok target))
+    (hArity :
+      sourceResult.2.length = Expressions.Structured.BasicOp.inputs op)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        callResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg layout)
+      (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim sourceResult)
+      (OpenExternal.OpenResult.map
+        (fun primResult =>
+          { state := primResult.1
+            ctx := target.ctx
+            values := primResult.2 })
+        (CompilerOpen.Primitive.eval prim op target.state target.values)) := by
+  have hInputs :
+      Expressions.Structured.BasicOp.inputs op = kind.inputArity :=
+    OpenExternal.CallKind.inputArity_eq_inputs_ofYulOperation?
+      hKind hBasic
+  have hYul : yulPrim = kind.toYulOperation :=
+    OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+  have hOp : op = kind.toBasicOp :=
+    OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+  rcases sourceResult with ⟨sourceAfterArgs, values⟩
+  have hLength : values.length = kind.inputArity :=
+    hArity.trans hInputs
+  subst yulPrim
+  subst op
+  rcases
+      OpenExternal.CallKind.exists_operands_of_reverse_args_length
+        kind hLength with
+    ⟨operands, hValues⟩
+  rcases hDone with ⟨hRelArgs, hTargetValuesEq⟩
+  cases hRelArgs with
+  | @ok sourceSharedAfter sourceStoreAfter _ hShared hVars =>
+      rcases
+          CompilerOpen.Primitive.yulCompilerOpenCallRel_toYulOperation
+            (cfg := cfg) (layout := layout)
+            (sourceShared := sourceSharedAfter)
+            (store := sourceStoreAfter) (compiler := target.state)
+            (SourceStateRel.ok hShared hVars) kind operands with
+        ⟨sourceCall, compilerCall, hSourceCall, hCompilerCall, hCallRel⟩
+      have hValuesReverse :
+          values.reverse = kind.args operands := by
+        rw [hValues]
+        simp
+      have hTargetValues :
+          target.values = (kind.args operands).reverse := by
+        simpa [hValues] using hTargetValuesEq.symm
+      have hSourceEval :
+          yulPrimitiveOpenResultAfterArgsPrim sourceFuel kind.toYulOperation
+              (.Ok sourceSharedAfter sourceStoreAfter, values) =
+            .call
+              { site := sourceCall.site
+                resume := fun response =>
+                  .done (sourceCall.resume response) } := by
+        simp [yulPrimitiveOpenResultAfterArgsPrim, hValuesReverse,
+          hSourceCall]
+      have hTargetEval :
+          CompilerOpen.Primitive.eval prim kind.toBasicOp target.state
+              target.values =
+            .call
+              { site := compilerCall.site
+                resume := fun response =>
+                  .done (compilerCall.resume response) } := by
+        rw [hTargetValues]
+        simp [CompilerOpen.Primitive.eval, hCompilerCall]
+      simpa [hSourceEval, hTargetEval, OpenExternal.OpenResult.map,
+        OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok] using
+          (OpenExternal.OpenResultRel.call hCallRel.sameSite
+              (by
+                intro response hResponse
+                have hPrimitiveDone :=
+                  hCallRel.preservesAllResponses response
+                    (hPrimitiveResponse
+                      (SourceStateRel.ok hShared hVars) hResponse)
+                cases hSourceDone : sourceCall.resume response <;>
+                  cases hTargetDone : compilerCall.resume response
+                all_goals
+                  simp [hSourceDone, hTargetDone,
+                    CompilerOpen.Primitive.ResultRel,
+                    SourceStateRel.OpenPrimitiveResultRel] at hPrimitiveDone
+                · simp [hSourceDone, hTargetDone,
+                    OpenExternal.OpenResult.map,
+                    OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.ok]
+                  exact
+                    OpenExternal.OpenResultRel.done
+                      (by
+                        change SourceStateRel cfg layout _ _ ∧ _ = _
+                        exact hPrimitiveDone)) :
+            OpenExternal.OpenResultRel callResponseRel
+              (SourceArgStackPreludeOpenDoneRel cfg layout)
+              (.call
+                { site := sourceCall.site
+                  resume := fun response =>
+                    .done (sourceCall.resume response) })
+              (.call
+                { site := compilerCall.site
+                  resume := fun response =>
+                    OpenExternal.OpenResult.map
+                      (fun primResult =>
+                        { state := primResult.1
+                          ctx := target.ctx
+                          values := primResult.2 })
+                      (.done (compilerCall.resume response)) }))
+
+/--
+Expression-level CALL-family primitive bridge using a source argument done
+invariant for arity.
+
+This is the CALL analogue of the safe primitive done-invariant wrapper: nested
+CALLs in arguments are handled by `hPrelude`, then the primitive head consumes
+the arity fact carried by the concrete open argument run.
+-/
+theorem sourceExprPreludeOpenSoundAtExactTarget_prim_call_of_arg_prelude_open_callKind_doneInvariant
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq
+        (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hArgInv :
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun doneResult =>
+            ∀ {sourceResult : State × List Word},
+              doneResult = .ok sourceResult →
+                sourceResult.2.length =
+                  Expressions.Structured.BasicOp.inputs op)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source)))
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        preludeCallResponseRel)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        callResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgs sourceFuel kind
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim kind.toBasicOp
+                      target.state target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      callResponseRel :=
+  sourceExprPreludeOpenSoundAtExactTarget_prim_of_arg_prelude_open_doneInvariant
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+    (yulPrim := yulPrim) (op := op) (args := args)
+    (codeOverride := codeOverride) (pre := pre) (results := results)
+    (lowerArgs := lowerArgs)
+    (preludeCallResponseRel := preludeCallResponseRel)
+    (callResponseRel := callResponseRel) hOutputs hArgInv hPrelude
+    (by
+      intro sourceResult target hDone hSourceInv
+      exact
+        callPrimitiveOpenDoneRel_of_callKind
+          (cfg := cfg) (layout := layout) (prim := prim)
+          (sourceFuel := sourceFuel) (yulPrim := yulPrim) (op := op)
+          (kind := kind) (callResponseRel := callResponseRel)
+          (sourceResult := sourceResult) (target := target)
+          hKind hBasic hDone (hSourceInv rfl) hPrimitiveResponse)
+    (by
+      intro sourceCall targetCall response hResponse
+      have hYul : yulPrim = kind.toYulOperation :=
+        OpenExternal.CallKind.toYulOperation_eq_ofYulOperation? hKind
+      have hOp : op = kind.toBasicOp :=
+        OpenExternal.CallKind.toBasicOp_eq_ofYulOperation? hKind hBasic
+      subst yulPrim
+      subst op
+      exact
+        hPreludeResponse
+          (by
+            simpa [yulPrimitiveOpenResultAfterArgs,
+              yulPrimitiveOpenResultAfterArgsPrim] using hResponse))
+
+/--
+Checked lowering wrapper for CALL-family one-result primitive expression heads.
+
+The wrapper derives argument arity from `lowerBound1?`/`toStackSeq?`; the only
+semantic inputs are the recursive open argument prelude and the abstract
+external response relation for the primitive CALL itself.
+-/
+theorem lower1?_prim_sourceExprPreludeOpenSoundAtExactTarget_call_of_lowerBound1?_arg_prelude_open
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {kind : OpenExternal.CallKind}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hKind : OpenExternal.CallKind.ofYulOperation? yulPrim = some kind)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = 1)
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre seq targetFuel
+        preludeCallResponseRel)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+          compilerAfter →
+        callResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+          compilerAfter.shared response)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgs sourceFuel kind
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim kind.toBasicOp
+                      target.state target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, Expr.cast hOutputs (.prim op seq), freshState') ∧
+      SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+        (Expr.cast hOutputs (.prim op seq)) targetFuel callResponseRel := by
+  constructor
+  · exact
+      Expr.lower1?_prim_of_lowerBound1? hBasic hLowerArgs hSeq hOutputs
+  · exact
+      sourceExprPreludeOpenSoundAtExactTarget_prim_call_of_arg_prelude_open_callKind_doneInvariant
+        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+        (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+        (yulPrim := yulPrim) (op := op) (kind := kind) (args := args)
+        (codeOverride := codeOverride) (pre := pre) (results := 1)
+        (lowerArgs := seq)
+        (preludeCallResponseRel := preludeCallResponseRel)
+        (callResponseRel := callResponseRel)
+        hKind hBasic hOutputs
+        (by
+          intro source compiler _hInitial
+          exact
+            OpenResultDoneInvariant.imp
+              (yulOpenEvalArgs_toOpenResult_doneInvariant_stack_arity_of_lowerBound1?_toStackSeq?
+                (fuel := sourceFuel) (args := args)
+                (codeOverride := codeOverride) (source := source)
+                (freshState := freshState) (freshState' := freshState')
+                (pre := pre) (argExprs := argExprs) (op := op) (seq := seq)
+                hLowerArgs hSeq)
+              (by
+                intro doneResult hDone sourceResult hOk
+                rcases sourceResult with ⟨sourceAfter, values⟩
+                exact hDone hOk))
+        hPrelude hPrimitiveResponse hPreludeResponse
+
+/--
 Open CALL-family expression bridge for generated argument preludes.
 
 `ExprValuePreludeSound` is intentionally a closed-expression contract: it
