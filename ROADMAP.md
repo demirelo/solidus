@@ -254,6 +254,10 @@ Checked base we can rely on:
   which peels the stack-order generated argument proof down to
   `SourceArgRawPreludeOpenDoneRel` so target internal `Stmt.call` can consume
   the checked `Functions.Source.ArgList.eval` state/value relation directly.
+- [x] Added target-side internal-call decomposition
+  `compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function`, exposing
+  the open `Stmt.call` execution as argument evaluation, resolved open callee
+  body execution, return assignment, or terminal propagation.
 
 Remaining work:
 

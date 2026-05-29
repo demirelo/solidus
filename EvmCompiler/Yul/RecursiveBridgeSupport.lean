@@ -50806,6 +50806,49 @@ theorem runAssignTarget_user_call_lower1?_eq_open_call
         simp [runAssignTarget_user_call_suffix_eq,
           OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
 
+/--
+Target-side open shape of an internal function-call statement after the callee
+has been resolved.
+
+This is the compiler-open counterpart of
+`YulOpen.call_succ_eq_bind_body_of_find_function`: the statement first
+evaluates the lowered arguments, then runs the open callee body, then assigns
+returned values to the caller targets or propagates terminal callee exits.
+-/
+theorem compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Locals.Expr 1)} {state : Objects.Source.State}
+    {fuel : Nat} {fn : Functions.FunDef}
+    (hTargets : targets.Nodup)
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel.succ
+        (Functions.Stmt.call targets functionName args) state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim args state)
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn
+              argResult.2 fuel argResult.1.shared)
+            (fun callResult =>
+              match callResult with
+              | .returned sharedAfterCall returnValues =>
+                  match Functions.Source.Store.assignMany targets returnValues
+                      argResult.1.vars with
+                  | none => CompilerOpen.invalid
+                  | some returnStore =>
+                      .ok
+                        (Functions.Source.Outcome.regular
+                          { shared := sharedAfterCall
+                            vars := returnStore },
+                          ctx)
+              | .halted kind haltedState =>
+                  .ok (Functions.Source.Outcome.halt kind haltedState, ctx))) := by
+  simp [CompilerOpen.FunctionsOpen.Stmt.run, hTargets, hFind]
+  rfl
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :
