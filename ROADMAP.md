@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 15:28 PDT.
+Last updated: 2026-05-29 15:34 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -316,6 +316,13 @@ Checked base we can rely on:
   lowered parameter insertion, and AST/lowered function metadata; and
   `compilerOpen_eval_var_of_assignMany_single` names the target singleton
   return-slot assignment followed by hidden-temp read.
+- [x] Added callee-body completed-branch adapters:
+  `sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!` transports return
+  value lookup equality out of an open body sequence done relation, while
+  `compilerOpen_funDef_runBody_succ_returned_of_body_done` and
+  `compilerOpen_funDef_runBody_succ_halted_of_body_done` expose the target
+  `FunDef.runBody` returned and halted branches after completed open body
+  execution.
 
 Remaining work:
 

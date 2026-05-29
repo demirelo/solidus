@@ -49575,6 +49575,35 @@ def SourceOpenResultSeqSoundWhenAtExactHiddenCtx
           (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
             targetFuel lowerBlock compiler)
 
+theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
+    {cfg : StateRelConfig} {layout returns : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {source : State} {outcome : Objects.Source.Outcome}
+    {ctx : Functions.Source.Ctx} {values : List Word}
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel allowed
+        (.ok source) (.ok (outcome, ctx)))
+    (hAllowed : allowed (.ok source))
+    (hMode : outcome.mode = .regular ∨ outcome.mode = .leave)
+    (hReturns : ∀ name, name ∈ returns → name ∈ layout)
+    (hLookup :
+      Functions.Source.Store.lookupMany returns outcome.state.vars =
+        some values) :
+    values = returns.map fun name => EvmYul.Yul.State.lookup! name source := by
+  have hOutcomeRel :
+      SourceResultOutcomeRel cfg layout terminalRel revertRel (.ok source)
+        outcome := hDone hAllowed
+  cases hOutcomeRel with
+  | ok hOk =>
+      exact
+        sourceOkOutcomeRel_lookupMany_eq_map_lookup!
+          (cfg := cfg) (layout := layout) (returns := returns)
+          (source := source) (outcome := outcome) (values := values)
+          hOk hMode hReturns hLookup
+
 theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
@@ -51618,6 +51647,97 @@ theorem compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
   apply OpenExternal.OpenResult.bind_congr_next
   intro bodyResult
   cases bodyResult.1.mode <;> rfl
+
+/-- Completed regular/leave callee bodies become returned call results. -/
+theorem compilerOpen_funDef_runBody_succ_returned_of_body_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args values : List Word} {fuel : Nat}
+    {shared : EvmYul.SharedState .EVM}
+    {paramStore : Locals.Source.Store}
+    {bodyOutcome : Objects.Source.Outcome}
+    {ctxAfter : Functions.Source.Ctx}
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBody :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          fuel fn.body
+          ({ shared := shared
+             vars :=
+              Functions.Source.Store.initReturns fn.returns paramStore } :
+            Objects.Source.State) =
+        .done (.ok (bodyOutcome, ctxAfter)))
+    (hMode : bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave)
+    (hLookup :
+      Functions.Source.Store.lookupMany fn.returns
+          bodyOutcome.state.vars =
+        some values) :
+    CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+        fuel.succ shared =
+      .done
+        (.ok
+          (Functions.Source.CallResult.returned bodyOutcome.state.shared
+            values)) := by
+  rw [compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
+    (prim := prim) (program := program) (fn := fn) (args := args)
+    (fuel := fuel) (shared := shared) (paramStore := paramStore)
+    hInsert]
+  cases hMode with
+  | inl hRegular =>
+      cases bodyOutcome with
+      | mk bodyState mode =>
+          cases hRegular
+          simp [hBody, hLookup, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+  | inr hLeave =>
+      cases bodyOutcome with
+      | mk bodyState mode =>
+          cases hLeave
+          simp [hBody, hLookup, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+
+/-- Completed halting callee bodies become halted call results. -/
+theorem compilerOpen_funDef_runBody_succ_halted_of_body_done
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args : List Word} {fuel : Nat}
+    {shared : EvmYul.SharedState .EVM}
+    {paramStore : Locals.Source.Store}
+    {kind : Assembly.HaltKind}
+    {bodyState : Objects.Source.State}
+    {ctxAfter : Functions.Source.Ctx}
+    (hInsert :
+      Functions.Source.Store.insertMany fn.params args
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBody :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          fuel fn.body
+          ({ shared := shared
+             vars :=
+              Functions.Source.Store.initReturns fn.returns paramStore } :
+            Objects.Source.State) =
+        .done
+          (.ok
+            (Functions.Source.Outcome.halt kind bodyState, ctxAfter))) :
+    CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
+        fuel.succ shared =
+      .done
+        (.ok (Functions.Source.CallResult.halted kind bodyState)) := by
+  rw [compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
+    (prim := prim) (program := program) (fn := fn) (args := args)
+    (fuel := fuel) (shared := shared) (paramStore := paramStore)
+    hInsert]
+  simp [hBody, OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+    Functions.Source.Outcome.halt, Locals.Source.Outcome.halt]
 
 /--
 Target-side final replay for singleton internal user-call expressions.
