@@ -49607,6 +49607,93 @@ theorem compilerOpen_expr_prelude_let_single_append_eq
       · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
           OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
 
+/--
+Raw target-side equation for an arbitrary expression prelude followed by a
+single `let` head and a sequence tail.
+
+Unlike `compilerOpen_expr_prelude_let_single_append_eq`, this theorem does not
+assume a `GeneratedPrelude`.  If the prefix completes nonregularly, the suffix
+is not run and that prefix result is propagated.  This is the shape needed for
+nested internal user-call preludes, whose prefix can contain real source
+function-call statements.
+-/
+theorem compilerOpen_expr_prelude_let_single_append_raw_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {state : Objects.Source.State} {suffixFuel : Nat} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + suffixFuel.succ)
+        { stmts := pre ++ ([Functions.Stmt.let_ name lowerExpr] ++ tail) }
+        state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel.succ) { stmts := pre } state)
+        (fun preResult =>
+          match preResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.bind
+                (CompilerOpen.LocalsExpr.eval prim lowerExpr
+                  preResult.1.state)
+                (fun exprResult =>
+                  match exprResult.2 with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        { preResult.2 with scope := name :: preResult.2.scope }
+                        suffixFuel { stmts := tail }
+                        (exprResult.1.insert name value)
+                  | _ => CompilerOpen.invalid)
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok preResult) := by
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (suffix := [Functions.Stmt.let_ name lowerExpr] ++ tail)
+    (state := state) (suffixFuel := suffixFuel.succ)]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfterPre mode =>
+      cases mode with
+      | regular =>
+          simp [compilerOpen_block_runOpen_cons_succ,
+            CompilerOpen.FunctionsOpen.Stmt.run,
+            CompilerOpen.LocalsExpr.evalOne,
+            OpenExternal.OpenResult.map,
+            OpenExternal.OpenResult.ok,
+            Functions.Source.Outcome.regular,
+            Locals.Source.Outcome.regular,
+            Locals.Source.State.insert]
+          conv_lhs =>
+            rw [openResult_bind_assoc
+              (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+            rw [openResult_bind_assoc
+              (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro exprResult
+          rcases exprResult with ⟨stateAfterExpr, values⟩
+          cases values with
+          | nil =>
+              simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                Functions.Source.invalid, Structured.invalid]
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  simp [OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.ok, Locals.Source.State.insert]
+              | cons value' rest' =>
+                  simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                    Functions.Source.invalid, Structured.invalid]
+      | brk =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | cont =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | leave =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | halt kind =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
 theorem sourceArgPreludeOpen_expr_prelude_let_single_final_eq
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
