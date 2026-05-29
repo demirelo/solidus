@@ -32044,6 +32044,92 @@ theorem sourceExprPreludeOpen_run_prim_eq_arg_prelude_bind
           openResult_bind_assoc_sourceBridge, CompilerOpen.invalid,
           Functions.Source.invalid, Structured.invalid]
 
+/--
+Expression-level open primitive continuation from an open argument prelude.
+
+This is the recursive-expression combinator for ordinary primitive heads such
+as `add(call(...), x)`: argument evaluation may suspend first, and once the
+arguments are done the caller must supply the primitive-specific continuation
+proof.  Keeping that continuation as an explicit local premise avoids
+reintroducing direct statement-shaped CALL lemmas while also avoiding a hidden
+assumption that primitive errors magically relate.
+-/
+theorem sourceExprPreludeOpenSoundAtExactTarget_prim_of_arg_prelude_open
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        preludeCallResponseRel)
+    (hPrimitiveDone :
+      ∀ {sourceResult : State × List Word}
+        {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok sourceResult) (.ok target) →
+        OpenExternal.OpenResultRel callResponseRel
+          (SourceArgStackPreludeOpenDoneRel cfg layout)
+          (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+            sourceResult)
+          (OpenExternal.OpenResult.map
+            (fun primResult =>
+              { state := primResult.1
+                ctx := target.ctx
+                values := primResult.2 })
+            (CompilerOpen.Primitive.eval prim op target.state
+              target.values)))
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim op target.state
+                      target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      callResponseRel := by
+  intro source compiler hInitial
+  dsimp [SourceExprPreludeOpenResultRel]
+  rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args,
+    sourceExprPreludeOpen_run_prim_eq_arg_prelude_bind
+      (hOutputs := hOutputs)]
+  refine OpenExternal.OpenResultRel.bind (hPrelude hInitial) ?_ ?_
+  · intro sourceDone targetDone hDone
+    cases sourceDone with
+    | error err =>
+        cases targetDone <;> cases hDone
+    | ok sourceResult =>
+        cases targetDone with
+        | error err => cases hDone
+        | ok target => exact hPrimitiveDone hDone
+  · intro sourceCall targetCall response hResponse
+    exact hPreludeResponse hResponse
+
 theorem openPrimitiveCallExprOpenResultRel_of_arg_prelude_open_toYulOperation
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
