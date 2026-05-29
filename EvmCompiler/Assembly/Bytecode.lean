@@ -202,6 +202,30 @@ theorem encodeInstr_length (instr : TargetInstr) :
   | prim op =>
       rfl
 
+theorem flatMap_encodeLocated_length (code : List LocatedTarget) :
+    (code.flatMap encodeLocated).length = codeByteLength code := by
+  induction code with
+  | nil =>
+      rfl
+  | cons located rest ih =>
+      change
+        (encodeLocated located ++ rest.flatMap encodeLocated).length =
+          byteSize located.instr + codeByteLength rest
+      rw [List.length_append, ih]
+      simp [encodeLocated, encodeInstr_length]
+
+theorem encodeTarget_size (target : TargetProgram) :
+    (encodeTarget target).size = codeByteLength target.code := by
+  cases target with
+  | mk code =>
+      simpa [encodeTarget, ofList, ByteArray.size, List.size_toArray]
+        using flatMap_encodeLocated_length code
+
+theorem encodeTarget_get?_codeByteLength (target : TargetProgram) :
+    (encodeTarget target).get? (codeByteLength target.code) = none := by
+  unfold ByteArray.get?
+  simp [encodeTarget_size]
+
 theorem uint256_ofNat_toNat (value : Word) :
     EvmYul.UInt256.ofNat value.toNat = value := by
   cases value with

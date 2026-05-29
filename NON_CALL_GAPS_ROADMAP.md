@@ -43,23 +43,33 @@ restriction unless explicitly re-prioritized.
 
 ## Current Preferred Boundary
 
-The preferred public alias now points at the no-CALL, no-`RETURNDATACOPY`,
-sufficient-gas, step-trace theorem:
+The preferred public alias now points at the actual-trace no-CALL,
+no-`RETURNDATACOPY`, sufficient-gas, step-trace theorem:
 
-`compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_instrCoreResources_finalization_noReturnDataCopy_X`
+`compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X`
 
 Current remaining non-CALL public premises after this checkpoint:
 
-- `hTargetInstrCoreResources`:
-  `Assembly.GasAware.XStepTrace.XBlockInstrCoreInputResources asm target`,
-  a named split resource package for trace-local stack/jump/static non-gas
-  checks.
-- `hTargetFinalization`:
-  `Assembly.GasAware.XStepTrace.XBlockTraceFinalizationReady ...`, a named
-  finalization package for running gasless target traces.
+- `hActualXTraceFacts`:
+  `RecursiveBridgeActualXTraceFacts cfg program asm target shared store initial
+  referenceResult`, an actual-trace package keyed by the checked source run,
+  semantic outcome relation, lowered target outcome relation, and concrete
+  `BlockTraceResult`.  After the latest checkpoint this package carries the
+  actual core target trace plus the final fallthrough-PC fact only.  The theorem
+  derives trace-local instruction-input readiness from the core trace, derives
+  final return-buffer cleanliness from
+  `RecursiveBridgeInitialCodeImageRel.returnBuffersClean` plus no-CALL target
+  trace preservation, derives final installed-code preservation from the
+  no-CALL trace, and derives decode-none-at-fallthrough from the bytecode
+  length theorem.
 - `hExprResultContracts`: source expression-result contracts.  The old broad
   `RecursiveBridgeExprNoOutOfFuelContracts` public premise is no longer on the
   preferred alias.
+
+This deliberately demotes the older global target-side predicates.  The old
+`XBlockInstrCoreInputResources` and `XBlockTraceFinalizationReady` routes remain
+as compatibility/internal lemmas, but `LayerAudit.ImportedYulBoundary` no longer
+points at them.
 
 ## Phase 1: Quarantine Legacy Gas-Aware Routes
 
@@ -93,10 +103,16 @@ certificates.
 
 Goal: replace the public `hTargetTraceInputsReady` premise with checked
 evidence for the actual compiled target trace, or with a clearly fundamental
-resource premise if total EVM stack growth is genuinely unbounded.
+resource premise if total EVM stack growth is genuinely unbounded.  Current
+checkpoint: the public root no longer asks for trace-local instruction inputs;
+it derives them from `CoreBlockTraceResultFor` carried by
+`RecursiveBridgeActualXTraceFacts`.
 
-- [x] Freeze the exact target predicate to discharge:
-  `Assembly.GasAware.XStepTrace.InstrCoreBlockTraceInputsReadyFor`.
+- [x] Freeze the exact target predicates to discharge:
+  `Assembly.GasAware.XStepTrace.InstrCoreBlockTraceInputsReadyFor` for
+  trace-local instruction inputs, and
+  `Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor` for the remaining
+  actual core target trace boundary.
 - [x] Split its obligations into four buckets:
   stack underflow, exact stack-overflow inequality, jump target validity, and
   static-mode write exclusion.
@@ -106,55 +122,73 @@ resource premise if total EVM stack growth is genuinely unbounded.
 - [x] Prove block-local control-instruction input readiness for `.label`,
   `.push`, `.jump`, and `.jumpi` from `emitInstr?` plus the concrete
   `Target.runListResult`.
-- [ ] Prove primitive stack-underflow readiness from primitive arity contracts
-  along the actual source/target trace.  Current checkpoint exposes this as the
-  `primitiveStackJump` field of `XBlockInstrCoreInputResources`.
+- [x] Prove primitive stack-underflow readiness for trace-local inputs from
+  the actual core target trace.  The deeper source-facing task is now to derive
+  `CoreBlockTraceResultFor` itself, not to expose the older
+  `XBlockInstrCoreInputResources` fields.
 - [x] Prove or expose the exact stack-overflow inequality:
   `state.stack.length - δ(op) + α(op) <= 1024`.
 - [x] Important decision point: if recursive function calls can create hidden
   return frames that make total EVM stack depth a real resource limit, expose a
   narrow public resource premise such as `TargetTraceStackResourceBound`
   instead of smuggling it through `traceInputsReady`.  This checkpoint exposes
-  the narrow package as `XBlockInstrCoreInputResources`.
-- [ ] Prove static-mode write exclusion from checked source-static facts and
-  the actual trace state.  Current checkpoint exposes this as the
-  `primitiveStatic` field of `XBlockInstrCoreInputResources`.
+  the narrow package as the actual-trace `RecursiveBridgeActualXTraceFacts`
+  boundary, after proving the older global `XBlockInstrCoreInputResources`
+  shape would imply false arbitrary-state push stack room obligations.
+- [x] Prove static-mode write exclusion for trace-local inputs from the actual
+  core target trace.  The deeper source-facing task is now to derive
+  `CoreBlockTraceResultFor` itself, likely using checked source-static facts
+  plus a resource invariant.
 - [x] Package the per-block facts into a whole-trace theorem by induction over
   `Assembly.Preservation.BlockTraceResult`.
-- [x] Add a no-CALL public wrapper that constructs
-  `InstrCoreBlockTraceInputsReadyFor` internally and removes
-  `hTargetTraceInputsReady` from the preferred public theorem.
+- [x] Add a no-CALL public wrapper that requests
+  `InstrCoreBlockTraceInputsReadyFor` only for the actual preservation trace
+  and removes `hTargetTraceInputsReady`/`XBlockInstrCoreInputResources` from the
+  preferred public theorem.
 - [x] Exit criterion: `recursiveBridgeTopToGasAwareEVM` no longer takes a
-  public `hTargetTraceInputsReady`-style predicate.  Any remaining stack-depth
-  premise is named as an explicit resource bound, not as compiler evidence.
+  public `hTargetTraceInputsReady`-style predicate.  Any remaining stack-depth,
+  primitive-underflow, jump, or static-mode premise is represented by the
+  actual-trace `CoreBlockTraceResultFor` boundary inside
+  `RecursiveBridgeActualXTraceFacts`, not a global target replay/resource
+  predicate.
 
 ## Phase 3: Derive Clean Fallthrough Finalization
 
 Goal: replace the public `hTargetFallthrough` premise with a checked theorem
 about the actual final gasless target trace.
 
-- [ ] First repair the shape if needed: the current premise quantifies over all
+- [x] First repair the shape if needed: the current premise quantifies over all
   running `BlockTraceResult`s from the entry state, which includes fuel-zero
   `done` traces.  The preferred theorem should only require or construct
   fallthrough cleanliness for the actual target trace produced by the source
-  preservation theorem.
+  preservation theorem.  The preferred root now derives
+  `XTraceFinalizationReadyFor hTrace` from the actual core trace, the actual
+  fallthrough-PC fact inside `RecursiveBridgeActualXTraceFacts`, and checked
+  no-CALL return-buffer preservation from the clean entry relation.
 - [ ] Prove a trace-final-state lemma distinguishing genuine completion
   fallthrough from ordinary target fuel exhaustion.
-- [ ] Prove that a completed no-CALL target trace ending in `.running state`
-  has `decode code pc = none` for the installed code image.
-- [ ] Prove the final stack bound needed by `XFallthroughStopCleanReady`, or
+- [x] Prove that a no-CALL running target trace preserves the installed code
+  image, and that final `pc.toNat = codeByteLength target.code` implies
+  `decode code pc = none` for the encoded target bytecode.
+- [x] Prove the final stack bound needed by `XFallthroughStopCleanReady`, or
   reuse the Phase 2 stack-resource theorem.
-- [ ] Prove the return-data/H_return cleanliness equation required by
+- [x] Prove the return-data/H_return cleanliness equation required by
   `XFallthroughStopCleanReady`; if this depends on terminal semantics, split
-  regular fallthrough from `RETURN`/`REVERT`/`SELFDESTRUCT` halted cases.
-- [x] Route the public sufficient-gas theorem through a named finalization
-  package and remove the raw `hTargetFallthrough` callback from the preferred
-  public alias.
+  regular fallthrough from `RETURN`/`REVERT`/`SELFDESTRUCT` halted cases.  The
+  checked route now requires clean entry return buffers in
+  `RecursiveBridgeInitialCodeImageRel`, proves primitive/target/run-list
+  preservation for running no-CALL target traces, and derives the final
+  cleanliness equation from the actual trace rather than exposing it in
+  `RecursiveBridgeActualXTraceFacts`.
+- [x] Route the public sufficient-gas theorem through an actual-trace
+  finalization package and remove the raw `hTargetFallthrough` callback and
+  global `XBlockTraceFinalizationReady` premise from the preferred public alias.
 - [ ] Exit criterion: the preferred public theorem does not take a
   fallthrough-cleanliness callback, and running final states are finalized by
-  checked code-image/trace facts.  Current checkpoint removes the callback
-  shape from `LayerAudit`, but still exposes the named
-  `XBlockTraceFinalizationReady` premise.
+  checked code-image/trace facts.  Current checkpoint removes the callback,
+  global-finalization shapes, and direct observation-ready predicate from
+  `LayerAudit`, and now derives return-buffer cleanliness internally.  The
+  remaining finalization payload is the actual final fallthrough-PC fact.
 
 ## Phase 4: Remove Or Shrink Source-Fuel `.OutOfFuel` Boundary
 
@@ -198,3 +232,11 @@ whose meaning is transparent to users.
 - [x] The remaining public assumptions are classified as fundamental source
   acceptedness, source run/input, initial state/code relation, explicit
   resource bounds, or no-CALL/no-`RETURNDATACOPY` fragment restrictions.
+- [ ] Fully derive `RecursiveBridgeActualXTraceFacts` from source-facing
+  stack/static/finalization invariants, or replace it with a narrower
+  source-facing resource/call-depth premise if recursive internal calls make
+  total EVM stack depth a true accepted-fragment bound.  Remaining payload:
+  actual `CoreBlockTraceResultFor` plus actual `XTraceFallthroughPcFor`;
+  trace-local instruction-input readiness, final stack bound,
+  return-buffer cleanliness, installed-code preservation, and final
+  decode-none observation are now derived internally.

@@ -5051,6 +5051,104 @@ theorem XNonGasCoreChecksPass.of_inputs_overflow_static
   rcases hInputs with ⟨hDelta, hStack, hJump, hJumpi⟩
   exact ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
 
+theorem XNonGasCoreChecksPass.to_inputs_overflow_static
+    {validJumps : Array Word} {state : EVMState} {op : EVMOp}
+    (hCore : XNonGasCoreChecksPass validJumps state op) :
+    XCoreStackAndJumpInputsReady validJumps state op ∧
+      state.stack.length - (EvmYul.EVM.δ op).getD 0 +
+          (EvmYul.EVM.α op).getD 0 ≤ 1024 ∧
+        (state.executionEnv.perm = false →
+          ¬ staticWriteSensitive op state.stack) := by
+  rcases hCore with
+    ⟨hDelta, hStack, hJump, hJumpi, hOverflow, hStatic⟩
+  exact ⟨⟨hDelta, hStack, hJump, hJumpi⟩, hOverflow, hStatic⟩
+
+theorem Target.stepInstrResult_running_stack_le_of_core_no_call_create
+    {validJumps : Array Word} {instr : TargetInstr}
+    {state post : EVMState}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hCore : XNonGasCoreChecksPass validJumps state instr.op)
+    (hRun : Target.stepInstrResult instr state = .ok (.running post)) :
+    post.stack.length ≤ 1024 := by
+  rcases XNonGasCoreChecksPass.to_inputs_overflow_static hCore with
+    ⟨hInputs, hOverflow, _hStatic⟩
+  rcases hInputs with ⟨_hDelta, hStack, _hJump, _hJumpi⟩
+  have hStepAndKind := Target.stepInstrResult_running_stepInstr hRun
+  rcases hStepAndKind with ⟨hStepInstr, hKind⟩
+  cases instr with
+  | push32 value =>
+      simp [Target.stepInstr, TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α,
+        EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC,
+        EvmYul.Stack.push] at hStepInstr hOverflow ⊢
+      cases hStepInstr
+      simpa [EvmYul.Stack.push] using hOverflow
+  | jump =>
+      simp [Target.stepInstr, TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α]
+        at hStepInstr hOverflow
+      cases hPop : state.stack.pop with
+      | none => simp [hPop] at hStepInstr
+      | some popped =>
+          rcases popped with ⟨rest, dest⟩
+          simp [hPop] at hStepInstr
+          cases hStepInstr
+          have hLen := PrimStep.Stack.length_of_pop_some hPop
+          simp
+          omega
+  | jumpi =>
+      simp [Target.stepInstr, TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α]
+        at hStepInstr hOverflow
+      cases hPop : state.stack.pop2 with
+      | none => simp [hPop] at hStepInstr
+      | some popped =>
+          rcases popped with ⟨rest, dest, cond⟩
+          simp [hPop] at hStepInstr
+          cases hStepInstr
+          have hLen := PrimStep.Stack.length_of_pop2_some hPop
+          simp
+          omega
+  | jumpdest =>
+      simp [Target.stepInstr, TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α,
+        EvmYul.EVM.State.incrPC] at hStepInstr hOverflow ⊢
+      cases hStepInstr
+      exact hOverflow
+  | prim op =>
+      simp [Target.stepInstr] at hStepInstr
+      cases hCont : op.continuingStep? with
+      | none =>
+          rw [PrimOp.step_eq_evm_step_of_not_continuing hCont] at hStepInstr
+          cases op <;>
+            simp [PrimOp.continuingStep?, PrimOp.isCallCreate,
+              targetInstrUsesCallCreate, TargetInstr.haltKind?,
+              PrimOp.haltKind?] at hCont hNoCallCreate hKind
+          case pc =>
+            simp [TargetInstr.op, PrimOp.toEVM, EvmYul.EVM.δ,
+              EvmYul.EVM.α] at hOverflow
+            have hPcStep :
+                EvmYul.step PrimOp.pc.toEVM none state =
+                  .ok (state.replaceStackAndIncrPC
+                    (state.stack.push state.pc)) := rfl
+            rw [hPcStep] at hStepInstr
+            cases hStepInstr
+            simpa [EvmYul.EVM.State.replaceStackAndIncrPC,
+              EvmYul.EVM.State.incrPC, EvmYul.Stack.push,
+              Nat.add_comm] using Nat.succ_le_succ hOverflow
+      | some step =>
+          rw [PrimOp.step_eq_continuingStep_run hCont] at hStepInstr
+          have hArity := PrimOp.continuingStep?_delta_alpha hCont
+          have hStackStep :
+              PrimStep.inputArity step ≤ state.stack.length := by
+            simpa [TargetInstr.op, hArity.1] using hStack
+          have hBoundStep :
+              state.stack.length - PrimStep.inputArity step +
+                  PrimStep.outputArity step ≤ 1024 := by
+            simpa [TargetInstr.op, hArity.1, hArity.2] using hOverflow
+          exact
+            PrimStep.run_stack_le_of_arity_bound hStackStep hBoundStep
+              (fun n hEq => by
+                subst step
+                exact PrimOp.continuingStep?_swap_pos hCont)
+              hStepInstr
+
 theorem XNonGasCoreChecksPass.of_inputs_bounded_stack
     {validJumps : Array Word} {state : EVMState} {op : EVMOp}
     (hInputs : XCoreStackAndJumpInputsReady validJumps state op)
@@ -7448,6 +7546,45 @@ theorem CoreRunListResult.to_runListResult {validJumps : Array Word} :
       rw [Target.runListResult, hStep]
       rfl
 
+theorem CoreRunListResult.head_core
+    {validJumps : Array Word} {instr : TargetInstr}
+    {rest : List TargetInstr} {state : EVMState} {result : StepResult}
+    (hCore :
+      CoreRunListResult validJumps (instr :: rest) state result) :
+    XNonGasCoreChecksPass validJumps state instr.op := by
+  cases hCore with
+  | stepRunning hCoreStep _hStep _hRest =>
+      exact hCoreStep
+  | stepHalted hCoreStep _hStep =>
+      exact hCoreStep
+
+theorem CoreRunListResult.running_stack_le_of_initial
+    {validJumps : Array Word} {code : List TargetInstr}
+    {state post : EVMState}
+    (hCore : CoreRunListResult validJumps code state (.running post))
+    (hInitial : state.stack.length ≤ 1024)
+    (hNoCallCreate :
+      ∀ instr ∈ code, targetInstrUsesCallCreate instr = false) :
+    post.stack.length ≤ 1024 := by
+  induction code generalizing state post with
+  | nil =>
+      cases hCore
+      exact hInitial
+  | cons instr rest ih =>
+      cases hCore with
+      | stepRunning hCoreStep hStep hRest =>
+          have hNoInstr :
+              targetInstrUsesCallCreate instr = false :=
+            hNoCallCreate instr (by simp)
+          have hMid :=
+            Target.stepInstrResult_running_stack_le_of_core_no_call_create
+              hNoInstr hCoreStep hStep
+          have hNoRest :
+              ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+            intro instr' hMem
+            exact hNoCallCreate instr' (by simp [hMem])
+          exact ih hRest hMid hNoRest
+
 theorem CoreRunListResult.singleton_of_core
     {validJumps : Array Word} {instr : TargetInstr}
     {state : EVMState} {result : StepResult}
@@ -8161,6 +8298,126 @@ theorem XBlockInstrCoreInputResources.of_inputs_ready
         simp [InstrPrimitiveStaticInputsReady]
     | jumpi targetLabel =>
         simp [InstrPrimitiveStaticInputsReady]
+
+theorem XBlockInstrCoreInputResources.push_stack_room
+    {program : Program} {target : TargetProgram}
+    {pc : Nat} {value : Word}
+    {emitted before after : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hResources : XBlockInstrCoreInputResources program target)
+    (hAt :
+      Program.instrAtPc program state.pc.toNat = some (pc, .push value))
+    (hEmit : emitInstr? program pc (.push value) = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result) :
+    state.stack.length + 1 ≤ 1024 := by
+  have hReady : InstrControlCoreInputsReady (.push value) state :=
+    hResources.controlStack hAt hEmit hTargetBlock hRun
+  simpa [InstrControlCoreInputsReady,
+    InstrControlCoreStackReady] using hReady
+
+theorem XBlockInstrCoreInputResources.not_push_full_stack
+    {program : Program} {target : TargetProgram}
+    {pc : Nat} {value : Word}
+    {emitted before after : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hResources : XBlockInstrCoreInputResources program target)
+    (hAt :
+      Program.instrAtPc program state.pc.toNat = some (pc, .push value))
+    (hEmit : emitInstr? program pc (.push value) = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result)
+    (hFull : state.stack.length = 1024) :
+    False := by
+  have hRoom :=
+    hResources.push_stack_room hAt hEmit hTargetBlock hRun
+  omega
+
+theorem InstrCoreBlockInputsReady.of_emitInstr_coreRun
+    {program : Program} {target : TargetProgram} {pc : Nat}
+    {instr : Instr} {emitted : List LocatedTarget}
+    {state : EVMState} {result : StepResult}
+    (hEmit : emitInstr? program pc instr = some emitted)
+    (hRun :
+      Target.runListResult (emitted.map LocatedTarget.instr) state =
+        .ok result)
+    (hCore :
+      CoreRunListResult (validJumps target)
+        (emitted.map LocatedTarget.instr) state result) :
+    InstrCoreBlockInputsReady target instr state := by
+  cases instr with
+  | label label =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hHeadCore := CoreRunListResult.head_core hCore
+      have hOverflow :=
+        (XNonGasCoreChecksPass.to_inputs_overflow_static hHeadCore).2.1
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreStackReady,
+        TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α] using hOverflow
+  | prim op =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hHeadCore := CoreRunListResult.head_core hCore
+      simpa [InstrCoreBlockInputsReady] using
+        XNonGasCoreChecksPass.to_inputs_overflow_static hHeadCore
+  | push value =>
+      simp [emitInstr?] at hEmit
+      subst emitted
+      have hHeadCore := CoreRunListResult.head_core hCore
+      have hOverflow :=
+        (XNonGasCoreChecksPass.to_inputs_overflow_static hHeadCore).2.1
+      simpa [InstrCoreBlockInputsReady, InstrControlCoreStackReady,
+        TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α] using hOverflow
+  | jump label =>
+      cases hDest : Program.labelPc program label with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          have hHeadCore := CoreRunListResult.head_core hCore
+          have hOverflow :=
+            (XNonGasCoreChecksPass.to_inputs_overflow_static hHeadCore).2.1
+          simpa [InstrCoreBlockInputsReady, InstrControlCoreStackReady,
+            TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α] using hOverflow
+  | jumpi label =>
+      cases hDest : Program.labelPc program label with
+      | none =>
+          simp [emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [emitInstr?, hDest] at hEmit
+          subst emitted
+          have hHeadCore := CoreRunListResult.head_core hCore
+          have hOverflow :=
+            (XNonGasCoreChecksPass.to_inputs_overflow_static hHeadCore).2.1
+          have hStackBound : state.stack.length + 1 ≤ 1024 := by
+            simpa [TargetInstr.op, EvmYul.EVM.δ, EvmYul.EVM.α]
+              using hOverflow
+          have hNonempty : 1 ≤ state.stack.length := by
+            cases hStackEq : state.stack with
+            | nil =>
+                have hRunErr :
+                    Target.runListResult
+                        [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+                        , TargetInstr.jumpi ] state =
+                      .error EvmYul.EVM.ExecutionException.StackUnderflow := by
+                  rw [Preservation.run_push_jumpi_result dest state]
+                  simp [hStackEq, EvmYul.Stack.pop]
+                have hRunPlain :
+                    Target.runListResult
+                        [ TargetInstr.push32 (EvmYul.UInt256.ofNat dest)
+                        , TargetInstr.jumpi ] state =
+                      .ok result := by
+                  simpa using hRun
+                rw [hRunErr] at hRunPlain
+                cases hRunPlain
+            | cons head tail =>
+                simp
+          exact ⟨hNonempty, hStackBound⟩
 
 theorem InstrCoreBlockReady.of_stack_bound16_and_primitive
     {program : Program} {target : TargetProgram} {pc : Nat}
@@ -10389,6 +10646,511 @@ def XFallthroughStopCleanReady (target : EVMState) : Prop :=
           ByteArray.empty =
         target.toMachineState
 
+def ReturnBuffersClean (state : EVMState) : Prop :=
+  (state.toMachineState.setReturnData ByteArray.empty).setHReturn
+      ByteArray.empty =
+    state.toMachineState
+
+theorem returnBuffersClean_iff (state : EVMState) :
+    ReturnBuffersClean state ↔
+      state.returnData = ByteArray.empty ∧
+        state.H_return = ByteArray.empty := by
+  cases state with
+  | mk shared pc stack execLength =>
+      cases shared
+      rename_i toState toMachineState
+      constructor
+      · intro h
+        constructor
+        · exact
+            (congrArg EvmYul.MachineState.returnData h).symm
+        · exact
+            (congrArg EvmYul.MachineState.H_return h).symm
+      · intro h
+        rcases h with ⟨hReturnData, hHReturn⟩
+        cases toMachineState
+        simp [ReturnBuffersClean, EvmYul.MachineState.setReturnData,
+          EvmYul.MachineState.setHReturn] at hReturnData hHReturn ⊢
+        exact ⟨hReturnData.symm, hHReturn.symm⟩
+
+theorem ReturnBuffersClean.of_return_buffers_eq
+    {state post : EVMState}
+    (hClean : ReturnBuffersClean state)
+    (hReturnData : post.returnData = state.returnData)
+    (hHReturn : post.H_return = state.H_return) :
+    ReturnBuffersClean post := by
+  rw [returnBuffersClean_iff] at hClean ⊢
+  exact ⟨hReturnData.trans hClean.1, hHReturn.trans hClean.2⟩
+
+def MachineReturnBuffersPreserved
+    (before after : EvmYul.MachineState) : Prop :=
+  after.returnData = before.returnData ∧
+    after.H_return = before.H_return
+
+def SharedReturnBuffersPreserved
+    {τ : EvmYul.OperationType}
+    (before after : EvmYul.SharedState τ) : Prop :=
+  after.returnData = before.returnData ∧
+    after.H_return = before.H_return
+
+def PrimStepPreservesReturnBuffers : PrimStep → Prop
+  | .binaryMachineState f =>
+      ∀ machine a b, MachineReturnBuffersPreserved machine (f machine a b)
+  | .binaryMachineStateWithResult f =>
+      ∀ machine a b,
+        MachineReturnBuffersPreserved machine (f machine a b).2
+  | .ternaryMachineState f =>
+      ∀ machine a b c,
+        MachineReturnBuffersPreserved machine (f machine a b c)
+  | .ternaryCopy f =>
+      ∀ shared a b c, SharedReturnBuffersPreserved shared (f shared a b c)
+  | .quaternaryCopy f =>
+      ∀ shared a b c d,
+        SharedReturnBuffersPreserved shared (f shared a b c d)
+  | .mload =>
+      ∀ machine offset,
+        MachineReturnBuffersPreserved machine
+          (EvmYul.MachineState.mload machine offset).2
+  | .returndatacopy =>
+      ∀ machine a b c,
+        MachineReturnBuffersPreserved machine
+          (EvmYul.MachineState.returndatacopy machine a b c)
+  | .log0 =>
+      ∀ (shared : EvmYul.SharedState .EVM) a b,
+        SharedReturnBuffersPreserved shared
+          (EvmYul.SharedState.logOp a b #[] shared)
+  | .log1 =>
+      ∀ (shared : EvmYul.SharedState .EVM) a b c,
+        SharedReturnBuffersPreserved shared
+          (EvmYul.SharedState.logOp a b #[c] shared)
+  | .log2 =>
+      ∀ (shared : EvmYul.SharedState .EVM) a b c d,
+        SharedReturnBuffersPreserved shared
+          (EvmYul.SharedState.logOp a b #[c, d] shared)
+  | .log3 =>
+      ∀ (shared : EvmYul.SharedState .EVM) a b c d e,
+        SharedReturnBuffersPreserved shared
+          (EvmYul.SharedState.logOp a b #[c, d, e] shared)
+  | .log4 =>
+      ∀ (shared : EvmYul.SharedState .EVM) a b c d e f,
+        SharedReturnBuffersPreserved shared
+          (EvmYul.SharedState.logOp a b #[c, d, e, f] shared)
+  | _ => True
+
+theorem PrimStepPreservesReturnBuffers.of_continuingStep
+    {op : PrimOp} {step : PrimStep}
+    (hStep : op.continuingStep? = some step) :
+    PrimStepPreservesReturnBuffers step := by
+  cases op <;> simp [PrimOp.continuingStep?] at hStep <;>
+    subst step
+  all_goals
+    first
+    | trivial
+    | simp [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+        SharedReturnBuffersPreserved, EvmYul.MachineState.mload,
+        EvmYul.MachineState.mstore, EvmYul.MachineState.writeWord,
+        EvmYul.MachineState.mstore8, EvmYul.MachineState.mcopy,
+        EvmYul.MachineState.keccak256,
+        EvmYul.MachineState.returndatacopy, EvmYul.writeBytes,
+        EvmYul.SharedState.calldatacopy, EvmYul.SharedState.codeCopy,
+        EvmYul.SharedState.extCodeCopy', EvmYul.SharedState.logOp]
+
+theorem PrimStep.run_preserves_return_buffers
+    {step : PrimStep} {state post : EVMState}
+    (hPreserve : PrimStepPreservesReturnBuffers step)
+    (hRun : step.run state = .ok post) :
+    post.returnData = state.returnData ∧
+      post.H_return = state.H_return := by
+  cases step with
+  | bin f =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, EvmYul.EVM.execBinOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.execBinOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | un f =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, EvmYul.EVM.execUnOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.execUnOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | tri f =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, EvmYul.EVM.execTriOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.execTriOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | executionEnv f =>
+      simp [PrimStep.run, EvmYul.EVM.executionEnvOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | unaryExecutionEnv f =>
+      cases hPop : state.stack.pop with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.unaryExecutionEnvOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | machineState f =>
+      simp [PrimStep.run, EvmYul.EVM.machineStateOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | binaryMachineState f =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toMachineState left right
+          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | binaryMachineStateWithResult f =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp', hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryMachineStateOp', hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toMachineState left right
+          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | ternaryMachineState f =>
+      cases hPop : state.stack.pop3 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.ternaryMachineStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.ternaryMachineStateOp, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toMachineState a b c
+          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | state f =>
+      simp [PrimStep.run, EvmYul.EVM.stateOp, Id.run] at hRun
+      cases hRun
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | unaryState f =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, EvmYul.EVM.unaryStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, EvmYul.EVM.unaryStateOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | binaryState f =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, EvmYul.EVM.binaryStateOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, left, right⟩
+          simp [PrimStep.run, EvmYul.EVM.binaryStateOp, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | ternaryCopy f =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, EvmYul.EVM.ternaryCopyOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, EvmYul.EVM.ternaryCopyOp, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | quaternaryCopy f =>
+      cases hPop : state.stack.pop4 with
+      | none =>
+          simp [PrimStep.run, EvmYul.EVM.quaternaryCopyOp, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d⟩
+          simp [PrimStep.run, EvmYul.EVM.quaternaryCopyOp, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c d
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | pop =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, value⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+  | mload =>
+      cases hPop : state.stack.pop with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, offset⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toMachineState offset
+          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | returndatacopy =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toMachineState a b c
+          simpa [PrimStepPreservesReturnBuffers, MachineReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | dup n =>
+      by_cases hLen : n ≤ state.stack.length
+      · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [PrimStep.run, EvmYul.dup, hLen] at hRun
+  | swap n =>
+      by_cases hLen : n + 1 ≤ state.stack.length
+      · simp [PrimStep.run, EvmYul.swap, hLen] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simp [PrimStep.run, EvmYul.swap, hLen] at hRun
+  | log0 =>
+      cases hPop : state.stack.pop2 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | log1 =>
+      cases hPop : state.stack.pop3 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | log2 =>
+      cases hPop : state.stack.pop4 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c d
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | log3 =>
+      cases hPop : state.stack.pop5 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d, e⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c d e
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | log4 =>
+      cases hPop : state.stack.pop6 with
+      | none => simp [PrimStep.run, hPop] at hRun
+      | some popped =>
+          rcases popped with ⟨stack, a, b, c, d, e, f⟩
+          simp [PrimStep.run, hPop] at hRun
+          cases hRun
+          have hBuffers := hPreserve state.toSharedState a b c d e f
+          simpa [PrimStepPreservesReturnBuffers, SharedReturnBuffersPreserved,
+            EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hBuffers
+  | invalid =>
+      simp [PrimStep.run] at hRun
+
+theorem PrimOp.step_preserves_return_buffers_of_no_call_create_nonhalting
+    {op : PrimOp} {state post : EVMState}
+    (hNoCallCreate : op.isCallCreate = false)
+    (hNoHalt : op.haltKind? = none)
+    (hRun : op.step state = .ok post) :
+    post.returnData = state.returnData ∧
+      post.H_return = state.H_return := by
+  unfold PrimOp.step at hRun
+  cases hStep : op.continuingStep? with
+  | some step =>
+      simp [hStep] at hRun
+      exact
+        PrimStep.run_preserves_return_buffers
+          (PrimStepPreservesReturnBuffers.of_continuingStep hStep) hRun
+  | none =>
+      simp [hStep] at hRun
+      cases op <;>
+        simp [PrimOp.continuingStep?, PrimOp.haltKind?,
+          PrimOp.isCallCreate, PrimOp.toEVM] at hStep hNoCallCreate hNoHalt hRun
+      · have hPc :
+            EvmYul.step (τ := .EVM) EvmYul.Operation.PC none state =
+              .ok
+                (EvmYul.EVM.State.replaceStackAndIncrPC state
+                  (state.stack.push state.pc)) := by
+          rfl
+        rw [hPc] at hRun
+        cases hRun
+        simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+
+theorem Target.stepInstrResult_running_preserves_return_buffers_of_no_call_create
+    {instr : TargetInstr} {state post : EVMState}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hStepResult :
+      Target.stepInstrResult instr state = .ok (.running post)) :
+    post.returnData = state.returnData ∧
+      post.H_return = state.H_return := by
+  obtain ⟨hStep, hNoHalt⟩ :=
+    Target.stepInstrResult_running_stepInstr hStepResult
+  cases instr with
+  | push32 value =>
+      simp [Target.stepInstr] at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  | jump =>
+      cases hPop : state.stack.pop with
+      | none =>
+          simp [Target.stepInstr, hPop] at hStep
+      | some popped =>
+          rcases popped with ⟨stack, dest⟩
+          simp [Target.stepInstr, hPop] at hStep
+          cases hStep
+          constructor <;> rfl
+  | jumpi =>
+      cases hPop : state.stack.pop2 with
+      | none =>
+          simp [Target.stepInstr, hPop] at hStep
+      | some popped =>
+          rcases popped with ⟨stack, dest, cond⟩
+          simp [Target.stepInstr, hPop] at hStep
+          cases hStep
+          constructor <;> rfl
+  | jumpdest =>
+      simp [Target.stepInstr] at hStep
+      cases hStep
+      simp [EvmYul.EVM.State.incrPC]
+  | prim op =>
+      exact
+        PrimOp.step_preserves_return_buffers_of_no_call_create_nonhalting
+          (by simpa [targetInstrUsesCallCreate] using hNoCallCreate)
+          (by simpa [TargetInstr.haltKind?] using hNoHalt)
+          (by simpa [Target.stepInstr] using hStep)
+
+theorem Target.stepInstrResult_running_preserves_returnBuffersClean_of_no_call_create
+    {instr : TargetInstr} {state post : EVMState}
+    (hNoCallCreate : targetInstrUsesCallCreate instr = false)
+    (hStepResult :
+      Target.stepInstrResult instr state = .ok (.running post))
+    (hClean : ReturnBuffersClean state) :
+    ReturnBuffersClean post := by
+  obtain ⟨hReturnData, hHReturn⟩ :=
+    Target.stepInstrResult_running_preserves_return_buffers_of_no_call_create
+      hNoCallCreate hStepResult
+  exact
+    ReturnBuffersClean.of_return_buffers_eq hClean hReturnData hHReturn
+
+theorem Target.runListResult_running_preserves_returnBuffersClean_of_no_call_create :
+    ∀ {code : List TargetInstr} {state post : EVMState},
+      Target.runListResult code state = .ok (.running post) →
+      (∀ instr ∈ code, targetInstrUsesCallCreate instr = false) →
+      ReturnBuffersClean state →
+      ReturnBuffersClean post := by
+  intro code
+  induction code with
+  | nil =>
+      intro state post hRun _hNoCall hClean
+      simp [Target.runListResult] at hRun
+      cases hRun
+      exact hClean
+  | cons instr rest ih =>
+      intro state post hRun hNoCall hClean
+      have hNoCallInstr : targetInstrUsesCallCreate instr = false :=
+        hNoCall instr (by simp)
+      rcases Target.runListResult_cons_ok_cases hRun with
+        ⟨mid, hStepResult, hRunRest⟩ | ⟨halt, _hStepResult, hResult⟩
+      · have hMidClean :
+            ReturnBuffersClean mid :=
+          Target.stepInstrResult_running_preserves_returnBuffersClean_of_no_call_create
+            hNoCallInstr hStepResult hClean
+        have hNoCallRest :
+            ∀ instr' ∈ rest, targetInstrUsesCallCreate instr' = false := by
+          intro instr' hMem
+          exact hNoCall instr' (by simp [hMem])
+        exact ih hRunRest hNoCallRest hMidClean
+      · cases hResult
+
+def XFallthroughStopObservationReady (target : EVMState) : Prop :=
+  (∀ full : EVMState,
+      GasExecRel full target →
+        EvmYul.EVM.decode full.executionEnv.code full.pc = none) ∧
+    ReturnBuffersClean target
+
+theorem decode_none_of_gasExecRel_pc_at_code_end
+    {targetProgram : TargetProgram} {full target : EVMState}
+    (hRel : GasExecRel full target)
+    (hCode :
+      target.executionEnv.code = Bytecode.encodeTarget targetProgram)
+    (hPc :
+      target.pc.toNat = Bytecode.codeByteLength targetProgram.code) :
+    EvmYul.EVM.decode full.executionEnv.code full.pc = none := by
+  rw [hRel]
+  unfold EvmYul.EVM.decode
+  simp [hCode, hPc, Bytecode.encodeTarget_get?_codeByteLength]
+
+theorem XFallthroughStopObservationReady.of_pc_code_cleanReturn
+    {targetProgram : TargetProgram} {target : EVMState}
+    (hCode :
+      target.executionEnv.code = Bytecode.encodeTarget targetProgram)
+    (hPc :
+      target.pc.toNat = Bytecode.codeByteLength targetProgram.code)
+    (hCleanReturn :
+      (target.toMachineState.setReturnData ByteArray.empty).setHReturn
+          ByteArray.empty =
+        target.toMachineState) :
+    XFallthroughStopObservationReady target := by
+  refine ⟨?_, hCleanReturn⟩
+  intro full hRel
+  exact decode_none_of_gasExecRel_pc_at_code_end hRel hCode hPc
+
+theorem XFallthroughStopCleanReady.of_observation_stack
+    {target : EVMState}
+    (hObservation : XFallthroughStopObservationReady target)
+    (hStack : target.stack.length ≤ 1024) :
+    XFallthroughStopCleanReady target :=
+  ⟨hObservation.1, hStack, hObservation.2⟩
+
 structure XBlockTraceFinalizationReady
     (validJumps : Array Word) (program : Program) (target : TargetProgram)
     (initial : EVMState) : Prop where
@@ -10397,6 +11159,156 @@ structure XBlockTraceFinalizationReady
       Preservation.BlockTraceResult program target targetFuel initial
         (.running targetState) →
         XFallthroughStopCleanReady targetState
+
+def XTraceFinalizationReadyFor
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    (_hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome) : Prop :=
+  match targetOutcome with
+  | .running targetState => XFallthroughStopCleanReady targetState
+  | .halted _ => True
+
+def XTraceFinalizationObservationReadyFor
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    (_hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome) : Prop :=
+  match targetOutcome with
+  | .running targetState => XFallthroughStopObservationReady targetState
+  | .halted _ => True
+
+def XTraceFallthroughPcFor
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    (_hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome) : Prop :=
+  match targetOutcome with
+  | .running targetState =>
+      targetState.pc.toNat = Bytecode.codeByteLength target.code
+  | .halted _ => True
+
+def XTraceFallthroughPcAndReturnCleanFor
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    (_hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome) : Prop :=
+  match targetOutcome with
+  | .running targetState =>
+      targetState.pc.toNat = Bytecode.codeByteLength target.code ∧
+        ReturnBuffersClean targetState
+  | .halted _ => True
+
+theorem blockTraceResult_running_preserves_code_of_no_call_create
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial final : EVMState}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        (.running final))
+    (hNoCallCreate : Program.usesCallCreate program = false) :
+    final.executionEnv.code = initial.executionEnv.code := by
+  induction targetFuel generalizing initial final with
+  | zero =>
+      cases hTrace
+      rfl
+  | succ fuel ih =>
+      cases hTrace with
+      | stepRunning hAt hEmit hTargetBlock hRun hRest =>
+          rename_i mid pc instr emitted before after
+          have hBlockCode :
+              mid.executionEnv.code = initial.executionEnv.code := by
+            refine
+              Target.runListResult_preserves_code_of_no_call_create hRun ?_
+            intro targetInstr hMem
+            rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+            subst targetInstr
+            exact targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
+              hNoCallCreate hAt hEmit hLocatedMem
+          have hRestCode :
+              final.executionEnv.code = mid.executionEnv.code :=
+            ih hRest
+          exact hRestCode.trans hBlockCode
+
+theorem blockTraceResult_running_preserves_returnBuffersClean_of_no_call_create
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial final : EVMState}
+    (hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        (.running final))
+    (hNoCallCreate : Program.usesCallCreate program = false)
+    (hInitialClean : ReturnBuffersClean initial) :
+    ReturnBuffersClean final := by
+  induction targetFuel generalizing initial final with
+  | zero =>
+      cases hTrace
+      exact hInitialClean
+  | succ fuel ih =>
+      cases hTrace with
+      | stepRunning hAt hEmit hTargetBlock hRun hRest =>
+          rename_i mid pc instr emitted before after
+          have hBlockClean :
+              ReturnBuffersClean mid := by
+            refine
+              Target.runListResult_running_preserves_returnBuffersClean_of_no_call_create
+                hRun ?_ hInitialClean
+            intro targetInstr hMem
+            rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+            subst targetInstr
+            exact targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
+              hNoCallCreate hAt hEmit hLocatedMem
+          exact ih hRest hBlockClean
+
+theorem XTraceFallthroughPcAndReturnCleanFor.of_pc_initialClean
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome}
+    (hNoCallCreate : Program.usesCallCreate program = false)
+    (hInitialClean : ReturnBuffersClean initial)
+    (hPc : XTraceFallthroughPcFor hTrace) :
+    XTraceFallthroughPcAndReturnCleanFor hTrace := by
+  cases targetOutcome with
+  | halted halt =>
+      trivial
+  | running final =>
+      exact
+        ⟨hPc,
+          blockTraceResult_running_preserves_returnBuffersClean_of_no_call_create
+            hTrace hNoCallCreate hInitialClean⟩
+
+theorem XTraceFinalizationObservationReadyFor.of_fallthrough_pc_cleanReturn
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome}
+    (hInitialCode : initial.executionEnv.code = Bytecode.encodeTarget target)
+    (hNoCallCreate : Program.usesCallCreate program = false)
+    (hFallthrough :
+      XTraceFallthroughPcAndReturnCleanFor hTrace) :
+    XTraceFinalizationObservationReadyFor hTrace := by
+  cases targetOutcome with
+  | halted halt =>
+      trivial
+  | running final =>
+      have hFinalCode :
+          final.executionEnv.code = Bytecode.encodeTarget target :=
+        (blockTraceResult_running_preserves_code_of_no_call_create
+          hTrace hNoCallCreate).trans hInitialCode
+      exact
+        XFallthroughStopObservationReady.of_pc_code_cleanReturn
+          hFinalCode hFallthrough.1 hFallthrough.2
 
 theorem XFallthroughStopContinuationReady.of_clean_stop_fallthrough
     {target : EVMState}
@@ -10506,6 +11418,46 @@ theorem XBlockTraceFinalizationReady.to_done_continuation
             (hReady.cleanRunning hTrace))
   | halted halt =>
       exact XTraceDoneContinuation.halted
+
+theorem XTraceFinalizationReadyFor.to_done_continuation
+    {validJumps : Array Word} {program : Program}
+    {target : TargetProgram} {targetFuel : Nat}
+    {initial : EVMState} {targetOutcome : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome}
+    (hReady : XTraceFinalizationReadyFor hTrace) :
+    XTraceDoneContinuation validJumps targetOutcome := by
+  cases targetOutcome with
+  | running targetState =>
+      exact
+        XTraceDoneContinuation.running_of_fallthrough_stop
+          (XFallthroughStopContinuationReady.of_clean hReady)
+  | halted halt =>
+      exact XTraceDoneContinuation.halted
+
+theorem XBlockTraceFinalizationReady.initial_clean
+    {validJumps : Array Word} {program : Program}
+    {target : TargetProgram} {initial : EVMState}
+    (hReady :
+      XBlockTraceFinalizationReady validJumps program target initial) :
+    XFallthroughStopCleanReady initial :=
+  hReady.cleanRunning
+    (Preservation.BlockTraceResult.done (program := program)
+      (target := target) initial)
+
+theorem XTraceFinalizationReadyFor.all_initial_clean
+    {program : Program} {target : TargetProgram} {initial : EVMState}
+    (hReady :
+      ∀ {targetFuel : Nat} {targetOutcome : StepResult},
+        (hTrace :
+          Preservation.BlockTraceResult program target targetFuel initial
+            targetOutcome) →
+        XTraceFinalizationReadyFor hTrace) :
+    XFallthroughStopCleanReady initial :=
+  hReady
+    (Preservation.BlockTraceResult.done (program := program)
+      (target := target) initial)
 
 theorem XBlockTraceFinalizationReady.of_clean_running
     {validJumps : Array Word} {program : Program} {target : TargetProgram}
@@ -10632,6 +11584,58 @@ inductive CoreBlockTraceResultFor
       CoreBlockTraceResultFor validJumps
         (Preservation.BlockTraceResult.stepHalted hAt hEmit
           hTargetBlock hRun)
+
+theorem CoreBlockTraceResultFor.running_stack_le_of_initial
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {initial final : EVMState}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        (.running final)}
+    (hCore : CoreBlockTraceResultFor validJumps hTrace)
+    (hInitial : initial.stack.length ≤ 1024)
+    (hNoCallCreate : Program.usesCallCreate program = false) :
+    final.stack.length ≤ 1024 := by
+  induction targetFuel generalizing initial final with
+  | zero =>
+      cases hCore with
+      | done state =>
+          exact hInitial
+  | succ fuel ih =>
+      cases hCore with
+      | stepRunning fuel state mid result pc instr emitted before after
+          hAt hEmit hTargetBlock hRun hRest hCoreRun hRestCore =>
+          have hMid := by
+            refine
+              CoreRunListResult.running_stack_le_of_initial
+                hCoreRun hInitial ?_
+            intro targetInstr hMem
+            rcases List.mem_map.mp hMem with ⟨located, hLocatedMem, hEq⟩
+            subst targetInstr
+            exact targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
+              hNoCallCreate hAt hEmit hLocatedMem
+          exact ih (hTrace := hRest) hRestCore hMid
+
+theorem XTraceFinalizationReadyFor.of_observation_core
+    {program : Program} {target : TargetProgram}
+    {validJumps : Array Word} {targetFuel : Nat}
+    {initial : EVMState} {targetOutcome : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel initial
+        targetOutcome}
+    (hCore : CoreBlockTraceResultFor validJumps hTrace)
+    (hInitial : initial.stack.length ≤ 1024)
+    (hNoCallCreate : Program.usesCallCreate program = false)
+    (hObservation : XTraceFinalizationObservationReadyFor hTrace) :
+    XTraceFinalizationReadyFor hTrace := by
+  cases targetOutcome with
+  | halted halt =>
+      trivial
+  | running final =>
+      exact
+        XFallthroughStopCleanReady.of_observation_stack hObservation
+          (CoreBlockTraceResultFor.running_stack_le_of_initial
+            hCore hInitial hNoCallCreate)
 
 theorem CoreBlockTraceResultFor.of_block_replay_core
     {program : Program} {target : TargetProgram}
@@ -10816,6 +11820,32 @@ theorem CoreBlockTraceResultFor.of_block_instr_core_ready
     hAsm hJumpdest hTrace
     (fun hAt hEmit hTargetBlock hRun =>
       hReady hAt hEmit hTargetBlock hRun)
+
+theorem CoreBlockTraceResultFor.to_trace_inputs_ready
+    {program : Program} {target : TargetProgram}
+    {targetFuel : Nat} {state : EVMState} {targetResult : StepResult}
+    {hTrace :
+      Preservation.BlockTraceResult program target targetFuel state
+        targetResult}
+    (hCore : CoreBlockTraceResultFor (validJumps target) hTrace) :
+    InstrCoreBlockTraceInputsReadyFor target hTrace := by
+  induction hCore with
+  | done state =>
+      exact InstrCoreBlockTraceInputsReadyFor.done (target := target)
+  | stepRunning fuel state mid result pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hRest hCoreRun _hRestCore ih =>
+      exact InstrCoreBlockTraceInputsReadyFor.stepRunning
+        (target := target)
+        hAt hEmit hTargetBlock hRun hRest
+        (InstrCoreBlockInputsReady.of_emitInstr_coreRun hEmit hRun hCoreRun)
+        ih
+  | stepHalted fuel state halt pc instr emitted before after
+      hAt hEmit hTargetBlock hRun hCoreRun =>
+      exact InstrCoreBlockTraceInputsReadyFor.stepHalted
+        (target := target)
+        fuel
+        hAt hEmit hTargetBlock hRun
+        (InstrCoreBlockInputsReady.of_emitInstr_coreRun hEmit hRun hCoreRun)
 
 theorem CoreBlockTraceResultFor.to_trace_core_checks
     {program : Program} {target : TargetProgram}
