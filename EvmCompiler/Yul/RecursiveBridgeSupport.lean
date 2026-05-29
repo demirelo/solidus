@@ -99518,6 +99518,59 @@ theorem compilerOpen_runOpen_doneInvariant_contains_of_writes
   unfold Locals.Source.Store.contains at hContains ⊢
   simpa [hVarsEq] using hContains
 
+theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hTargetMem : identName name ∈ layout)
+    (hPreWrites : SourceWritesDisjoint [identName name] pre)
+    (hHead :
+      SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx exprFuel name
+        sourceExpr rest codeOverride pre lowerExpr lowerTail tailFuel allowed
+        seqCallResponseRel) :
+    SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx exprFuel.succ.succ
+      (.Assign [name] sourceExpr :: rest) codeOverride
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      (pre.length + tailFuel.succ) allowed seqCallResponseRel :=
+  sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (exprFuel := exprFuel)
+    (name := name) (sourceExpr := sourceExpr) (rest := rest)
+    (codeOverride := codeOverride) (pre := pre) (lowerExpr := lowerExpr)
+    (lowerTail := lowerTail) (tailFuel := tailFuel) (allowed := allowed)
+    (seqCallResponseRel := seqCallResponseRel) hTargetMem
+    (by
+      intro source compiler hInitial
+      cases hInitial with
+      | @ok shared store compiler hShared hVars hDomain =>
+          have hInitialRel :
+              SourceStateRel cfg layout (.Ok shared store) compiler :=
+            SourceStateRel.ok hShared hVars
+          have hContains :
+              compiler.vars.contains (identName name) = true :=
+            SourceStateRel.contains_of_domain hInitialRel hDomain hTargetMem
+          exact
+            compilerOpen_runOpen_doneInvariant_contains_of_writes
+              (name := identName name) (prim := prim) (program := program)
+              (ctx := ctx) (fuel := pre.length + tailFuel.succ)
+              (pre := pre) (state := compiler) hPreWrites hContains)
+    hHead
+
 theorem sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes
     {names : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

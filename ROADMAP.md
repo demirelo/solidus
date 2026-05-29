@@ -214,7 +214,9 @@ Checked base we can rely on:
   `SourceExprSeqPreludeOpen`. These target the arbitrary-prefix equations
   directly, so internal user-call expression preludes can propagate suspended
   or nonregular target prefix results instead of passing through the strict
-  `SourceExprPreludeOpen.run` invalidation adapter.
+  `SourceExprPreludeOpen.run` invalidation adapter. The assignment wrapper now
+  derives its prefix-containment invariant from `SourceWritesDisjoint`, so this
+  path is ready to consume checked expression-lowering write-disjointness.
 
 Remaining work:
 
