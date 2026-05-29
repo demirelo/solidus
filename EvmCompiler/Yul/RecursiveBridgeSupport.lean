@@ -49965,6 +49965,108 @@ theorem compilerOpen_expr_prelude_assign_single_append_eq
       · simp [CompilerOpen.invalid, Functions.Source.invalid, Structured.invalid,
           OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
 
+/--
+Raw target-side equation for an arbitrary expression prelude followed by a
+single assignment head and a sequence tail.
+
+The arbitrary prefix may suspend or finish nonregularly.  On regular prefix
+completion, assignment still needs the honest compiler-side fact that the target
+variable is already present; callers can later derive this from disjoint writes
+and the initial state relation.
+-/
+theorem compilerOpen_expr_prelude_assign_single_append_raw_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {state : Objects.Source.State} {suffixFuel : Nat}
+    (hPreContains :
+      OpenResultDoneInvariant
+        (fun preDone =>
+          ∀ {compilerAfterPre : Objects.Source.State}
+            {ctxAfter : Functions.Source.Ctx},
+            preDone =
+              .ok (Functions.Source.Outcome.regular compilerAfterPre,
+                ctxAfter) →
+              compilerAfterPre.vars.contains name = true)
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel.succ) { stmts := pre } state)) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + suffixFuel.succ)
+        { stmts := pre ++ ([Functions.Stmt.assign name lowerExpr] ++ tail) }
+        state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel.succ) { stmts := pre } state)
+        (fun preResult =>
+          match preResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.bind
+                (CompilerOpen.LocalsExpr.eval prim lowerExpr
+                  preResult.1.state)
+                (fun exprResult =>
+                  match exprResult.2 with
+                  | [value] =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        preResult.2 suffixFuel { stmts := tail }
+                        (exprResult.1.insert name value)
+                  | _ => CompilerOpen.invalid)
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok preResult) := by
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (suffix := [Functions.Stmt.assign name lowerExpr] ++ tail)
+    (state := state) (suffixFuel := suffixFuel.succ)]
+  apply openResult_bind_congr_next_of_doneInvariant hPreContains
+  intro preResult
+  intro hPreContainsResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfterPre mode =>
+      cases mode with
+      | regular =>
+          have hContainsPre :
+              compilerAfterPre.vars.contains name = true :=
+            hPreContainsResult rfl
+          simp [compilerOpen_block_runOpen_cons_succ,
+            CompilerOpen.FunctionsOpen.Stmt.run,
+            CompilerOpen.LocalsExpr.evalOne,
+            OpenExternal.OpenResult.map,
+            OpenExternal.OpenResult.ok,
+            Functions.Source.Outcome.regular,
+            Locals.Source.Outcome.regular,
+            Locals.Source.State.insert, Locals.Source.State.withVars,
+            hContainsPre]
+          conv_lhs =>
+            rw [openResult_bind_assoc
+              (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+            rw [openResult_bind_assoc
+              (CompilerOpen.LocalsExpr.eval prim lowerExpr compilerAfterPre)]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro exprResult
+          rcases exprResult with ⟨stateAfterExpr, values⟩
+          cases values with
+          | nil =>
+              simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                Functions.Source.invalid, Structured.invalid]
+          | cons value rest =>
+              cases rest with
+              | nil =>
+                  simp [OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.ok, Locals.Source.State.insert,
+                    Locals.Source.State.withVars]
+              | cons value' rest' =>
+                  simp [OpenExternal.OpenResult.bind, CompilerOpen.invalid,
+                    Functions.Source.invalid, Structured.invalid]
+      | brk =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | cont =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | leave =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | halt kind =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
 theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_expr_prelude
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
