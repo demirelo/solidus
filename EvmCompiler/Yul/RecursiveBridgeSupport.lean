@@ -24031,6 +24031,18 @@ theorem yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args
   rw [yulOpen_evalValues_user_call_succ_eq_bind_args]
   rw [OpenExternal.YulOpenResult.toOpenResult_bind]
 
+theorem yulOpen_toOpenResult_reverseResult_eq_bind
+    (result : OpenExternal.YulOpenResult (State × List Word)) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.reverseResult result) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult result)
+        (fun pair =>
+          OpenExternal.OpenResult.ok (pair.1, pair.2.reverse)) := by
+  rw [OpenExternal.YulOpen.reverseResult, OpenExternal.YulOpenResult.map]
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  rfl
+
 theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
     (fuel : Nat) (args : List Word)
     (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
@@ -49072,6 +49084,35 @@ theorem openResult_bind_assoc
         funext response
         exact ih response next next')
       result) next next'
+
+/-- Right identity for the generic open-result bind. -/
+theorem openResult_bind_ok_eq
+    {ε α : Type*} (result : OpenExternal.OpenResult ε α) :
+    OpenExternal.OpenResult.bind result
+        (fun value => OpenExternal.OpenResult.ok value) =
+      result := by
+  exact
+    (OpenExternal.OpenResult.rec
+      (motive_1 := fun result =>
+        OpenExternal.OpenResult.bind result
+            (fun value => OpenExternal.OpenResult.ok value) =
+          result)
+      (motive_2 := fun externalCall =>
+        OpenExternal.OpenResult.bind (.call externalCall)
+            (fun value => OpenExternal.OpenResult.ok value) =
+          (.call externalCall : OpenExternal.OpenResult ε α))
+      (done := by
+        intro result
+        cases result <;> rfl)
+      (call := by
+        intro _ hCall
+        exact hCall)
+      (mk := by
+        intro site resume ih
+        simp [OpenExternal.OpenResult.bind]
+        funext response
+        exact ih response)
+      result)
 
 theorem openResult_bind_congr_next_of_doneInvariant
     {ε α β : Type*}

@@ -279,6 +279,9 @@ Checked base we can rely on:
   `yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function`, exposing
   imported-Yul internal user calls as open argument evaluation followed by
   open callee-body execution after function lookup.
+- [x] Added open-bind normalization utilities `openResult_bind_ok_eq` and
+  `yulOpen_toOpenResult_reverseResult_eq_bind`, needed to line up the source
+  reversed-argument result with the target raw argument-prelude relation.
 
 Remaining work:
 
