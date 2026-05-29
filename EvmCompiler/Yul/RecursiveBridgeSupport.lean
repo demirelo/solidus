@@ -99178,6 +99178,38 @@ theorem compilerOpen_runOpen_doneInvariant_varsAgree_of_writes
       | terminalArgs kind args =>
           simp [SourceWritesDisjoint] at hWrites
 
+theorem compilerOpen_runOpen_doneInvariant_contains_of_writes
+    {name : Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {pre : List Functions.Stmt}
+    {state : Objects.Source.State}
+    (hWrites : SourceWritesDisjoint [name] pre)
+    (hContains : state.vars.contains name = true) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {compilerAfterPre : Objects.Source.State}
+          {ctxAfter : Functions.Source.Ctx},
+          doneResult =
+            .ok (Functions.Source.Outcome.regular compilerAfterPre,
+              ctxAfter) →
+            compilerAfterPre.vars.contains name = true)
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel
+        { stmts := pre } state) := by
+  refine
+    OpenResultDoneInvariant.imp
+      (compilerOpen_runOpen_doneInvariant_varsAgree_of_writes
+        (names := [name]) (prim := prim) (program := program)
+        (pre := pre) (ctx := ctx) (state := state) (fuel := fuel)
+        hWrites)
+      ?_
+  intro doneResult hAgree compilerAfterPre ctxAfter hDone
+  have hVarsEq :
+      compilerAfterPre.vars name = state.vars name :=
+    hAgree hDone name (by simp)
+  unfold Locals.Source.Store.contains at hContains ⊢
+  simpa [hVarsEq] using hContains
+
 theorem sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes
     {names : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
