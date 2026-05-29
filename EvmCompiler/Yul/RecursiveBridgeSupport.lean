@@ -32348,6 +32348,56 @@ def SourceArgRawPreludeOpenDoneRel
       | .brk | .cont | .leave | .halt _ => False
   | _, _ => False
 
+def SourceArgCallPreludeOpenDoneRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (lowerArgs : List (Locals.Expr 1)) :
+    Except EvmYul.Yul.Exception (State × List Word) →
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx) → Prop
+  | .ok sourceResult, .ok (targetOutcome, _ctxAfter) =>
+      match targetOutcome.mode with
+      | .regular =>
+          SourceStateRel cfg layout sourceResult.1 targetOutcome.state ∧
+            Functions.Source.ArgList.eval prim lowerArgs
+                targetOutcome.state =
+              .ok (targetOutcome.state, sourceResult.2)
+      | .brk | .cont | .leave | .halt _ => False
+  | _, _ => False
+
+theorem sourceArgCallPreludeOpenDoneRel_of_raw_reverse
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {sourceDone :
+      Except EvmYul.Yul.Exception (State × List Word)}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hDone :
+      SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs sourceDone
+        targetDone) :
+    SourceArgCallPreludeOpenDoneRel cfg layout prim lowerArgs
+      (match sourceDone with
+      | .ok sourceResult => .ok (sourceResult.1, sourceResult.2.reverse)
+      | .error err => .error err)
+      targetDone := by
+  cases sourceDone with
+  | error err =>
+      cases targetDone <;> cases hDone
+  | ok sourceResult =>
+      rcases sourceResult with ⟨sourceAfter, values⟩
+      cases targetDone with
+      | error err =>
+          cases hDone
+      | ok targetResult =>
+          rcases targetResult with ⟨targetOutcome, ctxAfter⟩
+          cases targetOutcome with
+          | mk targetState mode =>
+              cases mode <;> simp [SourceArgRawPreludeOpenDoneRel,
+                SourceArgCallPreludeOpenDoneRel] at hDone ⊢
+              exact hDone
+
 abbrev SourceArgRawPreludeOpenCallResponseRel : Type :=
   OpenExternal.OpenCall
     (OpenExternal.OpenResult Exception (State × List Word)) →

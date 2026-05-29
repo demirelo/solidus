@@ -282,6 +282,9 @@ Checked base we can rely on:
 - [x] Added open-bind normalization utilities `openResult_bind_ok_eq` and
   `yulOpen_toOpenResult_reverseResult_eq_bind`, needed to line up the source
   reversed-argument result with the target raw argument-prelude relation.
+- [x] Added `SourceArgCallPreludeOpenDoneRel` plus
+  `sourceArgCallPreludeOpenDoneRel_of_raw_reverse`, naming the post-reversal
+  argument-prelude done relation consumed by internal user-call bodies.
 
 Remaining work:
 
