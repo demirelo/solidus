@@ -51951,6 +51951,111 @@ theorem compilerOpen_eval_var_of_assignMany_single
       Locals.Source.Store.insert_self]
   · simp [hContains] at hAssign
 
+/-- Singleton assignment into an already-present source local. -/
+theorem functionsStore_assignMany_single_of_contains
+    {tmp : Name} {value : Word}
+    {vars : Locals.Source.Store}
+    (hContains : vars.contains tmp = true) :
+    Functions.Source.Store.assignMany [tmp] [value] vars =
+      some (Locals.Source.Store.insert vars tmp value) := by
+  simp [Functions.Source.Store.assignMany, hContains]
+
+/--
+Target-side continuation for a singleton returned internal user call.
+
+After the callee returns one word, the compiler assigns it to the hidden
+temporary and immediately reads that temporary as the expression value.
+-/
+theorem compilerOpen_user_call_returned_single_expr_target
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {value : Word}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {argVars returnStore : Locals.Source.Store}
+    {ctxAfter : Functions.Source.Ctx}
+    (hAssign :
+      Functions.Source.Store.assignMany [tmp] [value] argVars =
+        some returnStore) :
+    OpenExternal.OpenResult.bind
+        (OpenExternal.OpenResult.ok
+          (Functions.Source.CallResult.returned sharedAfterCall [value]))
+        (fun callResult =>
+          match callResult with
+          | .returned sharedAfterCall returnValues =>
+              match Functions.Source.Store.assignMany [tmp] returnValues
+                  argVars with
+              | none => CompilerOpen.invalid
+              | some returnStore =>
+                  OpenExternal.OpenResult.map
+                    (fun exprResult =>
+                      { state := exprResult.1
+                        ctx := ctxAfter
+                        values := exprResult.2 })
+                    (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                      { shared := sharedAfterCall
+                        vars := returnStore })
+          | .halted _kind _haltedState =>
+              CompilerOpen.invalid) =
+      OpenExternal.OpenResult.ok
+        ({ state := ({ shared := sharedAfterCall, vars := returnStore } :
+              Objects.Source.State)
+           ctx := ctxAfter
+           values := [value] } : SourceArgPreludeOpenTarget) := by
+  simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok, hAssign,
+    OpenExternal.OpenResult.map,
+    compilerOpen_eval_var_of_assignMany_single
+      (prim := prim) (tmp := tmp) (value := value)
+      (shared := sharedAfterCall) (vars := argVars)
+      (returnStore := returnStore) hAssign]
+
+/--
+Returned singleton internal user calls satisfy the expression done relation
+after the hidden result temporary has been replayed.
+-/
+theorem sourceArgStackPreludeOpenResultRel_user_call_returned_single
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {value : Word}
+    {sourceAfter : State}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {argVars returnStore : Locals.Source.Store}
+    {ctxAfter : Functions.Source.Ctx}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hRel :
+      SourceStateRel cfg layout sourceAfter
+        ({ shared := sharedAfterCall, vars := returnStore } :
+          Objects.Source.State))
+    (hAssign :
+      Functions.Source.Store.assignMany [tmp] [value] argVars =
+        some returnStore) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg layout)
+      (OpenExternal.OpenResult.ok (sourceAfter, [value]))
+      (OpenExternal.OpenResult.bind
+        (OpenExternal.OpenResult.ok
+          (Functions.Source.CallResult.returned sharedAfterCall [value]))
+        (fun callResult =>
+          match callResult with
+          | .returned sharedAfterCall returnValues =>
+              match Functions.Source.Store.assignMany [tmp] returnValues
+                  argVars with
+              | none => CompilerOpen.invalid
+              | some returnStore =>
+                  OpenExternal.OpenResult.map
+                    (fun exprResult =>
+                      { state := exprResult.1
+                        ctx := ctxAfter
+                        values := exprResult.2 })
+                    (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                      { shared := sharedAfterCall
+                        vars := returnStore })
+          | .halted _kind _haltedState =>
+              CompilerOpen.invalid)) := by
+  rw [compilerOpen_user_call_returned_single_expr_target
+    (prim := prim) (tmp := tmp) (value := value)
+    (sharedAfterCall := sharedAfterCall) (argVars := argVars)
+    (returnStore := returnStore) (ctxAfter := ctxAfter) hAssign]
+  exact OpenExternal.OpenResultRel.done ⟨hRel, rfl⟩
+
 /--
 Target-side open shape of an internal function-call statement after the callee
 has been resolved.
