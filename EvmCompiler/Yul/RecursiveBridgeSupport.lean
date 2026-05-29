@@ -49369,6 +49369,75 @@ theorem sourceArgPreludeOpen_append_eq
               (lower := lower) (suffixFuel := suffixFuel))
 
 /--
+Open append law for arbitrary compiler-open blocks.
+
+This is the raw block-level version of `sourceArgPreludeOpen_append_eq`.
+It deliberately does not assume a generated prelude: expression lowering for
+nested internal user calls emits real `call` statements in the prefix, and the
+open sequence frontier must expose any external requests reached there before
+continuing into the suffix.
+-/
+theorem compilerOpen_block_runOpen_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} :
+    ∀ {pre suffix : List Functions.Stmt}
+      {ctx : Functions.Source.Ctx} {state : Objects.Source.State}
+      {suffixFuel : Nat},
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + suffixFuel) { stmts := pre ++ suffix } state =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (pre.length + suffixFuel) { stmts := pre } state)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                  preResult.2 suffixFuel { stmts := suffix }
+                  preResult.1.state
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok preResult) := by
+  intro pre
+  induction pre with
+  | nil =>
+      intro suffix ctx state suffixFuel
+      cases suffixFuel <;>
+        simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+          CompilerOpen.invalid, Functions.Source.invalid,
+          Structured.invalid, Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular]
+  | cons stmt rest ih =>
+      intro suffix ctx state suffixFuel
+      have hFuel :
+          (stmt :: rest).length + suffixFuel =
+            (rest.length + suffixFuel).succ := by
+        simp
+        omega
+      rw [hFuel]
+      simp only [List.cons_append]
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [openResult_bind_assoc]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro stmtResult
+      rcases stmtResult with ⟨stmtOutcome, stmtCtx⟩
+      cases stmtOutcome with
+      | mk stmtState mode =>
+          cases mode with
+          | regular =>
+              simpa using
+                ih (suffix := suffix) (ctx := stmtCtx) (state := stmtState)
+                  (suffixFuel := suffixFuel)
+          | brk =>
+              simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+          | cont =>
+              simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+          | leave =>
+              simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+          | halt kind =>
+              simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
+/--
 Open append law for compiler-generated argument preludes.
 
 The old closed proof could compose generated preludes with a suffix only after
