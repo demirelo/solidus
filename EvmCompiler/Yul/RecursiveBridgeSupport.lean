@@ -50242,6 +50242,122 @@ theorem runAssignTarget_append_eq
         simp [runAssignTarget, OpenExternal.OpenResult.bind,
           OpenExternal.OpenResult.ok]
 
+theorem runLetTarget_user_call_lower1?_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {name : Name} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState')) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      runLetTarget prim program ctx pre name lowerExpr tail tailFuel
+          compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                runLetTarget prim program preResult.2
+                  [Functions.Stmt.let_ tmp (.lit Expr.zero),
+                    Functions.Stmt.call [tmp] functionName lowerArgs]
+                  name (.var tmp) tail tailFuel preResult.1.state
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok preResult) := by
+  rcases lower1?_user_call_some_components hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hPreEq, hLowerEq⟩
+  subst pre
+  subst lowerExpr
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  simpa using
+    (runLetTarget_append_eq
+      (prim := prim) (program := program) (ctx := ctx)
+      (pre := preArgs)
+      (suffix :=
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs])
+      (tail := tail) (name := name) (lowerExpr := (.var tmp))
+      (tailFuel := tailFuel) (compiler := compiler))
+
+theorem runAssignTarget_user_call_lower1?_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {name : Name} {tail : List Functions.Stmt}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState')) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      runAssignTarget prim program ctx pre name lowerExpr tail tailFuel
+          compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                runAssignTarget prim program preResult.2
+                  [Functions.Stmt.let_ tmp (.lit Expr.zero),
+                    Functions.Stmt.call [tmp] functionName lowerArgs]
+                  name (.var tmp) tail tailFuel preResult.1.state
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok preResult) := by
+  rcases lower1?_user_call_some_components hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hPreEq, hLowerEq⟩
+  subst pre
+  subst lowerExpr
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  simpa using
+    (runAssignTarget_append_eq
+      (prim := prim) (program := program) (ctx := ctx)
+      (pre := preArgs)
+      (suffix :=
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs])
+      (tail := tail) (name := name) (lowerExpr := (.var tmp))
+      (tailFuel := tailFuel) (compiler := compiler))
+
 def LetSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :

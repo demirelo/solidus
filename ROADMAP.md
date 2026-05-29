@@ -229,6 +229,10 @@ Checked base we can rely on:
   `runAssignTarget`. These let the expression-recursive route peel arbitrary
   generated/internal-user-call target prefixes while preserving suspended and
   nonregular prefix outcomes.
+- [x] Added checked target decompositions for internal user-call expression
+  lowering, exposing the actual `lower1?` shape as `preArgs` followed by
+  `let tmp := 0; call [tmp] f lowerArgs` through the raw
+  `SourceExprSeqPreludeOpen` target append laws.
 
 Remaining work:
 
