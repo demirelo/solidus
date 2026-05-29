@@ -32131,6 +32131,103 @@ theorem sourceExprPreludeOpenSoundAtExactTarget_prim_of_arg_prelude_open
     exact hPreludeResponse hResponse
 
 /--
+Expression-level open primitive continuation that also carries a source-side
+done invariant for the argument evaluator.
+
+This is the shape needed by recursive primitive expressions: facts such as
+argument arity are properties of the concrete open argument run, not of the
+bare source/target done relation.  The invariant follows every nested external
+CALL response and is available exactly when the primitive head is reached.
+-/
+theorem sourceExprPreludeOpenSoundAtExactTarget_prim_of_arg_prelude_open_doneInvariant
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    {sourceArgDoneInv : Except Exception (State × List Word) → Prop}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hArgInv :
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant sourceArgDoneInv
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source)))
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        preludeCallResponseRel)
+    (hPrimitiveDone :
+      ∀ {sourceResult : State × List Word}
+        {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout
+          (.ok sourceResult) (.ok target) →
+        sourceArgDoneInv (.ok sourceResult) →
+        OpenExternal.OpenResultRel callResponseRel
+          (SourceArgStackPreludeOpenDoneRel cfg layout)
+          (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+            sourceResult)
+          (OpenExternal.OpenResult.map
+            (fun primResult =>
+              { state := primResult.1
+                ctx := target.ctx
+                values := primResult.2 })
+            (CompilerOpen.Primitive.eval prim op target.state
+              target.values)))
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim op target.state
+                      target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      callResponseRel := by
+  intro source compiler hInitial
+  dsimp [SourceExprPreludeOpenResultRel]
+  rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args,
+    sourceExprPreludeOpen_run_prim_eq_arg_prelude_bind
+      (hOutputs := hOutputs)]
+  refine
+    OpenResultDoneInvariant.bind_left (hPrelude hInitial)
+      (hArgInv (source := source) (compiler := compiler) hInitial) ?_ ?_
+  · intro sourceDone targetDone hDone hSourceInv
+    cases sourceDone with
+    | error err =>
+        cases targetDone <;> cases hDone
+    | ok sourceResult =>
+        cases targetDone with
+        | error err => cases hDone
+        | ok target =>
+            exact hPrimitiveDone hDone hSourceInv
+  · intro sourceCall targetCall response hResponse
+    exact hPreludeResponse hResponse
+
+/--
 Done-branch open relation for a safe non-CALL primitive.
 
 The source and compiler argument preludes have already completed and related
@@ -32296,6 +32393,97 @@ theorem sourceExprPreludeOpenSoundAtExactTarget_prim_safe_of_arg_prelude_open
           (callResponseRel := callResponseRel)
           (sourceResult := sourceResult) (target := target)
           hSafe hBasic hPrim hDone (hArity hDone) (hNoError hDone))
+    hPreludeResponse
+
+/--
+Safe non-CALL primitive expression bridge using a source argument done
+invariant instead of bare arity/error premises.
+
+The invariant is the future checked-lowering interface: it can be built from
+open argument length preservation plus the accepted/result-ok primitive-error
+frontier, and it remains valid through every nested external CALL response.
+-/
+theorem sourceExprPreludeOpenSoundAtExactTarget_prim_safe_of_arg_prelude_open_doneInvariant
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {preludeCallResponseRel callResponseRel :
+      SourceExprPreludeOpenCallResponseRel}
+    (hSafe : Safe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hArgInv :
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun doneResult =>
+            ∀ {sourceResult : State × List Word},
+              doneResult = .ok sourceResult →
+                sourceResult.2.length =
+                  Expressions.Structured.BasicOp.inputs op ∧
+                ∀ {err},
+                  EvmYul.Yul.primCall sourceFuel sourceResult.1 yulPrim
+                      sourceResult.2.reverse ≠
+                    .error err)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source)))
+    (hPrelude :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        preludeCallResponseRel)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hPreludeResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                    sourceResult) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun target =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      { state := primResult.1
+                        ctx := target.ctx
+                        values := primResult.2 })
+                    (CompilerOpen.Primitive.eval prim op target.state
+                      target.values)) }
+          response →
+        preludeCallResponseRel sourceCall targetCall response) :
+    SourceExprPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+      sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      callResponseRel :=
+  sourceExprPreludeOpenSoundAtExactTarget_prim_of_arg_prelude_open_doneInvariant
+    (cfg := cfg) (layout := layout) (prim := prim) (program := program)
+    (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+    (yulPrim := yulPrim) (op := op) (args := args)
+    (codeOverride := codeOverride) (pre := pre) (results := results)
+    (lowerArgs := lowerArgs)
+    (preludeCallResponseRel := preludeCallResponseRel)
+    (callResponseRel := callResponseRel) hOutputs hArgInv hPrelude
+    (by
+      intro sourceResult target hDone hSourceInv
+      have hFacts := hSourceInv rfl
+      exact
+        safePrimitiveOpenDoneRel_of_stackSoundAtArity
+          (cfg := cfg) (layout := layout) (prim := prim)
+          (sourceFuel := sourceFuel) (yulPrim := yulPrim) (op := op)
+          (callResponseRel := callResponseRel)
+          (sourceResult := sourceResult) (target := target)
+          hSafe hBasic hPrim hDone hFacts.1 hFacts.2)
     hPreludeResponse
 
 theorem openPrimitiveCallExprOpenResultRel_of_arg_prelude_open_toYulOperation
@@ -33690,6 +33878,61 @@ theorem evalArgs_stack_arity_of_lowerBound1?_toStackSeq?
     hLowerLen.symm.trans hSeqLen
   have hEvalLen := Imported.evalArgs_length_of_ok hEval
   simpa [List.length_reverse, hArgsLen] using hEvalLen
+
+/--
+Open counterpart of `evalArgs_stack_arity_of_lowerBound1?_toStackSeq?`.
+
+Even if an argument expression suspends at an external CALL, every resumed done
+result still has exactly the stack arity determined by the checked lowering
+shape.
+-/
+theorem yulOpenEvalArgs_toOpenResult_doneInvariant_stack_arity_of_lowerBound1?_toStackSeq?
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {source : State}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt}
+    {argExprs : List (Locals.Expr 1)}
+    {op : Structured.BasicOp}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hLowerArgs :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, argExprs, freshState'))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {sourceAfter : State} {values : List Word},
+          doneResult = .ok (sourceAfter, values) →
+            values.length = Expressions.Structured.BasicOp.inputs op)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+          source)) := by
+  have hLenInv :
+      OpenResultDoneInvariant
+        (fun doneResult =>
+          ∀ {sourceAfter : State} {values : List Word},
+            doneResult = .ok (sourceAfter, values) →
+              values.length = args.reverse.length)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+            source)) :=
+    yulOpenEvalArgs_toOpenResult_doneInvariant_length
+      (fuel := fuel) (args := args.reverse)
+  have hLowerLen :=
+    Expr.List.lowerBound1?_length_lowerArgs_eq hLowerArgs
+  have hSeqLen :=
+    exprList_toStackSeq?_length_eq hSeq
+  have hArgsLen :
+      args.length = Expressions.Structured.BasicOp.inputs op :=
+    hLowerLen.symm.trans hSeqLen
+  exact
+    OpenResultDoneInvariant.imp hLenInv (by
+      intro doneResult hDone sourceAfter values hOk
+      have hValuesLen : values.length = args.reverse.length :=
+        hDone hOk
+      simpa [List.length_reverse, hArgsLen] using hValuesLen)
 
 /--
 Open CALL-family expression bridge for generated argument preludes.
