@@ -484,6 +484,160 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       hBytes, hEncoding, hOutOfGas, hProjection,
       hTrace, hPreconditions.runsAboveBound⟩
 
+theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_replayReady_concreteGas_X
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuel initial
+        referenceResult)
+    (hCode : initial.executionEnv.code = Assembly.Bytecode.encodeTarget target)
+    (hTargetReplayForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        ∃ gas,
+          gas < EvmYul.UInt256.size ∧
+            Assembly.GasAware.XStepTrace.XBlockReplayReady asm target
+              (Assembly.GasAware.validJumps target) ∧
+              Assembly.GasAware.XStepTrace.XTraceDoneContinuation
+                (Assembly.GasAware.validJumps target) targetOutcome) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gas result,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome ∧
+                      gas < EvmYul.UInt256.size ∧
+                        EvmYul.EVM.X evmFuel
+                            (Assembly.GasAware.validJumps target)
+                            (Assembly.GasAware.installCodeAndGas target gas
+                              initial) =
+                          .ok result ∧
+                        Assembly.GasAware.XResultAgrees targetOutcome
+                          result := by
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, hRun, hOutcome,
+      hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace⟩ :=
+    compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall
+      hTop
+  obtain ⟨gas, hGasFits, hBlockReady, hDoneContinue⟩ :=
+    hTargetReplayForX hTrace
+  obtain ⟨evmFuel, gasValue, result, hGasValueFits, hXRun, hAgrees⟩ :=
+    Assembly.GasAware.XStepTrace.blockTraceResult_concrete_gas_of_replay_ready
+      (program := asm)
+      (target := target)
+      (initial := initial)
+      (targetFuel := targetFuel)
+      (targetResult := targetOutcome)
+      (gas := gas)
+      hCode hTrace hGasFits hBlockReady hDoneContinue
+  exact
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasValue, result,
+      hRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding, hOutOfGas,
+      hProjection, hTrace, hGasValueFits, hXRun, hAgrees⟩
+
+theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_budgetedConcreteGas_X
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeTopNoCallAssumptions cfg terminalRel revertRel prim
+        outcomeRel program asm target shared store sourceFuel initial
+        referenceResult)
+    (hCode : initial.executionEnv.code = Assembly.Bytecode.encodeTarget target)
+    (hTargetReplayForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+            initial targetOutcome < EvmYul.UInt256.size ∧
+          Assembly.GasAware.XStepTrace.XBlockReplayNonGasReady asm target
+            (Assembly.GasAware.validJumps target) ∧
+          Assembly.GasAware.XStepTrace.XTraceDoneContinuation
+            (Assembly.GasAware.validJumps target) targetOutcome) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gas result,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome ∧
+                      gas < EvmYul.UInt256.size ∧
+                        EvmYul.EVM.X evmFuel
+                            (Assembly.GasAware.validJumps target)
+                            (Assembly.GasAware.installCodeAndGas target gas
+                              initial) =
+                          .ok result ∧
+                        Assembly.GasAware.XResultAgrees targetOutcome
+                          result := by
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, hRun, hOutcome,
+      hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace⟩ :=
+    compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall
+      hTop
+  obtain ⟨hGasFits, hNonGas, hDoneContinue⟩ :=
+    hTargetReplayForX hTrace
+  have hNoCallCreate :
+      Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
+    Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate.of_program_no_call_create
+      (Program.compileCheckedAssemblyTarget?_noCallCreate
+        hTop.sourceAccepted.reference hTop.compileTarget)
+  obtain ⟨evmFuel, gasValue, result, hGasValueFits, hXRun, hAgrees⟩ :=
+    Assembly.GasAware.XStepTrace.blockTraceResult_concrete_gas_of_nonGas_no_call_create_and_budget
+      (program := asm)
+      (target := target)
+      (initial := initial)
+      (targetFuel := targetFuel)
+      (targetResult := targetOutcome)
+      hCode hTrace hGasFits hNonGas hNoCallCreate
+      (Assembly.GasAware.XStepTrace.XTraceDoneContinuation.to_path
+        hDoneContinue)
+  exact
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasValue, result,
+      hRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding, hOutOfGas,
+      hProjection, hTrace, hGasValueFits, hXRun, hAgrees⟩
+
 theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
@@ -536,6 +690,61 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
                                 result :=
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_X
     hTop.toNoCallAssumptions hTargetGasForX
+
+theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_budgetedConcreteGas_X
+    {cfg : Reference.StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hTop :
+      RecursiveBridgeTopNoCallSourceCompileAssumptions cfg terminalRel
+        revertRel prim outcomeRel program asm target shared store sourceFuel
+        initial referenceResult)
+    (hCode : initial.executionEnv.code = Assembly.Bytecode.encodeTarget target)
+    (hTargetReplayForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+          targetOutcome →
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+            initial targetOutcome < EvmYul.UInt256.size ∧
+          Assembly.GasAware.XStepTrace.XBlockReplayNonGasReady asm target
+            (Assembly.GasAware.validJumps target) ∧
+          Assembly.GasAware.XStepTrace.XTraceDoneContinuation
+            (Assembly.GasAware.validJumps target) targetOutcome) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gas result,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome ∧
+                      gas < EvmYul.UInt256.size ∧
+                        EvmYul.EVM.X evmFuel
+                            (Assembly.GasAware.validJumps target)
+                            (Assembly.GasAware.installCodeAndGas target gas
+                              initial) =
+                          .ok result ∧
+                        Assembly.GasAware.XResultAgrees targetOutcome
+                          result :=
+  compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_budgetedConcreteGas_X
+    hTop.toNoCallAssumptions hCode hTargetReplayForX
 
 /--
 Preferred result-level top theorem for the canonical imported-Yul observation
@@ -1790,6 +1999,287 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     hCheckedCompileTarget hTargetGasForX
 
 /--
+Public source-fuel existential wrapper for the preferred gas-aware theorem.
+
+Callers supply a successful source run for some sufficiently large source fuel;
+the theorem keeps that fuel existential instead of exposing it as a top-level
+parameter.
+-/
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (canonicalEntryState initial) targetOutcome) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ result,
+                            EvmYul.EVM.X evmFuel
+                                (Assembly.GasAware.validJumps target)
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) =
+                              .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result := by
+  obtain ⟨sourceFuel, hRun⟩ := hSourceFuelRun
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, hX⟩ :=
+    compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_X
+      hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hRun
+      hCheckedCompileTarget hTargetGasForX
+  exact
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, hX⟩
+
+/--
+Concrete-gas public wrapper for the preferred gas-aware theorem.
+
+The lower bridge still records the stronger "all gas above a bound" fact, but
+this theorem exposes the direct consequence users usually want: there is a
+UInt256 gas value and an `EVM.X` run at that value whose result agrees with the
+gasless target outcome.
+-/
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_concreteGas_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (canonicalEntryState initial) targetOutcome) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gas result,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gas < EvmYul.UInt256.size ∧
+                        EvmYul.EVM.X evmFuel
+                            (Assembly.GasAware.validJumps target)
+                            (Assembly.GasAware.installCodeAndGas target gas
+                              (canonicalEntryState initial)) =
+                          .ok result ∧
+                        Assembly.GasAware.XResultAgrees targetOutcome
+                          result := by
+  obtain
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, _evmFuel,
+      _gasBound, hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes,
+      hEncoding, hOutOfGas, hProjection, hTrace, _hRunsAbove⟩ :=
+    compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_X
+      hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hSourceFuelRun
+      hCheckedCompileTarget hTargetGasForX
+  let hPreconditions := hTargetGasForX hTrace
+  obtain ⟨result, hRun, hAgrees⟩ := hPreconditions.runsAtGasBound
+  exact
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome,
+      hPreconditions.evmFuel, hPreconditions.gasBound, result,
+      hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, hPreconditions.gasBoundFits, hRun,
+      hAgrees⟩
+
+/--
+Concrete-gas public wrapper using the checked explicit block-trace gas budget.
+
+Unlike the older `concreteGas_X` theorem, this does not ask callers to provide
+the stronger `XResultPreconditionAssumptions` bridge. The target-side premise
+only supplies the non-gas replay facts, done-continuation facts, and the proof
+that the computed finite gas budget fits in `UInt256`.
+-/
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_budgetedConcreteGas_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetReplayForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome →
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+            (canonicalEntryState initial) targetOutcome <
+          EvmYul.UInt256.size ∧
+          Assembly.GasAware.XStepTrace.XBlockReplayNonGasReady asm target
+            (Assembly.GasAware.validJumps target) ∧
+          Assembly.GasAware.XStepTrace.XTraceDoneContinuation
+            (Assembly.GasAware.validJumps target) targetOutcome) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gas result,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gas < EvmYul.UInt256.size ∧
+                        EvmYul.EVM.X evmFuel
+                            (Assembly.GasAware.validJumps target)
+                            (Assembly.GasAware.installCodeAndGas target gas
+                              (canonicalEntryState initial)) =
+                          .ok result ∧
+                        Assembly.GasAware.XResultAgrees targetOutcome
+                          result := by
+  obtain ⟨sourceFuel, hRun⟩ := hSourceFuelRun
+  let hStatic :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+      hCheckedCompileTarget
+  let hFeatures :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some hStatic.1
+  let hResources :=
+    compileCheckedAssemblyTargetBytecodeResources?_eq_some hFeatures.1
+  let hBytecode :=
+    compileCheckedAssemblyTargetBytecode?_eq_some hResources.1
+  let hProgramSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.2.sourceAcceptedCore hStatic.2.supported
+  let hProgramAccepted : Program.Accepted program :=
+    accepted_of_sourceAccepted_compileChecked? hProgramSourceAccepted
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_compileChecked
+        hCheckedCompileTarget)
+  let hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program :=
+    hStatic.2.toFullSourceAccepted hProgramAccepted
+  let hCompile := (compileCheckedAssemblyTarget?_eq_some hBytecode.1).1
+  let hSourceAccepted : RecursiveBridgeSourceAccepted program :=
+    RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+      hFullSourceAccepted hFeatures.2 hCompile
+  let hSourceCompileAccepted : SourceCompileAccepted program :=
+    RecursiveBridgeCompileResources.to_sourceCompileAccepted hSourceAccepted
+      hResources.2
+  have hCode :
+      (canonicalEntryState initial).executionEnv.code =
+        Assembly.Bytecode.encodeTarget target := by
+    simpa [canonicalEntryState] using hInitialCodeImageRel.targetCode
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gas, result,
+      hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, hGasFits, hXRun, hAgrees⟩ :=
+    compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_budgetedConcreteGas_X
+      (RecursiveBridgeTopNoCallSourceCompileAssumptions.withCanonicalObservation
+        hSourceAccepted hSourceCompileAccepted
+        (RecursiveBridgeSemanticCoreContracts.ofBoundaries
+          RecursiveBridgePrimitiveArityContracts.structured
+          (RecursiveBridgeTerminalContracts.structured_of_observation
+            (RecursiveBridgeTerminalObservationContracts.canonical cfg program))
+          hExprNoSuccessfulOutOfFuel.to_resultContracts)
+        (RecursiveBridgeInitialWorldRel.to_canonicalEntryState
+          hInitialCodeImageRel.world)
+        hRun hBytecode.1 hBytecode.2.1 hBytecode.2.2
+        (Assembly.OutOfGasPolicyAssumption.trivial (program := asm)
+          (initial := canonicalEntryState initial))
+        (Assembly.CurrentContractProjectionAssumption.trivial (program := asm)
+          (initial := canonicalEntryState initial))
+        (canonicalEntryState_pc initial) (canonicalEntryState_stack initial))
+      hCode hTargetReplayForX
+  exact
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, evmFuel, gas,
+      result, hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, hGasFits, hXRun, hAgrees⟩
+
+/--
 Companion no-out-of-gas theorem with the canonical terminal observation.
 -/
 theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_X
@@ -1884,6 +2374,61 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
   compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_X
     hExprNoSuccessfulOutOfFuel hInitialCodeImageRel.world hSourceFuelRun
     hCheckedCompileTarget hTargetGasForX
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel : RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target))
+    (hTargetGasForX :
+      ∀ {targetFuel targetOutcome},
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome →
+        Assembly.GasAware.XResultPreconditionAssumptions target
+          (canonicalEntryState initial) targetOutcome) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome evmFuel gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+        ∀ gas,
+          gasBound ≤ gas →
+          gas < EvmYul.UInt256.size →
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  obtain ⟨sourceFuel, hRun⟩ := hSourceFuelRun
+  obtain
+    ⟨sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hTrace, hNoOutOfGas⟩ :=
+    compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_X
+      hExprNoSuccessfulOutOfFuel hInitialCodeImageRel hRun
+      hCheckedCompileTarget hTargetGasForX
+  exact
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, evmFuel, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hTrace, hNoOutOfGas⟩
 
 end Program
 end Yul
