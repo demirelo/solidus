@@ -37410,6 +37410,73 @@ theorem sourceArgRawPreludeOpenResultRel_of_virtual_run_varMap_toStackSeq
       (callResponseRel := callResponseRel)
       hLowerVars hSeq hRel
 
+/--
+Soundness wrapper that peels a stack-order generated argument prelude down to
+the raw target prelude plus the ordinary function-call argument evaluator.
+
+Internal user-call expressions need this shape because the target `Stmt.call`
+evaluates `lowerArgs` with `Functions.Source.ArgList.eval` after the generated
+prelude has run.  The stack-order argument theorem remains the recursive proof
+engine; this wrapper exposes the target state that the subsequent call
+statement consumes.
+-/
+theorem sourceArgRawPreludeOpenSoundAtExactTarget_of_stack_varMap_toStackSeq
+    {cfg : StateRelConfig} {layout : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt}
+    {lowerArgs : List (Locals.Expr 1)} {names : List Name}
+    {results : Nat} {seq : Locals.ExprSeq results}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hLowerVars :
+      lowerArgs = names.map (fun name => (.var name : Locals.Expr 1)))
+    (hSeq : Expr.List.toStackSeq? lowerArgs results = some seq)
+    (hStack :
+      SourceArgStackPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre seq targetFuel callResponseRel) :
+    ∀ {source compiler},
+      SourceStateRel cfg layout source compiler →
+        OpenExternal.OpenResultRel
+          (fun sourceCall rawCall response =>
+            callResponseRel sourceCall
+              { site := rawCall.site
+                resume := fun response =>
+                  OpenExternal.OpenResult.bind (rawCall.resume response)
+                    (fun preResult =>
+                      match preResult.1.mode with
+                      | .regular =>
+                          OpenExternal.OpenResult.map
+                            (fun argResult =>
+                              { state := argResult.1
+                                ctx := preResult.2
+                                values := argResult.2 })
+                            (CompilerOpen.LocalsExpr.evalSeq prim seq
+                              preResult.1.state)
+                      | .brk | .cont | .leave | .halt _ =>
+                          CompilerOpen.invalid) }
+              response)
+          (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel { stmts := pre } compiler) := by
+  intro source compiler hInitial
+  exact
+    sourceArgRawPreludeOpenResultRel_of_virtual_run_varMap_toStackSeq
+      (cfg := cfg) (layout := layout) (prim := prim)
+      (program := program) (ctx := ctx) (targetFuel := targetFuel)
+      (pre := pre) (lowerArgs := lowerArgs) (names := names)
+      (results := results) (seq := seq) (compiler := compiler)
+      (source :=
+        OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            codeOverride source))
+      (callResponseRel := callResponseRel)
+      hLowerVars hSeq (hStack hInitial)
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_of_virtual_tail_with_target_invariants
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

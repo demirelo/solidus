@@ -249,6 +249,11 @@ Checked base we can rely on:
   decomposition with the suffix equations, so let/assign frontiers can expose
   `preArgs`, hidden temp insertion, the open target `Stmt.call`, regular temp
   replay, and nonregular propagation from the actual checked lowering result.
+- [x] Added raw argument-prelude soundness wrapper
+  `sourceArgRawPreludeOpenSoundAtExactTarget_of_stack_varMap_toStackSeq`,
+  which peels the stack-order generated argument proof down to
+  `SourceArgRawPreludeOpenDoneRel` so target internal `Stmt.call` can consume
+  the checked `Functions.Source.ArgList.eval` state/value relation directly.
 
 Remaining work:
 
