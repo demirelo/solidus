@@ -110734,6 +110734,156 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
               (state := compiler) hPreWrites hContains)
     hExpr hExprDone hTail
 
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTailStmts : List Functions.Stmt},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ
+          (.Let [name] (some sourceExpr) :: rest) codeOverride
+          { stmts :=
+            pre ++ [Functions.Stmt.let_ (identName name) lowerExpr] ++
+              lowerTailStmts }
+          allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) codeOverride allowed := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_let_expr_single_components
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              rw [hHeadEq]
+              unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+              intro source compiler trace sourceDone
+              exact
+                hHeadSound (freshState := freshState)
+                  (stateHead := stateHead) (pre := pre)
+                  (lowerExpr := lowerExpr)
+                  (lowerTailStmts := lowerRest) hCovers hExprLower
+                  (source := source) (compiler := compiler) (trace := trace)
+                  (sourceDone := sourceDone)
+
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTailStmts : List Functions.Stmt},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx
+          sourceFuel.succ.succ
+          (.Assign [name] sourceExpr :: rest) codeOverride
+          { stmts :=
+            pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+              lowerTailStmts }
+          allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) codeOverride allowed := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_assign_expr_single_components
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              rw [hHeadEq]
+              unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+              intro source compiler trace sourceDone
+              exact
+                hHeadSound (freshState := freshState)
+                  (stateHead := stateHead) (pre := pre)
+                  (lowerExpr := lowerExpr)
+                  (lowerTailStmts := lowerRest) hCovers hExprLower
+                  (source := source) (compiler := compiler) (trace := trace)
+                  (sourceDone := sourceDone)
+
 theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
@@ -115347,6 +115497,361 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
             hPrim hFindUser hUserRegular hReserve hMinimumTargetTailFuel hCovers
             (hSourceScoped.1.2 (identName name) (by simp [identNames]))
             hSafe hSourceScoped.2 hOk hLower hTail hAdmissible)
+
+/--
+Finite-path recursive declaration head.
+
+Expression recursion is established once at the canonical minimum exact
+cutoff, then projected to a selected finite path and padded only as required by
+the selected sequence continuation.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
+    {cfg : StateRelConfig} {coverLayout layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout coverLayout freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hFresh : identName name ∉ layout)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel
+          prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx base.succ.succ.succ.succ.succ.succ
+      (.Let [name] (some sourceExpr) :: rest) (some contract)
+      { stmts :=
+        pre ++ [Functions.Stmt.let_ (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_raw
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx)
+    (exprFuel := base.succ.succ.succ.succ) (name := name)
+    (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
+    (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
+    (allowed := allowed) hFresh
+    (SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+      (ctx := ctx) (allowed := fun _sourceDone => True)
+      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
+        hLayoutSubset hPrim hFindUser hUserRegular hReserve (by rfl) hCovers
+        hSafe hScoped hOk hLower
+        (rawOpenCallResponseAdmissible_relationallyAdmissible cfg)))
+    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+      (cfg := cfg) (layout := layout)
+      (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+      (contract := contract) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (lower := lowerExpr)
+      hSafe hScoped hLower (by
+        intro functionName args hEq
+        simpa [hEq] using hOk))
+    hTail
+
+/-- Finite-path recursive assignment head. -/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive
+    {cfg : StateRelConfig} {coverLayout layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout coverLayout freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hTargetMem : identName name ∈ layout)
+    (hPreWrites : SourceWritesDisjoint [identName name] pre)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx base.succ.succ.succ.succ.succ.succ
+      (.Assign [name] sourceExpr :: rest) (some contract)
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx)
+    (exprFuel := base.succ.succ.succ.succ) (name := name)
+    (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
+    (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
+    (allowed := allowed) hTargetMem hPreWrites
+    (SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+      (ctx := ctx) (allowed := fun _sourceDone => True)
+      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
+        hLayoutSubset hPrim hFindUser hUserRegular hReserve (by rfl) hCovers
+        hSafe hScoped hOk hLower
+        (rawOpenCallResponseAdmissible_relationallyAdmissible cfg)))
+    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+      (cfg := cfg) (layout := layout)
+      (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+      (contract := contract) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (lower := lowerExpr)
+      hSafe hScoped hLower (by
+        intro functionName args hEq
+        simpa [hEq] using hOk))
+    hTail
+
+/--
+Checked compiler-output finite-path declaration head backed by recursive raw
+expression preservation.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel
+          prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) (some contract) allowed := by
+  exact
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
+      (sourceFuel := base.succ.succ.succ.succ) (by
+        intro freshState stateHead pre lowerExpr lowerTailStmts hCovers hLower
+        exact
+          sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
+            (minimumTargetTailFuel := minimumTargetTailFuel)
+            (lowerTail := { stmts := lowerTailStmts })
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve hCovers
+            (hSourceScoped.1.2 (identName name) (by simp [identNames]))
+            hSafe hSourceScoped.2 hOk hLower hTail)
+
+/--
+Checked compiler-output finite-path assignment head backed by recursive raw
+expression preservation.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) (some contract) allowed := by
+  exact
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
+      (sourceFuel := base.succ.succ.succ.succ) (by
+        intro freshState stateHead pre lowerExpr lowerTailStmts hCovers hLower
+        have hTargetMem : identName name ∈ layout :=
+          hSourceScoped.1.2 (identName name) (by simp [identNames])
+        have hCoversTarget :
+            FreshCoversLayout [identName name] freshState := by
+          intro target hTarget
+          have hEq : target = identName name := by
+            simpa using hTarget
+          subst target
+          exact hCovers (identName name) (by simp [hTargetMem])
+        have hPreWrites :
+            SourceWritesDisjoint [identName name] pre :=
+          lower1?_sourceWritesDisjoint hCoversTarget hLower
+        unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+        intro source compiler trace sourceDone
+        exact
+          sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive
+            (minimumTargetTailFuel := minimumTargetTailFuel)
+            (ctx := ctx)
+            (lowerTail := { stmts := lowerTailStmts })
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve hCovers hTargetMem hPreWrites
+            hSafe hSourceScoped.2 hOk hLower hTail
+            (source := source) (compiler := compiler) (trace := trace)
+            (sourceDone := sourceDone))
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
