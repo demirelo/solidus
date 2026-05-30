@@ -525,6 +525,11 @@ Remaining work:
      temp while keeping it hidden from the visible source layout, and callee
      halt/revert results remain terminal target outcomes for enclosing
      generated preludes to propagate.
+   - [x] Introduce the terminal-aware raw generated-expression runner and
+     relation: regular preludes return the existing strict value payload,
+     stopped preludes retain their full target outcome/context, append
+     propagation is explicit, and generic let/assign consumers continue only
+     from successful singleton values.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using

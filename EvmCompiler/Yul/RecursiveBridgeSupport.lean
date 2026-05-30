@@ -35449,6 +35449,21 @@ end SourceArgPreludeOpen
 
 namespace SourceExprPreludeOpen
 
+/--
+Terminal-aware target payload for a generated expression prelude.
+
+`values` is the existing strict expression result.  `stopped` retains the full
+statement-prelude completion so enclosing raw consumers can propagate control
+outcomes without discarding the target state needed by terminal/revert
+relations.
+-/
+inductive RawTarget where
+  | values (target : SourceArgPreludeOpenTarget)
+  | stopped (target : Objects.Source.Outcome × Functions.Source.Ctx)
+
+abbrev RawResult :=
+  OpenExternal.OpenResult Functions.EVMException RawTarget
+
 def run
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (ctx : Functions.Source.Ctx)
@@ -35470,6 +35485,36 @@ def run
             (CompilerOpen.LocalsExpr.eval prim lower preResult.1.state)
       | .brk | .cont | .leave | .halt _ =>
           CompilerOpen.invalid
+
+/--
+Terminal-aware generated-expression runner.
+
+Generated statement preludes run before the final pure lowered expression.
+Regular completion evaluates that pure expression and returns `values`; any
+nonregular prelude completion is preserved verbatim as `stopped`.
+-/
+def runRaw
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (targetFuel : Nat) (pre : List Functions.Stmt)
+    {results : Nat} (lower : Locals.Expr results)
+    (compiler : Objects.Source.State) :
+    RawResult :=
+  OpenExternal.OpenResult.bind
+    (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+      targetFuel { stmts := pre } compiler)
+    fun preResult =>
+      match preResult.1.mode with
+      | .regular =>
+          OpenExternal.OpenResult.map
+            (fun exprResult =>
+              .values
+                { state := exprResult.1
+                  ctx := preResult.2
+                  values := exprResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim lower preResult.1.state)
+      | .brk | .cont | .leave | .halt _ =>
+          OpenExternal.OpenResult.ok (.stopped preResult)
 
 theorem run_done_regular
     {prim : Objects.Source.PrimitiveSemantics}
@@ -35570,6 +35615,61 @@ def SourceArgStackPreludeOpenDoneRel
       SourceStateRel cfg layout sourceResult.1 target.state ∧
         sourceResult.2 = target.values
   | _, _ => False
+
+/--
+Terminal-aware generated-expression completion relation.
+
+Successful source expressions reuse the strict value relation.  Source
+`YulHalt` and `Revert` errors correspond only to stopped target preludes with
+the matching target halt mode and post-stop compiler state.  Generated
+expression preludes are not allowed to leak `break`, `continue`, or `leave`.
+-/
+def SourceExprRawPreludeOpenDoneRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop) :
+    Except Exception (State × List Word) →
+      Except Functions.EVMException SourceExprPreludeOpen.RawTarget → Prop
+  | .ok sourceResult, .ok (.values target) =>
+      SourceArgStackPreludeOpenDoneRel cfg layout (.ok sourceResult)
+        (.ok target)
+  | .error (.YulHalt source value), .ok (.stopped (targetOutcome, _)) =>
+      match targetOutcome.mode with
+      | .halt kind => terminalRel kind value source targetOutcome.state
+      | .regular | .brk | .cont | .leave => False
+  | .error (.Revert source), .ok (.stopped (targetOutcome, _)) =>
+      match targetOutcome.mode with
+      | .halt .revert => revertRel source targetOutcome.state
+      | .regular | .brk | .cont | .leave | .halt _ => False
+  | _, _ => False
+
+abbrev SourceExprRawPreludeOpenCallResponseRel : Type :=
+  OpenExternal.OpenCall
+      (OpenExternal.OpenResult Exception (State × List Word)) →
+    OpenExternal.OpenCall SourceExprPreludeOpen.RawResult →
+    OpenExternal.CallResponse → Prop
+
+def SourceExprRawPreludeOpenSoundAtExactTarget
+    (cfg : StateRelConfig) (layout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (expr : AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) {results : Nat}
+    (lower : Locals.Expr results) (targetFuel : Nat)
+    (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel expr codeOverride source))
+        (SourceExprPreludeOpen.runRaw prim program ctx targetFuel pre lower
+          compiler)
 
 def SourceArgRawPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name)
@@ -53552,6 +53652,48 @@ theorem compilerOpen_block_runOpen_append_eq
               simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
 
 /--
+Open append law for terminal-aware generated-expression preludes.
+
+Unlike the strict expression runner, the raw runner propagates a nonregular
+prefix completion as `stopped`.  This is the append law used by recursive
+compound-expression preservation.
+-/
+theorem sourceExprPreludeOpen_runRaw_append_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} :
+    ∀ {pre suffix : List Functions.Stmt}
+      {ctx : Functions.Source.Ctx} {state : Objects.Source.State}
+      {results : Nat} {lower : Locals.Expr results}
+      {suffixFuel : Nat},
+      SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + suffixFuel) (pre ++ suffix) lower state =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (pre.length + suffixFuel) { stmts := pre } state)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                SourceExprPreludeOpen.runRaw prim program preResult.2
+                  suffixFuel suffix lower preResult.1.state
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok
+                  (.stopped preResult)) := by
+  intro pre suffix ctx state results lower suffixFuel
+  unfold SourceExprPreludeOpen.runRaw
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (pre := pre) (suffix := suffix)
+    (ctx := ctx) (state := state) (suffixFuel := suffixFuel)]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode <;>
+        simp [SourceExprPreludeOpen.runRaw, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok]
+
+/--
 Open append law for compiler-generated argument preludes.
 
 The old closed proof could compose generated preludes with a suffix only after
@@ -54337,6 +54479,113 @@ def runAssignTarget
               | _ => CompilerOpen.invalid)
       | .brk | .cont | .leave | .halt _ =>
           OpenExternal.OpenResult.ok preResult)
+
+def runLetTargetAfterRaw
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (name : Name)
+    (tail : List Functions.Stmt) (tailFuel : Nat) :
+    SourceExprPreludeOpen.RawTarget →
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)
+  | .values target =>
+      match target.values with
+      | [value] =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program
+            { target.ctx with scope := name :: target.ctx.scope }
+            tailFuel { stmts := tail } (target.state.insert name value)
+      | _ => CompilerOpen.invalid
+  | .stopped target =>
+      OpenExternal.OpenResult.ok target
+
+def runAssignTargetAfterRaw
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (name : Name)
+    (tail : List Functions.Stmt) (tailFuel : Nat) :
+    SourceExprPreludeOpen.RawTarget →
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)
+  | .values target =>
+      match target.values with
+      | [value] =>
+          CompilerOpen.FunctionsOpen.Block.runOpen prim program target.ctx
+            tailFuel { stmts := tail } (target.state.insert name value)
+      | _ => CompilerOpen.invalid
+  | .stopped target =>
+      OpenExternal.OpenResult.ok target
+
+/--
+Declarations consume terminal-aware expression preludes generically.
+
+Successful singleton values populate the declared local and enter the tail.
+Stopped generated preludes propagate their full statement outcome unchanged.
+-/
+theorem runLetTarget_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runLetTarget prim program ctx pre name lowerExpr tail tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        (runLetTargetAfterRaw prim program name tail tailFuel) := by
+  unfold runLetTarget SourceExprPreludeOpen.runRaw
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode with
+      | regular =>
+          simp only [Functions.Source.Outcome.regular,
+            Locals.Source.Outcome.regular, OpenExternal.OpenResult.map]
+          rw [openResult_bind_assoc]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro exprResult
+          simp [runLetTargetAfterRaw, OpenExternal.OpenResult.map,
+            OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | brk | cont | leave | halt =>
+          simp [runLetTargetAfterRaw, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+
+/--
+Assignments consume terminal-aware expression preludes generically.
+
+Successful singleton values update the existing local and enter the tail.
+Stopped generated preludes propagate their full statement outcome unchanged.
+-/
+theorem runAssignTarget_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    runAssignTarget prim program ctx pre name lowerExpr tail tailFuel compiler =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        (runAssignTargetAfterRaw prim program name tail tailFuel) := by
+  unfold runAssignTarget SourceExprPreludeOpen.runRaw
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode with
+      | regular =>
+          simp only [Functions.Source.Outcome.regular,
+            Locals.Source.Outcome.regular, OpenExternal.OpenResult.map]
+          rw [openResult_bind_assoc]
+          apply OpenExternal.OpenResult.bind_congr_next
+          intro exprResult
+          simp [runAssignTargetAfterRaw, OpenExternal.OpenResult.map,
+            OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+      | brk | cont | leave | halt =>
+          simp [runAssignTargetAfterRaw, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
 
 theorem runLetTarget_append_eq
     {prim : Objects.Source.PrimitiveSemantics}
