@@ -563,6 +563,10 @@ Remaining work:
      `YulOpen.evalValues` user-call semantics: reversed raw argument evaluation,
      restored stack order, open callee entry, stopped prefixes, and suspended
      requests now share one checked source-side equation.
+   - [x] Name and expose the compact target-side internal-call continuation:
+     regular generated argument completion enters lowered argument replay,
+     selected body execution, and hidden-slot replay; stopped prefixes remain
+     stopped without duplicating the bind tree in recursive callbacks.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

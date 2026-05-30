@@ -57632,6 +57632,110 @@ theorem sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_open_call_body_of_find
             OpenExternal.OpenResult.ok]
 
 /--
+Target continuation after a regular generated argument prefix for an internal
+user-call expression.
+
+The fresh hidden result slot is initialized before the lowered call arguments
+are replayed.  The selected callee body remains open, and restored completion
+is converted into the raw expression endpoint by assigning and reading that
+slot.
+-/
+def compilerOpenUserCallRawAfterRegularArgs
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (fn : Functions.FunDef)
+    (lowerArgs : List (Locals.Expr 1)) (tmp : Name) (tailFuel : Nat)
+    (preResult : Functions.Source.Outcome × Functions.Source.Ctx) :
+    SourceExprPreludeOpen.RawResult :=
+  OpenExternal.OpenResult.bind
+    (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+      (preResult.1.state.insert tmp Expr.zero))
+    (fun argResult =>
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn
+          argResult.2 tailFuel argResult.1.shared)
+        (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+          { preResult.2 with scope := tmp :: preResult.2.scope }
+          argResult.1))
+
+/--
+Target continuation after the complete generated argument prefix for an
+internal user-call expression.
+
+Only a regular prefix enters the selected callee.  A prefix that already
+halted or reverted remains a stopped raw expression so enclosing generated
+preludes can propagate the terminal result.
+-/
+def compilerOpenUserCallRawAfterArgs
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (fn : Functions.FunDef)
+    (lowerArgs : List (Locals.Expr 1)) (tmp : Name) (tailFuel : Nat)
+    (preResult : Functions.Source.Outcome × Functions.Source.Ctx) :
+    SourceExprPreludeOpen.RawResult :=
+  match preResult.1.mode with
+  | .regular =>
+      compilerOpenUserCallRawAfterRegularArgs prim program fn lowerArgs tmp
+        tailFuel preResult
+  | .brk | .cont | .leave | .halt _ =>
+      OpenExternal.OpenResult.ok (.stopped preResult)
+
+/--
+Compact terminal-aware target decomposition for a complete lowered internal
+user-call expression.
+
+This is the callback-friendly form of
+`sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_open_call_body_of_find_function`.
+-/
+theorem sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {fn : Functions.FunDef}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (compilerOpenUserCallRawAfterArgs prim program fn lowerArgs tmp
+            tailFuel) := by
+  rcases
+      sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_open_call_body_of_find_function
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (tailFuel := tailFuel)
+        (compiler := compiler) (fn := fn) hLower hFind with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hTarget⟩
+  exact
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, by
+      simpa [compilerOpenUserCallRawAfterArgs,
+        compilerOpenUserCallRawAfterRegularArgs] using hTarget⟩
+
+/--
 Exact target-side shape of the hidden result-slot suffix emitted for an
 internal user-call expression at the expression-prelude level.
 
