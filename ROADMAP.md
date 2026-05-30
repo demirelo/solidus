@@ -548,6 +548,9 @@ Remaining work:
      and compose terminal-aware prefixes with raw expression continuations:
      regular prefixes continue, terminal prefixes stop, and suspended requests
      remain visible through the outer bind.
+   - [x] Reuse the checked hidden-result-slot freshness theorem at the
+     terminal-aware raw boundary: regular prefixes replay the reversed lowered
+     arguments unchanged after insertion of the fresh compiler-only slot.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
