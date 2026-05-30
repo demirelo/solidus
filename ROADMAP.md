@@ -714,6 +714,9 @@ Remaining work:
    - [x] Add the checked canonical generated-argument facade: whole-list CALL
      safety, lexical scope, and user-call arity now construct selected-head
      singleton invariants internally.
+   - [x] Carry syntax-reserve adequacy through canonical generated-argument
+     recursion and expose `sourceExprRawPreludeBaseReserve head ≤ residualBase`
+     at every nested expression callback.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

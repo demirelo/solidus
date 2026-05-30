@@ -110796,6 +110796,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         {ctxHead : Functions.Source.Ctx}
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
+        sourceExprRawPreludeBaseReserve head ≤ base →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -110820,6 +110821,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (OpenExternal.YulOpenResult.toOpenResult
             (OpenExternal.YulOpen.evalValues base.succ.succ.succ.succ head
               codeOverride sourceTailResult.1)))
+    (hReserve : sourceExprsRawPreludeBaseReserve args ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hLower :
       Expr.List.lowerBound1? freshState args =
@@ -110844,6 +110846,14 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (callResponseRel := finalCallResponseRel) hLower
           (source := source) (compiler := compiler) hInitial)
   | cons head tail ih =>
+      have hReserveHead :
+          sourceExprRawPreludeBaseReserve head ≤ base := by
+        simp only [sourceExprsRawPreludeBaseReserve] at hReserve
+        exact (Nat.le_max_left _ _).trans hReserve
+      have hReserveTail :
+          sourceExprsRawPreludeBaseReserve tail ≤ base.succ.succ := by
+        simp only [sourceExprsRawPreludeBaseReserve] at hReserve
+        omega
       have hCons :
           SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
             terminalRel revertRel prim program ctx
@@ -110871,10 +110881,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (hHead := by
                     intro base' targetTailFuel' head' stateHeadStart' preHead'
                       lowerHead' stateHead' ctxHead' headCallResponseRel
-                      hHeadMem hHeadLower
+                      hHeadMem hHeadReserve hHeadLower
                     exact
                       hHead headCallResponseRel
-                        (List.mem_cons_of_mem head hHeadMem) hHeadLower)
+                        (List.mem_cons_of_mem head hHeadMem) hHeadReserve
+                        hHeadLower)
                   (hHeadSingle := by
                     intro base' head' stateHeadStart' preHead' lowerHead'
                       stateHead' sourceTailResult' targetState' hHeadMem
@@ -110890,8 +110901,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                     SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedTail
                       prim program head codeOverride preHead lowerHead tmp
                       base.succ.succ targetTailFuel finalCallResponseRel)
-                  hCovers hTailLower (source := source) (compiler := compiler)
-                  hInitial))
+                  hReserveTail hCovers hTailLower (source := source)
+                  (compiler := compiler) hInitial))
             (by
               intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
                 ctxHead sourceTailResult targetTailResult hTailLower hHeadLower
@@ -110901,7 +110912,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedHead
                     prim program tmp targetTailFuel sourceTailResult.2
                     finalCallResponseRel)
-                  (by simp) hHeadLower)
+                  (by simp) hReserveHead hHeadLower)
             (by
               intro stateTail preHead lowerHead stateHead sourceTailResult
                 targetState hHeadLower hInitial
@@ -110941,12 +110952,14 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         {ctxHead : Functions.Source.Ctx}
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
+        sourceExprRawPreludeBaseReserve head ≤ base →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
           revertRel prim program ctxHead base.succ.succ.succ.succ head
           (some contract) preHead lowerHead
           (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
+    (hReserve : sourceExprsRawPreludeBaseReserve args ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafe : Safe.CallSafe.exprs args)
     (hScoped : SourceExprsScoped layout args)
@@ -110976,7 +110989,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (contract := contract) (freshState := stateHeadStart)
           (freshState' := stateHead) (pre := preHead) (lower := lowerHead)
           hSafe hScoped hOk hMem hHeadLower hInitial)
-    hCovers hLower
+    hReserve hCovers hLower
 
 /--
 Structural compiler-output dispatcher for terminal-aware raw arguments.
