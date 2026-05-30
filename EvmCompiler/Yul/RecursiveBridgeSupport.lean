@@ -109617,7 +109617,7 @@ The target reserve grows by the generated head-prefix cost before recursively
 proving the tail.  Later expression recursion can therefore consume one
 whole-list `lowerBound1?` result without rebuilding nil/cons lowering cases.
 -/
-theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem
     {cfg : StateRelConfig} {coverLayout layout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -109635,6 +109635,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
       ∀ {base targetTailFuel : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
         {ctxHead : Functions.Source.Ctx},
+        head ∈ args →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -109644,6 +109645,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     (hHeadSingle :
       ∀ {base : Nat} {head : AstExpr}
         {sourceTailResult : State × List Word},
+        head ∈ args →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109764,7 +109766,17 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
               hTailLower hHeadLower
             intro source compiler hInitial
             simpa [Nat.add_assoc] using
-              (ih (base := base.succ.succ)
+              (ih
+                (hHead := by
+                  intro base' targetTailFuel' head' stateHeadStart' preHead'
+                    lowerHead' stateHead' ctxHead' hHeadMem hHeadLower
+                  exact
+                    hHead (List.mem_cons_of_mem head hHeadMem) hHeadLower)
+                (hHeadSingle := by
+                  intro base' head' sourceTailResult' hHeadMem
+                  exact
+                    hHeadSingle (List.mem_cons_of_mem head hHeadMem))
+                (base := base.succ.succ)
                 (targetTailFuel := preHead.length + targetTailFuel.succ)
                 (freshState := freshState) (stateFresh := stateTail)
                 (pre := preTail) (lowerArgs := lowerTail) (ctx := ctx)
@@ -109776,8 +109788,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
               hHead (base := base) (targetTailFuel := targetTailFuel)
                 (head := head) (stateHeadStart := stateTail)
                 (preHead := preHead) (lowerHead := lowerHead)
-                (stateHead := stateHead) (ctxHead := ctxHead) hHeadLower)
-          (hHeadSingle (base := base) (head := head))
+                (stateHead := stateHead) (ctxHead := ctxHead)
+                (by simp) hHeadLower)
+          (hHeadSingle (base := base) (head := head) (by simp))
           (by
             intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
               hTailLower hHeadLower hFresh sourceCall targetCall response
