@@ -54516,6 +54516,7 @@ def SourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx
       (OpenExternal.YulOpenResult.toOpenResult
         (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
       trace sourceDone →
+    (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
     SourceOpenTraceResponsesAdmissible cfg trace →
     ∀ minimumTargetFuel,
       ∃ targetFuel,
@@ -54596,7 +54597,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
   · rcases hHeadError with ⟨err, hSourceHead, rfl⟩
-    rcases hHead hInitial hSourceHead hResponses minimumTargetFuel with
+    rcases hHead hInitial hSourceHead (fun _hNotRegular => hAllowed) hResponses
+        minimumTargetFuel with
       ⟨headFuel, hMinimumHead, hHeadPath⟩
     rcases hHeadPath.resolves with
       ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
@@ -54661,7 +54663,33 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
       OpenExternal.OpenTrace.left_of_append hResponses
     have hTailResponses : SourceOpenTraceResponsesAdmissible cfg tailTrace :=
       OpenExternal.OpenTrace.right_of_append hResponses
-    rcases hHead hInitial hSourceHead hHeadResponses minimumTargetFuel with
+    have hHeadAllowed :
+        SourceResultNotRegularOk (.ok headDone) → allowed (.ok headDone) := by
+      intro hNotRegular
+      cases headDone with
+      | Ok shared store =>
+          cases hNotRegular
+      | OutOfFuel =>
+          have hTailDone :
+              OpenExternal.OpenResultResolves
+                (.done (.ok (.OutOfFuel : State))) tailTrace sourceDone := by
+            simpa [OpenExternal.YulOpen.execSeq,
+              OpenExternal.YulOpenResult.toOpenResult,
+              OpenExternal.YulOpenResult.ok] using hSourceTail
+          cases hTailDone
+          exact hAllowed
+      | Checkpoint jump =>
+          have hTailDone :
+              OpenExternal.OpenResultResolves
+                (.done (.ok (.Checkpoint jump : State))) tailTrace
+                sourceDone := by
+            simpa [OpenExternal.YulOpen.execSeq,
+              OpenExternal.YulOpenResult.toOpenResult,
+              OpenExternal.YulOpenResult.ok] using hSourceTail
+          cases hTailDone
+          exact hAllowed
+    rcases hHead hInitial hSourceHead hHeadAllowed hHeadResponses
+        minimumTargetFuel with
       ⟨headFuel, hMinimumHead, hHeadPath⟩
     rcases hHeadPath.resolves with
       ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
@@ -55083,6 +55111,130 @@ theorem openResult_bind_ok_eq
         funext response
         exact ih response)
       result)
+
+/--
+Lift a selected compiled block path through scoped cleanup and the enclosing
+statement boundary after regular completion.
+-/
+theorem compilerOpen_stmt_run_block_resolves_of_runOpen_regular
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {fuel : Nat} {body : Functions.Block}
+    {compiler compilerAfter : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel body
+          compiler)
+        trace
+        (.ok (Functions.Source.Outcome.regular compilerAfter, ctxAfter))) :
+    OpenExternal.OpenResultResolves
+      (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel (.block body)
+        compiler)
+      trace
+      (.ok
+        (Functions.Source.Outcome.regular (compilerAfter.restrictTo ctx.scope),
+          ctx)) := by
+  simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+  unfold CompilerOpen.FunctionsOpen.Block.runScoped
+  rw [openResult_bind_assoc]
+  let okOutcome :
+      Objects.Source.Outcome →
+        OpenExternal.OpenResult Functions.EVMException Objects.Source.Outcome :=
+    fun outcome => OpenExternal.OpenResult.ok outcome
+  let okPair :
+      Objects.Source.Outcome →
+        OpenExternal.OpenResult Functions.EVMException
+          (Objects.Source.Outcome × Functions.Source.Ctx) :=
+    fun outcome => OpenExternal.OpenResult.ok (outcome, ctx)
+  have hCleanup :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind
+          (okOutcome
+            (Functions.Source.Outcome.regular
+              (compilerAfter.restrictTo ctx.scope)))
+          okPair)
+        []
+        (.ok
+          (Functions.Source.Outcome.regular
+            (compilerAfter.restrictTo ctx.scope), ctx)) := by
+    exact
+      OpenExternal.OpenResultResolves.bind_ok
+        OpenExternal.OpenResultResolves.done
+        OpenExternal.OpenResultResolves.done
+  simpa only [List.append_nil] using
+    (OpenExternal.OpenResultResolves.bind_ok
+      (next := fun value =>
+        OpenExternal.OpenResult.bind
+          (match value.1.mode with
+          | .regular =>
+              okOutcome
+                (Functions.Source.Outcome.regular
+                  (value.1.state.restrictTo ctx.scope))
+          | .brk | .cont | .leave | .halt _ =>
+              okOutcome value.1)
+          okPair)
+      hResolve hCleanup)
+
+/--
+Lift a selected compiled block path through scoped cleanup and the enclosing
+statement boundary when the completed body is already stopping.
+-/
+theorem compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {fuel : Nat} {body : Functions.Block} {compiler : Objects.Source.State}
+    {outcome : Objects.Source.Outcome} {trace : OpenExternal.OpenTrace}
+    (hMode : outcome.mode ≠ .regular)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel body
+          compiler)
+        trace (.ok (outcome, ctxAfter))) :
+    OpenExternal.OpenResultResolves
+      (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel (.block body)
+        compiler)
+      trace (.ok (outcome, ctx)) := by
+  simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+  unfold CompilerOpen.FunctionsOpen.Block.runScoped
+  rw [openResult_bind_assoc]
+  let okOutcome :
+      Objects.Source.Outcome →
+        OpenExternal.OpenResult Functions.EVMException Objects.Source.Outcome :=
+    fun outcome => OpenExternal.OpenResult.ok outcome
+  let okPair :
+      Objects.Source.Outcome →
+        OpenExternal.OpenResult Functions.EVMException
+          (Objects.Source.Outcome × Functions.Source.Ctx) :=
+    fun outcome => OpenExternal.OpenResult.ok (outcome, ctx)
+  have hCleanup :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind
+          (match outcome.mode with
+          | .regular =>
+              okOutcome
+                (Functions.Source.Outcome.regular
+                  (outcome.state.restrictTo ctx.scope))
+          | .brk | .cont | .leave | .halt _ =>
+              okOutcome outcome)
+          okPair)
+        [] (.ok (outcome, ctx)) := by
+    cases hOutcomeMode : outcome.mode <;>
+      simp_all [OpenExternal.OpenResult.ok] <;>
+      exact OpenExternal.OpenResultResolves.done
+  simpa only [List.append_nil] using
+    (OpenExternal.OpenResultResolves.bind_ok
+      (next := fun value =>
+        OpenExternal.OpenResult.bind
+          (match value.1.mode with
+          | .regular =>
+              okOutcome
+                (Functions.Source.Outcome.regular
+                  (value.1.state.restrictTo ctx.scope))
+          | .brk | .cont | .leave | .halt _ =>
+              okOutcome value.1)
+          okPair)
+      hResolve hCleanup)
 
 /--
 Lift an open function-body sequence relation through imported Yul block-scope
