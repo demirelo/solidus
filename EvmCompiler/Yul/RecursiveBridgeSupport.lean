@@ -110565,6 +110565,215 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_callSafe_of_arg_terminal
         (exprCallResponseRel := exprCallResponseRel) (by rfl) hBasic
         hLowerVars hSeq hDone hPrimitiveResponse
 
+/--
+Terminal-aware raw expression preservation for literals.
+-/
+theorem sourceExprRawPreludeOpenSoundAtExactTarget_lit
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {value : Word} {codeOverride : Option AstContract}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel} :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Lit value) codeOverride [] (.lit value)
+      targetFuel.succ callResponseRel := by
+  intro source compiler hInitial
+  cases hInitial with
+  | ok hShared hVars =>
+      rename_i shared store
+      have hSource :
+          OpenExternal.YulOpen.evalValues sourceFuel.succ (.Lit value)
+              codeOverride (.Ok shared store) =
+            .done (.ok (.Ok shared store, [value])) := by
+        simp [OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpenResult.ok]
+      have hTarget :
+          SourceExprPreludeOpen.runRaw prim program ctx targetFuel.succ []
+              (.lit value) compiler =
+            .done (.ok (.values
+              { state := compiler
+                ctx := ctx
+                values := [value] })) := by
+        simp [SourceExprPreludeOpen.runRaw,
+          CompilerOpen.FunctionsOpen.Block.runOpen,
+          CompilerOpen.LocalsExpr.eval, OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+          Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+      rw [hSource, hTarget]
+      exact
+        OpenExternal.OpenResultRel.done
+          ⟨SourceStateRel.ok hShared hVars, rfl⟩
+
+/--
+Checked-lowering wrapper for terminal-aware raw literal preservation.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_lit_of_lower1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {value : Word} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hTargetFuel : 0 < targetFuel)
+    (hLower :
+      Expr.lower1? freshState (.Lit value) =
+        some (pre, lower, freshState')) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Lit value) codeOverride pre lower
+      targetFuel callResponseRel := by
+  simp [Expr.lower1?, Expr.lower?] at hLower
+  rcases hLower with ⟨hPre, hLowerExpr, _hState⟩
+  subst pre
+  have hLowerEq : lower = (.lit value : Locals.Expr 1) := by
+    rw [← hLowerExpr]
+    simp [Expr.cast]
+  rw [hLowerEq]
+  cases targetFuel with
+  | zero =>
+      intro source compiler hInitial
+      exact False.elim (Nat.not_lt_zero _ hTargetFuel)
+  | succ targetFuelPred =>
+      intro source compiler hInitial
+      simpa [Nat.succ_eq_add_one] using
+        (sourceExprRawPreludeOpenSoundAtExactTarget_lit
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel)
+          (targetFuel := targetFuelPred) (value := value)
+          (codeOverride := codeOverride) (callResponseRel := callResponseRel)
+          (source := source) (compiler := compiler) hInitial)
+
+/--
+Terminal-aware raw expression preservation for scoped variables.
+-/
+theorem sourceExprRawPreludeOpenSoundAtExactTarget_var_of_storeDomainContains
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {name : EvmYul.Identifier} {codeOverride : Option AstContract}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hMem : identName name ∈ layout)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Var name) codeOverride []
+      (.var (identName name)) targetFuel.succ callResponseRel := by
+  intro source compiler hInitial
+  cases hInitial with
+  | ok hShared hVars =>
+      rename_i shared store
+      have hContains :
+          StoreDomainContains layout store :=
+        hStoreContains (SourceStateRel.ok hShared hVars)
+      have hLookupSome :
+          (store.lookup (identName name)).isSome = true :=
+        hContains (identName name) hMem
+      cases hLookupStore :
+          store.lookup (identName name) with
+      | none =>
+          simp [hLookupStore] at hLookupSome
+      | some sourceValue =>
+          have hLookupState :
+              EvmYul.Yul.State.lookup? name (.Ok shared store) =
+                some sourceValue := by
+            simpa [EvmYul.Yul.State.lookup?, identName] using hLookupStore
+          have hCompilerVar :
+              compiler.vars (identName name) = some sourceValue := by
+            simpa [hLookupStore] using
+              hVars (identName name) hMem
+          have hSource :
+              OpenExternal.YulOpen.evalValues sourceFuel.succ (.Var name)
+                  codeOverride (.Ok shared store) =
+                .done (.ok (.Ok shared store, [sourceValue])) := by
+            simp [OpenExternal.YulOpen.evalValues, hLookupState,
+              OpenExternal.YulOpenResult.ok]
+          have hTarget :
+              SourceExprPreludeOpen.runRaw prim program ctx targetFuel.succ []
+                  (.var (identName name)) compiler =
+                .done (.ok (.values
+                  { state := compiler
+                    ctx := ctx
+                    values := [sourceValue] })) := by
+            simp [SourceExprPreludeOpen.runRaw,
+              CompilerOpen.FunctionsOpen.Block.runOpen,
+              CompilerOpen.LocalsExpr.eval, hCompilerVar,
+              OpenExternal.OpenResult.bind, OpenExternal.OpenResult.map,
+              OpenExternal.OpenResult.ok, Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular]
+          rw [hSource, hTarget]
+          exact
+            OpenExternal.OpenResultRel.done
+              ⟨SourceStateRel.ok hShared hVars, rfl⟩
+
+/--
+Checked-lowering wrapper for terminal-aware raw scoped-variable preservation.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {name : EvmYul.Identifier} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hTargetFuel : 0 < targetFuel)
+    (hMem : identName name ∈ layout)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.lower1? freshState (.Var name) =
+        some (pre, lower, freshState')) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Var name) codeOverride pre lower
+      targetFuel callResponseRel := by
+  simp [Expr.lower1?, Expr.lower?] at hLower
+  rcases hLower with ⟨hPre, hLowerExpr, _hState⟩
+  subst pre
+  have hLowerEq : lower = (.var (identName name) : Locals.Expr 1) := by
+    rw [← hLowerExpr]
+    simp [Expr.cast]
+  rw [hLowerEq]
+  cases targetFuel with
+  | zero =>
+      intro source compiler hInitial
+      exact False.elim (Nat.not_lt_zero _ hTargetFuel)
+  | succ targetFuelPred =>
+      intro source compiler hInitial
+      simpa [Nat.succ_eq_add_one] using
+        (sourceExprRawPreludeOpenSoundAtExactTarget_var_of_storeDomainContains
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel)
+          (targetFuel := targetFuelPred) (name := name)
+          (codeOverride := codeOverride) (callResponseRel := callResponseRel)
+          hMem hStoreContains (source := source) (compiler := compiler)
+          hInitial)
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

@@ -619,6 +619,10 @@ Remaining work:
      now provide one generated argument proof; regular completion chooses the
      safe primitive or ordinary open-`CALL` strict continuation internally,
      while stopped prefixes bypass the primitive.
+   - [x] Add terminal-aware raw literal and scoped-variable leaves plus their
+     checked `lower1?` wrappers. Empty generated prefixes return honest raw
+     values directly; variable lookup keeps the visible-store containment
+     premise explicit.
    - [x] Scope the structural raw argument dispatcher callback to head
      subterms of the current argument list before assembling the final
      recursive expression constructor. The live theorem now threads
