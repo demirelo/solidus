@@ -563,6 +563,10 @@ Remaining work:
    - [x] Factor imported reverse-cons argument evaluation through raw
      `evalValues` for the head before its singleton projection, so nested calls
      remain visible at the recursive expression boundary in source order.
+   - [x] Compose one terminal-aware raw generated argument head after a regular
+     tail prefix: successful heads insert the fresh temporary and replay the
+     complete lowered list, while stopped heads propagate their terminal result
+     without entering generated replay.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
