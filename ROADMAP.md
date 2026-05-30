@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 03:14 PDT.
+Last updated: 2026-05-30 03:19 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -38,6 +38,11 @@ Finite-trace correction:
   requested target cutoff floor, the target constructs one adequate exact
   cutoff at or above that floor; it does not claim every larger cutoff works.
   The direct zero/one source-fuel base cases are verified.
+- [x] Add successful-path target cutoff extension for `CompilerOpen`: once one
+  concrete finite response path resolves successfully, any larger cutoff
+  follows that same selected path to the same result. This covers blocks,
+  scoped blocks, user-function bodies, loops, conditionals, switches, and
+  internal user calls without making a whole-tree monotonicity claim.
 - [ ] Make expression-prefix, generated-argument, selected-callee body, and
   sequence-tail composition path-native. Construct the exact target cutoff
   from the selected finite trace rather than asking one cutoff to cover the

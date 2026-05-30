@@ -1935,6 +1935,80 @@ theorem bind_inv
                     OpenResultResolves.call hPrefix, hSuffix⟩)
       source) hResolve
 
+/--
+Transport one resolved bound path when both the prefix computation and each
+selected successful continuation preserve the same concrete trace and result.
+-/
+theorem bind_mono
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source source' : OpenResult ε α}
+    {next next' : α → OpenResult ε β}
+    {trace : OpenTrace} {result : Except ε β}
+    (hResolve :
+      OpenResultResolves (OpenResult.bind source next) trace result)
+    (hSource :
+      ∀ {trace sourceDone},
+        OpenResultResolves source trace sourceDone →
+          OpenResultResolves source' trace sourceDone)
+    (hNext :
+      ∀ {value trace result},
+        OpenResultResolves (next value) trace result →
+          OpenResultResolves (next' value) trace result) :
+    OpenResultResolves (OpenResult.bind source' next') trace result := by
+  rcases bind_inv hResolve with hError | hOk
+  · rcases hError with ⟨err, hPrefix, hResult⟩
+    subst result
+    exact bind_error (hSource hPrefix)
+  · rcases hOk with ⟨left, right, value, hTrace, hPrefix, hSuffix⟩
+    subst trace
+    exact bind_ok (hSource hPrefix) (hNext hSuffix)
+
+/--
+Transport one successfully resolved bind path when the prefix and the selected
+continuation preserve successful resolutions.  This is the useful fuel-padding
+shape: a fuel-zero error is intentionally not claimed to survive a larger
+executable cutoff.
+-/
+theorem bind_ok_mono
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source source' : OpenResult ε α}
+    {next next' : α → OpenResult ε β}
+    {trace : OpenTrace} {result : β}
+    (hResolve :
+      OpenResultResolves (OpenResult.bind source next) trace (.ok result))
+    (hSource :
+      ∀ {trace value},
+        OpenResultResolves source trace (.ok value) →
+          OpenResultResolves source' trace (.ok value))
+    (hNext :
+      ∀ {value trace result},
+        OpenResultResolves (next value) trace (.ok result) →
+          OpenResultResolves (next' value) trace (.ok result)) :
+    OpenResultResolves (OpenResult.bind source' next') trace (.ok result) := by
+  rcases bind_inv hResolve with hError | hOk
+  · rcases hError with ⟨err, _hPrefix, hResult⟩
+    cases hResult
+  · rcases hOk with ⟨left, right, value, hTrace, hPrefix, hSuffix⟩
+    subst trace
+    exact bind_ok (hSource hPrefix) (hNext hSuffix)
+
+/-- Resolution along one fixed trace is deterministic. -/
+theorem deterministic
+    {ε : Type u} {α : Type v}
+    {source : OpenResult ε α} {trace : OpenTrace}
+    {left right : Except ε α}
+    (hLeft : OpenResultResolves source trace left)
+    (hRight : OpenResultResolves source trace right) :
+    left = right := by
+  induction hLeft generalizing right with
+  | done =>
+      cases hRight
+      rfl
+  | @call call response trace left hTail ih =>
+      cases hRight with
+      | @call _ _ _ _ hTail' =>
+          exact ih hTail'
+
 end OpenResultResolves
 
 /--
