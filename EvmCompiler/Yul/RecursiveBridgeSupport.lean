@@ -38243,6 +38243,44 @@ theorem yulOpenEvalArgsAppendFuel_eq_add_length
       simp [yulOpenEvalArgsAppendFuel, ih]
       omega
 
+/--
+If the open argument evaluator does not have enough fuel to reach an appended
+head, the appended head is observationally absent.
+
+This equality is deliberately below the two-ticks-per-prefix boundary.  It is
+the low-fuel sibling of the scheduled append equation: nested calls in the
+reachable prefix remain visible, while the unreachable head contributes no
+interaction tree at all.
+-/
+theorem yulOpen_evalArgs_append_singleton_eq_of_fuel_le_twice_length
+    {argsPrefix : List AstExpr} {head : AstExpr}
+    {sourceFuel : Nat} {codeOverride : Option AstContract} {source : State}
+    (hFuel : sourceFuel ≤ 2 * argsPrefix.length) :
+    OpenExternal.YulOpen.evalArgs sourceFuel (argsPrefix ++ [head])
+        codeOverride source =
+      OpenExternal.YulOpen.evalArgs sourceFuel argsPrefix codeOverride source := by
+  induction argsPrefix generalizing sourceFuel source with
+  | nil =>
+      simp only [List.length_nil, mul_zero] at hFuel
+      have hSourceFuel : sourceFuel = 0 := by omega
+      subst sourceFuel
+      simp [OpenExternal.YulOpen.evalArgs]
+  | cons first rest ih =>
+      cases sourceFuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs]
+      | succ sourceFuel =>
+          cases sourceFuel with
+          | zero =>
+              simp [OpenExternal.YulOpen.evalArgs,
+                OpenExternal.YulOpen.evalTail]
+          | succ sourceFuel =>
+              have hTailFuel : sourceFuel ≤ 2 * rest.length := by
+                simp only [List.length_cons] at hFuel
+                omega
+              simp [OpenExternal.YulOpen.evalArgs,
+                OpenExternal.YulOpen.evalTail, ih hTailFuel]
+
 theorem exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le
     {fuel : Nat} (args : List AstExpr)
     (hFuel : 2 * args.length + 3 ≤ fuel) :
