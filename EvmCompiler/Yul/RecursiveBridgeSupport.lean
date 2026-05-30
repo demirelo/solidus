@@ -25699,6 +25699,354 @@ theorem yulOpenEvalArgsReverse_toOpenResult_doneInvariant_outOfFuel_of_callSafe_
   (yulOpenEvalValues_evalArgs_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
     fuel).2 (callSafe_exprs_reverse hSafe)
 
+theorem multifill'_toOpenResult_doneInvariant_outOfFuel
+    {names : List Name} {result : Except Exception (State × List Word)}
+    (hResult :
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv (fun state => state = .OutOfFuel))
+        (.done result)) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (.done (EvmYul.Yul.multifill' names result)) := by
+  cases result with
+  | error err =>
+      simp [EvmYul.Yul.multifill']
+      exact OpenResultDoneInvariant.done True.intro
+  | ok pair =>
+      rcases pair with ⟨state, values⟩
+      cases hResult with
+      | done hState =>
+          subst state
+          simp [EvmYul.Yul.multifill', multifill_outOfFuel]
+          exact OpenResultDoneInvariant.done rfl
+
+theorem yulOpenExecPrimCall_toOpenResult_doneInvariant_outOfFuel
+    {fuel : Nat} {prim : EvmYul.Operation .Yul} {names : List Name}
+    {argsResult : OpenExternal.YulOpenResult (State × List Word)}
+    (hSafe : Safe.CallSafe.primitive prim)
+    (hArgs :
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult argsResult)) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execPrimCall fuel prim names argsResult)) := by
+  unfold OpenExternal.YulOpen.execPrimCall
+  exact YulOpenPairStateDoneInv.bind_state hArgs (by
+    intro stateArgs argValues hArgsEq
+    subst stateArgs
+    have hSplit : Safe.primitive prim ∨ prim = .System .CALL :=
+      (Safe.CallSafe.primitive_iff_safe_or_call prim).mp hSafe
+    cases hSplit with
+    | inl hSafePrim =>
+        have hNoOpen :
+            OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                .OutOfFuel prim argValues =
+              none :=
+          yulPrimitiveEvalValuesOpenCall?_none_of_safe_primitive hSafePrim
+        simp [hNoOpen]
+        exact
+          multifill'_toOpenResult_doneInvariant_outOfFuel
+            (primCall_safe_toOpenResult_doneInvariant_outOfFuel hSafePrim)
+    | inr hCallPrim =>
+        subst prim
+        cases hOpen :
+            OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                .OutOfFuel (.System .CALL) argValues with
+        | none =>
+            simp [hOpen]
+            exact
+              multifill'_toOpenResult_doneInvariant_outOfFuel
+                (primCall_yul_call_toOpenResult_doneInvariant_outOfFuel_of_no_open
+                  hOpen)
+        | some call =>
+            simp [hOpen]
+            exact
+              YulOpenPairStateDoneInv.bind_state
+                (yulPrimitiveEvalValuesOpenCall?_toOpenResult_doneInvariant_outOfFuel_status
+                  hOpen)
+                (by
+                  intro stateAfter values hStateEq
+                  subst stateAfter
+                  exact OpenResultDoneInvariant.done rfl))
+
+theorem yulOpenExecCall_toOpenResult_doneInvariant_outOfFuel
+    {fuel : Nat} {functionName : Name} {names : List Name}
+    {codeOverride : Option AstContract}
+    {argsResult : OpenExternal.YulOpenResult (State × List Word)}
+    (hArgs :
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult argsResult)) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execCall fuel functionName names codeOverride
+          argsResult)) := by
+  unfold OpenExternal.YulOpen.execCall
+  exact YulOpenPairStateDoneInv.bind_state hArgs (by
+    intro stateArgs argValues hArgsEq
+    subst stateArgs
+    cases fuel with
+    | zero =>
+        simp [OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+    | succ fuel' =>
+        simp
+        exact
+          YulOpenPairStateDoneInv.bind_state
+            yulOpenCall_toOpenResult_doneInvariant_outOfFuel
+            (by
+              intro stateAfter values hStateEq
+              subst stateAfter
+              exact OpenResultDoneInvariant.done rfl))
+
+theorem yulOpenExec_exprStmtCall_succ_toOpenResult_doneInvariant_outOfFuel_of_callSafe
+    {fuel : Nat} {expr : AstExpr} {codeOverride : Option AstContract}
+    (hSafe : Safe.CallSafe.expr expr) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.ExprStmtCall expr)
+          codeOverride .OutOfFuel)) := by
+  cases expr with
+  | Lit value =>
+      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done True.intro
+  | Var name =>
+      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done True.intro
+  | Call callee args =>
+      have hSafeArgs : Safe.CallSafe.exprs args := by
+        cases callee <;> exact hSafe.2
+      have hArgs :
+          OpenResultDoneInvariant
+            (YulOpenPairStateDoneInv (fun state => state = .OutOfFuel))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.reverseResult
+                (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride
+                  .OutOfFuel))) :=
+        YulOpenPairStateDoneInv.reverseResult
+          (yulOpenEvalArgsReverse_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+            hSafeArgs)
+      cases callee with
+      | inl prim =>
+          simpa [OpenExternal.YulOpen.exec] using
+            yulOpenExecPrimCall_toOpenResult_doneInvariant_outOfFuel
+              hSafe.1 hArgs
+      | inr functionName =>
+          simpa [OpenExternal.YulOpen.exec] using
+            yulOpenExecCall_toOpenResult_doneInvariant_outOfFuel hArgs
+
+theorem yulOpenExec_execSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+    (fuel : Nat) :
+    (∀ {stmt : AstStmt} {codeOverride : Option AstContract},
+      Safe.CallSafe.stmt stmt →
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel stmt codeOverride .OutOfFuel))) ∧
+    (∀ {stmts : List AstStmt} {codeOverride : Option AstContract},
+      Safe.CallSafe.stmts stmts →
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel stmts codeOverride
+            .OutOfFuel))) := by
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro stmt codeOverride _hSafe
+        simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+      · intro stmts codeOverride _hSafe
+        simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+  | succ fuel' =>
+      have ihFuel := ih fuel' (Nat.lt_succ_self fuel')
+      constructor
+      · intro stmt codeOverride hSafe
+        cases stmt with
+        | Block body =>
+            simpa [OpenExternal.YulOpen.exec] using
+              YulOpenStateDoneInv.bind
+                (ihFuel.2 (by simpa [Safe.CallSafe.stmt] using hSafe))
+                (by
+                  intro stateAfter hStateEq
+                  subst stateAfter
+                  simp [EvmYul.Yul.State.restrictStoreTo,
+                    EvmYul.Yul.State.store]
+                  exact OpenResultDoneInvariant.done rfl)
+        | Let names value? =>
+            cases value? with
+            | none =>
+                cases hCheck :
+                    EvmYul.Yul.checkDeclaration (.OutOfFuel : State) names with
+                | error err =>
+                    simp [OpenExternal.YulOpen.exec, hCheck,
+                      OpenExternal.YulOpenResult.error]
+                    exact OpenResultDoneInvariant.done True.intro
+                | ok unit =>
+                    simp [OpenExternal.YulOpen.exec, hCheck, zeroFill_outOfFuel]
+                    exact OpenResultDoneInvariant.done rfl
+            | some value =>
+                cases hCheck :
+                    EvmYul.Yul.checkDeclaration (.OutOfFuel : State) names with
+                | error err =>
+                    simp [OpenExternal.YulOpen.exec, hCheck,
+                      OpenExternal.YulOpenResult.error]
+                    exact OpenResultDoneInvariant.done True.intro
+                | ok unit =>
+                    simpa [OpenExternal.YulOpen.exec, hCheck] using
+                      YulOpenPairStateDoneInv.bind_state
+                        (yulOpenEvalValues_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                          (by simpa [Safe.CallSafe.stmt] using hSafe))
+                        (by
+                          intro stateAfter values hStateEq
+                          subst stateAfter
+                          exact OpenResultDoneInvariant.done rfl)
+        | Assign names value =>
+            cases hCheck :
+                EvmYul.Yul.checkAssignment (.OutOfFuel : State) names with
+            | error err =>
+                simp [OpenExternal.YulOpen.exec, hCheck,
+                  OpenExternal.YulOpenResult.error]
+                exact OpenResultDoneInvariant.done True.intro
+            | ok unit =>
+                simpa [OpenExternal.YulOpen.exec, hCheck] using
+                  YulOpenPairStateDoneInv.bind_state
+                    (yulOpenEvalValues_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                      (by simpa [Safe.CallSafe.stmt] using hSafe))
+                    (by
+                      intro stateAfter values hStateEq
+                      subst stateAfter
+                      exact OpenResultDoneInvariant.done rfl)
+        | ExprStmtCall expr =>
+            exact
+              yulOpenExec_exprStmtCall_succ_toOpenResult_doneInvariant_outOfFuel_of_callSafe
+                (by simpa [Safe.CallSafe.stmt] using hSafe)
+        | Switch cond cases defaultBody =>
+            rcases hSafe with ⟨hCondSafe, hCasesSafe, hDefaultSafe⟩
+            simpa [OpenExternal.YulOpen.exec] using
+              YulOpenPairStateDoneInv.bind_state
+                (yulOpenEval_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                  hCondSafe)
+                (by
+                  intro stateAfter value hStateEq
+                  subst stateAfter
+                  exact
+                    ihFuel.1
+                      (stmt :=
+                        .Block
+                          (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+                      (by
+                        simpa [Safe.CallSafe.stmt, Safe.CallSafe.stmts] using
+                          family_safe_cases_selectSwitchCase
+                            (by simpa [Safe.CallSafe.casesSafe] using hCasesSafe)
+                            (by simpa [Safe.CallSafe.stmts] using hDefaultSafe)))
+        | For cond post body =>
+            rcases hSafe with ⟨hCondSafe, _hPostSafe, hBodySafe⟩
+            cases fuel' with
+            | zero =>
+                simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.loop,
+                  OpenExternal.YulOpenResult.error]
+                exact OpenResultDoneInvariant.done True.intro
+            | succ fuel1 =>
+                cases fuel1 with
+                | zero =>
+                    simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.loop,
+                      OpenExternal.YulOpenResult.error]
+                    exact OpenResultDoneInvariant.done True.intro
+                | succ sourceFuel =>
+                    simpa [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.loop,
+                      EvmYul.Yul.State.mkOk] using
+                      YulOpenPairStateDoneInv.bind_state
+                        (yulOpenEval_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                          hCondSafe)
+                        (by
+                          intro stateAfter value hStateEq
+                          subst stateAfter
+                          by_cases hZero : value = EvmYul.UInt256.ofNat 0
+                          · simp [hZero, EvmYul.Yul.State.overwrite?]
+                            exact OpenResultDoneInvariant.done rfl
+                          · simp [hZero]
+                            exact
+                              YulOpenStateDoneInv.bind
+                                ((ih sourceFuel (by omega)).1
+                                  (stmt := .Block body)
+                                  (by
+                                    simpa [Safe.CallSafe.stmt] using
+                                      hBodySafe))
+                                (by
+                                  intro stateAfterBody hBodyEq
+                                  subst stateAfterBody
+                                  simp [EvmYul.Yul.State.overwrite?]
+                                  exact OpenResultDoneInvariant.done rfl))
+        | If cond body =>
+            rcases hSafe with ⟨hCondSafe, hBodySafe⟩
+            simpa [OpenExternal.YulOpen.exec] using
+              YulOpenPairStateDoneInv.bind_state
+                (yulOpenEval_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                  hCondSafe)
+                (by
+                  intro stateAfter value hStateEq
+                  subst stateAfter
+                  by_cases hNonzero : value ≠ EvmYul.UInt256.ofNat 0
+                  · simpa [hNonzero] using
+                      ihFuel.1
+                        (stmt := .Block body)
+                        (by simpa [Safe.CallSafe.stmt] using hBodySafe)
+                  · have hZero : value = EvmYul.UInt256.ofNat 0 :=
+                      not_ne_iff.mp hNonzero
+                    simp [hZero]
+                    exact OpenResultDoneInvariant.done rfl)
+        | Continue =>
+            simp [OpenExternal.YulOpen.exec, EvmYul.Yul.State.setContinue]
+            exact OpenResultDoneInvariant.done rfl
+        | Break =>
+            simp [OpenExternal.YulOpen.exec, EvmYul.Yul.State.setBreak]
+            exact OpenResultDoneInvariant.done rfl
+        | Leave =>
+            simp [OpenExternal.YulOpen.exec, EvmYul.Yul.State.setLeave]
+            exact OpenResultDoneInvariant.done rfl
+      · intro stmts codeOverride hSafe
+        cases stmts with
+        | nil =>
+            simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpenResult.ok]
+            exact OpenResultDoneInvariant.done rfl
+        | cons head tail =>
+            simpa [OpenExternal.YulOpen.execSeq] using
+              YulOpenStateDoneInv.bind
+                (ihFuel.1 hSafe.1)
+                (by
+                  intro stateAfter hStateEq
+                  subst stateAfter
+                  simp [OpenExternal.YulOpenResult.ok]
+                  exact OpenResultDoneInvariant.done rfl)
+
+theorem yulOpenExec_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+    {fuel : Nat} {stmt : AstStmt} {codeOverride : Option AstContract}
+    (hSafe : Safe.CallSafe.stmt stmt) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel stmt codeOverride .OutOfFuel)) :=
+  (yulOpenExec_execSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+    fuel).1 hSafe
+
+theorem yulOpenExecSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+    {fuel : Nat} {stmts : List AstStmt} {codeOverride : Option AstContract}
+    (hSafe : Safe.CallSafe.stmts stmts) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel stmts codeOverride .OutOfFuel)) :=
+  (yulOpenExec_execSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+    fuel).2 hSafe
+
 theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
     (fuel : Nat) :
     (∀ {layout : List Name} {expr : AstExpr}
