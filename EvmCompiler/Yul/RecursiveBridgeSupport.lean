@@ -44828,6 +44828,62 @@ theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_
           (functionName := functionName) (args := args)
           (contract := contract) (hUserOk hEq))
 
+theorem UserCallArity.ExprsOk.mem
+    {contract : AstContract} {args : List AstExpr} {expr : AstExpr}
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hMem : expr ∈ args) :
+    UserCallArity.ExprOk contract expr := by
+  induction args with
+  | nil =>
+      simp at hMem
+  | cons head tail ih =>
+      simp [UserCallArity.ExprsOk] at hOk
+      simp at hMem
+      rcases hMem with hEq | hTail
+      · subst expr
+        exact hOk.1
+      · exact ih hOk.2 hTail
+
+/--
+Membership wrapper for the checked raw argument-head singleton invariant.
+
+The structural argument recursion already knows that each head belongs to the
+current argument list. CALL safety, lexical scope, and user-call arity can
+therefore be recovered compositionally from the whole-list facts.
+-/
+theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat} {args : List AstExpr} {expr : AstExpr}
+    {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hMem : expr ∈ args)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState')) :
+    ∀ {source compiler},
+      SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel.succ expr
+              (some contract) source)) :=
+  lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity
+    (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+    (expr := expr) (contract := contract) (freshState := freshState)
+    (freshState' := freshState') (pre := pre) (lower := lower)
+    (callSafe_exprs_mem hSafe hMem)
+    (SourceExprsScoped.mem hScoped hMem) hLower
+    (by
+      intro functionName callArgs hEq
+      subst expr
+      exact UserCallArity.ExprsOk.mem hOk hMem)
+
 theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
     {cfg : StateRelConfig} {layout : List Name}
     {sourceFuel : Nat}

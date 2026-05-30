@@ -640,6 +640,9 @@ Remaining work:
    - [x] Scope each raw argument singleton callback to the related regular tail
      state already produced by recursive prefix preservation. Head one-result
      facts no longer need to hold for arbitrary unrelated source states.
+   - [x] Construct checked raw argument-head singleton invariants from
+     whole-list CALL safety, lexical scope, user-call arity, head membership,
+     checked lowering, and the actual related regular tail state.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
