@@ -705,6 +705,9 @@ Remaining work:
    - [x] Lift canonical generated-argument response composition through
      compiler-derived freshness, generated-variable disjointness, and hidden
      temporary safety bookkeeping.
+   - [x] Hide generated reverse-cons `lowerBound1?` decomposition behind a
+     checked canonical wrapper, so recursive callers consume the whole-list
+     lowering result and the induced tail/head relations only.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
