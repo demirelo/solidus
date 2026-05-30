@@ -2199,6 +2199,71 @@ theorem bind
                 OpenResult.bind (targetCall.resume response) targetNext })
           hSite (hCallResponse hResponse) hTail)
 
+/--
+Compose one related finite path through continuations that add no new
+interaction events.
+
+This specialization is useful for pure postprocessing such as scope cleanup,
+caller restoration, and hidden-slot replay.  It preserves the original trace
+exactly instead of returning an existential suffix.
+-/
+theorem bind_nil
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel : OpenResultPathRel callResponseRel doneRel trace source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          OpenResultPathRel callResponseRel' doneRel' []
+            (match sourceDone with
+            | .ok value => sourceNext value
+            | .error err => .done (.error err))
+            (match targetDone with
+            | .ok value => targetNext value
+            | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response) :
+    OpenResultPathRel callResponseRel' doneRel' trace
+      (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        simpa [OpenResult.bind] using hDone hDoneRel
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      simpa [OpenResult.bind] using
+        (OpenResultPathRel.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext })
+          hSite (hCallResponse hResponse) ih)
+
 end OpenResultPathRel
 
 namespace OpenResultRel

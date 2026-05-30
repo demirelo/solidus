@@ -54414,6 +54414,98 @@ theorem sourceOpenResultSeqRel_exec_block_succ_of_seq_checkpoint_scope_contains
   · intro sourceCall targetCall response hResponse
     exact hResponse
 
+/--
+Lift one selected open function-body sequence path through imported Yul
+block-scope cleanup.
+
+Unlike the tree-shaped sibling above, this theorem follows only the admitted
+finite trace.  The recursive sequence proof may therefore choose the compiler
+cutoff for that concrete body execution before caller restoration is replayed.
+-/
+theorem sourceOpenResultSeqPathRel_exec_block_succ_of_seq_checkpoint_scope_contains
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {fuel : Nat} {body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {source : State}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {trace : OpenExternal.OpenTrace}
+    (hScope :
+      ∀ name, name ∈ layout →
+        (source.store.lookup name).isSome = true)
+    (hSeq :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel body codeOverride source))
+        target) :
+    OpenExternal.OpenResultPathRel
+      (SourceOpenTraceCallResponseRel cfg)
+      (SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true))
+      trace
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.Block body) codeOverride
+          source))
+      target := by
+  rw [yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq]
+  rw [← openResult_bind_ok_eq target]
+  exact OpenExternal.OpenResultPathRel.bind_nil
+    (sourceNext := fun sourceAfter =>
+      OpenExternal.OpenResult.ok
+        (EvmYul.Yul.State.restrictStoreTo source.store sourceAfter))
+    (targetNext := fun targetAfter => OpenExternal.OpenResult.ok targetAfter)
+    (callResponseRel' := SourceOpenTraceCallResponseRel cfg)
+    (doneRel' :=
+      SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true))
+    hSeq (by
+      intro sourceDone targetDone hDone
+      have allowed_of_restrict :
+          ∀ state,
+            SourceResultCheckpointAllowed false false true
+                (.ok (EvmYul.Yul.State.restrictStoreTo source.store state)) →
+              SourceResultCheckpointAllowed false false true (.ok state) := by
+        intro state hAllowedRestricted
+        cases state with
+        | Ok shared store =>
+            simp [SourceResultCheckpointAllowed, StateCheckpointAllowed]
+        | OutOfFuel =>
+            simp [SourceResultCheckpointAllowed, StateCheckpointAllowed]
+        | Checkpoint jump =>
+            cases jump <;>
+              simpa [SourceResultCheckpointAllowed, StateCheckpointAllowed,
+                EvmYul.Yul.State.restrictStoreTo] using hAllowedRestricted
+      cases sourceDone with
+      | error err =>
+          cases targetDone <;>
+            exact OpenExternal.OpenResultPathRel.done hDone
+      | ok sourceAfter =>
+          cases targetDone with
+          | error targetErr =>
+              exact OpenExternal.OpenResultPathRel.done (by
+                intro hAllowedRestricted
+                exact
+                  hDone
+                    (allowed_of_restrict sourceAfter hAllowedRestricted))
+          | ok targetAfter =>
+              exact OpenExternal.OpenResultPathRel.done (by
+                intro hAllowedRestricted
+                exact
+                  SourceResultOutcomeRel.restrictStoreTo_of_scope_contains
+                    hScope
+                    (hDone
+                      (allowed_of_restrict sourceAfter hAllowedRestricted)))) (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
+
 theorem openResult_bind_congr_next_of_doneInvariant
     {ε α β : Type*}
     {result : OpenExternal.OpenResult ε α}
@@ -57553,6 +57645,114 @@ theorem sourceUserCallResultOpenResultRel_bind_body
     exact hCallResponse hResponse
 
 /--
+Compose one selected callee-body path into the restored internal-user-call
+result.
+
+Caller restoration is pure, so the finite interaction trace is preserved
+exactly.  The completed endpoint reuses the tree-shaped body-result algebra;
+only the recursive traversal is path-native.
+-/
+theorem sourceUserCallResultOpenResultPathRel_bind_body
+    {cfg : StateRelConfig} {callerLayout bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {fn : Functions.FunDef}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler : Objects.Source.State}
+    {rets : List EvmYul.Identifier}
+    {sourceBody : OpenExternal.OpenResult Exception State}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {trace : OpenExternal.OpenTrace}
+    (hCaller :
+      SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceUserCallBodyDoneRel cfg bodyLayout terminalRel revertRel allowed
+          fn)
+        trace sourceBody targetBody)
+    (hLowerReturns : fn.returns = identNames rets)
+    (hReturns : ∀ name, name ∈ fn.returns → name ∈ bodyLayout) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceUserCallResultDoneRel cfg callerLayout callerCompiler terminalRel
+        revertRel)
+      trace
+      (OpenExternal.OpenResult.bind sourceBody
+        (yulOpenUserCallRestoreResult (.Ok callerShared callerStore) rets))
+      (OpenExternal.OpenResult.bind targetBody
+        (fun bodyResult =>
+          compilerOpenUserCallBodyResult fn bodyResult.1)) := by
+  exact
+    OpenExternal.OpenResultPathRel.bind_nil
+      (sourceNext :=
+        yulOpenUserCallRestoreResult (.Ok callerShared callerStore) rets)
+      (targetNext := fun bodyResult =>
+        compilerOpenUserCallBodyResult fn bodyResult.1)
+      (callResponseRel' := RelationallyAdmissibleOpenCallResponseRel cfg)
+      (doneRel' :=
+        SourceUserCallResultDoneRel cfg callerLayout callerCompiler
+          terminalRel revertRel)
+      hBody (by
+        intro sourceDone targetDone hDone
+        cases sourceDone with
+        | error err =>
+            cases targetDone with
+            | error targetErr =>
+                exact False.elim hDone.2.2
+            | ok targetResult =>
+                rcases targetResult with ⟨bodyOutcome, bodyCtx⟩
+                exact
+                  OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+                    (sourceUserCallResultOpenResultRel_terminal_of_sourceOpenResultSeqDoneRel_error
+                      (cfg := cfg) (bodyLayout := bodyLayout)
+                      (callerLayout := callerLayout)
+                      (callerCompiler := callerCompiler)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (allowed := allowed) (fn := fn) (err := err)
+                      (bodyOutcome := bodyOutcome) (bodyCtx := bodyCtx)
+                      (callResponseRel :=
+                        RelationallyAdmissibleOpenCallResponseRel cfg)
+                      hDone.1 hDone.2.1)
+                    OpenExternal.OpenResultResolves.done (by
+                      intro event hMem
+                      cases hMem)
+        | ok bodySource =>
+            cases targetDone with
+            | error targetErr =>
+                exact False.elim hDone.2.2
+            | ok targetResult =>
+                rcases targetResult with ⟨bodyOutcome, bodyCtx⟩
+                rcases hDone.2.2 with ⟨values, hMode, hLookup⟩
+                exact
+                  OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+                    (sourceUserCallResultOpenResultRel_returned_of_sourceOpenResultSeqDoneRel
+                      (cfg := cfg) (callerLayout := callerLayout)
+                      (bodyLayout := bodyLayout)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (allowed := allowed) (fn := fn)
+                      (callerShared := callerShared)
+                      (callerStore := callerStore)
+                      (callerCompiler := callerCompiler)
+                      (bodySource := bodySource) (bodyOutcome := bodyOutcome)
+                      (bodyCtx := bodyCtx) (rets := rets) (values := values)
+                      (callResponseRel :=
+                        RelationallyAdmissibleOpenCallResponseRel cfg)
+                      hCaller hDone.1 hDone.2.1 hMode hLowerReturns hReturns
+                      hLookup)
+                    OpenExternal.OpenResultResolves.done (by
+                      intro event hMem
+                      cases hMem)) (by
+        intro sourceCall targetCall response hResponse
+        exact hResponse)
+
+/--
 Resolved open internal-user-call bodies compose into the selected call result.
 
 The source and target body executions may suspend at arbitrary external CALLs.
@@ -58220,6 +58420,106 @@ theorem sourceUserCallResultOpenResultRel_replay_hidden_temp_raw
       apply hCallResponse
       simpa [openResult_bind_ok_eq] using hResponse
   simpa [openResult_bind_ok_eq] using hLift
+
+/--
+Replay one selected restored internal-call path through the generated hidden
+result slot.
+
+The selected path is re-paired once to attach the source singleton invariant
+at its resolved endpoint.  Hidden-slot assignment and reading are pure, so the
+observable interaction trace remains unchanged.
+-/
+theorem sourceUserCallResultOpenResultPathRel_replay_hidden_temp_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        Functions.Source.CallResult}
+    {trace : OpenExternal.OpenTrace}
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTmpContains : callerCompiler.vars.contains tmp = true)
+    (hRel :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+          revertRel)
+        trace source target)
+    (hSingle :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              ∃ value, sourceValues = [value])
+        source)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      trace source
+      (OpenExternal.OpenResult.bind target
+        (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+          callerCompiler)) := by
+  rcases hRel.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  have hSingleDone :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          ∃ value, sourceValues = [value] :=
+    OpenResultDoneInvariant.of_resolves hSingle hSource
+  have hStrong :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (fun sourceDone targetDone =>
+          SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+              revertRel sourceDone targetDone ∧
+            ∀ {sourceAfter sourceValues},
+              sourceDone = .ok (sourceAfter, sourceValues) →
+                ∃ value, sourceValues = [value])
+        trace source target :=
+    OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+      hSource hTarget hResponses ⟨hDone, hSingleDone⟩
+  rw [← openResult_bind_ok_eq source]
+  exact
+    OpenExternal.OpenResultPathRel.bind_nil
+      (sourceNext := fun sourceResult =>
+        OpenExternal.OpenResult.ok sourceResult)
+      (targetNext :=
+        compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+          callerCompiler)
+      (callResponseRel' := RelationallyAdmissibleOpenCallResponseRel cfg)
+      (doneRel' :=
+        SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      hStrong (by
+        intro sourceDone targetDone hDone
+        cases targetDone with
+        | error targetErr =>
+            cases sourceDone <;>
+              simp [SourceUserCallResultDoneRel] at hDone
+        | ok callResult =>
+            cases sourceDone <;>
+              simpa [OpenExternal.OpenResult.ok] using
+                (OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+                  (sourceUserCallResultDoneRel_replay_hidden_temp_raw
+                    (cfg := cfg) (layout := layout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (prim := prim) (tmp := tmp) (ctx := ctx)
+                    (callerCompiler := callerCompiler)
+                    (callResult := callResult)
+                    (rawCallResponseRel :=
+                      RelationallyAdmissibleOpenCallResponseRel cfg)
+                    hTmpFreshLayout hTmpContains hDone.1 hDone.2)
+                  OpenExternal.OpenResultResolves.done (by
+                    intro event hMem
+                    cases hMem))) (by
+        intro sourceCall targetCall response hResponse
+        exact hResponse)
 
 /--
 Compose a regular terminal-aware argument prefix with an already-related open
