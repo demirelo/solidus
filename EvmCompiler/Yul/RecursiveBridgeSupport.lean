@@ -53956,6 +53956,90 @@ theorem openResult_bind_ok_eq
         exact ih response)
       result)
 
+/--
+Lift an open function-body sequence relation through imported Yul block-scope
+cleanup.
+
+The recursive sequence proof runs `YulOpen.execSeq`. Internal Yul calls run a
+scoped `.Block`, which restricts completed source stores back to the callee
+entry scope. The compiler body already exposes the matching lowered block, so
+only the source continuation is transformed. External suspensions remain
+visible through the canonical bind pullback.
+-/
+theorem sourceOpenResultSeqRel_exec_block_succ_of_seq_checkpoint_scope_contains
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {fuel : Nat} {body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {source : State}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hScope :
+      ∀ name, name ∈ layout →
+        (source.store.lookup name).isSome = true)
+    (hSeq :
+      OpenExternal.OpenResultRel
+        (OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+          (fun sourceAfter =>
+            OpenExternal.OpenResult.ok
+              (EvmYul.Yul.State.restrictStoreTo source.store sourceAfter))
+          (fun targetAfter => OpenExternal.OpenResult.ok targetAfter))
+        (SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel body codeOverride source))
+        target) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.Block body) codeOverride
+          source))
+      target := by
+  rw [yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq]
+  rw [← openResult_bind_ok_eq target]
+  refine OpenExternal.OpenResultRel.bind hSeq ?_ ?_
+  · intro sourceDone targetDone hDone
+    have allowed_of_restrict :
+        ∀ state,
+          SourceResultCheckpointAllowed false false true
+              (.ok (EvmYul.Yul.State.restrictStoreTo source.store state)) →
+            SourceResultCheckpointAllowed false false true (.ok state) := by
+      intro state hAllowedRestricted
+      cases state with
+      | Ok shared store =>
+          simp [SourceResultCheckpointAllowed, StateCheckpointAllowed]
+      | OutOfFuel =>
+          simp [SourceResultCheckpointAllowed, StateCheckpointAllowed]
+      | Checkpoint jump =>
+          cases jump <;>
+            simpa [SourceResultCheckpointAllowed, StateCheckpointAllowed,
+              EvmYul.Yul.State.restrictStoreTo] using hAllowedRestricted
+    cases sourceDone with
+    | error err =>
+        cases targetDone <;>
+          exact OpenExternal.OpenResultRel.done hDone
+    | ok sourceAfter =>
+        cases targetDone with
+        | error targetErr =>
+            exact OpenExternal.OpenResultRel.done (by
+              intro hAllowedRestricted
+              exact hDone (allowed_of_restrict sourceAfter hAllowedRestricted))
+        | ok targetAfter =>
+            exact OpenExternal.OpenResultRel.done (by
+              intro hAllowedRestricted
+              exact
+                SourceResultOutcomeRel.restrictStoreTo_of_scope_contains
+                  hScope
+                  (hDone
+                    (allowed_of_restrict sourceAfter hAllowedRestricted)))
+  · intro sourceCall targetCall response hResponse
+    exact hResponse
+
 theorem openResult_bind_congr_next_of_doneInvariant
     {ε α β : Type*}
     {result : OpenExternal.OpenResult ε α}

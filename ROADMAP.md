@@ -527,6 +527,10 @@ Remaining work:
      clock is chosen before execution, exact preservation holds at every larger
      clock, and the existing hidden-fuel public shape follows by selecting that
      minimum itself.
+   - [x] Lift recursive open sequence preservation through the actual scoped
+     `.Block` executed by an internal Yul call: source local-store restriction
+     is threaded through a bind pullback, target execution remains unchanged,
+     and every exposed external response keeps the same relation.
    - [ ] Construct the compiler-derived minimum residual target fuel (or an
      equivalent checked exact-target adequacy invariant) at the recursive
      sequence frontier so suspended continuations carry one uniform sufficient
