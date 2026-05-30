@@ -685,6 +685,9 @@ Remaining work:
      fixed list overhead, and recover a residual base from any sufficient-fuel
      inequality. This is the checked algebra needed before widening recursive
      nested-expression adequacy.
+   - [x] Widen all-residual-base raw argument preservation to arbitrary source
+     fuel above the fixed reversed-list traversal overhead. Nested-head
+     adequacy remains an explicit recursive obligation.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

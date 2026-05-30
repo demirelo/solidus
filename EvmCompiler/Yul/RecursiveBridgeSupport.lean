@@ -110441,6 +110441,43 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     hCovers hLower
 
 /--
+Widen a terminal-aware raw argument proof from every residual scheduler base to
+an arbitrary source fuel above the fixed reversed-list traversal overhead.
+
+This does not discharge nested head adequacy: callers still have to construct
+the scheduled proof for every residual base. It only removes scheduler
+reconstruction from the eventual recursive consumer.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_length_overhead_le
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {targetFuel : Nat}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hFuel : 2 * args.reverse.length + 3 ≤ sourceFuel)
+    (hScheduled :
+      ∀ base,
+        SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
+          terminalRel revertRel prim program ctx
+          (yulOpenEvalArgsAppendFuel base args.reverse) args codeOverride pre
+          lowerArgs targetFuel callResponseRel) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
+      targetFuel callResponseRel := by
+  rcases
+      exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le args.reverse
+        hFuel with
+    ⟨base, hBase⟩
+  rw [← hBase]
+  exact hScheduled base
+
+/--
 Terminal-aware raw primitive expression composition from a generated argument
 prefix.
 
