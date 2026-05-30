@@ -54657,76 +54657,6 @@ theorem SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx.of_atExact
         OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
           hResolve hTargetPadded hResponses hDone
 
-/--
-Selected-path contract for one lowered statement head before its surrounding
-sequence tail is attached.
-
-A genuinely regular imported head carries the exact post-state relation needed
-to enter the tail. Imported out-of-fuel, checkpoint, and error completions have
-already stopped the surrounding sequence, so they carry its final done
-relation directly.
--/
-def SourceOpenStmtHeadDoneRel
-    (cfg : StateRelConfig) (layoutAfter outcomeLayout : List Name)
-    (terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
-    (revertRel : State → Objects.Source.State → Prop)
-    (allowed : Except Exception State → Prop) :
-    Except Exception State →
-      Except Functions.EVMException
-        (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
-  | .ok (.Ok shared store), .ok (targetOutcome, _ctxAfter) =>
-      match targetOutcome.mode with
-      | .regular =>
-          SourceStateExactRel cfg layoutAfter (.Ok shared store)
-            targetOutcome.state
-      | .brk | .cont | .leave | .halt _ => False
-  | .ok (.Ok _shared _store), .error _targetErr => False
-  | .ok .OutOfFuel, targetDone =>
-      SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
-        allowed (.ok .OutOfFuel) targetDone
-  | .ok (.Checkpoint jump), targetDone =>
-      SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
-        allowed (.ok (.Checkpoint jump)) targetDone
-  | .error err, targetDone =>
-      SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
-        allowed (.error err) targetDone
-
-/--
-Finite-path soundness for one statement head before its enclosing sequence tail
-is attached.
--/
-def SourceOpenStmtHeadPathSoundWhen
-    (cfg : StateRelConfig) (layout layoutAfter outcomeLayout : List Name)
-    (terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
-    (revertRel : State → Objects.Source.State → Prop)
-    (prim : Objects.Source.PrimitiveSemantics)
-    (program : Functions.Program) (ctx : Functions.Source.Ctx)
-    (sourceFuel : Nat) (sourceStmt : AstStmt)
-    (codeOverride : Option AstContract) (lowerHead : Functions.Block)
-    (allowed : Except Exception State → Prop) : Prop :=
-  ∀ {source compiler trace sourceDone},
-    SourceStateExactRel cfg layout source compiler →
-    OpenExternal.OpenResultResolves
-      (OpenExternal.YulOpenResult.toOpenResult
-        (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
-      trace sourceDone →
-    SourceOpenTraceResponsesAdmissible cfg trace →
-    ∀ minimumTargetFuel,
-      ∃ targetFuel,
-        minimumTargetFuel ≤ targetFuel ∧
-        OpenExternal.OpenResultPathRel
-          (SourceOpenTraceCallResponseRel cfg)
-          (SourceOpenStmtHeadDoneRel cfg layoutAfter outcomeLayout terminalRel
-            revertRel allowed)
-          trace
-          (OpenExternal.YulOpenResult.toOpenResult
-            (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride
-              source))
-          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-            targetFuel lowerHead compiler)
-
 /-- Associativity for the generic open-result bind. -/
 theorem openResult_bind_assoc
     {ε α β γ : Type*}
@@ -55582,259 +55512,6 @@ theorem compilerOpen_block_runOpen_append_eq
               simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
 
 /--
-Attach a selected statement-head path to its surrounding sequence tail.
-
-Only an ordinary imported head enters the recursive tail. Imported
-out-of-fuel, checkpoint, and exception completions have already stopped the
-sequence and therefore bypass the compiled suffix as well.
--/
-theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
-    {cfg : StateRelConfig} {layout layoutAfter outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {sourceStmt : AstStmt} {rest : List AstStmt}
-    {codeOverride : Option AstContract}
-    {lowerHead lowerTail : Functions.Block}
-    {allowed : Except Exception State → Prop}
-    (hHead :
-      SourceOpenStmtHeadPathSoundWhen cfg layout layoutAfter outcomeLayout
-        terminalRel revertRel prim program ctx sourceFuel sourceStmt
-        codeOverride lowerHead allowed)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layoutAfter
-          outcomeLayout terminalRel revertRel prim program ctxAfter sourceFuel
-          rest codeOverride lowerTail allowed) :
-    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
-      terminalRel revertRel prim program ctx sourceFuel.succ
-      (sourceStmt :: rest) codeOverride
-      { stmts := lowerHead.stmts ++ lowerTail.stmts } allowed := by
-  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
-    minimumTargetFuel
-  have stopAtNonregular
-      {selectedTrace : OpenExternal.OpenTrace} {prefixFuel : Nat}
-      {targetOutcome : Objects.Source.Outcome}
-      {targetCtx : Functions.Source.Ctx}
-      (hSourceSelected :
-        OpenExternal.OpenResultResolves
-          (OpenExternal.YulOpenResult.toOpenResult
-            (OpenExternal.YulOpen.execSeq sourceFuel.succ
-              (sourceStmt :: rest) codeOverride source))
-          selectedTrace sourceDone)
-      (hTargetHead :
-        OpenExternal.OpenResultResolves
-          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx prefixFuel
-            lowerHead compiler)
-          selectedTrace (.ok (targetOutcome, targetCtx)))
-      (hDone :
-        SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
-          allowed sourceDone (.ok (targetOutcome, targetCtx)))
-      (hNonregular : targetOutcome.mode ≠ .regular)
-      (hSelectedResponses :
-        SourceOpenTraceResponsesAdmissible cfg selectedTrace) :
-      ∃ targetFuel,
-        minimumTargetFuel ≤ targetFuel ∧
-          OpenExternal.OpenResultPathRel
-            (SourceOpenTraceCallResponseRel cfg)
-            (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel
-              revertRel allowed)
-            selectedTrace
-            (OpenExternal.YulOpenResult.toOpenResult
-              (OpenExternal.YulOpen.execSeq sourceFuel.succ
-                (sourceStmt :: rest) codeOverride source))
-            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-              targetFuel
-              { stmts := lowerHead.stmts ++ lowerTail.stmts } compiler) := by
-    let suffixFuel := max minimumTargetFuel prefixFuel
-    have hTargetHeadPadded :
-        OpenExternal.OpenResultResolves
-          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-            (lowerHead.stmts.length + suffixFuel) lowerHead compiler)
-          selectedTrace (.ok (targetOutcome, targetCtx)) :=
-      CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
-        (by
-          dsimp [suffixFuel]
-          omega)
-        hTargetHead
-    have hTargetFull :
-        OpenExternal.OpenResultResolves
-          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-            (lowerHead.stmts.length + suffixFuel)
-            { stmts := lowerHead.stmts ++ lowerTail.stmts } compiler)
-          selectedTrace (.ok (targetOutcome, targetCtx)) := by
-      rw [compilerOpen_block_runOpen_append_eq]
-      cases lowerHead
-      cases lowerTail with
-      | mk lowerTailStmts =>
-          let next :=
-            fun preResult : Objects.Source.Outcome × Functions.Source.Ctx =>
-              match preResult.1.mode with
-              | .regular =>
-                  CompilerOpen.FunctionsOpen.Block.runOpen prim program
-                    preResult.2 suffixFuel { stmts := lowerTailStmts }
-                    preResult.1.state
-              | .brk | .cont | .leave | .halt _ =>
-                  OpenExternal.OpenResult.ok preResult
-          have hNext :
-              OpenExternal.OpenResultResolves
-                (next (targetOutcome, targetCtx)) []
-                (.ok (targetOutcome, targetCtx)) := by
-            cases hMode : targetOutcome.mode <;>
-              simp [next, hMode, OpenExternal.OpenResult.ok] at hNonregular ⊢
-            all_goals exact OpenExternal.OpenResultResolves.done
-          simpa only [List.append_nil, next] using
-            (OpenExternal.OpenResultResolves.bind_ok (next := next)
-              (right := []) hTargetHeadPadded hNext)
-    refine ⟨lowerHead.stmts.length + suffixFuel, ?_, ?_⟩
-    · dsimp [suffixFuel]
-      omega
-    · exact
-        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
-          hSourceSelected hTargetFull hSelectedResponses hDone
-  have hSourceSeqResolve := hResolve
-  rw [yulOpen_toOpenResult_execSeq_cons_succ] at hResolve
-  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
-    hError | hValue
-  · rcases hError with ⟨err, hSourceHead, hDoneEq⟩
-    subst sourceDone
-    rcases hHead hInitial hSourceHead hResponses minimumTargetFuel with
-      ⟨prefixFuel, _hMinimumPrefix, hHeadPath⟩
-    rcases hHeadPath.resolves with
-      ⟨sourceHeadDone, targetHeadDone, hSourceHead', hTargetHead, hHeadDone⟩
-    have hSourceHeadEq :
-        (.error err : Except Exception State) = sourceHeadDone :=
-      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
-    subst sourceHeadDone
-    cases targetHeadDone with
-    | error targetErr =>
-        exact False.elim (hHeadDone hAllowed)
-    | ok targetResult =>
-        rcases targetResult with ⟨targetOutcome, targetCtx⟩
-        have hNonregular : targetOutcome.mode ≠ .regular := by
-          intro hRegular
-          rcases targetOutcome with ⟨targetState, targetMode⟩
-          simp only at hRegular
-          subst targetMode
-          cases hHeadDone hAllowed
-        exact
-          stopAtNonregular hSourceSeqResolve hTargetHead hHeadDone hNonregular
-            hResponses
-  · rcases hValue with
-      ⟨left, right, sourceHeadDone, hTrace, hSourceHead, hSuffix⟩
-    subst trace
-    have hLeftResponses :
-        SourceOpenTraceResponsesAdmissible cfg left :=
-      OpenExternal.OpenTrace.left_of_append hResponses
-    have hRightResponses :
-        SourceOpenTraceResponsesAdmissible cfg right :=
-      OpenExternal.OpenTrace.right_of_append hResponses
-    rcases hHead hInitial hSourceHead hLeftResponses 0 with
-      ⟨prefixFuel, _hMinimumPrefix, hHeadPath⟩
-    rcases hHeadPath.resolves with
-      ⟨sourceHeadDone', targetHeadDone, hSourceHead', hTargetHead, hHeadDone⟩
-    have hSourceHeadEq :
-        (.ok sourceHeadDone : Except Exception State) = sourceHeadDone' :=
-      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
-    subst sourceHeadDone'
-    cases sourceHeadDone with
-    | OutOfFuel =>
-        cases hSuffix
-        cases targetHeadDone with
-        | error targetErr =>
-            exact False.elim (hHeadDone hAllowed)
-        | ok targetResult =>
-            rcases targetResult with ⟨⟨targetState, targetMode⟩, targetCtx⟩
-            exact False.elim (by
-              have hImpossible := hHeadDone hAllowed
-              cases hImpossible with
-              | ok hRel =>
-                  cases hRel with
-                  | regular hStateRel =>
-                      cases hStateRel)
-    | Checkpoint jump =>
-        cases hSuffix
-        cases targetHeadDone with
-        | error targetErr =>
-            exact False.elim (hHeadDone hAllowed)
-        | ok targetResult =>
-            rcases targetResult with ⟨⟨targetState, targetMode⟩, targetCtx⟩
-            have hNonregular : targetMode ≠ .regular := by
-              intro hRegular
-              subst targetMode
-              have hRel := hHeadDone hAllowed
-              cases hRel with
-              | ok hOk =>
-                  cases hOk with
-                  | regular hStateRel =>
-                      cases hStateRel
-            simpa only [List.append_nil] using
-              (stopAtNonregular (selectedTrace := left)
-                (by simpa only [List.append_nil] using hSourceSeqResolve)
-                hTargetHead hHeadDone hNonregular hLeftResponses)
-    | Ok shared store =>
-        cases targetHeadDone with
-        | error targetErr =>
-            simp [SourceOpenStmtHeadDoneRel] at hHeadDone
-        | ok targetResult =>
-            rcases targetResult with ⟨targetOutcome, targetCtx⟩
-            rcases targetOutcome with ⟨targetState, targetMode⟩
-            cases targetMode with
-            | regular =>
-                have hAfter :
-                    SourceStateExactRel cfg layoutAfter (.Ok shared store)
-                      targetState := by
-                  simpa [SourceOpenStmtHeadDoneRel] using hHeadDone
-                rcases
-                    hTail (ctxAfter := targetCtx) hAfter hSuffix hAllowed
-                      hRightResponses (max minimumTargetFuel prefixFuel) with
-                  ⟨tailFuel, hMinimumTail, hTailPath⟩
-                rcases hTailPath.resolves with
-                  ⟨tailSourceDone, tailTargetDone, hTailSource, hTargetTail,
-                    hTailDone⟩
-                have hTailSourceEq : sourceDone = tailSourceDone :=
-                  OpenExternal.OpenResultResolves.deterministic hSuffix
-                    hTailSource
-                subst tailSourceDone
-                have hTargetHeadPadded :
-                    OpenExternal.OpenResultResolves
-                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-                        (lowerHead.stmts.length + tailFuel) lowerHead compiler)
-                      left
-                      (.ok
-                        (Functions.Source.Outcome.regular targetState,
-                          targetCtx)) :=
-                  CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim
-                    program (by omega) hTargetHead
-                have hTargetFull :
-                    OpenExternal.OpenResultResolves
-                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-                        (lowerHead.stmts.length + tailFuel)
-                        { stmts := lowerHead.stmts ++ lowerTail.stmts }
-                        compiler)
-                      (left ++ right) tailTargetDone := by
-                  rw [compilerOpen_block_runOpen_append_eq]
-                  cases lowerHead
-                  cases lowerTail
-                  exact
-                    OpenExternal.OpenResultResolves.bind_ok hTargetHeadPadded
-                      hTargetTail
-                refine ⟨lowerHead.stmts.length + tailFuel, by omega, ?_⟩
-                exact
-                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
-                    hSourceSeqResolve hTargetFull hResponses hTailDone
-            | brk =>
-                simp [SourceOpenStmtHeadDoneRel] at hHeadDone
-            | cont =>
-                simp [SourceOpenStmtHeadDoneRel] at hHeadDone
-            | leave =>
-                simp [SourceOpenStmtHeadDoneRel] at hHeadDone
-            | halt kind =>
-                simp [SourceOpenStmtHeadDoneRel] at hHeadDone
-
-/--
 Run generated zero-initializers in the open compiler interpreter.
 
 These statements cannot suspend: each generated initializer evaluates one
@@ -56086,133 +55763,6 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_none_succ
         hSourceSeqResolve hTargetFull hResponses hTailDone
 
 /--
-Selected-path statement-head bridge for `break`.
--/
-theorem sourceOpenStmtHeadPathSoundWhen_break_succ
-    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hBreak : ctx.breakScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
-    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
-      revertRel prim program ctx sourceFuel.succ .Break codeOverride
-      { stmts := [Functions.Stmt.brk] } allowed := by
-  intro source compiler trace sourceDone hInitial hResolve _hResponses
-    minimumTargetFuel
-  cases hInitial with
-  | @ok shared store compiler hShared hVars _hDomain =>
-      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
-      cases hResolve
-      let compilerBreak := compiler.restrictTo outcomeLayout
-      have hRelBreak :
-          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerBreak :=
-        sourceStateRel_restrictCompiler
-          (SourceStateRel.ok hShared hVars) hSubset
-      have hDone :
-          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
-            revertRel allowed
-            (.ok (.Checkpoint (.Break shared store)))
-            (.ok (Functions.Source.Outcome.brk compilerBreak, ctx)) := by
-        intro _hAllowed
-        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.brk hRelBreak)
-      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
-      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
-        CompilerOpen.FunctionsOpen.Stmt.run, hBreak,
-        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
-        OpenExternal.OpenResult.ok, compilerBreak] using
-        (OpenExternal.OpenResultPathRel.done hDone)
-
-/--
-Selected-path statement-head bridge for `continue`.
--/
-theorem sourceOpenStmtHeadPathSoundWhen_continue_succ
-    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hContinue : ctx.continueScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
-    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
-      revertRel prim program ctx sourceFuel.succ .Continue codeOverride
-      { stmts := [Functions.Stmt.cont] } allowed := by
-  intro source compiler trace sourceDone hInitial hResolve _hResponses
-    minimumTargetFuel
-  cases hInitial with
-  | @ok shared store compiler hShared hVars _hDomain =>
-      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
-      cases hResolve
-      let compilerContinue := compiler.restrictTo outcomeLayout
-      have hRelContinue :
-          SourceStateRel cfg outcomeLayout (.Ok shared store)
-            compilerContinue :=
-        sourceStateRel_restrictCompiler
-          (SourceStateRel.ok hShared hVars) hSubset
-      have hDone :
-          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
-            revertRel allowed
-            (.ok (.Checkpoint (.Continue shared store)))
-            (.ok (Functions.Source.Outcome.cont compilerContinue, ctx)) := by
-        intro _hAllowed
-        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.cont hRelContinue)
-      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
-      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
-        CompilerOpen.FunctionsOpen.Stmt.run, hContinue,
-        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
-        OpenExternal.OpenResult.ok, compilerContinue] using
-        (OpenExternal.OpenResultPathRel.done hDone)
-
-/--
-Selected-path statement-head bridge for `leave`.
--/
-theorem sourceOpenStmtHeadPathSoundWhen_leave_succ
-    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hLeave : ctx.leaveScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
-    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
-      revertRel prim program ctx sourceFuel.succ .Leave codeOverride
-      { stmts := [Functions.Stmt.leave] } allowed := by
-  intro source compiler trace sourceDone hInitial hResolve _hResponses
-    minimumTargetFuel
-  cases hInitial with
-  | @ok shared store compiler hShared hVars _hDomain =>
-      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
-      cases hResolve
-      let compilerLeave := compiler.restrictTo outcomeLayout
-      have hRelLeave :
-          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerLeave :=
-        sourceStateRel_restrictCompiler
-          (SourceStateRel.ok hShared hVars) hSubset
-      have hDone :
-          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
-            revertRel allowed
-            (.ok (.Checkpoint (.Leave shared store)))
-            (.ok (Functions.Source.Outcome.leave compilerLeave, ctx)) := by
-        intro _hAllowed
-        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.leave hRelLeave)
-      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
-      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
-        CompilerOpen.FunctionsOpen.Stmt.run, hLeave,
-        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
-        OpenExternal.OpenResult.ok, compilerLeave] using
-        (OpenExternal.OpenResultPathRel.done hDone)
-
-/--
 Attach a selected `break` head to an arbitrary compiled sequence tail.
 -/
 theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ
@@ -56226,24 +55776,39 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ
     {codeOverride : Option AstContract} {lowerTail : Functions.Block}
     {allowed : Except Exception State → Prop}
     (hBreak : ctx.breakScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Break :: rest) codeOverride
-      { stmts := [Functions.Stmt.brk] ++ lowerTail.stmts } allowed :=
-  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
-    (hHead :=
-      sourceOpenStmtHeadPathSoundWhen_break_succ
-        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-        (codeOverride := codeOverride) (allowed := allowed) hBreak hSubset)
-    hTail
+      { stmts := [Functions.Stmt.brk] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hAllowed _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult] at hResolve
+      cases hResolve
+      let compilerBreak := compiler.restrictTo outcomeLayout
+      have hRelBreak :
+          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerBreak :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+            allowed
+            (.ok (.Checkpoint (.Break shared store)))
+            (.ok (Functions.Source.Outcome.brk compilerBreak, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.brk hRelBreak)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hBreak,
+        OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult, OpenExternal.OpenResult.ok,
+        compilerBreak] using
+        (OpenExternal.OpenResultPathRel.done hDone)
 
 /--
 Attach a selected `continue` head to an arbitrary compiled sequence tail.
@@ -56259,24 +55824,40 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ
     {codeOverride : Option AstContract} {lowerTail : Functions.Block}
     {allowed : Except Exception State → Prop}
     (hContinue : ctx.continueScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Continue :: rest) codeOverride
-      { stmts := [Functions.Stmt.cont] ++ lowerTail.stmts } allowed :=
-  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
-    (hHead :=
-      sourceOpenStmtHeadPathSoundWhen_continue_succ
-        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-        (codeOverride := codeOverride) (allowed := allowed) hContinue hSubset)
-    hTail
+      { stmts := [Functions.Stmt.cont] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hAllowed _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult] at hResolve
+      cases hResolve
+      let compilerContinue := compiler.restrictTo outcomeLayout
+      have hRelContinue :
+          SourceStateRel cfg outcomeLayout (.Ok shared store)
+            compilerContinue :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+            allowed
+            (.ok (.Checkpoint (.Continue shared store)))
+            (.ok (Functions.Source.Outcome.cont compilerContinue, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.cont hRelContinue)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hContinue,
+        OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult, OpenExternal.OpenResult.ok,
+        compilerContinue] using
+        (OpenExternal.OpenResultPathRel.done hDone)
 
 /--
 Attach a selected `leave` head to an arbitrary compiled sequence tail.
@@ -56292,24 +55873,39 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ
     {codeOverride : Option AstContract} {lowerTail : Functions.Block}
     {allowed : Except Exception State → Prop}
     (hLeave : ctx.leaveScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Leave :: rest) codeOverride
-      { stmts := [Functions.Stmt.leave] ++ lowerTail.stmts } allowed :=
-  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
-    (hHead :=
-      sourceOpenStmtHeadPathSoundWhen_leave_succ
-        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-        (codeOverride := codeOverride) (allowed := allowed) hLeave hSubset)
-    hTail
+      { stmts := [Functions.Stmt.leave] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hAllowed _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult] at hResolve
+      cases hResolve
+      let compilerLeave := compiler.restrictTo outcomeLayout
+      have hRelLeave :
+          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerLeave :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+            allowed
+            (.ok (.Checkpoint (.Leave shared store)))
+            (.ok (Functions.Source.Outcome.leave compilerLeave, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.leave hRelLeave)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hLeave,
+        OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+        OpenExternal.YulOpenResult.toOpenResult, OpenExternal.OpenResult.ok,
+        compilerLeave] using
+        (OpenExternal.OpenResultPathRel.done hDone)
 
 /--
 Selected `break` successor under compositional outcome-layout support.
@@ -56331,12 +55927,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ_of_supp
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+          sourceResult) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Break :: rest) codeOverride
@@ -56364,7 +55955,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ_of_supp
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hBreak hSubset hTail
+          (lowerTail := lowerTail) (allowed := allowed) hBreak hSubset
           (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
           hResponses minimumTargetFuel
 
@@ -56384,12 +55975,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ_of_s
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+          sourceResult) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Continue :: rest) codeOverride
@@ -56417,7 +56003,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ_of_s
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hContinue hSubset hTail
+          (lowerTail := lowerTail) (allowed := allowed) hContinue hSubset
           (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
           hResponses minimumTargetFuel
 
@@ -56437,12 +56023,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ_of_supp
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          sourceFuel.succ rest codeOverride lowerTail allowed) :
+          sourceResult) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel.succ.succ
       (.Leave :: rest) codeOverride
@@ -56470,7 +56051,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ_of_supp
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hLeave hSubset hTail
+          (lowerTail := lowerTail) (allowed := allowed) hLeave hSubset
           (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
           hResponses minimumTargetFuel
 
@@ -65369,10 +64950,10 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           hSourceScoped hReservedHead hTail (compileFuel := compileFuel)
 
 /--
-Checked path-native lift for one source head that lowers to a single target
-statement without changing fresh-name state.
+Checked path-native lift for a singleton source head that stops its surrounding
+sequence before the compiled tail is entered.
 -/
-theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton_stopping
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -65388,19 +64969,10 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           some ([targetHead], freshState))
     (hSeq :
       ∀ {lowerTail : Functions.Block},
-        (∀ {ctxAfter : Functions.Source.Ctx},
-          SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-            outcomeLayout terminalRel revertRel prim program ctxAfter tailFuel
-            rest codeOverride lowerTail allowed) →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctx tailFuel.succ
           (head :: rest) codeOverride
-          { stmts := [targetHead] ++ lowerTail.stmts } allowed)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+          { stmts := [targetHead] ++ lowerTail.stmts } allowed) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
@@ -65409,7 +64981,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
   apply
     checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
   intro freshState stateHead lowerFuel lowerHead lowerTail freshState'
-    hCovers hLower hLowerTail
+    _hCovers hLower _hLowerTail
   cases lowerFuel with
   | zero =>
       simp [Stmt.toFunctionsListFuel?] at hLower
@@ -65420,138 +64992,9 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       cases hPair
       unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
       intro source compiler trace sourceDone
-        hInitial hResolves hAllowed hResponses minimumTargetFuel
       exact
-        (hSeq (by
-            intro ctxAfter
-            exact hTail hCovers hLowerTail))
-          hInitial hResolves hAllowed hResponses minimumTargetFuel
-
-/--
-Checked selected-path sequence successor for `break`.
--/
-theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_break_succ
-    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {rest : List AstStmt}
-    {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hBreak : ctx.breakScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
-    ∀ {compileFuel : Nat},
-      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-        reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        sourceFuel.succ.succ compileFuel (.Break :: rest) codeOverride
-        allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
-    (head := .Break) (targetHead := Functions.Stmt.brk)
-    (hLowerHead := by
-      intro fuel freshState
-      simp [Stmt.toFunctionsListFuel?])
-    (hSeq := by
-      intro lowerTail hTailRaw
-      exact
-        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ
-          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-          (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hBreak hSubset
-          hTailRaw)
-    hTail
-
-/--
-Checked selected-path sequence successor for `continue`.
--/
-theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_continue_succ
-    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {rest : List AstStmt}
-    {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hContinue : ctx.continueScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
-    ∀ {compileFuel : Nat},
-      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-        reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        sourceFuel.succ.succ compileFuel (.Continue :: rest) codeOverride
-        allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
-    (head := .Continue) (targetHead := Functions.Stmt.cont)
-    (hLowerHead := by
-      intro fuel freshState
-      simp [Stmt.toFunctionsListFuel?])
-    (hSeq := by
-      intro lowerTail hTailRaw
-      exact
-        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ
-          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-          (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hContinue hSubset
-          hTailRaw)
-    hTail
-
-/--
-Checked selected-path sequence successor for `leave`.
--/
-theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_leave_succ
-    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {rest : List AstStmt}
-    {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hLeave : ctx.leaveScope? = some outcomeLayout)
-    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
-    ∀ {compileFuel : Nat},
-      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-        reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        sourceFuel.succ.succ compileFuel (.Leave :: rest) codeOverride
-        allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
-    (head := .Leave) (targetHead := Functions.Stmt.leave)
-    (hLowerHead := by
-      intro fuel freshState
-      simp [Stmt.toFunctionsListFuel?])
-    (hSeq := by
-      intro lowerTail hTailRaw
-      exact
-        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ
-          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
-          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
-          (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hLeave hSubset
-          hTailRaw)
-    hTail
+        hSeq (lowerTail := lowerTail) (source := source)
+          (compiler := compiler) (trace := trace) (sourceDone := sourceDone)
 
 /--
 Checked selected-path sequence successor for `break` under compositional
@@ -65570,32 +65013,26 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
         sourceFuel.succ.succ compileFuel (.Break :: rest) codeOverride
         allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton_stopping
     (head := .Break) (targetHead := Functions.Stmt.brk)
     (hLowerHead := by
       intro fuel freshState
       simp [Stmt.toFunctionsListFuel?])
     (hSeq := by
-      intro lowerTail hTailRaw
+      intro lowerTail
       exact
         sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ_of_supported
           (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
-    hTail
+          (lowerTail := lowerTail) (allowed := allowed) hSupported)
 
 /--
 Checked selected-path sequence successor for `continue` under compositional
@@ -65614,32 +65051,26 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
         sourceFuel.succ.succ compileFuel (.Continue :: rest) codeOverride
         allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton_stopping
     (head := .Continue) (targetHead := Functions.Stmt.cont)
     (hLowerHead := by
       intro fuel freshState
       simp [Stmt.toFunctionsListFuel?])
     (hSeq := by
-      intro lowerTail hTailRaw
+      intro lowerTail
       exact
         sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ_of_supported
           (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
-    hTail
+          (lowerTail := lowerTail) (allowed := allowed) hSupported)
 
 /--
 Checked selected-path sequence successor for `leave` under compositional
@@ -65658,32 +65089,26 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
         sourceFuel.succ.succ compileFuel (.Leave :: rest) codeOverride
         allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton_stopping
     (head := .Leave) (targetHead := Functions.Stmt.leave)
     (hLowerHead := by
       intro fuel freshState
       simp [Stmt.toFunctionsListFuel?])
     (hSeq := by
-      intro lowerTail hTailRaw
+      intro lowerTail
       exact
         sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ_of_supported
           (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
           (rest := rest) (codeOverride := codeOverride)
-          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
-    hTail
+          (lowerTail := lowerTail) (allowed := allowed) hSupported)
 
 /--
 Fuel-dispatched checked selected-path constructor for `break :: rest`.
@@ -65704,12 +65129,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
@@ -65732,7 +65152,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
           (revertRel := revertRel) (prim := prim) (program := program)
           (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
-          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (codeOverride := codeOverride) (allowed := allowed) hSupported
           (compileFuel := compileFuel)
 
 /--
@@ -65754,12 +65174,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
@@ -65782,7 +65197,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
           (revertRel := revertRel) (prim := prim) (program := program)
           (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
-          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (codeOverride := codeOverride) (allowed := allowed) hSupported
           (compileFuel := compileFuel)
 
 /--
@@ -65804,12 +65219,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSupported :
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
-          sourceResult)
-    (hTail :
-      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+          sourceResult) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
@@ -65832,7 +65242,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
           (revertRel := revertRel) (prim := prim) (program := program)
           (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
-          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (codeOverride := codeOverride) (allowed := allowed) hSupported
           (compileFuel := compileFuel)
 
 /--
