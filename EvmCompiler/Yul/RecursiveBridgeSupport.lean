@@ -57669,6 +57669,21 @@ def beforeUserCallRestore
               compilerOpenUserCallBodyResult lowerFn bodyResult.1) }
       response
 
+/--
+Canonical response relation for the selected internal user-call body all the
+way through caller restoration and hidden-slot replay.
+-/
+def beforeUserCallBody
+    (prim : Objects.Source.PrimitiveSemantics)
+    (caller : State) (returns : List EvmYul.Identifier)
+    (lowerFn : Functions.FunDef)
+    (tmp : Name) (ctx : Functions.Source.Ctx)
+    (callerCompiler : Objects.Source.State)
+    (rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
+    SourceOpenSeqCallResponseRel :=
+  beforeUserCallRestore caller returns lowerFn
+    (beforeUserCallReplay prim tmp ctx callerCompiler rawCallResponseRel)
+
 end SourceExprRawPreludeOpenCallResponseRel
 
 /--
@@ -57904,11 +57919,10 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
     (hLowerReturns : lowerFn.returns = identNames returns)
     (hBody :
       OpenExternal.OpenResultRel
-        (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallRestore
-          (.Ok callerShared callerStore) returns lowerFn
-          (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
-            { ctxAfter with scope := tmp :: ctxAfter.scope }
-            (targetState.insert tmp Expr.zero) rawCallResponseRel))
+        (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallBody prim
+          (.Ok callerShared callerStore) returns lowerFn tmp
+          { ctxAfter with scope := tmp :: ctxAfter.scope }
+          (targetState.insert tmp Expr.zero) rawCallResponseRel)
         (SourceOpenResultSeqDoneRel cfg
           (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
           (SourceResultCheckpointAllowed false false true))
@@ -57959,11 +57973,10 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
     (params := params) (returns := returns) (body := body)
     (paramStore := paramStore)
     (bodyCallResponseRel :=
-      SourceExprRawPreludeOpenCallResponseRel.beforeUserCallRestore
-        (.Ok callerShared callerStore) returns lowerFn
-        (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
-          { ctxAfter with scope := tmp :: ctxAfter.scope }
-          (targetState.insert tmp Expr.zero) rawCallResponseRel))
+      SourceExprRawPreludeOpenCallResponseRel.beforeUserCallBody prim
+        (.Ok callerShared callerStore) returns lowerFn tmp
+        { ctxAfter with scope := tmp :: ctxAfter.scope }
+        (targetState.insert tmp Expr.zero) rawCallResponseRel)
     (callResponseRel :=
       SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
         { ctxAfter with scope := tmp :: ctxAfter.scope }

@@ -657,9 +657,10 @@ Remaining work:
      CALL-safe/scoped function-body bridge: completed argument prefixes now
      enter the actual recursively related callee body before restoration and
      hidden-slot replay.
-   - [x] Name the canonical selected-callee caller-restoration and hidden-slot
-     replay response transformers, and specialize the raw selected-body bridge
-     so recursive callers provide the body relation without ad hoc adapters.
+   - [x] Name the canonical selected-callee caller-restoration, hidden-slot
+     replay, and composed selected-body response transformers, and specialize
+     the raw selected-body bridge so recursive callers provide one body
+     relation without ad hoc adapters.
    - [x] Specialize the terminal-aware argument binder to imported
      `YulOpen.evalValues` user-call semantics: reversed raw argument evaluation,
      restored stack order, open callee entry, stopped prefixes, and suspended
