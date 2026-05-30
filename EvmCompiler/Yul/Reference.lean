@@ -6023,6 +6023,34 @@ def OpenExternalResponseRel
     (response.internalMutation.apply sourceShared.toState)
     (response.internalMutation.apply targetShared.toState)
 
+/--
+Admissible external responses at one actual suspended source/target shared
+state pair.
+
+This alias makes the semantic boundary explicit: admissibility is local to the
+pre-call states, not a continuation-shaped proof obligation and not a global
+relation-preserving mutation requirement.
+-/
+abbrev ExternalResponseRelAt
+    (cfg : StateRelConfig)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (targetShared : EvmYul.SharedState .EVM) :
+    OpenExternal.CallResponse → Prop :=
+  OpenExternalResponseRel cfg sourceShared targetShared
+
+/-- Open-call agreement at one actual suspended shared-state pair. -/
+abbrev OpenCallRelAt
+    {SourceState : Type _} {TargetState : Type _}
+    (cfg : StateRelConfig)
+    (sourceShared : EvmYul.SharedState .Yul)
+    (targetShared : EvmYul.SharedState .EVM)
+    (stateRel : SourceState → TargetState → Prop)
+    (sourceCall : OpenExternal.OpenCall SourceState)
+    (targetCall : OpenExternal.OpenCall TargetState) : Prop :=
+  OpenExternal.OpenCallRel
+    (ExternalResponseRelAt cfg sourceShared targetShared)
+    stateRel sourceCall targetCall
+
 theorem finishExternalCall {cfg : StateRelConfig}
     {sourceShared : EvmYul.SharedState .Yul}
     {targetShared : EvmYul.SharedState .EVM}
@@ -7383,9 +7411,7 @@ theorem openExternalPrimitiveOpenCallRel_of_args
       compilerPrimitiveOpenCall? compiler kind
           (kind.args operands).reverse =
         some compilerCall ∧
-      OpenExternal.OpenCallRel
-        (SharedStateRel.OpenExternalResponseRel cfg sourceShared
-          compiler.shared)
+      SharedStateRel.OpenCallRelAt cfg sourceShared compiler.shared
         (OpenPrimitiveResultRel cfg layout) sourceCall compilerCall := by
   let site :=
     (OpenExternal.CallContext.ofEVMSharedState compiler.shared).callSite
@@ -7444,9 +7470,7 @@ theorem openExternalPrimitiveEVMOpenCallRel_of_args
           ({ evmState with stack := kind.args operands ++ baseStack }
             : EvmYul.EVM.State) kind =
         some evmCall ∧
-      OpenExternal.OpenCallRel
-        (SharedStateRel.OpenExternalResponseRel cfg sourceShared
-          compiler.shared)
+      SharedStateRel.OpenCallRelAt cfg sourceShared compiler.shared
         (OpenPrimitiveEVMResultRel cfg layout baseStack)
         sourceCall evmCall := by
   rcases

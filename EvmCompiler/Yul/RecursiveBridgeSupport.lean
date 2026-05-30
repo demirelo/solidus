@@ -206498,9 +206498,7 @@ def OpenPrimitiveCallSound (cfg : Reference.StateRelConfig) : Prop :=
         Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
             compiler kind (kind.args operands).reverse =
           some compilerCall ∧
-        OpenExternal.OpenCallRel
-          (Reference.SharedStateRel.OpenExternalResponseRel
-            cfg sourceShared compiler.shared)
+        Reference.SharedStateRel.OpenCallRelAt cfg sourceShared compiler.shared
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveResultRel
             cfg layout) sourceCall compilerCall
 
@@ -206555,9 +206553,7 @@ def OpenPrimitiveEVMCallSound (cfg : Reference.StateRelConfig) : Prop :=
             ({ evmState with stack := kind.args operands ++ baseStack }
               : EvmYul.EVM.State) kind =
           some evmCall ∧
-        OpenExternal.OpenCallRel
-          (Reference.SharedStateRel.OpenExternalResponseRel
-            cfg sourceShared compiler.shared)
+        Reference.SharedStateRel.OpenCallRelAt cfg sourceShared compiler.shared
           (Reference.SourceBridgeFacts.SourceStateRel.OpenPrimitiveEVMResultRel
             cfg layout baseStack) sourceCall evmCall
 

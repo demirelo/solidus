@@ -754,6 +754,9 @@ Remaining work:
      coverage until each has its own open-boundary semantics and proof.
 
 5. [ ] Connect the open CALL boundary to the EVM target.
+   - [x] Name the actual-prestate external-response admissibility relation and
+     local open-call relation explicitly. Source/compiler and source/EVM
+     primitive CALL proofs now expose that non-vacuous boundary directly.
    - [ ] Audit `OpenExternal.OpenCallRel` and request projections for every
      ordinary `CALL` observable: call kind, caller/context address, target/code
      address, value, calldata bytes, static permission, return-copy window, and
