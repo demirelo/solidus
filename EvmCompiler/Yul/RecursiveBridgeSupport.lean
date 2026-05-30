@@ -55717,6 +55717,34 @@ def runAssignSource
       | .OutOfFuel => .done (.ok sourceAfter)
       | .Checkpoint _ => .done (.ok sourceAfter))
 
+theorem yulOpen_toOpenResult_execSeq_let_single_eq_runLetSource
+    (fuel : Nat) (name : EvmYul.Identifier) (expr : AstExpr)
+    (rest : List AstStmt) (codeOverride : Option AstContract)
+    (state : State)
+    (hCheck : EvmYul.Yul.checkDeclaration state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel.succ.succ
+          (.Let [name] (some expr) :: rest) codeOverride state) =
+      runLetSource fuel name expr rest codeOverride state := by
+  rw [yulOpen_toOpenResult_execSeq_let_single_eq_bind_evalValues
+    (fuel := fuel) (name := name) (expr := expr) (rest := rest)
+    (codeOverride := codeOverride) (state := state) hCheck]
+  rfl
+
+theorem yulOpen_toOpenResult_execSeq_assign_single_eq_runAssignSource
+    (fuel : Nat) (name : EvmYul.Identifier) (expr : AstExpr)
+    (rest : List AstStmt) (codeOverride : Option AstContract)
+    (state : State)
+    (hCheck : EvmYul.Yul.checkAssignment state [name] = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel.succ.succ
+          (.Assign [name] expr :: rest) codeOverride state) =
+      runAssignSource fuel name expr rest codeOverride state := by
+  rw [yulOpen_toOpenResult_execSeq_assign_single_eq_bind_evalValues
+    (fuel := fuel) (name := name) (expr := expr) (rest := rest)
+    (codeOverride := codeOverride) (state := state) hCheck]
+  rfl
+
 theorem runLetSource_user_call_succ_eq_bind_args
     (fuel : Nat) (name : EvmYul.Identifier) (functionName : Name)
     (args : List AstExpr) (rest : List AstStmt)
@@ -55962,6 +55990,38 @@ theorem runLetTarget_eq_bind_runRaw
             OpenExternal.OpenResult.ok]
 
 /--
+Normalize a compiled declaration-expression head and its sequence tail through
+the terminal-aware raw-expression runner.
+-/
+theorem compilerOpen_block_runOpen_let_expr_prelude_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + tailFuel.succ)
+        { stmts := pre ++ [Functions.Stmt.let_ name lowerExpr] ++ tail }
+        compiler =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        (runLetTargetAfterRaw prim program name tail tailFuel) := by
+  rw [show
+    pre ++ [Functions.Stmt.let_ name lowerExpr] ++ tail =
+      pre ++ ([Functions.Stmt.let_ name lowerExpr] ++ tail) by
+    simp [List.append_assoc]]
+  rw [compilerOpen_expr_prelude_let_single_append_raw_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := tail) (name := name) (lowerExpr := lowerExpr)
+    (state := compiler) (suffixFuel := tailFuel)]
+  rw [← runLetTarget_eq_bind_runRaw
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := tail) (name := name) (lowerExpr := lowerExpr)
+    (tailFuel := tailFuel) (compiler := compiler)]
+  rfl
+
+/--
 Raw target equation for one generated argument head.
 
 The head expression prelude may itself stop after a nested internal call.  In
@@ -56031,6 +56091,49 @@ theorem runAssignTarget_eq_bind_runRaw
       | brk | cont | leave | halt =>
           simp [runAssignTargetAfterRaw, OpenExternal.OpenResult.bind,
             OpenExternal.OpenResult.ok]
+
+/--
+Normalize a compiled assignment-expression head and its sequence tail through
+the terminal-aware raw-expression runner.
+-/
+theorem compilerOpen_block_runOpen_assign_expr_prelude_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    (hPreContains :
+      OpenResultDoneInvariant
+        (fun preDone =>
+          ∀ {compilerAfterPre : Objects.Source.State}
+            {ctxAfter : Functions.Source.Ctx},
+            preDone =
+              .ok (Functions.Source.Outcome.regular compilerAfterPre,
+                ctxAfter) →
+              compilerAfterPre.vars.contains name = true)
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + tailFuel.succ) { stmts := pre } compiler)) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + tailFuel.succ)
+        { stmts := pre ++ [Functions.Stmt.assign name lowerExpr] ++ tail }
+        compiler =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        (runAssignTargetAfterRaw prim program name tail tailFuel) := by
+  rw [show
+    pre ++ [Functions.Stmt.assign name lowerExpr] ++ tail =
+      pre ++ ([Functions.Stmt.assign name lowerExpr] ++ tail) by
+    simp [List.append_assoc]]
+  rw [compilerOpen_expr_prelude_assign_single_append_raw_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := tail) (name := name) (lowerExpr := lowerExpr)
+    (state := compiler) (suffixFuel := tailFuel) hPreContains]
+  rw [← runAssignTarget_eq_bind_runRaw
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := tail) (name := name) (lowerExpr := lowerExpr)
+    (tailFuel := tailFuel) (compiler := compiler)]
+  rfl
 
 theorem runLetTarget_append_eq
     {prim : Objects.Source.PrimitiveSemantics}
