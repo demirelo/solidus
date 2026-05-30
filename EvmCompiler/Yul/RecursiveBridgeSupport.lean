@@ -113470,6 +113470,112 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
                 cases hTailRaw
 
 /--
+Compiler-output wrapper for path-native terminal-aware reverse-cons argument
+composition.
+
+The successful whole-list lowering result determines the generated tail
+prelude, raw head prelude, and fresh temporary.  Recursive callers provide
+only the selected-path tail and head preservation interfaces.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBound1?_head_expr
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hLower :
+      Expr.List.lowerBound1? freshState (head :: tail) =
+        some (pre, lowerArgs, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
+    (hTail :
+      ∀ {preTail lowerTail stateTail preHead lowerHead stateHead},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+          revertRel prim program ctx
+          (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride
+          preTail lowerTail (fun _sourceDone => True))
+    (hHead :
+      ∀ {stateTail preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx},
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+          prim program ctxHead base.succ.succ head codeOverride preHead
+          lowerHead (fun _sourceDone => True))
+    (hHeadSingle :
+      ∀ {stateTail preHead lowerHead stateHead}
+        {sourceTailResult : State × List Word}
+        {targetState : Objects.Source.State},
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        SourceStateRel cfg layout sourceTailResult.1 targetState →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
+              sourceTailResult.1))) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx
+      (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail)
+      codeOverride pre lowerArgs allowed := by
+  rcases lowerBound1?_cons_some_components hLower with
+    ⟨preTail, lowerTail, stateTail, preHead, lowerHead, stateHead, tmp,
+      hTailLower, hHeadLower, hFresh, hPre, hArgs⟩
+  subst pre
+  subst lowerArgs
+  intro source compiler trace sourceDone hInitial hContains hResolve hAllowed
+    hResponses minimumTargetFuel
+  simpa only [List.append_assoc] using
+    (sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBound1?_components_head_expr
+      (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx)
+      (freshState := freshState) (stateTail := stateTail)
+      (stateHead := stateHead) (stateFresh := stateFresh)
+      (preTail := preTail) (preHead := preHead) (lowerTail := lowerTail)
+      (lowerHead := lowerHead) (tmp := tmp) (base := base)
+      (head := head) (tail := tail) (codeOverride := codeOverride)
+      (allowed := allowed) hLayoutSubset hCovers hTailLower hHeadLower hFresh
+      hTailSafe (hTail hTailLower hHeadLower) (hHead hHeadLower)
+      (by
+        intro sourceTailResult targetTailResult hTailDone
+        have hTailRaw :
+            SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+              (.ok sourceTailResult) (.ok targetTailResult) :=
+          sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+        rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+        cases targetTailOutcome with
+        | mk targetTailState mode =>
+            cases mode with
+            | regular =>
+                exact hHeadSingle hHeadLower hTailRaw.1
+            | brk =>
+                cases hTailRaw
+            | cont =>
+                cases hTailRaw
+            | leave =>
+                cases hTailRaw
+            | halt kind =>
+                cases hTailRaw)
+      (source := source) (compiler := compiler) (trace := trace)
+      (sourceDone := sourceDone) hInitial hContains hResolve hAllowed hResponses
+      minimumTargetFuel)
+
+/--
 Terminal-aware raw reverse-cons argument composition.
 
 Imported Yul evaluates the tail arguments first and then the head expression in
