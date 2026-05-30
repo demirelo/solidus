@@ -109917,6 +109917,69 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal
             targetArgsResult.1.state))
       (hArgs hInitial) hRegular hArgResponse
 
+/--
+Lift an ordinary successful expression-value relation into the terminal-aware
+raw expression relation.
+
+This adapter is deliberately one-way: strict targets are wrapped as
+`RawTarget.values`.  It cannot manufacture a stopped target, so terminal
+outcomes still have to enter through the raw argument or raw user-call
+boundaries.
+-/
+theorem sourceExprRawPreludeOpenResultRel_values_of_stack
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        SourceArgPreludeOpenTarget}
+    (hRel :
+      OpenExternal.OpenResultRel
+        (fun sourceCall targetCall response =>
+          rawCallResponseRel sourceCall
+            { site := targetCall.site
+              resume := fun response =>
+                OpenExternal.OpenResult.map
+                  SourceExprPreludeOpen.RawTarget.values
+                  (targetCall.resume response) }
+            response)
+        (SourceArgStackPreludeOpenDoneRel cfg layout) source target) :
+    OpenExternal.OpenResultRel rawCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      source
+      (OpenExternal.OpenResult.map SourceExprPreludeOpen.RawTarget.values
+        target) := by
+  induction hRel with
+  | @done sourceDone targetDone hDone =>
+      cases sourceDone with
+      | error sourceErr =>
+          cases targetDone <;> cases hDone
+      | ok sourceResult =>
+          cases targetDone with
+          | error targetErr =>
+              cases hDone
+          | ok targetResult =>
+              simpa [OpenExternal.OpenResult.map,
+                OpenExternal.OpenResult.bind,
+                OpenExternal.OpenResult.ok,
+                SourceExprRawPreludeOpenDoneRel] using
+                (OpenExternal.OpenResultRel.done hDone :
+                  OpenExternal.OpenResultRel rawCallResponseRel
+                    (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel
+                      revertRel)
+                    (.done (.ok sourceResult))
+                    (.done (.ok
+                      (.values targetResult))))
+  | call hSite _hResume ih =>
+      simp [OpenExternal.OpenResult.map, OpenExternal.OpenResult.bind]
+      exact OpenExternal.OpenResultRel.call hSite (by
+        intro response hResponse
+        exact ih response hResponse)
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

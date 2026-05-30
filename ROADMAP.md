@@ -598,6 +598,10 @@ Remaining work:
      halt/revert outcomes become stopped raw expressions, regular completion
      enters an explicit primitive continuation, and suspended argument calls
      retain the full post-primitive response relation.
+   - [x] Add the strict-value-to-raw-expression lift: already-proved regular
+     expression continuations map into `RawTarget.values` without inventing a
+     stopped branch, keeping terminal propagation confined to honest raw
+     boundaries.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
