@@ -540,6 +540,10 @@ Remaining work:
      internal-call expression: generated argument preludes run first, any
      suspended nested request remains visible, stopped prefixes remain stopped,
      and only regular prefixes enter the selected callee body.
+   - [x] Add the terminal-aware generated argument-prefix relation: regular
+     completion retains the existing lowered-argument replay contract, while
+     nested `YulHalt` and `Revert` outcomes retain the target statement stop
+     needed by the enclosing raw expression.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

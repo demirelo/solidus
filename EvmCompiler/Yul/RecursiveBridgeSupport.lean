@@ -35688,6 +35688,123 @@ def SourceArgRawPreludeOpenDoneRel
       | .brk | .cont | .leave | .halt _ => False
   | _, _ => False
 
+/--
+Terminal-aware generated-argument-prefix completion relation.
+
+The regular branch is the existing raw argument-prefix contract: the generated
+statement prefix preserves the visible source state and the lowered pure
+argument list computes the reversed source values.  A nested internal call in
+that generated prefix may instead halt or revert; those branches retain the
+full target statement outcome so the enclosing raw expression can stop without
+pretending that argument evaluation returned values.
+-/
+def SourceArgTerminalRawPreludeOpenDoneRel
+    (cfg : StateRelConfig) (layout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (lowerArgs : List (Locals.Expr 1)) :
+    Except EvmYul.Yul.Exception (State × List Word) →
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx) → Prop
+  | .ok sourceResult, .ok (targetOutcome, _ctxAfter) =>
+      match targetOutcome.mode with
+      | .regular =>
+          SourceStateRel cfg layout sourceResult.1 targetOutcome.state ∧
+            Functions.Source.ArgList.eval prim lowerArgs
+                targetOutcome.state =
+              .ok (targetOutcome.state, sourceResult.2.reverse)
+      | .brk | .cont | .leave | .halt _ => False
+  | .error (.YulHalt source value), .ok (targetOutcome, _ctxAfter) =>
+      match targetOutcome.mode with
+      | .halt kind => terminalRel kind value source targetOutcome.state
+      | .regular | .brk | .cont | .leave => False
+  | .error (.Revert source), .ok (targetOutcome, _ctxAfter) =>
+      match targetOutcome.mode with
+      | .halt .revert => revertRel source targetOutcome.state
+      | .regular | .brk | .cont | .leave | .halt _ => False
+  | _, _ => False
+
+theorem sourceArgTerminalRawPreludeOpenDoneRel_of_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {sourceDone : Except EvmYul.Yul.Exception (State × List Word)}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hDone :
+      SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs sourceDone
+        targetDone) :
+    SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel prim
+      lowerArgs sourceDone targetDone := by
+  cases sourceDone with
+  | error err =>
+      cases targetDone <;> cases hDone
+  | ok sourceResult =>
+      cases targetDone with
+      | error err =>
+          cases hDone
+      | ok targetResult =>
+          rcases targetResult with ⟨targetOutcome, ctxAfter⟩
+          cases targetOutcome with
+          | mk targetState mode =>
+              cases mode <;>
+                simpa [SourceArgRawPreludeOpenDoneRel,
+                  SourceArgTerminalRawPreludeOpenDoneRel] using hDone
+
+theorem sourceArgRawPreludeOpenDoneRel_of_terminal_ok
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {sourceResult : State × List Word}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.ok sourceResult) targetDone) :
+    SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs (.ok sourceResult)
+      targetDone := by
+  cases targetDone with
+  | error err =>
+      cases hDone
+  | ok targetResult =>
+      rcases targetResult with ⟨targetOutcome, ctxAfter⟩
+      cases targetOutcome with
+      | mk targetState mode =>
+          cases mode <;>
+            simpa [SourceArgRawPreludeOpenDoneRel,
+              SourceArgTerminalRawPreludeOpenDoneRel] using hDone
+
+theorem sourceExprRawPreludeOpenDoneRel_stopped_of_arg_terminal_error
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {err : Exception}
+    {target : Functions.Source.Outcome × Functions.Source.Ctx}
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.error err) (.ok target)) :
+    SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+      (.error err) (.ok (.stopped target)) := by
+  rcases target with ⟨targetOutcome, targetCtx⟩
+  cases targetOutcome with
+  | mk targetState mode =>
+      cases err <;> cases mode <;>
+        simpa [SourceArgTerminalRawPreludeOpenDoneRel,
+          SourceExprRawPreludeOpenDoneRel] using hDone
+
 def SourceArgCallPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name)
     (prim : Objects.Source.PrimitiveSemantics)
