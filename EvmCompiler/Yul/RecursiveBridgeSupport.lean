@@ -110353,6 +110353,218 @@ theorem sourceExprRawPreludeOpenResultRel_prim_regular_call_of_arg_terminal
                 targetCall response hRel hResponse
               exact hPrimitiveResponse hRel hResponse))
 
+namespace SourceExprRawPreludeOpenCallResponseRel
+
+/--
+Canonical response relation while evaluating a terminal-aware raw primitive's
+generated argument prefix.
+
+Any suspended argument request resumes into the primitive only after regular
+prefix completion.  A terminal prefix remains stopped and never enters the
+primitive continuation.
+-/
+def beforePrimitive
+    (prim : Objects.Source.PrimitiveSemantics)
+    (sourceFuel : Nat) (yulPrim : EvmYul.Operation .Yul)
+    (op : Structured.BasicOp) {results : Nat}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (lowerArgs : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
+    (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
+    SourceArgRawPreludeOpenCallResponseRel :=
+  fun sourceCall targetCall response =>
+    callResponseRel
+      { site := sourceCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (sourceCall.resume response)
+            (fun sourceArgsResult =>
+              yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                sourceArgsResult) }
+      { site := targetCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (targetCall.resume response)
+            (fun targetArgsResult =>
+              match targetArgsResult.1.mode with
+              | .regular =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      .values
+                        { state := primResult.1
+                          ctx := targetArgsResult.2
+                          values := primResult.2 })
+                    (CompilerOpen.LocalsExpr.eval prim
+                      (Expr.cast hOutputs (.prim op lowerArgs))
+                      targetArgsResult.1.state)
+              | .brk | .cont | .leave | .halt _ =>
+                  OpenExternal.OpenResult.ok (.stopped targetArgsResult)) }
+      response
+
+end SourceExprRawPreludeOpenCallResponseRel
+
+/--
+Canonical-response wrapper for terminal-aware raw primitive expressions.
+-/
+theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hArgs :
+      SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx sourceFuel args codeOverride pre argExprs
+        targetFuel
+        (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim sourceFuel
+          yulPrim op hOutputs lowerArgs exprCallResponseRel))
+    (hRegular :
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim argExprs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel exprCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+            sourceArgsResult)
+          (OpenExternal.OpenResult.map
+            (fun primResult =>
+              .values
+                { state := primResult.1
+                  ctx := targetArgsResult.2
+                  values := primResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim
+              (Expr.cast hOutputs (.prim op lowerArgs))
+              targetArgsResult.1.state))) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Call (.inl yulPrim) args)
+      codeOverride pre (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      exprCallResponseRel :=
+  sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal
+    (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) (program := program) (ctx := ctx)
+    (sourceFuel := sourceFuel) (targetFuel := targetFuel) (yulPrim := yulPrim)
+    (op := op) (args := args) (codeOverride := codeOverride) (pre := pre)
+    (argExprs := argExprs) (results := results) (lowerArgs := lowerArgs)
+    (argCallResponseRel :=
+      SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim sourceFuel
+        yulPrim op hOutputs lowerArgs exprCallResponseRel)
+    (exprCallResponseRel := exprCallResponseRel) hOutputs hArgs hRegular
+    (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
+
+/--
+CALL-safe terminal-aware raw primitive dispatcher.
+
+Safe primitives reuse the strict stack-soundness route. Ordinary `CALL` reuses
+the strict open boundary and retains the universal shared-response premise.
+-/
+theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_callSafe_of_arg_terminal_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {names : List Name} {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hCallSafe : Safe.CallSafe.primitive yulPrim)
+    (hBasic : Prim.toBasicOp? yulPrim = some op)
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hLowerVars :
+      argExprs = names.map (fun name => (.var name : Locals.Expr 1)))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some lowerArgs)
+    (hArgs :
+      SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx sourceFuel args codeOverride pre argExprs
+        targetFuel
+        (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim sourceFuel
+          yulPrim op hOutputs lowerArgs exprCallResponseRel))
+    (hPrim :
+      Safe.primitive yulPrim →
+        PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hNoError :
+      Safe.primitive yulPrim →
+        SourcePrimitiveCallNoErrorAt sourceFuel yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+            compilerAfter →
+          exprCallResponseRel sourceCall
+            { site := targetCall.site
+              resume := fun response =>
+                OpenExternal.OpenResult.map
+                  SourceExprPreludeOpen.RawTarget.values
+                  (targetCall.resume response) }
+            response →
+          Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+            compilerAfter.shared response) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Call (.inl yulPrim) args)
+      codeOverride pre (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
+      exprCallResponseRel := by
+  apply
+    sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal_canonical
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := sourceFuel) (targetFuel := targetFuel) (yulPrim := yulPrim)
+      (op := op) (args := args) (codeOverride := codeOverride) (pre := pre)
+      (argExprs := argExprs) (results := results) (lowerArgs := lowerArgs)
+      (exprCallResponseRel := exprCallResponseRel) hOutputs hArgs
+  intro sourceArgsResult targetArgsResult hDone
+  rcases (Safe.CallSafe.primitive_iff_safe_or_call yulPrim).mp hCallSafe with
+    hSafe | hCall
+  · exact
+      sourceExprRawPreludeOpenResultRel_prim_regular_safe_of_arg_terminal
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (sourceFuel := sourceFuel)
+        (yulPrim := yulPrim) (op := op) (argExprs := argExprs)
+        (names := names) (results := results) (seq := lowerArgs)
+        (hOutputs := hOutputs) (sourceArgsResult := sourceArgsResult)
+        (targetArgsResult := targetArgsResult)
+        (exprCallResponseRel := exprCallResponseRel) hSafe hBasic hLowerVars
+        hSeq hDone (hPrim hSafe) (hNoError hSafe)
+  · subst yulPrim
+    exact
+      sourceExprRawPreludeOpenResultRel_prim_regular_call_of_arg_terminal
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (sourceFuel := sourceFuel)
+        (yulPrim := .System .CALL) (op := op)
+        (kind := OpenExternal.CallKind.call) (argExprs := argExprs)
+        (names := names) (results := results) (seq := lowerArgs)
+        (hOutputs := hOutputs) (sourceArgsResult := sourceArgsResult)
+        (targetArgsResult := targetArgsResult)
+        (exprCallResponseRel := exprCallResponseRel) (by rfl) hBasic
+        hLowerVars hSeq hDone hPrimitiveResponse
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

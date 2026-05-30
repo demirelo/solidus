@@ -614,6 +614,11 @@ Remaining work:
      strict continuation reuse to safe non-CALL primitives and CALL-family
      primitives. The CALL-family adapter retains the universal shared-response
      preservation premise through the raw-value wrapper.
+   - [x] Name the canonical terminal-aware raw primitive argument-response
+     adapter and add the CALL-safe raw primitive dispatcher. Recursive callers
+     now provide one generated argument proof; regular completion chooses the
+     safe primitive or ordinary open-`CALL` strict continuation internally,
+     while stopped prefixes bypass the primitive.
    - [x] Scope the structural raw argument dispatcher callback to head
      subterms of the current argument list before assembling the final
      recursive expression constructor. The live theorem now threads
