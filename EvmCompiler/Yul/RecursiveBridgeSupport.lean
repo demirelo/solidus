@@ -2507,6 +2507,21 @@ theorem freshCoversLayout_append_cons_of_mem {front layout : List Name}
       (freshCoversLayout_mem_left hCovers hMem)
       (freshCoversLayout_append_right hCovers)
 
+theorem freshCoversLayout_append_reverse_append_of_reserved
+    {reserved names layout : List Name} {state : Fresh.State}
+    (hCovers : FreshCoversLayout (reserved ++ layout) state)
+    (hReserved : SourceNamesReserved reserved names) :
+    FreshCoversLayout (reserved ++ (names.reverse ++ layout)) state := by
+  apply freshCoversLayout_append_left
+  · intro name hMem
+    exact freshCoversLayout_mem_left hCovers hMem
+  · apply freshCoversLayout_append_left
+    · intro name hMem
+      exact
+        freshCoversLayout_mem_left hCovers
+          (hReserved name (by simpa using hMem))
+    · exact freshCoversLayout_append_right hCovers
+
 theorem toFunctionsListFuel?_let_user_call_eq_succ
     (fuel : Nat) (state : Fresh.State) (names : List EvmYul.Identifier)
     (functionName : Name) (args : List AstExpr) :
@@ -56027,6 +56042,42 @@ theorem sourceOpenStmtHeadPathSoundWhen_let_none_succ
           (by simpa [hSharedAfter] using hShared) hRelAfter hDomainAfter
 
 /--
+Attach an uninitialized declaration head to an arbitrary compiled sequence
+tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_none_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {names : List EvmYul.Identifier}
+    {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hNoDup : (identNames names).Nodup)
+    (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
+          ((identNames names).reverse ++ layout) outcomeLayout terminalRel
+          revertRel prim program ctxAfter sourceFuel.succ rest codeOverride
+          lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Let names none :: rest) codeOverride
+      { stmts := Stmt.initNames (identNames names) ++ lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    (sourceOpenStmtHeadPathSoundWhen_let_none_succ
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+      (codeOverride := codeOverride) (allowed := allowed) names hNoDup hFresh)
+    hTail
+
+/--
 Selected-path statement-head bridge for `break`.
 -/
 theorem sourceOpenStmtHeadPathSoundWhen_break_succ
@@ -65183,6 +65234,81 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                       (by
                         simp [Stmt.List.toBlockFuel?, hLowerRest]))
                       hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
+Checked path-native lift for an uninitialized declaration head.
+
+The lowerer emits one zero-initializer per declared source name.  Reserved-name
+coverage lets the recursive tail run under the larger visible layout.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_none_succ
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {names : List EvmYul.Identifier}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped : SourceLexical.StmtScoped layout (.Let names none))
+    (hReservedHead :
+      SourceNamesReserved reserved (Stmt.names (.Let names none)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved ((identNames names).reverse ++ layout) outcomeLayout
+          terminalRel revertRel prim program ctxAfter sourceFuel.succ
+          compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel (.Let names none :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState'
+    hCovers hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ lowerFuel =>
+      have hLower' :
+          (some (Stmt.initNames (identNames names), freshState) :
+              Option (List Functions.Stmt × Fresh.State)) =
+            some (lowerHead, stateHead) := by
+        simpa only [Stmt.toFunctionsListFuel?.eq_3] using hLower
+      have hPair :
+          (Stmt.initNames (identNames names), freshState) =
+            (lowerHead, stateHead) :=
+        Option.some.inj hLower'
+      cases hPair
+      have hReservedNames :
+          SourceNamesReserved reserved (identNames names) := by
+        intro name hMem
+        exact hReservedHead name (by simpa [Stmt.names] using hMem)
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_none_succ
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (names := names) (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed)
+          (SourceLexical.let_none_names_nodup hSourceScoped)
+          (SourceLexical.let_none_names_fresh hSourceScoped)
+          (by
+            intro ctxAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                  (compileFuel := lowerFuel.succ.succ))
+                (freshCoversLayout_append_reverse_append_of_reserved
+                  hCovers hReservedNames)
+                hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone)
 
 /--
 Checked path-native lift for one source head that lowers to a single target
