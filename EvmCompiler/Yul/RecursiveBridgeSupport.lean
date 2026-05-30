@@ -35688,6 +35688,14 @@ def SourceArgRawPreludeOpenDoneRel
       | .brk | .cont | .leave | .halt _ => False
   | _, _ => False
 
+abbrev SourceArgRawPreludeOpenCallResponseRel : Type :=
+  OpenExternal.OpenCall
+    (OpenExternal.OpenResult Exception (State × List Word)) →
+    OpenExternal.OpenCall
+      (OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)) →
+    OpenExternal.CallResponse → Prop
+
 /--
 Terminal-aware generated-argument-prefix completion relation.
 
@@ -35805,6 +35813,155 @@ theorem sourceExprRawPreludeOpenDoneRel_stopped_of_arg_terminal_error
         simpa [SourceArgTerminalRawPreludeOpenDoneRel,
           SourceExprRawPreludeOpenDoneRel] using hDone
 
+theorem sourceArgTerminalRawPreludeOpenResultRel_of_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hRel :
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+        source target) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs)
+      source target := by
+  induction hRel with
+  | @done sourceDone targetDone hDone =>
+      exact OpenExternal.OpenResultRel.done
+        (sourceArgTerminalRawPreludeOpenDoneRel_of_raw hDone)
+  | call hSite _hResume ih =>
+      exact OpenExternal.OpenResultRel.call hSite (by
+        intro response hResponse
+        exact ih response hResponse)
+
+/--
+Compose a terminal-aware generated argument prefix with a raw expression
+continuation.
+
+Regular prefix completion enters the supplied user-call continuation.  A
+nested `YulHalt` or `Revert` completion skips that continuation and becomes a
+stopped raw expression.  Suspended calls in the prefix remain observable
+through the outer bind.
+-/
+theorem sourceExprRawPreludeOpenResultRel_bind_arg_terminal
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)}
+    {argCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    {sourceArgs :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {targetArgs :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    {sourceNext :
+      State × List Word →
+        OpenExternal.OpenResult Exception (State × List Word)}
+    {targetRegular :
+      Functions.Source.Outcome × Functions.Source.Ctx →
+        SourceExprPreludeOpen.RawResult}
+    (hArgs :
+      OpenExternal.OpenResultRel argCallResponseRel
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs)
+        sourceArgs targetArgs)
+    (hRegular :
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel exprCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (sourceNext sourceArgsResult) (targetRegular targetArgsResult))
+    (hArgResponse :
+      ∀ {sourceCall targetCall response},
+        exprCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetArgsResult =>
+                  match targetArgsResult.1.mode with
+                  | .regular => targetRegular targetArgsResult
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok (.stopped targetArgsResult)) }
+          response →
+        argCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel exprCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (OpenExternal.OpenResult.bind sourceArgs sourceNext)
+      (OpenExternal.OpenResult.bind targetArgs
+        (fun targetArgsResult =>
+          match targetArgsResult.1.mode with
+          | .regular => targetRegular targetArgsResult
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok (.stopped targetArgsResult))) := by
+  refine OpenExternal.OpenResultRel.bind hArgs ?_ hArgResponse
+  intro sourceArgsDone targetArgsDone hDone
+  cases sourceArgsDone with
+  | error err =>
+      cases targetArgsDone with
+      | error targetErr =>
+          simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+      | ok targetArgsResult =>
+          rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+          cases targetArgsOutcome with
+          | mk targetArgsState mode =>
+              cases mode with
+              | regular =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | brk =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | cont =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | leave =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | halt kind =>
+                  simpa [OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.ok] using
+                    (OpenExternal.OpenResultRel.done
+                      (sourceExprRawPreludeOpenDoneRel_stopped_of_arg_terminal_error
+                        hDone))
+  | ok sourceArgsResult =>
+      cases targetArgsDone with
+      | error targetErr =>
+          cases hDone
+      | ok targetArgsResult =>
+          rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+          cases targetArgsOutcome with
+          | mk targetArgsState mode =>
+              cases mode with
+              | regular =>
+                  simpa using hRegular hDone
+              | brk =>
+                  cases hDone
+              | cont =>
+                  cases hDone
+              | leave =>
+                  cases hDone
+              | halt kind =>
+                  cases hDone
+
 def SourceArgCallPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name)
     (prim : Objects.Source.PrimitiveSemantics)
@@ -35854,14 +36011,6 @@ theorem sourceArgCallPreludeOpenDoneRel_of_raw_reverse
               cases mode <;> simp [SourceArgRawPreludeOpenDoneRel,
                 SourceArgCallPreludeOpenDoneRel] at hDone ⊢
               exact hDone
-
-abbrev SourceArgRawPreludeOpenCallResponseRel : Type :=
-  OpenExternal.OpenCall
-    (OpenExternal.OpenResult Exception (State × List Word)) →
-    OpenExternal.OpenCall
-      (OpenExternal.OpenResult Functions.EVMException
-        (Functions.Source.Outcome × Functions.Source.Ctx)) →
-    OpenExternal.CallResponse → Prop
 
 theorem sourceArgCallPreludeOpenResultRel_of_raw_reverse
     {cfg : StateRelConfig} {layout : List Name}

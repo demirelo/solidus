@@ -544,6 +544,10 @@ Remaining work:
      completion retains the existing lowered-argument replay contract, while
      nested `YulHalt` and `Revert` outcomes retain the target statement stop
      needed by the enclosing raw expression.
+   - [x] Lift strict raw argument-prefix proofs into the terminal-aware relation
+     and compose terminal-aware prefixes with raw expression continuations:
+     regular prefixes continue, terminal prefixes stop, and suspended requests
+     remain visible through the outer bind.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
