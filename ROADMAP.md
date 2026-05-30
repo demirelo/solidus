@@ -590,6 +590,10 @@ Remaining work:
      target fuel, so recursively proved tails can reserve fuel for outer
      generated heads instead of relying on the non-compositional minimal
      `preHead.length + 2` case.
+   - [x] Package terminal-aware raw checked argument lowering as structural
+     syntax recursion: nil and cons consume whole-list `lowerBound1?` results,
+     recursive tails reserve the generated outer-head cost, and recursive
+     heads delegate to raw expression preservation.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

@@ -35985,14 +35985,15 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
     {freshState stateFresh : Fresh.State}
     {pre : List Functions.Stmt}
     {lowerArgs : List (Locals.Expr 1)}
-    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {sourceFuel targetTailFuel : Nat} {codeOverride : Option AstContract}
     {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLower :
       Expr.List.lowerBound1? freshState ([] : List AstExpr) =
         some (pre, lowerArgs, stateFresh)) :
     SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
       revertRel prim program ctx sourceFuel.succ ([] : List AstExpr)
-      codeOverride pre lowerArgs pre.length.succ callResponseRel := by
+      codeOverride pre lowerArgs (pre.length + targetTailFuel.succ)
+      callResponseRel := by
   rcases lowerBound1?_nil_some_components hLower with
     ⟨hPre, hArgs, hState⟩
   subst pre
@@ -36003,7 +36004,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
     (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
       (revertRel := revertRel) (prim := prim) (program := program)
-      (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := 0)
+      (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetTailFuel)
       (codeOverride := codeOverride) (callResponseRel := callResponseRel)
       (source := source) (compiler := compiler) hInitial)
 
@@ -109607,6 +109608,202 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult) hResponse)
       hInitial)
+
+/--
+Structural compiler-output dispatcher for terminal-aware raw arguments.
+
+The source scheduler budgets two more ticks when a reversed head is appended.
+The target reserve grows by the generated head-prefix cost before recursively
+proving the tail.  Later expression recursion can therefore consume one
+whole-list `lowerBound1?` result without rebuilding nil/cons lowering cases.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {base targetTailFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {argCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hHead :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx},
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead base.succ.succ.succ.succ head
+          codeOverride preHead lowerHead
+          (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
+    (hHeadSingle :
+      ∀ {base : Nat} {head : AstExpr}
+        {sourceTailResult : State × List Word},
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ.succ.succ head
+              codeOverride sourceTailResult.1)))
+    (hTailResponse :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+        {freshState stateFresh : Fresh.State}
+        {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {sourceCall targetCall response},
+        argCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.evalValues
+                        base.succ.succ.succ.succ head codeOverride
+                        sourceTailResult.1))
+                    (sourceArgAppendHeadValues sourceTailResult.2)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  match targetTailResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetTailResult.2
+                        (preHead.length + targetTailFuel.succ.succ)
+                        { stmts :=
+                            preHead ++
+                              [Functions.Stmt.let_ tmp lowerHead] }
+                        targetTailResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok targetTailResult) }
+          response →
+        argCallResponseRel sourceCall targetCall response)
+    (hHeadResponse :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+        {freshState stateFresh : Fresh.State}
+        {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx}
+        {sourceCall targetCall response},
+        argCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (sourceArgAppendHeadValues sourceTailResult.2) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
+                  prim program tmp [] targetTailFuel.succ) }
+          response →
+        headCallResponseRel sourceCall targetCall response)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx (yulOpenEvalArgsAppendFuel base args.reverse)
+      args codeOverride pre lowerArgs (pre.length + targetTailFuel.succ)
+      argCallResponseRel := by
+  induction args generalizing base targetTailFuel freshState stateFresh pre
+      lowerArgs ctx with
+  | nil =>
+      intro source compiler hInitial
+      simpa [yulOpenEvalArgsAppendFuel] using
+        (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (freshState := freshState) (stateFresh := stateFresh)
+          (pre := pre) (lowerArgs := lowerArgs)
+          (sourceFuel := base.succ.succ)
+          (targetTailFuel := targetTailFuel)
+          (codeOverride := codeOverride)
+          (callResponseRel := argCallResponseRel) hLower
+          (source := source) (compiler := compiler) hInitial)
+  | cons head tail ih =>
+      have hCons :
+          SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
+            terminalRel revertRel prim program ctx
+            (yulOpenEvalArgsAppendFuel base.succ.succ tail.reverse)
+            (head :: tail) codeOverride pre lowerArgs
+            (pre.length + targetTailFuel.succ) argCallResponseRel := by
+        intro source compiler hInitial
+        exact
+          sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_head_expr
+          (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (prim := prim) (program := program) (ctx := ctx)
+          (freshState := freshState) (stateFresh := stateFresh)
+          (pre := pre) (lowerArgs := lowerArgs) (base := base.succ.succ)
+          (tailFuel := targetTailFuel) (head := head) (tail := tail)
+          (codeOverride := codeOverride)
+          (tailCallResponseRel := argCallResponseRel)
+          (finalCallResponseRel := argCallResponseRel)
+          (headCallResponseRel := headCallResponseRel)
+          hLayoutSubset hCovers hLower
+          (by
+            intro preTail lowerTail stateTail preHead lowerHead stateHead
+              hTailLower hHeadLower
+            intro source compiler hInitial
+            simpa [Nat.add_assoc] using
+              (ih (base := base.succ.succ)
+                (targetTailFuel := preHead.length + targetTailFuel.succ)
+                (freshState := freshState) (stateFresh := stateTail)
+                (pre := preTail) (lowerArgs := lowerTail) (ctx := ctx)
+                hCovers hTailLower (source := source)
+                (compiler := compiler) hInitial))
+          (by
+            intro stateTail preHead lowerHead stateHead ctxHead hHeadLower
+            exact
+              hHead (base := base) (targetTailFuel := targetTailFuel)
+                (head := head) (stateHeadStart := stateTail)
+                (preHead := preHead) (lowerHead := lowerHead)
+                (stateHead := stateHead) (ctxHead := ctxHead) hHeadLower)
+          (hHeadSingle (base := base) (head := head))
+          (by
+            intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
+              hTailLower hHeadLower hFresh sourceCall targetCall response
+              hResponse
+            exact
+              hTailResponse (base := base)
+                (targetTailFuel := targetTailFuel) (head := head)
+                (tail := tail) (freshState := freshState)
+                (stateFresh := stateFresh) hTailLower hHeadLower hFresh
+                hResponse)
+          (by
+            intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
+              hTailLower hHeadLower hFresh sourceTailResult targetTailResult
+              sourceCall targetCall response hResponse
+            exact
+              hHeadResponse (base := base)
+                (targetTailFuel := targetTailFuel) (head := head)
+                (tail := tail) (freshState := freshState)
+                (stateFresh := stateFresh) hTailLower hHeadLower hFresh
+                (sourceTailResult := sourceTailResult)
+                (targetTailResult := targetTailResult) hResponse)
+            (source := source) (compiler := compiler) hInitial
+      intro source compiler hInitial
+      simpa [List.reverse_cons,
+        yulOpenEvalArgsAppendFuel_append_singleton] using
+        (hCons (source := source) (compiler := compiler) hInitial)
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
