@@ -108533,6 +108533,78 @@ theorem sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes
   · intro err _hPreDone target hDone
     cases hDone
 
+/--
+Terminal-aware generated-expression analogue of
+`sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes`.
+
+Only ordinary value completion needs a variable-agreement fact.  A stopped raw
+expression bypasses generated replay entirely, so its terminal outcome is
+retained without pretending that a head value was produced.
+-/
+theorem sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
+    {names : List Name}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler : Objects.Source.State}
+    (hWrites : SourceWritesDisjoint names pre) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {target : SourceArgPreludeOpenTarget},
+          doneResult = .ok (.values target) →
+            SourceVarsAgree names compiler.vars target.state.vars)
+      (SourceExprPreludeOpen.runRaw prim program ctx targetFuel pre lower
+        compiler) := by
+  unfold SourceExprPreludeOpen.runRaw
+  refine
+    OpenResultDoneInvariant.bind
+      (compilerOpen_runOpen_doneInvariant_varsAgree_of_writes
+        (names := names) (prim := prim) (program := program)
+        (pre := pre) (ctx := ctx) (state := compiler)
+        (fuel := targetFuel) hWrites)
+      ?_ ?_
+  · intro preResult hPreDone
+    rcases preResult with ⟨preOutcome, ctxAfter⟩
+    cases preOutcome with
+    | mk compilerAfterPre mode =>
+        cases mode with
+        | regular =>
+            unfold OpenExternal.OpenResult.map
+            refine
+              OpenResultDoneInvariant.bind
+                (compilerOpen_localsExpr_eval_doneInvariant_varsAgree
+                  (names := names) (prim := prim) lower compilerAfterPre)
+                ?_ ?_
+            · intro exprResult hExprDone
+              rcases exprResult with ⟨compilerAfterExpr, values⟩
+              exact OpenResultDoneInvariant.done (by
+                intro target hDone
+                cases hDone
+                exact
+                  SourceVarsAgree.trans (hPreDone rfl)
+                    (hExprDone rfl))
+            · intro err _hExprDone target hDone
+              cases hDone
+        | brk =>
+            exact OpenResultDoneInvariant.done (by
+              intro target hDone
+              cases hDone)
+        | cont =>
+            exact OpenResultDoneInvariant.done (by
+              intro target hDone
+              cases hDone)
+        | leave =>
+            exact OpenResultDoneInvariant.done (by
+              intro target hDone
+              cases hDone)
+        | halt kind =>
+            exact OpenResultDoneInvariant.done (by
+              intro target hDone
+              cases hDone)
+  · intro err _hPreDone target hDone
+    cases hDone
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

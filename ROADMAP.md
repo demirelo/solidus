@@ -557,6 +557,9 @@ Remaining work:
    - [x] Extract the closed variable-only replay core for one generated
      argument head: after the head runs, inserting its fresh temporary makes
      `.var tmp :: lowerTail` replay the new value followed by the retained tail.
+   - [x] Preserve generated-tail variable agreement across the terminal-aware
+     raw head runner: only successful value completions need replay evidence;
+     stopped nested-call outcomes bypass replay and remain intact.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
