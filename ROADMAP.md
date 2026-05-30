@@ -677,6 +677,10 @@ Remaining work:
      from `directCallArgsSafe?`, `toLocals1?`, and explicit positive source
      and target fuel; dispatch direct versus generated arguments without
      exposing empty-list replay plumbing.
+   - [x] Feed the checked direct/generated argument split into the canonical
+     raw internal-user-call expression wrapper. Callers now provide only
+     positive source fuel, generated-prefix preservation when selected, and
+     the regular selected-callee continuation.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
