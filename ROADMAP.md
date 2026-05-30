@@ -609,6 +609,11 @@ Remaining work:
      stack-sequence replay reconstructs the strict primitive input, existing
      strict primitive continuations run unchanged, and successful values lift
      back into the terminal-aware raw expression relation.
+   - [x] Construct regular raw primitive input arity from the checked
+     `toStackSeq?` witness and lowered `ArgList.eval` replay, then specialize
+     strict continuation reuse to safe non-CALL primitives and CALL-family
+     primitives. The CALL-family adapter retains the universal shared-response
+     preservation premise through the raw-value wrapper.
    - [x] Scope the structural raw argument dispatcher callback to head
      subterms of the current argument list before assembling the final
      recursive expression constructor. The live theorem now threads
