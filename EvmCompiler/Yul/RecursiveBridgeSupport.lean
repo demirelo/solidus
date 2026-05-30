@@ -55820,6 +55820,59 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
                 simp [SourceOpenStmtHeadDoneRel] at hHeadDone
 
 /--
+Run generated zero-initializers in the open compiler interpreter.
+
+These statements cannot suspend: each generated initializer evaluates one
+literal and extends the local context.  The resulting target store is exactly
+the ordinary `initReturns` store used by the closed source-tower proof.
+-/
+theorem compilerOpen_functions_initNames_runOpen_regular_initReturns
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compiler : Objects.Source.State} :
+    ∀ (names : List Name),
+      ∃ compilerAfter,
+        CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (names.length + 1) { stmts := Stmt.initNames names } compiler =
+          .ok (Functions.Source.Outcome.regular compilerAfter,
+            { ctx with scope := names.reverse ++ ctx.scope }) ∧
+        compilerAfter.shared = compiler.shared ∧
+        compilerAfter.vars = Functions.Source.Store.initReturns names
+          compiler.vars
+  | [] => by
+      refine ⟨compiler, ?_, rfl, rfl⟩
+      simp [Stmt.initNames, CompilerOpen.FunctionsOpen.Block.runOpen,
+        OpenExternal.OpenResult.ok]
+  | name :: rest => by
+      let compilerHead := compiler.insert name Stmt.zero
+      let ctxHead : Functions.Source.Ctx :=
+        { ctx with scope := name :: ctx.scope }
+      rcases
+          compilerOpen_functions_initNames_runOpen_regular_initReturns
+            (prim := prim) (program := program) (ctx := ctxHead)
+            (compiler := compilerHead) rest with
+        ⟨compilerAfter, hRestRun, hShared, hVars⟩
+      refine ⟨compilerAfter, ?_, ?_, ?_⟩
+      · have hHead :
+            CompilerOpen.FunctionsOpen.Stmt.run prim program ctx
+                rest.length.succ
+                (Functions.Stmt.let_ name
+                  (Locals.Expr.lit Stmt.zero)) compiler =
+              .ok (Functions.Source.Outcome.regular compilerHead, ctxHead) := by
+            simp [CompilerOpen.FunctionsOpen.Stmt.run,
+              CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+              compilerHead, ctxHead, Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular, OpenExternal.OpenResult.bind,
+              OpenExternal.OpenResult.ok]
+        simpa [Stmt.initNames, CompilerOpen.FunctionsOpen.Block.runOpen, hHead,
+          ctxHead, compilerHead, List.append_assoc,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok] using
+          hRestRun
+      · simpa [compilerHead] using hShared
+      · simpa [Functions.Source.Store.initReturns, compilerHead,
+          Locals.Source.State.insert] using hVars
+
+/--
 Selected-path statement-head bridge for a regular call-free endpoint.
 
 The caller proves the open source and compiler endpoints directly.  This
@@ -55885,9 +55938,9 @@ theorem sourceOpenStmtHeadPathSoundWhen_of_regular_done
             exact SourceStateExactRel.ok hShared hVars hDomain)
 
 /--
-Selected-path regular statement-head bridge for `x := literal`.
+Selected-path regular statement-head bridge for uninitialized declarations.
 -/
-theorem sourceOpenStmtHeadPathSoundWhen_assign_lit_single
+theorem sourceOpenStmtHeadPathSoundWhen_let_none_succ
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -55896,82 +55949,82 @@ theorem sourceOpenStmtHeadPathSoundWhen_assign_lit_single
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {sourceFuel : Nat} {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
-    (name : EvmYul.Identifier) (value : Word)
-    (hTargetMem : identName name ∈ layout) :
-    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
-      revertRel prim program ctx sourceFuel.succ.succ
-      (.Assign [name] (.Lit value)) codeOverride
-      { stmts := [Functions.Stmt.assign (identName name) (.lit value)] }
-      allowed := by
+    (names : List EvmYul.Identifier)
+    (hNoDup : (identNames names).Nodup)
+    (hFresh : ∀ name, name ∈ identNames names → name ∉ layout) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout
+      ((identNames names).reverse ++ layout) outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel.succ (.Let names none)
+      codeOverride { stmts := Stmt.initNames (identNames names) } allowed := by
   apply sourceOpenStmtHeadPathSoundWhen_of_regular_done
   intro source compiler hInitial
   cases hInitial with
   | @ok shared store compiler hShared hVars hDomain =>
-      have hStoreSome : (store.lookup (identName name)).isSome = true :=
-        StoreDomainExact.contains_of_mem hDomain hTargetMem
-      cases hLookupTarget : store.lookup (identName name) with
-      | none =>
-          simp [hLookupTarget] at hStoreSome
-      | some oldValue =>
-          have hCompilerTarget :
-              compiler.vars (identName name) = some oldValue := by
-            simpa [hLookupTarget] using hVars (identName name) hTargetMem
-          have hContains :
-              compiler.vars.contains (identName name) = true := by
-            simp [Locals.Source.Store.contains, hCompilerTarget]
-          rcases
-              sourceRegularStmtRunHiddenExact_assign_lit_single
-                (prim := prim) (program := program) (ctx := ctx)
-                (sourceFuel := sourceFuel) name value codeOverride
-                (SourceStateExactRel.ok hShared hVars hDomain) hTargetMem with
-            ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel, hSource, hTarget,
-              _hSubset, hAfter⟩
-          refine
-            ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel, ?_, ?_, hAfter⟩
-          · rw [OpenExternal.YulOpen.exec]
-            cases hCheck :
-                EvmYul.Yul.checkAssignment (.Ok shared store) [name] with
-            | error err =>
-                simp [hCheck, EvmYul.Yul.exec] at hSource
-            | ok unit =>
-                cases unit
-                simpa [hCheck, EvmYul.Yul.exec, EvmYul.Yul.evalValues,
-                  EvmYul.Yul.evalArgs, EvmYul.Yul.evalTail,
-                  OpenExternal.YulOpen.evalValues,
-                  OpenExternal.YulOpen.evalArgs,
-                  OpenExternal.YulOpen.reverseResult,
-                  OpenExternal.YulOpenResult.bind,
-                  OpenExternal.YulOpenResult.map,
-                  OpenExternal.YulOpenResult.ok] using
-                  congrArg OpenExternal.YulOpenResult.done hSource
-          · cases targetFuel with
-            | zero =>
-                simp [Functions.Source.Block.runOpen, Functions.Source.invalid,
-                  Structured.invalid] at hTarget
-            | succ targetFuel =>
-                cases targetFuel with
-                | zero =>
-                    simp [Functions.Source.Block.runOpen,
-                      Functions.Source.Stmt.run, Functions.Source.invalid,
-                      Structured.invalid, Functions.Source.Expr.evalOne,
-                      Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
-                      Functions.Source.Outcome.regular,
-                      Locals.Source.Outcome.regular, hContains] at hTarget
-                | succ targetFuel =>
-                    simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
-                      CompilerOpen.FunctionsOpen.Stmt.run,
-                      CompilerOpen.LocalsExpr.evalOne,
-                      CompilerOpen.LocalsExpr.eval,
-                      Functions.Source.Block.runOpen,
-                      Functions.Source.Stmt.run,
-                      Functions.Source.Expr.evalOne,
-                      Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
-                      OpenExternal.OpenResult.bind,
-                      OpenExternal.OpenResult.ok, CompilerOpen.invalid,
-                      Functions.Source.invalid, Structured.invalid,
-                      Functions.Source.Outcome.regular,
-                      Locals.Source.Outcome.regular, hContains] using
-                      congrArg OpenExternal.OpenResult.done hTarget
+      have hCheck :
+          EvmYul.Yul.checkDeclaration (.Ok shared store) names = .ok () :=
+        StoreDomainExact.checkDeclaration_ok
+          (layout := layout) (store := store) (shared := shared)
+          (names := names) hDomain hNoDup hFresh
+      let sourceStore :=
+        VarStackRel.insertPairs
+          (VarStackRel.zeroPairs (identNames names)) store
+      have hSource :
+          OpenExternal.YulOpen.exec sourceFuel.succ (.Let names none)
+              codeOverride (.Ok shared store) =
+            .ok (.Ok shared sourceStore) := by
+        have hClosed :=
+          BridgeFacts.exec_let_none_ok sourceFuel names codeOverride shared
+            store hCheck
+        simpa [OpenExternal.YulOpen.exec, EvmYul.Yul.exec, hCheck, sourceStore,
+          OpenExternal.YulOpenResult.ok] using
+          congrArg OpenExternal.YulOpenResult.done hClosed
+      rcases
+          compilerOpen_functions_initNames_runOpen_regular_initReturns
+            (prim := prim) (program := program) (ctx := ctx)
+            (compiler := compiler) (identNames names) with
+        ⟨compilerAfter, hTarget, hSharedAfter, hVarsAfter⟩
+      refine
+        ⟨.Ok shared sourceStore, compilerAfter,
+          { ctx with scope := (identNames names).reverse ++ ctx.scope },
+          (identNames names).length + 1, hSource, hTarget, ?_⟩
+      have hRelNames :
+          SourceStoreRel (identNames names ++ layout) sourceStore
+            compilerAfter.vars := by
+        rw [hVarsAfter]
+        exact
+          sourceStoreRel_initReturns_insertZeros
+            (layout := layout) (names := identNames names)
+            (store := store) (vars := compiler.vars) hVars hNoDup hFresh
+      have hRelAfter :
+          SourceStoreRel ((identNames names).reverse ++ layout) sourceStore
+            compilerAfter.vars :=
+        sourceStoreRel_of_mem_iff hRelNames
+          (by
+            intro name
+            simp [List.mem_append, List.mem_reverse, or_comm, or_left_comm,
+              or_assoc])
+      have hDomainNames :
+          StoreDomainExact (identNames names ++ layout) sourceStore := by
+        let pairs := VarStackRel.zeroPairs (identNames names)
+        have hRaw :
+            StoreDomainExact (pairs.map Prod.fst ++ layout)
+              (VarStackRel.insertPairs pairs store) :=
+          StoreDomainExact.insertPairs
+            (pairs := pairs) (layout := layout) (store := store) hDomain
+        have hPairs : pairs.map Prod.fst = identNames names := by
+          simp [pairs, VarStackRel.zeroPairs, Function.comp_def]
+        simpa [sourceStore, pairs, hPairs] using hRaw
+      have hDomainAfter :
+          StoreDomainExact ((identNames names).reverse ++ layout)
+            sourceStore :=
+        StoreDomainExact.of_mem_iff hDomainNames
+          (by
+            intro name
+            simp [List.mem_append, List.mem_reverse, or_comm, or_left_comm,
+              or_assoc])
+      exact
+        SourceStateExactRel.ok
+          (by simpa [hSharedAfter] using hShared) hRelAfter hDomainAfter
 
 /--
 Selected-path statement-head bridge for `break`.
