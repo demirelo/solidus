@@ -57702,14 +57702,8 @@ def beforeUserCallReplay
         (OpenExternal.OpenResult Functions.EVMException
           Functions.Source.CallResult) →
       OpenExternal.CallResponse → Prop :=
-  fun sourceCall targetCall response =>
-    rawCallResponseRel sourceCall
-      { site := targetCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (targetCall.resume response)
-            (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
-              callerCompiler) }
-      response
+  OpenExternal.OpenCallResponseRel.comapRightBind rawCallResponseRel
+    (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx callerCompiler)
 
 /--
 Canonical response relation while running the selected internal user-call
@@ -57727,18 +57721,10 @@ def beforeUserCallRestore
             Functions.Source.CallResult) →
         OpenExternal.CallResponse → Prop) :
     SourceOpenSeqCallResponseRel :=
-  fun sourceCall targetCall response =>
-    callResponseRel
-      { site := sourceCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (sourceCall.resume response)
-            (yulOpenUserCallRestoreResult caller returns) }
-      { site := targetCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (targetCall.resume response)
-            (fun bodyResult =>
-              compilerOpenUserCallBodyResult lowerFn bodyResult.1) }
-      response
+  OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+    (yulOpenUserCallRestoreResult caller returns)
+    (fun bodyResult =>
+      compilerOpenUserCallBodyResult lowerFn bodyResult.1)
 
 /--
 Canonical response relation for the selected internal user-call body all the
@@ -58411,22 +58397,12 @@ def beforeUserCall
     (lowerArgs : List (Locals.Expr 1)) (tmp : Name) (tailFuel : Nat)
     (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
     SourceArgRawPreludeOpenCallResponseRel :=
-  fun sourceCall targetCall response =>
-    callResponseRel
-      { site := sourceCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (sourceCall.resume response)
-            (fun sourceArgsResult =>
-              OpenExternal.YulOpenResult.toOpenResult
-                (OpenExternal.YulOpen.call sourceFuel
-                  sourceArgsResult.2.reverse functionName (some contract)
-                  sourceArgsResult.1)) }
-      { site := targetCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (targetCall.resume response)
-            (compilerOpenUserCallRawAfterArgs prim program fn lowerArgs tmp
-              tailFuel) }
-      response
+  OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+    (fun sourceArgsResult =>
+      OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel sourceArgsResult.2.reverse
+          functionName (some contract) sourceArgsResult.1))
+    (compilerOpenUserCallRawAfterArgs prim program fn lowerArgs tmp tailFuel)
 
 end SourceExprRawPreludeOpenCallResponseRel
 
@@ -111305,32 +111281,23 @@ def beforePrimitive
     (lowerArgs : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op))
     (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
     SourceArgRawPreludeOpenCallResponseRel :=
-  fun sourceCall targetCall response =>
-    callResponseRel
-      { site := sourceCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (sourceCall.resume response)
-            (fun sourceArgsResult =>
-              yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
-                sourceArgsResult) }
-      { site := targetCall.site
-        resume := fun response =>
-          OpenExternal.OpenResult.bind (targetCall.resume response)
-            (fun targetArgsResult =>
-              match targetArgsResult.1.mode with
-              | .regular =>
-                  OpenExternal.OpenResult.map
-                    (fun primResult =>
-                      .values
-                        { state := primResult.1
-                          ctx := targetArgsResult.2
-                          values := primResult.2 })
-                    (CompilerOpen.LocalsExpr.eval prim
-                      (Expr.cast hOutputs (.prim op lowerArgs))
-                      targetArgsResult.1.state)
-              | .brk | .cont | .leave | .halt _ =>
-                  OpenExternal.OpenResult.ok (.stopped targetArgsResult)) }
-      response
+  OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+    (fun sourceArgsResult =>
+      yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim sourceArgsResult)
+    (fun targetArgsResult =>
+      match targetArgsResult.1.mode with
+      | .regular =>
+          OpenExternal.OpenResult.map
+            (fun primResult =>
+              .values
+                { state := primResult.1
+                  ctx := targetArgsResult.2
+                  values := primResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim
+              (Expr.cast hOutputs (.prim op lowerArgs))
+              targetArgsResult.1.state)
+      | .brk | .cont | .leave | .halt _ =>
+          OpenExternal.OpenResult.ok (.stopped targetArgsResult))
 
 end SourceExprRawPreludeOpenCallResponseRel
 

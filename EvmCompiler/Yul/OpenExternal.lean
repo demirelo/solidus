@@ -880,6 +880,57 @@ theorem bind_congr_next {ε : Type u} {α : Type v} {β : Type w}
 
 end OpenResult
 
+namespace OpenCallResponseRel
+
+/--
+Pull an open-call response relation back through continuations on both sides.
+
+This is the response-relation counterpart of `OpenResult.bind`: a suspended
+computation resumes its current call first, then enters the supplied
+continuation.
+-/
+def comapBind
+    {ε₁ : Type _} {ε₂ : Type _}
+    {α : Type _} {β : Type _} {γ : Type _} {δ : Type _}
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop)
+    (sourceNext : α → OpenResult ε₁ γ)
+    (targetNext : β → OpenResult ε₂ δ) :
+    OpenCall (OpenResult ε₁ α) →
+      OpenCall (OpenResult ε₂ β) → CallResponse → Prop :=
+  fun sourceCall targetCall response =>
+    callResponseRel
+      { site := sourceCall.site
+        resume := fun response =>
+          OpenResult.bind (sourceCall.resume response) sourceNext }
+      { site := targetCall.site
+        resume := fun response =>
+          OpenResult.bind (targetCall.resume response) targetNext }
+      response
+
+/--
+Pull an open-call response relation back through a continuation on the target
+side only.
+-/
+def comapRightBind
+    {ε₁ : Type _} {ε₂ : Type _}
+    {α : Type _} {β : Type _} {δ : Type _}
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop)
+    (targetNext : β → OpenResult ε₂ δ) :
+    OpenCall (OpenResult ε₁ α) →
+      OpenCall (OpenResult ε₂ β) → CallResponse → Prop :=
+  fun sourceCall targetCall response =>
+    callResponseRel sourceCall
+      { site := targetCall.site
+        resume := fun response =>
+          OpenResult.bind (targetCall.resume response) targetNext }
+      response
+
+end OpenCallResponseRel
+
 namespace CallKind
 
 def yulOpenCall?

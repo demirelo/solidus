@@ -696,6 +696,9 @@ Remaining work:
      adequate call reserve into the exact reversed-argument scheduler base plus
      a reserve proof for every selected nested argument head. No fuel
      monotonicity assumption is used.
+   - [x] Factor generic open-call response-relation bind comaps and rewrite raw
+     primitive, user-call argument, caller-restoration, and hidden-slot replay
+     adapters as thin specializations instead of bespoke continuation records.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
