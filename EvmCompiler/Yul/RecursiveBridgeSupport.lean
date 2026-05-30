@@ -110774,6 +110774,258 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
           hMem hStoreContains (source := source) (compiler := compiler)
           hInitial)
 
+/--
+Checked-lowering wrapper for CALL-safe terminal-aware raw primitive
+expressions.
+
+The successful `lower1?` result determines the primitive op, result cast,
+generated variable list, and final stack sequence. Recursive callers provide
+only the terminal-aware argument-prefix proof at that checked shape.
+-/
+theorem lower1?_prim_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_arg_terminal_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hSafe : Safe.CallSafe.expr (.Call (.inl yulPrim) args))
+    (hLower :
+      Expr.lower1? freshState (.Call (.inl yulPrim) args) =
+        some (pre, lower, freshState'))
+    (hArgPrelude :
+      Safe.CallSafe.exprs args →
+      ∀ {op argExprs}
+        {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+        {hOutputs : Expressions.Structured.BasicOp.outputs op = 1},
+        Prim.toBasicOp? yulPrim = some op →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        lower = Expr.cast hOutputs (.prim op seq) →
+          SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
+            terminalRel revertRel prim program ctx sourceFuel args codeOverride
+            pre argExprs targetFuel
+            (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
+              sourceFuel yulPrim op hOutputs seq callResponseRel))
+    (hPrim :
+      Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hNoError :
+      Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          SourcePrimitiveCallNoErrorAt sourceFuel yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+            compilerAfter →
+          callResponseRel sourceCall
+            { site := targetCall.site
+              resume := fun response =>
+                OpenExternal.OpenResult.map
+                  SourceExprPreludeOpen.RawTarget.values
+                  (targetCall.resume response) }
+            response →
+          Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+            compilerAfter.shared response) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Call (.inl yulPrim) args)
+      codeOverride pre lower targetFuel callResponseRel := by
+  rcases lower1?_primitive_call_some_components hLower with
+    ⟨op, argExprs, seq, hOutputs, hBasic, hLowerArgs, hSeq, hLowerEq⟩
+  rcases Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs with
+    ⟨names, hLowerVars⟩
+  intro source compiler hInitial
+  have hRel :=
+    sourceExprRawPreludeOpenSoundAtExactTarget_prim_callSafe_of_arg_terminal_canonical
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := sourceFuel) (targetFuel := targetFuel) (yulPrim := yulPrim)
+      (op := op) (args := args) (codeOverride := codeOverride) (pre := pre)
+      (argExprs := argExprs) (names := names) (results := 1)
+      (lowerArgs := seq) (exprCallResponseRel := callResponseRel) hSafe.1 hBasic
+      hOutputs hLowerVars hSeq
+      (hArgPrelude hSafe.2 hBasic hLowerArgs hSeq hLowerEq)
+      (fun hSafePrim => hPrim hSafePrim hBasic)
+      (fun hSafePrim => hNoError hSafePrim hBasic)
+      hPrimitiveResponse (source := source) (compiler := compiler) hInitial
+  simpa [hLowerEq] using hRel
+
+/--
+Checked terminal-aware raw expression dispatcher.
+
+Literal and scoped-variable leaves close directly. Primitive heads delegate to
+the terminal-aware recursive argument route. Internal user calls stay as an
+explicit checked callback until the selected-body recursion is assembled at
+the same expression interface.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_cases
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {expr : AstExpr} {codeOverride : Option AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hTargetFuel : 0 < targetFuel)
+    (hSafe : Safe.CallSafe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState'))
+    (hArgPrelude :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        expr = .Call (.inl yulPrim) args →
+        Safe.CallSafe.exprs args →
+      ∀ {op argExprs}
+        {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+        {hOutputs : Expressions.Structured.BasicOp.outputs op = 1},
+        Prim.toBasicOp? yulPrim = some op →
+        Expr.List.lowerBound1? freshState args =
+          some (pre, argExprs, freshState') →
+        Expr.List.toStackSeq? argExprs
+            (Expressions.Structured.BasicOp.inputs op) =
+          some seq →
+        lower = Expr.cast hOutputs (.prim op seq) →
+          SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
+            terminalRel revertRel prim program ctx sourceFuel args codeOverride
+            pre argExprs targetFuel
+            (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
+              sourceFuel yulPrim op hOutputs seq callResponseRel))
+    (hPrim :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        expr = .Call (.inl yulPrim) args →
+        Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim sourceFuel yulPrim op)
+    (hNoError :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        expr = .Call (.inl yulPrim) args →
+        Safe.primitive yulPrim →
+      ∀ {op},
+        Prim.toBasicOp? yulPrim = some op →
+          SourcePrimitiveCallNoErrorAt sourceFuel yulPrim op)
+    (hPrimitiveResponse :
+      ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
+        expr = .Call (.inl yulPrim) args →
+      ∀ {sourceShared : EvmYul.SharedState .Yul}
+        {sourceStore : EvmYul.Yul.VarStore}
+        {compilerAfter : Objects.Source.State}
+        {sourceCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Exception (State × List Word))}
+        {targetCall :
+          OpenExternal.OpenCall
+            (OpenExternal.OpenResult Functions.EVMException
+              SourceArgPreludeOpenTarget)}
+        {response : OpenExternal.CallResponse},
+        SourceStateRel cfg layout (.Ok sourceShared sourceStore)
+            compilerAfter →
+          callResponseRel sourceCall
+            { site := targetCall.site
+              resume := fun response =>
+                OpenExternal.OpenResult.map
+                  SourceExprPreludeOpen.RawTarget.values
+                  (targetCall.resume response) }
+            response →
+          Reference.SharedStateRel.OpenExternalResponseRel cfg sourceShared
+            compilerAfter.shared response)
+    (hUserCall :
+      ∀ {functionName : Name} {args : List AstExpr},
+        expr = .Call (.inr functionName) args →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        Expr.lower1? freshState (.Call (.inr functionName) args) =
+          some (pre, lower, freshState') →
+          SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+            revertRel prim program ctx sourceFuel.succ
+            (.Call (.inr functionName) args) codeOverride pre lower targetFuel
+            callResponseRel) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ expr codeOverride pre lower targetFuel
+      callResponseRel := by
+  cases expr with
+  | Lit value =>
+      exact
+        lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_lit_of_lower1?
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+          (value := value) (codeOverride := codeOverride)
+          (freshState := freshState) (freshState' := freshState') (pre := pre)
+          (lower := lower) (callResponseRel := callResponseRel) hTargetFuel
+          hLower
+  | Var name =>
+      exact
+        lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+          (name := name) (codeOverride := codeOverride)
+          (freshState := freshState) (freshState' := freshState') (pre := pre)
+          (lower := lower) (callResponseRel := callResponseRel) hTargetFuel
+          hScoped hStoreContains hLower
+  | Call callee args =>
+      cases callee with
+      | inl yulPrim =>
+          exact
+            lower1?_prim_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_arg_terminal_canonical
+              (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := sourceFuel)
+              (targetFuel := targetFuel) (yulPrim := yulPrim) (args := args)
+              (codeOverride := codeOverride) (freshState := freshState)
+              (freshState' := freshState') (pre := pre) (lower := lower)
+              (callResponseRel := callResponseRel) hSafe hLower
+              (by
+                intro hArgs op argExprs seq hOutputs hBasic hLowerArgs hSeq
+                  hLowerEq
+                exact
+                  hArgPrelude rfl hArgs hBasic hLowerArgs hSeq hLowerEq)
+              (by
+                intro hSafePrim op hBasic
+                exact hPrim rfl hSafePrim hBasic)
+              (by
+                intro hSafePrim op hBasic
+                exact hNoError rfl hSafePrim hBasic)
+              (by
+                intro sourceShared sourceStore compilerAfter sourceCall
+                  targetCall response hRel hResponse
+                exact hPrimitiveResponse rfl hRel hResponse)
+      | inr functionName =>
+          exact hUserCall rfl hSafe hScoped hLower
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

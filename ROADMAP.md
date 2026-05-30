@@ -623,6 +623,11 @@ Remaining work:
      checked `lower1?` wrappers. Empty generated prefixes return honest raw
      values directly; variable lookup keeps the visible-store containment
      premise explicit.
+   - [x] Hide CALL-safe raw primitive decomposition behind checked `lower1?`
+     output and add the whole terminal-aware raw expression dispatcher.
+     Literals, variables, and primitive calls are now internal branches;
+     selected internal user calls remain the single explicit expression
+     callback to connect to recursive body preservation.
    - [x] Scope the structural raw argument dispatcher callback to head
      subterms of the current argument list before assembling the final
      recursive expression constructor. The live theorem now threads
