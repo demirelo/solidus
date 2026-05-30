@@ -1582,36 +1582,64 @@ mutual
         some ([Functions.Stmt.block lower], state')
     | _fuel + 1, state, .Let names none =>
         some (initNames (identNames names), state)
-    | _fuel + 1, state, .Let names (some (.Call (.inr functionName) args)) =>
+    | _fuel + 1, state, .Let [] (some (.Call (.inr functionName) args)) =>
         if ObjectBuiltin.unsupported? functionName then
           none
         else do
-          let lowerNames := identNames names
           let (preArgs, lowerArgs, state') ←
             if Expr.List.directCallArgsSafe? args then do
               let lowerArgs ← Expr.List.toLocals1? args
               some ([], lowerArgs, state)
             else
               Expr.List.lowerBound1? state args
-          -- Declare the Yul `let` targets directly as the function's return
-          -- slots before evaluating lowered argument temporaries.  The targets
-          -- remain visible after the call, while the lifetime pass can still
-          -- wrap the argument work tightly around the call site.
           some
-            (initNames lowerNames ++ preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
+            (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
     | _fuel + 1, state, .Let [name] (some value) => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
         some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
           state')
-    | _fuel + 1, _state, .Let _names (some _value) =>
-        none
-    | _fuel + 1, state, .Assign names (.Call (.inr functionName) args) =>
+    | _fuel + 1, state,
+        .Let (name :: next :: rest) (some (.Call (.inr functionName) args)) =>
         if ObjectBuiltin.unsupported? functionName then
           none
         else do
-          let lowerNames := identNames names
+          let lowerNames := identNames (name :: next :: rest)
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1? state args
+          -- Multi-result calls declare their visible return slots directly.
+          some
+            (initNames lowerNames ++ preArgs ++
+              [Functions.Stmt.call lowerNames functionName lowerArgs],
+              state')
+    | _fuel + 1, _state, .Let _names (some _value) =>
+        none
+    | _fuel + 1, state, .Assign [] (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let (preArgs, lowerArgs, state') ←
+            if Expr.List.directCallArgsSafe? args then do
+              let lowerArgs ← Expr.List.toLocals1? args
+              some ([], lowerArgs, state)
+            else
+              Expr.List.lowerBound1? state args
+          some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+            state')
+    | _fuel + 1, state, .Assign [name] value => do
+        let (preValue, lowerValue, state') ← Expr.lower1? state value
+        some (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
+          state')
+    | _fuel + 1, state,
+        .Assign (name :: next :: rest) (.Call (.inr functionName) args) =>
+        if ObjectBuiltin.unsupported? functionName then
+          none
+        else do
+          let lowerNames := identNames (name :: next :: rest)
           let (preArgs, lowerArgs, state') ←
             if Expr.List.directCallArgsSafe? args then do
               let lowerArgs ← Expr.List.toLocals1? args
@@ -1620,10 +1648,6 @@ mutual
               Expr.List.lowerBound1? state args
           some (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
             state')
-    | _fuel + 1, state, .Assign [name] value => do
-        let (preValue, lowerValue, state') ← Expr.lower1? state value
-        some (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
-          state')
     | _fuel + 1, _state, .Assign _names _value =>
         none
     | _fuel + 1, state, .ExprStmtCall (.Call (.inr functionName) args) =>
