@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 01:01 PDT.
+Last updated: 2026-05-30 01:05 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -190,8 +190,9 @@ Checked base we can rely on:
 - [x] Made the executing-contract override authoritative for open internal
   function resolution. Reentrant abstract responses may mutate caller account
   state, but they cannot replace the fixed code image of an already-executing
-  frame. The mutable `accountMap` lookup remains only on the no-override
-  imported-compatibility path.
+  frame. `OpenExternal.YulOpen.callFrame` names the explicit immutable-frame
+  boundary. A no-override call consults mutable `accountMap` only once to load
+  an entry frame, then executes the selected body under that fixed code image.
 - [x] Removed mutable account lookup from the selected-callee proof stack:
   override-specific source decomposition, CALL-safe/scoped restoration, and raw
   hidden-slot replay wrappers now consume the fixed executing contract image
@@ -202,13 +203,11 @@ Checked base we can rely on:
   `OpenExternal.YulOpen.callFunction?` and checked
   `call_succ_eq_bind_body_of_find_function`, exposing the successful branch as
   exactly open callee-body execution followed by imported call restoration.
-- [x] Added checked no-override done-branch closed-agreement helpers for the surrounding
-  user-call migration: `reverseResult_evalArgs_done_eq_closed`,
-  `execPrimCall_done_eq_closed`, `execCall_done_eq_closed`,
-  `execSeq_done_eq_closed`, `exec_done_eq_closed`, `loop_done_eq_closed`, and
-  `call_done_eq_closed`. Override-present CALL preservation uses the corrected
-  open semantics directly instead of identifying it with Nethermind's mutable
-  account-lookup behavior.
+- [x] Deleted the stale open-vs-imported closed-agreement compatibility layer
+  after frame snapshotting made its claim intentionally false. Removed the
+  auxiliary strict Yul-to-EVM argument adapter family that consumed it; the
+  CALL-capable route stays open through nested responses instead of collapsing
+  back to Nethermind's mutable account-reload behavior.
 - [x] Added the open internal-user-call one-result invariant:
   `yulOpenEvalValues_user_call_doneInvariant_single_of_exprOk` proves from
   `UserCallArity.ExprOk` that every completed open user-call expression result
