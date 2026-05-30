@@ -108687,6 +108687,143 @@ theorem sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
     cases hDone
 
 /--
+Compose a terminal-aware generated argument tail with the remaining argument
+prefix.
+
+Regular tails enter the supplied continuation.  Nested `YulHalt` or `Revert`
+tails skip it and retain their stopped target block outcome.  Suspended calls
+in the tail remain visible through the outer bind.
+-/
+theorem sourceArgTerminalRawPreludeOpenResultRel_bind_tail
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerTail lowerArgs : List (Locals.Expr 1)}
+    {tailCallResponseRel finalCallResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {sourceTail :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {targetTail :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    {sourceNext :
+      State × List Word →
+        OpenExternal.OpenResult Exception (State × List Word)}
+    {targetRegular :
+      Functions.Source.Outcome × Functions.Source.Ctx →
+        OpenExternal.OpenResult Functions.EVMException
+          (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hTail :
+      OpenExternal.OpenResultRel tailCallResponseRel
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail)
+        sourceTail targetTail)
+    (hRegular :
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        OpenExternal.OpenResultRel finalCallResponseRel
+          (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+            revertRel prim lowerArgs)
+          (sourceNext sourceTailResult) (targetRegular targetTailResult))
+    (hTailResponse :
+      ∀ {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                sourceNext }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  match targetTailResult.1.mode with
+                  | .regular => targetRegular targetTailResult
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok targetTailResult) }
+          response →
+        tailCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel finalCallResponseRel
+      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs)
+      (OpenExternal.OpenResult.bind sourceTail sourceNext)
+      (OpenExternal.OpenResult.bind targetTail
+        (fun targetTailResult =>
+          match targetTailResult.1.mode with
+          | .regular => targetRegular targetTailResult
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok targetTailResult)) := by
+  refine OpenExternal.OpenResultRel.bind hTail ?_ hTailResponse
+  intro sourceTailDone targetTailDone hDone
+  cases sourceTailDone with
+  | error err =>
+      cases targetTailDone with
+      | error targetErr =>
+          simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+      | ok targetTailResult =>
+          rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+          cases targetTailOutcome with
+          | mk targetTailState mode =>
+              cases mode with
+              | regular =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | brk =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | cont =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | leave =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+              | halt kind =>
+                  have hDoneArgs :
+                      SourceArgTerminalRawPreludeOpenDoneRel cfg layout
+                        terminalRel revertRel prim lowerArgs (.error err)
+                        (.ok
+                          (Functions.Source.Outcome.halt kind targetTailState,
+                            targetTailCtx)) := by
+                    cases err <;> cases kind <;>
+                      simpa [SourceArgTerminalRawPreludeOpenDoneRel] using
+                        hDone
+                  simpa [OpenExternal.OpenResult.bind,
+                    OpenExternal.OpenResult.ok] using
+                    (OpenExternal.OpenResultRel.done hDoneArgs :
+                      OpenExternal.OpenResultRel finalCallResponseRel
+                        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout
+                          terminalRel revertRel prim lowerArgs)
+                        (.done (.error err))
+                        (.done
+                          (.ok
+                            (Functions.Source.Outcome.halt kind
+                              targetTailState,
+                              targetTailCtx))))
+  | ok sourceTailResult =>
+      cases targetTailDone with
+      | error targetErr =>
+          cases hDone
+      | ok targetTailResult =>
+          rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+          cases targetTailOutcome with
+          | mk targetTailState mode =>
+              cases mode with
+              | regular =>
+                  simpa using hRegular hDone
+              | brk =>
+                  cases hDone
+              | cont =>
+                  cases hDone
+              | leave =>
+                  cases hDone
+              | halt kind =>
+                  cases hDone
+
+/--
 Compose one terminal-aware generated argument head after an already completed
 regular tail prefix.
 

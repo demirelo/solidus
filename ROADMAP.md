@@ -567,6 +567,9 @@ Remaining work:
      tail prefix: successful heads insert the fresh temporary and replay the
      complete lowered list, while stopped heads propagate their terminal result
      without entering generated replay.
+   - [x] Factor the terminal-aware raw argument-tail binder: regular tails
+     enter the remaining generated prefix, while halt/revert tails skip it and
+     propagate unchanged across arbitrary suspended requests.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
