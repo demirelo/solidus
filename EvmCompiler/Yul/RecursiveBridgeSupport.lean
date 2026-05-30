@@ -55820,6 +55820,133 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
                 simp [SourceOpenStmtHeadDoneRel] at hHeadDone
 
 /--
+Selected-path statement-head bridge for `break`.
+-/
+theorem sourceOpenStmtHeadPathSoundWhen_break_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hBreak : ctx.breakScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel.succ .Break codeOverride
+      { stmts := [Functions.Stmt.brk] } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
+      cases hResolve
+      let compilerBreak := compiler.restrictTo outcomeLayout
+      have hRelBreak :
+          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerBreak :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
+            revertRel allowed
+            (.ok (.Checkpoint (.Break shared store)))
+            (.ok (Functions.Source.Outcome.brk compilerBreak, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.brk hRelBreak)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hBreak,
+        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
+        OpenExternal.OpenResult.ok, compilerBreak] using
+        (OpenExternal.OpenResultPathRel.done hDone)
+
+/--
+Selected-path statement-head bridge for `continue`.
+-/
+theorem sourceOpenStmtHeadPathSoundWhen_continue_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hContinue : ctx.continueScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel.succ .Continue codeOverride
+      { stmts := [Functions.Stmt.cont] } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
+      cases hResolve
+      let compilerContinue := compiler.restrictTo outcomeLayout
+      have hRelContinue :
+          SourceStateRel cfg outcomeLayout (.Ok shared store)
+            compilerContinue :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
+            revertRel allowed
+            (.ok (.Checkpoint (.Continue shared store)))
+            (.ok (Functions.Source.Outcome.cont compilerContinue, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.cont hRelContinue)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hContinue,
+        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
+        OpenExternal.OpenResult.ok, compilerContinue] using
+        (OpenExternal.OpenResultPathRel.done hDone)
+
+/--
+Selected-path statement-head bridge for `leave`.
+-/
+theorem sourceOpenStmtHeadPathSoundWhen_leave_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hLeave : ctx.leaveScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel.succ .Leave codeOverride
+      { stmts := [Functions.Stmt.leave] } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve _hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars _hDomain =>
+      simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok] at hResolve
+      cases hResolve
+      let compilerLeave := compiler.restrictTo outcomeLayout
+      have hRelLeave :
+          SourceStateRel cfg outcomeLayout (.Ok shared store) compilerLeave :=
+        sourceStateRel_restrictCompiler
+          (SourceStateRel.ok hShared hVars) hSubset
+      have hDone :
+          SourceOpenStmtHeadDoneRel cfg layout outcomeLayout terminalRel
+            revertRel allowed
+            (.ok (.Checkpoint (.Leave shared store)))
+            (.ok (Functions.Source.Outcome.leave compilerLeave, ctx)) := by
+        intro _hAllowed
+        exact SourceResultOutcomeRel.ok (SourceOkOutcomeRel.leave hRelLeave)
+      refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+      simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, hLeave,
+        OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.ok,
+        OpenExternal.OpenResult.ok, compilerLeave] using
+        (OpenExternal.OpenResultPathRel.done hDone)
+
+/--
 Open append law for terminal-aware generated-expression preludes.
 
 Unlike the strict expression runner, the raw runner propagates a nonregular
