@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 16:30 PDT.
+Last updated: 2026-05-29 19:46 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -329,31 +329,26 @@ Checked base we can rely on:
   and `compilerOpen_funDef_runBody_succ_returned_of_body_done_rel` now prove
   the target returned values are exactly the values read by the source open
   block after callee-frame restriction.
-- [x] Added the singleton returned-call hidden-temp replay brick:
-  `functionsStore_assignMany_single_of_contains`,
-  `compilerOpen_user_call_returned_single_expr_target`, and
-  `sourceArgStackPreludeOpenResultRel_user_call_returned_single` compose the
-  target `CallResult.returned [value]` branch through assignment to the hidden
-  result slot and final variable read into the expression done relation.
-- [x] Added the caller-restore hidden-slot state relation:
-  `SourceStateRel.callRestore_insert_hidden` proves that internal user-call
-  caller restoration keeps the source-visible caller locals related while the
-  target updates only the hidden result temporary and adopts the callee body's
-  related shared state.
-- [x] Added the returned-body internal-user-call composition bridge:
+- [x] Added the generalized caller-restore state relation:
+  `SourceStateRel.callRestore` proves that internal user-call restoration keeps
+  the source-visible caller locals related while adopting the callee body's
+  related shared state before any caller-specific continuation.
+- [x] Added the pre-replay completed-body internal-user-call bridge:
   `sourceOpenResultSeqDoneRel_reviveJump_stateRel_of_regular_leave` extracts
-  the revived callee state relation from a completed open body, and
-  `sourceArgStackPreludeOpenResultRel_user_call_body_returned_single` composes
-  return-list agreement, caller restoration, hidden-slot assignment, and final
-  variable replay into the expression done relation.
-- [x] Added the suspension-preserving open internal-user-call body bridge:
-  `SourceUserCallBodyReturnedDoneRel`,
-  `sourceArgStackPreludeOpenResultRel_user_call_bind_body_returned_single`, and
-  `sourceArgStackPreludeOpenResultRel_user_call_succ_of_find_function_body`
-  compose recursively related open callee bodies into selected `YulOpen.call`
-  and target `FunDef.runBody` executions, preserving every suspended external
-  request and related abstract response through caller restoration and hidden
-  result-slot replay.
+  the revived callee state relation from a completed open body;
+  `compilerOpenUserCallBodyResult`, `SourceUserCallResultDoneRel`, and the
+  completed return/terminal adapters keep successful values and terminal exits
+  distinct before caller-specific replay.
+- [x] Added the suspension-preserving open internal-user-call result bridge:
+  `SourceUserCallBodyDoneRel`, `sourceUserCallResultOpenResultRel_bind_body`,
+  and `sourceUserCallResultOpenResultRel_succ_of_find_function_body` compose
+  recursively related open callee bodies into selected `YulOpen.call` and
+  target `FunDef.runBody` executions, preserving every suspended external
+  request and related abstract response while keeping terminal exits available
+  for statement-level propagation.
+- [x] Removed the temporary returned-singleton hidden-slot replay recursion
+  scaffold instead of retaining compatibility wrappers. The live bridge no
+  longer forces terminal callee exits through an expression-value read.
 
 Remaining work:
 
