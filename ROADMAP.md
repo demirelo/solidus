@@ -559,6 +559,10 @@ Remaining work:
      CALL-safe/scoped function-body bridge: completed argument prefixes now
      enter the actual recursively related callee body before restoration and
      hidden-slot replay.
+   - [x] Specialize the terminal-aware argument binder to imported
+     `YulOpen.evalValues` user-call semantics: reversed raw argument evaluation,
+     restored stack order, open callee entry, stopped prefixes, and suspended
+     requests now share one checked source-side equation.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

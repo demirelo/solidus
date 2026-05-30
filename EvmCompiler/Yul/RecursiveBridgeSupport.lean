@@ -35962,6 +35962,146 @@ theorem sourceExprRawPreludeOpenResultRel_bind_arg_terminal
               | halt kind =>
                   cases hDone
 
+theorem openResult_bind_assoc_sourceBridge
+    {ε α β γ : Type*}
+    (result : OpenExternal.OpenResult ε α)
+    (next : α → OpenExternal.OpenResult ε β)
+    (next' : β → OpenExternal.OpenResult ε γ) :
+    OpenExternal.OpenResult.bind
+        (OpenExternal.OpenResult.bind result next) next' =
+      OpenExternal.OpenResult.bind result
+        (fun value => OpenExternal.OpenResult.bind (next value) next') := by
+  exact
+    (OpenExternal.OpenResult.rec
+      (motive_1 := fun result =>
+        ∀ (next : α → OpenExternal.OpenResult ε β)
+          (next' : β → OpenExternal.OpenResult ε γ),
+          OpenExternal.OpenResult.bind
+              (OpenExternal.OpenResult.bind result next) next' =
+            OpenExternal.OpenResult.bind result
+              (fun value =>
+                OpenExternal.OpenResult.bind (next value) next'))
+      (motive_2 := fun externalCall =>
+        ∀ (next : α → OpenExternal.OpenResult ε β)
+          (next' : β → OpenExternal.OpenResult ε γ),
+          OpenExternal.OpenResult.bind
+              (OpenExternal.OpenResult.bind (.call externalCall) next)
+              next' =
+            OpenExternal.OpenResult.bind (.call externalCall)
+              (fun value =>
+                OpenExternal.OpenResult.bind (next value) next'))
+      (done := by
+        intro result next next'
+        cases result <;> simp [OpenExternal.OpenResult.bind])
+      (call := by
+        intro _ hCall next next'
+        exact hCall next next')
+      (mk := by
+        intro _ _ ih next next'
+        simp [OpenExternal.OpenResult.bind]
+        funext response
+        exact ih response next next')
+      result) next next'
+
+/--
+Imported-Yul user-call specialization of the terminal-aware argument binder.
+
+`YulOpen.evalValues` evaluates user-call arguments right-to-left, reverses the
+completed raw value list, and only then enters `YulOpen.call`.  This theorem
+exposes that semantic shape while retaining stopped generated argument
+prefixes and every suspended external request.
+-/
+theorem sourceExprRawPreludeOpenResultRel_user_call_of_arg_terminal
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {sourceFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {args : List AstExpr} {contract : AstContract} {source : State}
+    {lowerArgs : List (Locals.Expr 1)}
+    {argCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    {targetArgs :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    {targetRegular :
+      Functions.Source.Outcome × Functions.Source.Ctx →
+        SourceExprPreludeOpen.RawResult}
+    (hArgs :
+      OpenExternal.OpenResultRel argCallResponseRel
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            (some contract) source))
+        targetArgs)
+    (hRegular :
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel exprCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.call sourceFuel sourceArgsResult.2.reverse
+              functionName (some contract) sourceArgsResult.1))
+          (targetRegular targetArgsResult))
+    (hArgResponse :
+      ∀ {sourceCall targetCall response},
+        exprCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceArgsResult =>
+                  OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.call sourceFuel
+                      sourceArgsResult.2.reverse functionName (some contract)
+                      sourceArgsResult.1)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetArgsResult =>
+                  match targetArgsResult.1.mode with
+                  | .regular => targetRegular targetArgsResult
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok (.stopped targetArgsResult)) }
+          response →
+        argCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel exprCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues sourceFuel.succ
+          (.Call (.inr functionName) args) (some contract) source))
+      (OpenExternal.OpenResult.bind targetArgs
+        (fun targetArgsResult =>
+          match targetArgsResult.1.mode with
+          | .regular => targetRegular targetArgsResult
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok (.stopped targetArgsResult))) := by
+  rw [yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args]
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  exact
+    sourceExprRawPreludeOpenResultRel_bind_arg_terminal
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim)
+      (lowerArgs := lowerArgs) (argCallResponseRel := argCallResponseRel)
+      (exprCallResponseRel := exprCallResponseRel)
+      (sourceArgs :=
+        OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            (some contract) source))
+      (targetArgs := targetArgs)
+      (sourceNext := fun sourceArgsResult =>
+        OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.call sourceFuel sourceArgsResult.2.reverse
+            functionName (some contract) sourceArgsResult.1))
+      (targetRegular := targetRegular)
+      hArgs hRegular hArgResponse
+
 def SourceArgCallPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name)
     (prim : Objects.Source.PrimitiveSemantics)
@@ -36574,47 +36714,6 @@ def yulPrimitiveOpenResultAfterArgsPrim
       .done
         (EvmYul.Yul.primCall sourceFuel sourceResult.1 prim
           sourceResult.2.reverse)
-
-theorem openResult_bind_assoc_sourceBridge
-    {ε α β γ : Type*}
-    (result : OpenExternal.OpenResult ε α)
-    (next : α → OpenExternal.OpenResult ε β)
-    (next' : β → OpenExternal.OpenResult ε γ) :
-    OpenExternal.OpenResult.bind
-        (OpenExternal.OpenResult.bind result next) next' =
-      OpenExternal.OpenResult.bind result
-        (fun value => OpenExternal.OpenResult.bind (next value) next') := by
-  exact
-    (OpenExternal.OpenResult.rec
-      (motive_1 := fun result =>
-        ∀ (next : α → OpenExternal.OpenResult ε β)
-          (next' : β → OpenExternal.OpenResult ε γ),
-          OpenExternal.OpenResult.bind
-              (OpenExternal.OpenResult.bind result next) next' =
-            OpenExternal.OpenResult.bind result
-              (fun value =>
-                OpenExternal.OpenResult.bind (next value) next'))
-      (motive_2 := fun externalCall =>
-        ∀ (next : α → OpenExternal.OpenResult ε β)
-          (next' : β → OpenExternal.OpenResult ε γ),
-          OpenExternal.OpenResult.bind
-              (OpenExternal.OpenResult.bind (.call externalCall) next)
-              next' =
-            OpenExternal.OpenResult.bind (.call externalCall)
-              (fun value =>
-                OpenExternal.OpenResult.bind (next value) next'))
-      (done := by
-        intro result next next'
-        cases result <;> simp [OpenExternal.OpenResult.bind])
-      (call := by
-        intro _ hCall next next'
-        exact hCall next next')
-      (mk := by
-        intro _ _ ih next next'
-        simp [OpenExternal.OpenResult.bind]
-        funext response
-        exact ih response next next')
-      result) next next'
 
 theorem openResult_bind_done_ok_identity_sourceBridge
     {ε α : Type*} (result : OpenExternal.OpenResult ε α) :
