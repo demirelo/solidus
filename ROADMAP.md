@@ -643,6 +643,9 @@ Remaining work:
    - [x] Construct checked raw argument-head singleton invariants from
      whole-list CALL safety, lexical scope, user-call arity, head membership,
      checked lowering, and the actual related regular tail state.
+   - [x] Hide raw structural argument-head singleton plumbing behind a checked
+     compiler-output wrapper. Recursive callers now supply only whole-list
+     facts, head expression preservation, and continuation-response adapters.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

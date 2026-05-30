@@ -109923,6 +109923,145 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (hCons (source := source) (compiler := compiler) hInitial)
 
 /--
+Checked structural compiler-output dispatcher for terminal-aware raw arguments.
+
+The selected-head singleton invariant is constructed from whole-list CALL
+safety, lexical scope, user-call arity, membership, checked lowering, and the
+actual related regular tail state. Recursive callers therefore provide only
+the head expression theorem and continuation-response adapters.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {base targetTailFuel : Nat} {args : List AstExpr}
+    {contract : AstContract}
+    {argCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hHead :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx},
+        head ∈ args →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead base.succ.succ.succ.succ head
+          (some contract) preHead lowerHead
+          (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
+    (hTailResponse :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+        {freshState stateFresh : Fresh.State}
+        {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {sourceCall targetCall response},
+        argCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.evalValues
+                        base.succ.succ.succ.succ head (some contract)
+                        sourceTailResult.1))
+                    (sourceArgAppendHeadValues sourceTailResult.2)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  match targetTailResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetTailResult.2
+                        (preHead.length + targetTailFuel.succ.succ)
+                        { stmts :=
+                            preHead ++
+                              [Functions.Stmt.let_ tmp lowerHead] }
+                        targetTailResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok targetTailResult) }
+          response →
+        argCallResponseRel sourceCall targetCall response)
+    (hHeadResponse :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+        {freshState stateFresh : Fresh.State}
+        {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
+        Expr.List.lowerBound1? freshState tail =
+          some (preTail, lowerTail, stateTail) →
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
+        Fresh.fresh? stateHead = some (tmp, stateFresh) →
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx}
+        {sourceCall targetCall response},
+        argCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (sourceArgAppendHeadValues sourceTailResult.2) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
+                  prim program tmp [] targetTailFuel.succ) }
+          response →
+        headCallResponseRel sourceCall targetCall response)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx (yulOpenEvalArgsAppendFuel base args.reverse)
+      args (some contract) pre lowerArgs (pre.length + targetTailFuel.succ)
+      argCallResponseRel :=
+  sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem
+    (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (freshState := freshState)
+    (stateFresh := stateFresh) (pre := pre) (lowerArgs := lowerArgs)
+    (base := base) (targetTailFuel := targetTailFuel) (args := args)
+    (codeOverride := some contract) (argCallResponseRel := argCallResponseRel)
+    (headCallResponseRel := headCallResponseRel) hLayoutSubset hHead
+    (by
+      intro base' head stateHeadStart preHead lowerHead stateHead
+        sourceTailResult targetState hMem hHeadLower hInitial
+      exact
+        lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem
+          (cfg := cfg) (layout := layout)
+          (sourceFuel := base'.succ.succ.succ) (args := args) (expr := head)
+          (contract := contract) (freshState := stateHeadStart)
+          (freshState' := stateHead) (pre := preHead) (lower := lowerHead)
+          hSafe hScoped hOk hMem hHeadLower hInitial)
+    hTailResponse
+    (by
+      intro base' targetTailFuel' head tail freshState' stateFresh'
+        preTail lowerTail stateTail preHead lowerHead stateHead tmp
+        hTailLower hHeadLower hFresh sourceTailResult targetTailResult
+        sourceCall targetCall response hResponse
+      exact
+        hHeadResponse (base := base') (targetTailFuel := targetTailFuel')
+          (head := head) (tail := tail) (freshState := freshState')
+          (stateFresh := stateFresh') hTailLower hHeadLower hFresh
+          (sourceTailResult := sourceTailResult)
+          (targetTailResult := targetTailResult) hResponse)
+    hCovers hLower
+
+/--
 Terminal-aware raw primitive expression composition from a generated argument
 prefix.
 
