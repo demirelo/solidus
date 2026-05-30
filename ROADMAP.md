@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 00:39 PDT.
+Last updated: 2026-05-30 00:47 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -503,9 +503,10 @@ Remaining work:
    - [x] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
-   - [ ] Adapt internal user-call expression preservation when arguments may
-     suspend, then connect completed argument states to the recursive
-     function-body bridge.
+   - [x] Adapt internal user-call expression preservation when arguments may
+     suspend.
+   - [ ] Connect completed internal-user-call argument states to the recursive
+     function-body bridge at the sequence frontier.
    - [x] Construct the selected-callee open body invariant from CALL-safe body
      scoping and initialized local-store exactness: after every shared external
      response, completed source bodies must satisfy function checkpoint
@@ -733,6 +734,11 @@ Remaining work:
      Generated prefixes recursively preserve nested argument CALLs before
      entering the selected-callee continuation; the checked direct empty-arg
      path remains compiler-constructed.
+   - [x] Assemble well-founded raw expression recursion over syntax size.
+     Literals, variables, primitive CALLs, nested compound-expression CALLs,
+     and internal-user-call argument prefixes now share one expression proof;
+     the sequence layer supplies only the named selected-callee regular
+     continuation.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
