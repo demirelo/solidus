@@ -173,63 +173,6 @@ theorem lower1?_pre_length_eq
     pre.length = exprPreludeLength expr :=
   lower?_pre_length_eq (by simpa [Expr.lower1?] using hLower)
 
-/--
-Split any sufficiently large target clock after the generated prefix and one
-following statement.  The residual clock is chosen entirely from the compiled
-prefix length and the requested total clock.
--/
-theorem exists_residual_of_add_succ_le
-    {prefixLength minimumTargetFuel targetFuel : Nat}
-    (hFuel : prefixLength + minimumTargetFuel.succ ≤ targetFuel) :
-    ∃ residualTargetFuel,
-      minimumTargetFuel ≤ residualTargetFuel ∧
-        targetFuel = prefixLength + residualTargetFuel.succ := by
-  exact ⟨targetFuel - prefixLength - 1, by omega, by omega⟩
-
-/--
-Split any sufficiently large target clock after the generated prefix and two
-following statements.  Internal user-call expressions use this shape for the
-generated result-slot initialization and call statement.
--/
-theorem exists_residual_of_add_succ_succ_le
-    {prefixLength minimumTargetFuel targetFuel : Nat}
-    (hFuel : prefixLength + minimumTargetFuel.succ.succ ≤ targetFuel) :
-    ∃ residualTargetFuel,
-      minimumTargetFuel ≤ residualTargetFuel ∧
-        targetFuel = prefixLength + residualTargetFuel.succ.succ := by
-  exact ⟨targetFuel - prefixLength - 2, by omega, by omega⟩
-
-/--
-Expression-lowering specialization of `exists_residual_of_add_succ_le`.
--/
-theorem exists_residual_of_lower1?_add_succ_le
-    {state state' : Fresh.State} {expr : AstExpr}
-    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
-    {minimumTargetFuel targetFuel : Nat}
-    (hLower : Expr.lower1? state expr = some (pre, lower, state'))
-    (hFuel : exprPreludeLength expr + minimumTargetFuel.succ ≤ targetFuel) :
-    ∃ residualTargetFuel,
-      minimumTargetFuel ≤ residualTargetFuel ∧
-        targetFuel = pre.length + residualTargetFuel.succ := by
-  rw [← lower1?_pre_length_eq hLower] at hFuel
-  exact exists_residual_of_add_succ_le hFuel
-
-/--
-Expression-lowering specialization of `exists_residual_of_add_succ_succ_le`.
--/
-theorem exists_residual_of_lower1?_add_succ_succ_le
-    {state state' : Fresh.State} {expr : AstExpr}
-    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
-    {minimumTargetFuel targetFuel : Nat}
-    (hLower : Expr.lower1? state expr = some (pre, lower, state'))
-    (hFuel :
-      exprPreludeLength expr + minimumTargetFuel.succ.succ ≤ targetFuel) :
-    ∃ residualTargetFuel,
-      minimumTargetFuel ≤ residualTargetFuel ∧
-        targetFuel = pre.length + residualTargetFuel.succ.succ := by
-  rw [← lower1?_pre_length_eq hLower] at hFuel
-  exact exists_residual_of_add_succ_succ_le hFuel
-
 end OpenFuelAdequacy
 end Yul
 end EvmCompiler
