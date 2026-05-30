@@ -26849,6 +26849,121 @@ theorem yulOpenExecSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_
   (yulOpenExec_execSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
     fuel).2 hSafe hScoped hContains
 
+theorem openResultDoneInvariant_sourceResultCheckpointAllowed_stateStoreContains_of_checkpointStoreContains
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {result : OpenExternal.OpenResult Exception State}
+    (hResult :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+        result) :
+    OpenResultDoneInvariant
+      (fun sourceDone =>
+        SourceResultCheckpointAllowed canBreak canContinue canLeave
+            sourceDone ∧
+          match sourceDone with
+          | .ok source => StateStoreContains layout source
+          | .error _ => True)
+      result := by
+  exact OpenResultDoneInvariant.imp hResult (by
+    intro sourceDone hDone
+    cases sourceDone with
+    | error err =>
+        trivial
+    | ok source =>
+        exact ⟨hDone.1, hDone.2⟩)
+
+/--
+Selected CALL-safe function bodies preserve their initialized return/parameter
+frame through every open external response.
+
+The initialized source frame is constructed by the interpreter itself:
+returns are zero-filled, parameters are bound from the checked argument list,
+and `mkOk` is identity because `initcall` starts from a real caller `.Ok`
+state.
+-/
+theorem yulOpenExec_function_body_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    {program : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {sharedArgs : EvmYul.SharedState .Yul}
+    {storeArgs : EvmYul.Yul.VarStore} {argValues : List Word}
+    {bodyFuel : Nat}
+    (hSafe : Safe.CallSafe.program program)
+    (hScoped : ControlFlow.ProgramScoped program)
+    (hLookup :
+      program.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ argValues.length) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains
+          (identNames returns ++ identNames params) false false true))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+          (some program.contract)
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall params returns argValues
+              (.Ok sharedArgs storeArgs))))) := by
+  have hSafeBody : Safe.CallSafe.stmts body :=
+    CallSafeLookup.function_body_safe_of_contract_lookup hSafe hLookup
+  have hScopedBody : ControlFlow.ScopedStmts false false true body :=
+    ControlFlow.function_body_scoped_of_contract_lookup hScoped hLookup
+  let bodyStore : EvmYul.Yul.VarStore :=
+    VarStackRel.insertPairs (List.zip (identNames params) argValues)
+      (VarStackRel.insertPairs
+        (VarStackRel.zeroPairs (identNames returns))
+        (default : EvmYul.Yul.VarStore))
+  have hContains :
+      StoreDomainContains (identNames returns ++ identNames params)
+        bodyStore := by
+    have hEntry :
+        StateStoreContains (identNames returns ++ identNames params)
+          (EvmYul.Yul.State.initcall params returns argValues
+            (.Ok sharedArgs storeArgs)) :=
+      StateStoreContains.initcall_of_length hArgsLength
+    simpa [bodyStore, StateStoreContains, initcall_ok_insertPairs] using
+      hEntry
+  simpa [bodyStore, EvmYul.Yul.State.mkOk, initcall_ok_insertPairs] using
+    (yulOpenExec_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+      (layout := identNames returns ++ identNames params)
+      (canBreak := false) (canContinue := false) (canLeave := true)
+      (fuel := bodyFuel) (stmt := .Block body)
+      (codeOverride := some program.contract) (shared := sharedArgs)
+      (store := bodyStore)
+      (by simpa [Safe.CallSafe.stmt] using hSafeBody)
+      (by simpa [ControlFlow.ScopedStmt] using hScopedBody)
+      hContains)
+
+theorem yulOpenExec_function_body_toOpenResult_doneInvariant_sourceResultCheckpointAllowed_stateStoreContains_of_callSafe_scoped
+    {program : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {sharedArgs : EvmYul.SharedState .Yul}
+    {storeArgs : EvmYul.Yul.VarStore} {argValues : List Word}
+    {bodyFuel : Nat}
+    (hSafe : Safe.CallSafe.program program)
+    (hScoped : ControlFlow.ProgramScoped program)
+    (hLookup :
+      program.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ argValues.length) :
+    OpenResultDoneInvariant
+      (fun sourceDone =>
+        SourceResultCheckpointAllowed false false true sourceDone ∧
+          match sourceDone with
+          | .ok source =>
+              StateStoreContains
+                (identNames returns ++ identNames params) source
+          | .error _ => True)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+          (some program.contract)
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall params returns argValues
+              (.Ok sharedArgs storeArgs))))) :=
+  openResultDoneInvariant_sourceResultCheckpointAllowed_stateStoreContains_of_checkpointStoreContains
+    (yulOpenExec_function_body_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+      hSafe hScoped hLookup hArgsLength)
+
 theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
     (fuel : Nat) :
     (∀ {layout : List Name} {expr : AstExpr}
