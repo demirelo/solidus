@@ -56021,6 +56021,36 @@ theorem compilerOpen_block_runOpen_let_expr_prelude_eq_bind_runRaw
     (tailFuel := tailFuel) (compiler := compiler)]
   rfl
 
+/-- Rebuild one selected compiled declaration path from its raw prefix and tail. -/
+theorem compilerOpen_block_runOpen_let_expr_prelude_resolves
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {left right : OpenExternal.OpenTrace}
+    {rawTarget : SourceExprPreludeOpen.RawTarget}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hRaw :
+      OpenExternal.OpenResultResolves
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        left (.ok rawTarget))
+    (hTail :
+      OpenExternal.OpenResultResolves
+        (runLetTargetAfterRaw prim program name tail tailFuel rawTarget)
+        right targetDone) :
+    OpenExternal.OpenResultResolves
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + tailFuel.succ)
+        { stmts := pre ++ [Functions.Stmt.let_ name lowerExpr] ++ tail }
+        compiler)
+      (left ++ right) targetDone := by
+  rw [compilerOpen_block_runOpen_let_expr_prelude_eq_bind_runRaw]
+  exact OpenExternal.OpenResultResolves.bind_ok hRaw hTail
+
 /--
 Raw target equation for one generated argument head.
 
@@ -56134,6 +56164,48 @@ theorem compilerOpen_block_runOpen_assign_expr_prelude_eq_bind_runRaw
     (pre := pre) (tail := tail) (name := name) (lowerExpr := lowerExpr)
     (tailFuel := tailFuel) (compiler := compiler)]
   rfl
+
+/-- Rebuild one selected compiled assignment path from its raw prefix and tail. -/
+theorem compilerOpen_block_runOpen_assign_expr_prelude_resolves
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre tail : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {left right : OpenExternal.OpenTrace}
+    {rawTarget : SourceExprPreludeOpen.RawTarget}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hPreContains :
+      OpenResultDoneInvariant
+        (fun preDone =>
+          ∀ {compilerAfterPre : Objects.Source.State}
+            {ctxAfter : Functions.Source.Ctx},
+            preDone =
+              .ok (Functions.Source.Outcome.regular compilerAfterPre,
+                ctxAfter) →
+              compilerAfterPre.vars.contains name = true)
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (pre.length + tailFuel.succ) { stmts := pre } compiler))
+    (hRaw :
+      OpenExternal.OpenResultResolves
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler)
+        left (.ok rawTarget))
+    (hTail :
+      OpenExternal.OpenResultResolves
+        (runAssignTargetAfterRaw prim program name tail tailFuel rawTarget)
+        right targetDone) :
+    OpenExternal.OpenResultResolves
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + tailFuel.succ)
+        { stmts := pre ++ [Functions.Stmt.assign name lowerExpr] ++ tail }
+        compiler)
+      (left ++ right) targetDone := by
+  rw [compilerOpen_block_runOpen_assign_expr_prelude_eq_bind_runRaw
+    (hPreContains := hPreContains)]
+  exact OpenExternal.OpenResultResolves.bind_ok hRaw hTail
 
 theorem runLetTarget_append_eq
     {prim : Objects.Source.PrimitiveSemantics}
