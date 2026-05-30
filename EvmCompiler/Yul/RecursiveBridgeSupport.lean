@@ -55968,6 +55968,153 @@ theorem sourceUserCallResultDoneRel_replay_hidden_temp_of_ok
       cases hDone
 
 /--
+Target postprocessing for the generated hidden-slot call statement.
+
+The hidden slot already exists before the lowered arguments run.  A returned
+callee result is assigned into that slot; a terminal callee result remains a
+terminal statement outcome for the enclosing generated prelude to propagate.
+-/
+def compilerOpenUserCallAssignHiddenTempResult
+    (tmp : Name) (ctx : Functions.Source.Ctx)
+    (callerCompiler : Objects.Source.State)
+    (callResult : Functions.Source.CallResult) :
+    OpenExternal.OpenResult Functions.EVMException
+      (Objects.Source.Outcome × Functions.Source.Ctx) :=
+  match callResult with
+  | .returned sharedAfterCall returnValues =>
+      match Functions.Source.Store.assignMany [tmp] returnValues
+          callerCompiler.vars with
+      | none => CompilerOpen.invalid
+      | some returnStore =>
+          OpenExternal.OpenResult.ok
+            (Functions.Source.Outcome.regular
+              { shared := sharedAfterCall
+                vars := returnStore },
+              ctx)
+  | .halted kind haltedState =>
+      OpenExternal.OpenResult.ok
+        (Functions.Source.Outcome.halt kind haltedState, ctx)
+
+/--
+Raw generated-expression relation immediately after an internal-call hidden
+slot has been assigned.
+
+Successful calls expose the singleton source value together with the target
+slot that stores it.  Halting and reverting calls remain terminal statement
+outcomes.  This is the terminal-aware boundary consumed by recursive generated
+preludes before any enclosing pure expression attempts to read the slot.
+-/
+def SourceUserCallHiddenTempDoneRel
+    (cfg : StateRelConfig) (layout : List Name) (tmp : Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop) :
+    Except Exception (State × List Word) →
+      Except Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
+  | .ok (sourceAfter, sourceValues), .ok (targetOutcome, _) =>
+      match targetOutcome.mode with
+      | .regular =>
+          SourceStateRel cfg layout sourceAfter targetOutcome.state ∧
+            ∃ value,
+              sourceValues = [value] ∧
+                targetOutcome.state.vars tmp = some value
+      | .brk | .cont | .leave | .halt _ => False
+  | .error (.YulHalt source value), .ok (targetOutcome, _) =>
+      match targetOutcome.mode with
+      | .halt kind => terminalRel kind value source targetOutcome.state
+      | .regular | .brk | .cont | .leave => False
+  | .error (.Revert source), .ok (targetOutcome, _) =>
+      match targetOutcome.mode with
+      | .halt .revert => revertRel source targetOutcome.state
+      | .regular | .brk | .cont | .leave | .halt _ => False
+  | _, _ => False
+
+/--
+Restored internal-call results enter the raw generated-prelude boundary after
+the hidden result slot assignment.
+
+The proof is deliberately one-step.  A later open-result bind theorem can use
+it for every completed branch while retaining suspended external requests.
+-/
+theorem sourceUserCallHiddenTempOpenResultRel_of_resultDoneRel
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {tmp : Name} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {sourceDone : Except Exception (State × List Word)}
+    {callResult : Functions.Source.CallResult}
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTmpContains : callerCompiler.vars.contains tmp = true)
+    (hDone :
+      SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+        revertRel sourceDone (.ok callResult))
+    (hSingle :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          ∃ value, sourceValues = [value]) :
+    OpenExternal.OpenResultRel (fun _ _ _ => False)
+      (SourceUserCallHiddenTempDoneRel cfg layout tmp terminalRel revertRel)
+      (.done sourceDone)
+      (compilerOpenUserCallAssignHiddenTempResult tmp ctx callerCompiler
+        callResult) := by
+  cases sourceDone with
+  | error err =>
+      cases err <;> try { cases hDone }
+      · rename_i source
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            cases kind <;>
+              exact OpenExternal.OpenResultRel.done (by
+                simpa [compilerOpenUserCallAssignHiddenTempResult,
+                  SourceUserCallHiddenTempDoneRel,
+                  OpenExternal.OpenResult.ok] using hDone)
+      · rename_i source value
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            exact OpenExternal.OpenResultRel.done (by
+              simpa [compilerOpenUserCallAssignHiddenTempResult,
+                SourceUserCallHiddenTempDoneRel,
+                OpenExternal.OpenResult.ok] using hDone)
+  | ok sourceResult =>
+      rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+      rcases hSingle rfl with ⟨value, hValues⟩
+      subst sourceValues
+      cases callResult with
+      | returned sharedAfterCall returnValues =>
+          rcases hDone with ⟨hRel, hReturnValues⟩
+          have hReturnValues' : returnValues = [value] := by
+            simpa using hReturnValues.symm
+          subst returnValues
+          have hAssign :
+              compilerOpenUserCallAssignHiddenTempResult tmp ctx
+                  callerCompiler (.returned sharedAfterCall [value]) =
+                OpenExternal.OpenResult.ok
+                  (Functions.Source.Outcome.regular
+                    { shared := sharedAfterCall
+                      vars := callerCompiler.vars.insert tmp value },
+                    ctx) := by
+            simp [compilerOpenUserCallAssignHiddenTempResult,
+              Functions.Source.Store.assignMany, hTmpContains,
+              OpenExternal.OpenResult.ok]
+          rw [hAssign]
+          apply OpenExternal.OpenResultRel.done
+          simp [SourceUserCallHiddenTempDoneRel,
+            Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+            Locals.Source.Store.insert_self]
+          simpa [Locals.Source.State.withShared,
+            Locals.Source.State.insert] using
+            (SourceStateRel.insert_hidden hRel hTmpFreshLayout)
+      | halted kind haltedState =>
+          cases hDone
+
+/--
 Target-side open shape of an internal function-call statement after the callee
 has been resolved.
 

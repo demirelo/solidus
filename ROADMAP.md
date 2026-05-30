@@ -520,6 +520,11 @@ Remaining work:
      generated hidden result slot: the returned singleton is assigned into the
      existing compiler-only temp, read back as the source expression value,
      and hidden again from the visible source layout.
+   - [x] Preserve restored internal-call completion at the raw hidden-slot
+     statement boundary: successful singleton returns populate the generated
+     temp while keeping it hidden from the visible source layout, and callee
+     halt/revert results remain terminal target outcomes for enclosing
+     generated preludes to propagate.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using
