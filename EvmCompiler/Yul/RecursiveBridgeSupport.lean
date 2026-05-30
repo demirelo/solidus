@@ -56454,6 +56454,7 @@ theorem sourceUserCallResultDoneRel_replay_hidden_temp_raw
     {callerCompiler : Objects.Source.State}
     {sourceDone : Except Exception (State × List Word)}
     {callResult : Functions.Source.CallResult}
+    {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
     (hTmpFreshLayout : tmp ∉ layout)
     (hTmpContains : callerCompiler.vars.contains tmp = true)
     (hDone :
@@ -56463,7 +56464,7 @@ theorem sourceUserCallResultDoneRel_replay_hidden_temp_raw
       ∀ {sourceAfter sourceValues},
         sourceDone = .ok (sourceAfter, sourceValues) →
           ∃ value, sourceValues = [value]) :
-    OpenExternal.OpenResultRel (fun _ _ _ => False)
+    OpenExternal.OpenResultRel rawCallResponseRel
       (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
       (.done sourceDone)
       (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx callerCompiler
@@ -56532,6 +56533,116 @@ theorem sourceUserCallResultDoneRel_replay_hidden_temp_raw
               rfl⟩
       | halted kind haltedState =>
           cases hDone
+
+/--
+Lift raw hidden-slot replay across an open restored internal call.
+
+The callee may suspend on arbitrarily many external requests.  Each suspension
+remains visible; completed restored-call branches replay through the hidden
+slot into either a singleton raw expression value or a preserved terminal
+stop.
+-/
+theorem sourceUserCallResultOpenResultRel_replay_hidden_temp_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        Functions.Source.CallResult}
+    {callResponseRel :
+      OpenExternal.OpenCall
+          (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            Functions.Source.CallResult) →
+        OpenExternal.CallResponse → Prop}
+    {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTmpContains : callerCompiler.vars.contains tmp = true)
+    (hRel :
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+          revertRel)
+        source target)
+    (hSingle :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              ∃ value, sourceValues = [value])
+        source)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        rawCallResponseRel sourceCall
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+                  callerCompiler) }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel rawCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      source
+      (OpenExternal.OpenResult.bind target
+        (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+          callerCompiler)) := by
+  have hLift :
+      OpenExternal.OpenResultRel rawCallResponseRel
+        (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        (OpenExternal.OpenResult.bind source
+          (fun sourceResult => OpenExternal.OpenResult.ok sourceResult))
+        (OpenExternal.OpenResult.bind target
+          (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+            callerCompiler)) := by
+    refine
+      OpenResultDoneInvariant.bind_left
+        (callResponseRel := callResponseRel)
+        (doneRel :=
+          SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+            revertRel)
+        (callResponseRel' := rawCallResponseRel)
+        (doneRel' :=
+          SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        hRel hSingle ?_ ?_
+    · intro sourceDone targetDone hDone hSingleDone
+      cases targetDone with
+      | error targetErr =>
+          cases sourceDone <;>
+            simp [SourceUserCallResultDoneRel] at hDone
+      | ok callResult =>
+          cases sourceDone with
+          | error err =>
+              simpa [OpenExternal.OpenResult.bind] using
+                (sourceUserCallResultDoneRel_replay_hidden_temp_raw
+                  (cfg := cfg) (layout := layout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (tmp := tmp) (ctx := ctx)
+                  (callerCompiler := callerCompiler)
+                  (sourceDone := .error err) (callResult := callResult)
+                  (rawCallResponseRel := rawCallResponseRel)
+                  hTmpFreshLayout hTmpContains hDone hSingleDone)
+          | ok sourceResult =>
+              simpa [OpenExternal.OpenResult.bind,
+                OpenExternal.OpenResult.ok] using
+                (sourceUserCallResultDoneRel_replay_hidden_temp_raw
+                  (cfg := cfg) (layout := layout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (tmp := tmp) (ctx := ctx)
+                  (callerCompiler := callerCompiler)
+                  (sourceDone := .ok sourceResult) (callResult := callResult)
+                  (rawCallResponseRel := rawCallResponseRel)
+                  hTmpFreshLayout hTmpContains hDone hSingleDone)
+    · intro sourceCall targetCall response hResponse
+      apply hCallResponse
+      simpa [openResult_bind_ok_eq] using hResponse
+  simpa [openResult_bind_ok_eq] using hLift
 
 /--
 Target-side open shape of an internal function-call statement after the callee

@@ -529,6 +529,9 @@ Remaining work:
      expression endpoint: successful hidden-slot assignments read back the
      singleton value, while callee halt/revert outcomes remain stopped target
      preludes with their terminal state intact.
+   - [x] Lift terminal-aware hidden-slot replay across the full open restored
+     internal-call trace: arbitrary suspended external requests remain visible,
+     and only completed callee branches enter the raw expression endpoint.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
