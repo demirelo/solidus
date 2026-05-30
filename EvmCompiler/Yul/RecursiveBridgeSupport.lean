@@ -22890,24 +22890,39 @@ theorem yulOpenCall_toOpenResult_doneInvariant_checkpoint_contains
         cases hDone)
   | succ fuel' =>
       unfold OpenExternal.YulOpen.call
-      cases hFind :
-          state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      cases codeOverride with
       | none =>
-          simp [hFind, OpenExternal.YulOpenResult.error]
-          exact OpenResultDoneInvariant.done (by
-            intro stateAfter values hDone
-            cases hDone)
-      | some yulContract =>
-          cases hFunction :
-              OpenExternal.YulOpen.callFunction? functionName?
-                (codeOverride.getD yulContract.code) with
+          cases hFind :
+              state.sharedState.accountMap.find? state.executionEnv.codeOwner with
           | none =>
-              simp [hFind, hFunction, OpenExternal.YulOpenResult.error]
+              simp [hFind, OpenExternal.YulOpenResult.error]
+              exact OpenResultDoneInvariant.done (by
+                intro stateAfter values hDone
+                cases hDone)
+          | some yulContract =>
+              cases hFunction :
+                  OpenExternal.YulOpen.callFunction? functionName?
+                    yulContract.code with
+              | none =>
+                  simp [hFind, hFunction, OpenExternal.YulOpenResult.error]
+                  exact OpenResultDoneInvariant.done (by
+                    intro stateAfter values hDone
+                    cases hDone)
+              | some fn =>
+                  simp [hFind, hFunction]
+                  exact
+                    yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_checkpoint_contains
+                      hAllowed hContains
+      | some contract =>
+          cases hFunction :
+              OpenExternal.YulOpen.callFunction? functionName? contract with
+          | none =>
+              simp [hFunction, OpenExternal.YulOpenResult.error]
               exact OpenResultDoneInvariant.done (by
                 intro stateAfter values hDone
                 cases hDone)
           | some fn =>
-              simp [hFind, hFunction]
+              simp [hFunction]
               exact
                 yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_checkpoint_contains
                   hAllowed hContains
@@ -24253,24 +24268,39 @@ theorem yulOpenCall_state_domain_exact_of_state
         cases hOk)
   | succ fuel' =>
       unfold OpenExternal.YulOpen.call
-      cases hFind :
-          state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      cases codeOverride with
       | none =>
-          simp [hFind, OpenExternal.YulOpenResult.error]
-          exact YulOpenResultStateStoreDomainExact.done (by
-            intro stateAfter values hOk
-            cases hOk)
-      | some yulContract =>
-          cases hFunction :
-              OpenExternal.YulOpen.callFunction? fname
-                (codeOverride.getD yulContract.code) with
+          cases hFind :
+              state.sharedState.accountMap.find? state.executionEnv.codeOwner with
           | none =>
-              simp [hFind, hFunction, OpenExternal.YulOpenResult.error]
+              simp [hFind, OpenExternal.YulOpenResult.error]
+              exact YulOpenResultStateStoreDomainExact.done (by
+                intro stateAfter values hOk
+                cases hOk)
+          | some yulContract =>
+              cases hFunction :
+                  OpenExternal.YulOpen.callFunction? fname yulContract.code with
+              | none =>
+                  simp [hFind, hFunction, OpenExternal.YulOpenResult.error]
+                  exact YulOpenResultStateStoreDomainExact.done (by
+                    intro stateAfter values hOk
+                    cases hOk)
+              | some f =>
+                  simp [hFind, hFunction]
+                  exact
+                    YulOpenResultStateStoreDomainExact.restoreCallerAfterOpenBody
+                      (layout := layout) (caller := state) (rets := f.rets)
+                      hDomain
+      | some contract =>
+          cases hFunction :
+              OpenExternal.YulOpen.callFunction? fname contract with
+          | none =>
+              simp [hFunction, OpenExternal.YulOpenResult.error]
               exact YulOpenResultStateStoreDomainExact.done (by
                 intro stateAfter values hOk
                 cases hOk)
           | some f =>
-              simp [hFind, hFunction]
+              simp [hFunction]
               exact
                 YulOpenResultStateStoreDomainExact.restoreCallerAfterOpenBody
                   (layout := layout) (caller := state) (rets := f.rets)
@@ -26047,26 +26077,38 @@ theorem yulOpenCall_toOpenResult_doneInvariant_outOfFuel
       exact OpenResultDoneInvariant.done True.intro
   | succ fuel' =>
       unfold OpenExternal.YulOpen.call
-      cases hFind :
-          (default : EvmYul.SharedState .Yul).accountMap.find?
-            (default : EvmYul.ExecutionEnv .Yul).codeOwner with
+      cases codeOverride with
       | none =>
-          simp [EvmYul.Yul.State.sharedState,
-            EvmYul.Yul.State.executionEnv, hFind,
-            OpenExternal.YulOpenResult.error]
-          exact OpenResultDoneInvariant.done True.intro
-      | some yulContract =>
-          cases hFunction :
-              OpenExternal.YulOpen.callFunction? functionName?
-                (codeOverride.getD yulContract.code) with
+          cases hFind :
+              (default : EvmYul.SharedState .Yul).accountMap.find?
+                (default : EvmYul.ExecutionEnv .Yul).codeOwner with
           | none =>
               simp [EvmYul.Yul.State.sharedState,
-                EvmYul.Yul.State.executionEnv, hFind, hFunction,
+                EvmYul.Yul.State.executionEnv, hFind,
                 OpenExternal.YulOpenResult.error]
               exact OpenResultDoneInvariant.done True.intro
+          | some yulContract =>
+              cases hFunction :
+                  OpenExternal.YulOpen.callFunction? functionName?
+                    yulContract.code with
+              | none =>
+                  simp [EvmYul.Yul.State.sharedState,
+                    EvmYul.Yul.State.executionEnv, hFind, hFunction,
+                    OpenExternal.YulOpenResult.error]
+                  exact OpenResultDoneInvariant.done True.intro
+              | some fn =>
+                  simp [EvmYul.Yul.State.sharedState,
+                    EvmYul.Yul.State.executionEnv, hFind, hFunction]
+                  exact
+                    yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_outOfFuel
+      | some contract =>
+          cases hFunction :
+              OpenExternal.YulOpen.callFunction? functionName? contract with
+          | none =>
+              simp [hFunction, OpenExternal.YulOpenResult.error]
+              exact OpenResultDoneInvariant.done True.intro
           | some fn =>
-              simp [EvmYul.Yul.State.sharedState,
-                EvmYul.Yul.State.executionEnv, hFind, hFunction]
+              simp [hFunction]
               exact
                 yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_outOfFuel
 
@@ -27283,25 +27325,19 @@ theorem yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq
   intro stateAfter
   rfl
 
-theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
+theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_override_function
     (fuel : Nat) (args : List Word)
     (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
-    (codeOverride : Option AstContract) (state : State)
-    {yulContract : EvmYul.Account .Yul}
+    (contract : AstContract) (state : State)
     {f : EvmYul.Yul.Ast.FunctionDefinition}
-    (hFind :
-      state.sharedState.accountMap.find? state.executionEnv.codeOwner =
-        some yulContract)
     (hFunction :
-      OpenExternal.YulOpen.callFunction? functionName?
-          (codeOverride.getD yulContract.code) =
-        some f) :
+      OpenExternal.YulOpen.callFunction? functionName? contract = some f) :
     OpenExternal.YulOpenResult.toOpenResult
-        (OpenExternal.YulOpen.call fuel.succ args functionName? codeOverride
-          state) =
+        (OpenExternal.YulOpen.call fuel.succ args functionName?
+          (some contract) state) =
       OpenExternal.OpenResult.bind
         (OpenExternal.YulOpenResult.toOpenResult
-          (OpenExternal.YulOpen.exec fuel (.Block f.body) codeOverride
+          (OpenExternal.YulOpen.exec fuel (.Block f.body) (some contract)
             (EvmYul.Yul.State.mkOk
               (EvmYul.Yul.State.initcall f.params f.rets args state))))
         (fun state₂ =>
@@ -27311,10 +27347,9 @@ theorem yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
                 (EvmYul.Yul.State.reviveJump state₂) state)
               state
           .done (.ok (state₃, List.map state₂.lookup! f.rets))) := by
-  rw [OpenExternal.YulOpen.call_succ_eq_bind_body_of_find_function
+  rw [OpenExternal.YulOpen.call_succ_eq_bind_body_of_override_function
     (fuel := fuel) (args := args) (functionName? := functionName?)
-    (codeOverride := codeOverride) (state := state)
-    (yulContract := yulContract) (f := f) hFind hFunction]
+    (contract := contract) (state := state) (f := f) hFunction]
   rw [OpenExternal.YulOpenResult.toOpenResult_bind]
   rfl
 
@@ -27398,19 +27433,10 @@ theorem yulOpenCall_doneInvariant_returnValues_length_of_function
         cases hOk)
   | succ fuel' =>
       unfold OpenExternal.YulOpen.call
-      cases hFind :
-          state.sharedState.accountMap.find? state.executionEnv.codeOwner with
-      | none =>
-          simp [hFind, OpenExternal.YulOpenResult.error,
-            OpenExternal.YulOpenResult.toOpenResult]
-          exact OpenResultDoneInvariant.done (by
-            intro stateAfter values hOk
-            cases hOk)
-      | some yulContract =>
-          simp [hFind, hFunction]
-          exact
-            yulOpenResult_restoreCaller_returnValues_length
-              (caller := state) (rets := f.rets)
+      simp [hFunction]
+      exact
+        yulOpenResult_restoreCaller_returnValues_length
+          (caller := state) (rets := f.rets)
 
 theorem yulOpenCall_doneInvariant_single_of_exprOk
     {fuel : Nat} {state : State} {argValues : List Word}
@@ -27438,21 +27464,11 @@ theorem yulOpenCall_doneInvariant_single_of_exprOk
             cases hOk)
       | succ fuel' =>
           unfold OpenExternal.YulOpen.call
-          cases hFind :
-              state.sharedState.accountMap.find?
-                state.executionEnv.codeOwner with
-          | none =>
-              simp [hFind, OpenExternal.YulOpenResult.error,
-                OpenExternal.YulOpenResult.toOpenResult]
-              exact OpenResultDoneInvariant.done (by
-                intro stateAfter values hOk
-                cases hOk)
-          | some yulContract =>
-              simp [hFind, hFunction, OpenExternal.YulOpenResult.error,
-                OpenExternal.YulOpenResult.toOpenResult]
-              exact OpenResultDoneInvariant.done (by
-                intro stateAfter values hOk
-                cases hOk)
+          simp [hFunction, OpenExternal.YulOpenResult.error,
+            OpenExternal.YulOpenResult.toOpenResult]
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter values hOk
+            cases hOk)
   | some f =>
       have hLength :
           f.rets.length = 1 := by
@@ -36822,54 +36838,6 @@ theorem done_ok_of_regularAt
       target]
     exact OpenExternal.OpenResultRel.done ⟨hRelAfter, rfl⟩
 
-theorem done_ok_of_regularAt_open
-    {cfg : StateRelConfig} {layout : List Name}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel : Nat} {args : List AstExpr}
-    {codeOverride : Option AstContract}
-    {pre : List Functions.Stmt} {results : Nat}
-    {lower : Locals.ExprSeq results}
-    {responseRel : OpenExternal.CallResponse → Prop}
-    (hRegular :
-      SourceArgStackPreludeRegularAt cfg layout prim program ctx sourceFuel
-        args codeOverride pre lower)
-    {source sourceAfter : State} {compiler : Objects.Source.State}
-    {values : List Word}
-    (hInitial : SourceStateRel cfg layout source compiler)
-    (hOpenEvalArgs :
-      OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
-          source =
-        .done (.ok (sourceAfter, values))) :
-    ∃ compilerAfterPre : Objects.Source.State,
-    ∃ targetFuel : Nat,
-    ∃ target : SourceArgPreludeOpenTarget,
-      Functions.Source.Block.runOpen prim program ctx targetFuel
-          { stmts := pre } compiler =
-        .ok (Functions.Source.Outcome.regular compilerAfterPre,
-          target.ctx) ∧
-      Locals.Source.Expr.ExprSeq.eval prim lower compilerAfterPre =
-        .ok (target.state, target.values) ∧
-      SourceArgStackPreludeOpenResultRel cfg layout responseRel
-        (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
-          source)
-        (.done (.ok target)) := by
-  have hClosedEvalArgs :
-      EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride source =
-        .ok (sourceAfter, values) :=
-    OpenExternal.YulOpen.evalArgs_done_eq_closed hOpenEvalArgs
-  rcases
-      done_ok_of_regularAt
-        (cfg := cfg) (layout := layout) (prim := prim) (program := program)
-        (ctx := ctx) (sourceFuel := sourceFuel) (args := args)
-        (codeOverride := codeOverride) (pre := pre) (results := results)
-        (lower := lower) (responseRel := responseRel) hRegular
-        hInitial hClosedEvalArgs with
-    ⟨compilerAfterPre, targetFuel, target, hPreRun, hArgEval, hRel⟩
-  exact
-    ⟨compilerAfterPre, targetFuel, target, hPreRun, hArgEval,
-      by simpa [hOpenEvalArgs] using hRel⟩
-
 theorem done_ok_of_open_parts
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
@@ -45766,6 +45734,7 @@ theorem openPrimitiveCallExprEVMOpenResultRel_of_arg_stack_preludeRegularAt_call
       OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
           (.Ok sourceShared sourceStore) =
         .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hNoOverride : codeOverride = none)
     (hValuesArity : values.length = Expressions.Structured.BasicOp.inputs op) :
     ∃ operands : OpenExternal.CallOperands,
     ∃ compilerAfterPre : Objects.Source.State,
@@ -45813,7 +45782,7 @@ theorem openPrimitiveCallExprEVMOpenResultRel_of_arg_stack_preludeRegularAt_call
       EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
           (.Ok sourceShared sourceStore) =
         .ok (.Ok sourceSharedAfter sourceStoreAfter, values) :=
-    OpenExternal.YulOpen.evalArgs_done_eq_closed hOpenEvalArgs
+    OpenExternal.YulOpen.evalArgs_done_eq_closed hOpenEvalArgs hNoOverride
   have hClosedEvalArgsForRegular :
       EvmYul.Yul.evalArgs sourceFuel args.reverse codeOverride
           (.Ok sourceShared sourceStore) =
@@ -56971,7 +56940,7 @@ Once a recursive body theorem relates those open executions, this theorem
 rewrites `YulOpen.call` and `FunDef.runBody` to the matching body binds and
 applies the suspension-preserving pre-replay restoration wrapper above.
 -/
-theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
+theorem sourceUserCallResultOpenResultRel_succ_of_override_function_body
     {cfg : StateRelConfig} {callerLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -56982,8 +56951,7 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
     {sourceFuel targetBodyFuel : Nat} {argValues : List Word}
     {paramStore : Locals.Source.Store}
     {functionName? : Option EvmYul.Yul.Ast.YulFunctionName}
-    {codeOverride : Option AstContract}
-    {yulContract : EvmYul.Account .Yul}
+    {contract : AstContract}
     {f : EvmYul.Yul.Ast.FunctionDefinition}
     {callerShared : EvmYul.SharedState .Yul}
     {callerStore : EvmYul.Yul.VarStore}
@@ -56999,13 +56967,8 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
     (hCaller :
       SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
         callerCompiler)
-    (hFind :
-      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
-        some yulContract)
     (hFunction :
-      OpenExternal.YulOpen.callFunction? functionName?
-          (codeOverride.getD yulContract.code) =
-        some f)
+      OpenExternal.YulOpen.callFunction? functionName? contract = some f)
     (hInsert :
       Functions.Source.Store.insertMany lowerFn.params argValues
           Locals.Source.Store.empty =
@@ -57016,7 +56979,7 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
           (lowerFn.returns ++ lowerFn.params) terminalRel revertRel allowed
           lowerFn)
         (OpenExternal.YulOpenResult.toOpenResult
-          (OpenExternal.YulOpen.exec sourceFuel (.Block f.body) codeOverride
+          (OpenExternal.YulOpen.exec sourceFuel (.Block f.body) (some contract)
             (EvmYul.Yul.State.mkOk
               (EvmYul.Yul.State.initcall f.params f.rets argValues
                 (.Ok callerShared callerStore)))))
@@ -57051,18 +57014,14 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
         revertRel)
       (OpenExternal.YulOpenResult.toOpenResult
         (OpenExternal.YulOpen.call sourceFuel.succ argValues functionName?
-          codeOverride (.Ok callerShared callerStore)))
+          (some contract) (.Ok callerShared callerStore)))
       (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
         argValues targetBodyFuel.succ callerCompiler.shared) := by
-  rw [yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
+  rw [yulOpen_toOpenResult_call_succ_eq_bind_body_of_override_function
     (fuel := sourceFuel) (args := argValues)
-    (functionName? := functionName?) (codeOverride := codeOverride)
+    (functionName? := functionName?) (contract := contract)
     (state := (.Ok callerShared callerStore : State))
-    (yulContract := yulContract) (f := f)
-    (by
-      simpa [EvmYul.Yul.State.sharedState,
-        EvmYul.Yul.State.executionEnv] using hFind)
-    hFunction]
+    (f := f) hFunction]
   rw [compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
     (prim := prim) (program := program) (fn := lowerFn)
     (args := argValues) (fuel := targetBodyFuel)
@@ -57084,13 +57043,13 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body
 
 /--
 CALL-safe selected-function wrapper for
-`sourceUserCallResultOpenResultRel_succ_of_find_function_body`.
+`sourceUserCallResultOpenResultRel_succ_of_override_function_body`.
 
 Callers supply the ordinary recursive open body theorem.  The selected-callee
 checkpoint/store invariant is constructed internally from source acceptedness
 facts before restoration and replay are composed.
 -/
-theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_scoped
+theorem sourceUserCallResultOpenResultRel_succ_of_override_function_body_callSafe_scoped
     {cfg : StateRelConfig} {callerLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -57101,7 +57060,6 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_sc
     {sourceFuel targetBodyFuel : Nat} {argValues : List Word}
     {paramStore : Locals.Source.Store}
     {functionName : EvmYul.Yul.Ast.YulFunctionName}
-    {yulContract : EvmYul.Account .Yul}
     {params returns : List EvmYul.Identifier} {body : List AstStmt}
     {callerShared : EvmYul.SharedState .Yul}
     {callerStore : EvmYul.Yul.VarStore}
@@ -57119,9 +57077,6 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_sc
     (hCaller :
       SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
         callerCompiler)
-    (hFind :
-      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
-        some yulContract)
     (hLookup :
       yulProgram.contract.functions.lookup functionName =
         some (.Def params returns body))
@@ -57177,7 +57132,7 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_sc
       (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
         argValues targetBodyFuel.succ callerCompiler.shared) := by
   exact
-    sourceUserCallResultOpenResultRel_succ_of_find_function_body
+    sourceUserCallResultOpenResultRel_succ_of_override_function_body
       (cfg := cfg) (callerLayout := callerLayout)
       (terminalRel := terminalRel) (revertRel := revertRel)
       (allowed := SourceResultCheckpointAllowed false false true)
@@ -57185,14 +57140,13 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_sc
       (sourceFuel := sourceFuel) (targetBodyFuel := targetBodyFuel)
       (argValues := argValues) (paramStore := paramStore)
       (functionName? := some functionName)
-      (codeOverride := some yulProgram.contract)
-      (yulContract := yulContract)
+      (contract := yulProgram.contract)
       (f := .Def params returns body)
       (callerShared := callerShared) (callerStore := callerStore)
       (callerCompiler := callerCompiler)
       (bodyCallResponseRel := bodyCallResponseRel)
       (callResponseRel := callResponseRel)
-      hCaller hFind
+      hCaller
       (by simpa [OpenExternal.YulOpen.callFunction?] using hLookup)
       hInsert
       (sourceUserCallBodyOpenResultRel_of_seq_callSafe_scoped_function
@@ -57829,7 +57783,7 @@ after insertion of the fresh result slot.  CALL-safe program scoping and the
 recursive selected-body theorem then construct the restored open callee
 relation consumed by `sourceExprRawPreludeOpenResultRel_user_call_regular_of_arg_terminal`.
 -/
-theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_body_callSafe_scoped
+theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_override_function_body_callSafe_scoped
     {cfg : StateRelConfig} {layout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -57846,7 +57800,6 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
     {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
     {sourceFuel targetBodyFuel : Nat}
     {functionName : EvmYul.Yul.Ast.YulFunctionName}
-    {yulContract : EvmYul.Account .Yul}
     {params returns : List EvmYul.Identifier} {body : List AstStmt}
     {paramStore : Locals.Source.Store}
     {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
@@ -57873,9 +57826,6 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
       SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
         prim lowerArgs (.ok ((.Ok callerShared callerStore : State), values))
         (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
-    (hFind :
-      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
-        some yulContract)
     (hLookup :
       yulProgram.contract.functions.lookup functionName =
         some (.Def params returns body))
@@ -57977,20 +57927,20 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
       (callResponseRel := callResponseRel)
       (rawCallResponseRel := rawCallResponseRel)
       hArgs hFresh hTmpFreshLayout hDone
-      (sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_scoped
+      (sourceUserCallResultOpenResultRel_succ_of_override_function_body_callSafe_scoped
         (cfg := cfg) (callerLayout := layout)
         (terminalRel := terminalRel) (revertRel := revertRel)
         (prim := prim) (yulProgram := yulProgram) (program := program)
         (lowerFn := lowerFn) (sourceFuel := sourceFuel)
         (targetBodyFuel := targetBodyFuel) (argValues := values.reverse)
         (paramStore := paramStore) (functionName := functionName)
-        (yulContract := yulContract) (params := params) (returns := returns)
+        (params := params) (returns := returns)
         (body := body) (callerShared := callerShared)
         (callerStore := callerStore)
         (callerCompiler := targetState.insert tmp Expr.zero)
         (bodyCallResponseRel := bodyCallResponseRel)
         (callResponseRel := callResponseRel)
-      hSafe hScoped hRelInserted hFind hLookup hArgsLength hInsert
+      hSafe hScoped hRelInserted hLookup hArgsLength hInsert
         hLowerParams hLowerReturns hBody hBodyCallResponse)
       hExprOk hReplayResponse
 
@@ -58002,7 +57952,7 @@ The body and hidden-slot replay response relations are determined by the raw
 expression continuation. Recursive callers provide only the selected body
 relation itself.
 -/
-theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_body_callSafe_scoped_canonical
+theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_override_function_body_callSafe_scoped_canonical
     {cfg : StateRelConfig} {layout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -58019,7 +57969,6 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
     {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
     {sourceFuel targetBodyFuel : Nat}
     {functionName : EvmYul.Yul.Ast.YulFunctionName}
-    {yulContract : EvmYul.Account .Yul}
     {params returns : List EvmYul.Identifier} {body : List AstStmt}
     {paramStore : Locals.Source.Store}
     {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
@@ -58038,9 +57987,6 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
       SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
         prim lowerArgs (.ok ((.Ok callerShared callerStore : State), values))
         (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
-    (hFind :
-      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
-        some yulContract)
     (hLookup :
       yulProgram.contract.functions.lookup functionName =
         some (.Def params returns body))
@@ -58094,7 +58040,7 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
             (compilerOpenUserCallReadHiddenTempRawResult prim tmp
               { ctxAfter with scope := tmp :: ctxAfter.scope }
               argResult.1))) :=
-  sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_body_callSafe_scoped
+  sourceExprRawPreludeOpenResultRel_user_call_regular_of_override_function_body_callSafe_scoped
     (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
     (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
     (program := program) (lowerFn := lowerFn) (args := args)
@@ -58103,7 +58049,7 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
     (tmp := tmp) (callerShared := callerShared) (callerStore := callerStore)
     (values := values) (targetState := targetState) (ctxAfter := ctxAfter)
     (sourceFuel := sourceFuel) (targetBodyFuel := targetBodyFuel)
-    (functionName := functionName) (yulContract := yulContract)
+    (functionName := functionName)
     (params := params) (returns := returns) (body := body)
     (paramStore := paramStore)
     (bodyCallResponseRel :=
@@ -58116,7 +58062,7 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
         { ctxAfter with scope := tmp :: ctxAfter.scope }
         (targetState.insert tmp Expr.zero) rawCallResponseRel)
     (rawCallResponseRel := rawCallResponseRel)
-    hSafe hScoped hArgs hFresh hTmpFreshLayout hDone hFind hLookup hArgsLength
+    hSafe hScoped hArgs hFresh hTmpFreshLayout hDone hLookup hArgsLength
     hInsert hLowerParams hLowerReturns hBody
     (by
       intro sourceCall targetCall response hResponse
@@ -208237,6 +208183,7 @@ theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
       OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
           (.Ok sourceShared sourceStore) =
         .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hNoOverride : codeOverride = none)
     (hValuesArity :
       values.length = Expressions.Structured.BasicOp.inputs op) :
     ∃ operands : OpenExternal.CallOperands,
@@ -208279,7 +208226,7 @@ theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
     (sourceShared := sourceShared) (sourceSharedAfter := sourceSharedAfter)
     (sourceStore := sourceStore) (sourceStoreAfter := sourceStoreAfter)
     (compiler := compiler) (values := values) hKind hBasic hArgsRegular
-    hInitial hOpenEvalArgs hValuesArity
+    hInitial hOpenEvalArgs hNoOverride hValuesArity
 
 end RecursiveBridgeCALLSemanticContracts
 
@@ -209370,6 +209317,7 @@ theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
       OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
           (.Ok sourceShared sourceStore) =
         .done (.ok (.Ok sourceSharedAfter sourceStoreAfter, values)))
+    (hNoOverride : codeOverride = none)
     (hValuesArity :
       values.length = Expressions.Structured.BasicOp.inputs op) :
     ∃ operands : OpenExternal.CallOperands,
@@ -209405,7 +209353,7 @@ theorem openPrimitiveEVMResultRel_of_argStackPrelude_callKind
               (Reference.SourceBridgeFacts.openPrimitiveCallEVMResult
                 evmCall) :=
   hTop.semantics.openPrimitiveEVMResultRel_of_argStackPrelude_callKind
-    hKind hBasic hArgsRegular hInitial hOpenEvalArgs hValuesArity
+    hKind hBasic hArgsRegular hInitial hOpenEvalArgs hNoOverride hValuesArity
 
 end RecursiveBridgeCALLTopAssumptions
 

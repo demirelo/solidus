@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 01:00 PDT.
+Last updated: 2026-05-30 01:01 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -192,6 +192,12 @@ Checked base we can rely on:
   state, but they cannot replace the fixed code image of an already-executing
   frame. The mutable `accountMap` lookup remains only on the no-override
   imported-compatibility path.
+- [x] Removed mutable account lookup from the selected-callee proof stack:
+  override-specific source decomposition, CALL-safe/scoped restoration, and raw
+  hidden-slot replay wrappers now consume the fixed executing contract image
+  directly. Rewrote open caller-local/domain/out-of-fuel invariants for the
+  corrected override split and deleted the unused open-to-closed argument
+  adapter instead of preserving it as a compatibility route.
 - [x] Factored the open internal-call function selector as
   `OpenExternal.YulOpen.callFunction?` and checked
   `call_succ_eq_bind_body_of_find_function`, exposing the successful branch as
