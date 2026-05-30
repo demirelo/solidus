@@ -548,6 +548,9 @@ Remaining work:
      and compose terminal-aware prefixes with raw expression continuations:
      regular prefixes continue, terminal prefixes stop, and suspended requests
      remain visible through the outer bind.
+   - [x] Name strict and terminal-aware raw generated-argument soundness at the
+     exact target block boundary, and lift any checked strict raw proof into
+     the terminal-aware interface without changing its observable call trace.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

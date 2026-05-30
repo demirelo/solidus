@@ -35734,6 +35734,48 @@ def SourceArgTerminalRawPreludeOpenDoneRel
       | .regular | .brk | .cont | .leave | .halt _ => False
   | _, _ => False
 
+def SourceArgRawPreludeOpenSoundAtExactTarget
+    (cfg : StateRelConfig) (layout : List Name)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) (lowerArgs : List (Locals.Expr 1))
+    (targetFuel : Nat)
+    (callResponseRel : SourceArgRawPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            codeOverride source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler)
+
+def SourceArgTerminalRawPreludeOpenSoundAtExactTarget
+    (cfg : StateRelConfig) (layout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) (lowerArgs : List (Locals.Expr 1))
+    (targetFuel : Nat)
+    (callResponseRel : SourceArgRawPreludeOpenCallResponseRel) : Prop :=
+  ∀ {source compiler},
+    SourceStateRel cfg layout source compiler →
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+            codeOverride source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler)
+
 theorem sourceArgTerminalRawPreludeOpenDoneRel_of_raw
     {cfg : StateRelConfig} {layout : List Name}
     {terminalRel :
@@ -35842,6 +35884,28 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_of_raw
       exact OpenExternal.OpenResultRel.call hSite (by
         intro response hResponse
         exact ih response hResponse)
+
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {targetFuel : Nat}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hRaw :
+      SourceArgRawPreludeOpenSoundAtExactTarget cfg layout prim program ctx
+        sourceFuel args codeOverride pre lowerArgs targetFuel
+        callResponseRel) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
+      targetFuel callResponseRel := by
+  intro source compiler hInitial
+  exact sourceArgTerminalRawPreludeOpenResultRel_of_raw (hRaw hInitial)
 
 /--
 Compose a terminal-aware generated argument prefix with a raw expression
