@@ -55237,6 +55237,311 @@ theorem compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
       hResolve hCleanup)
 
 /--
+Selected-path preservation for one imported Yul block statement.
+
+The recursive body path is selected only after the concrete source endpoint is
+known. Regular completion uses the visible entry layout and reconstructs an
+exact state relation after both scope cleanups. Stopping completion uses the
+outward outcome layout and remains guarded by the enclosing admission
+predicate.
+-/
+theorem sourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodyFuel : Nat} {body : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBody : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBody : Safe.CallSafe.stmts body)
+    (hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body)
+    (hBody :
+      ∀ {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout bodyOutcomeLayout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          bodyOutcomeLayout terminalRel revertRel prim program ctx bodyFuel body
+          codeOverride lowerBody allowedBody) :
+    SourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx bodyFuel.succ (.Block body)
+      codeOverride (.block lowerBody) allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  cases hInitial with
+  | @ok shared scope compiler hShared hVars hDomain =>
+      have hEntryContains :
+          StoreDomainContains layout scope := by
+        intro name hMem
+        exact (hDomain name).mpr hMem
+      have hResolveBlock := hResolve
+      rw [yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq] at hResolveBlock
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolveBlock with
+        hBodyError | hBodyOk
+      · rcases hBodyError with ⟨err, hResolveBody, rfl⟩
+        have hOuterAllowed : allowed (.error err) :=
+          hStoppingAllowed (by simp [SourceResultNotRegularOk])
+        rcases
+            (hBody
+              (bodyOutcomeLayout := outcomeLayout)
+              (allowedBody := fun result =>
+                result = (.error err : Except Exception State))
+              (by
+                intro result hEq
+                cases hEq
+                exact hAllowed hOuterAllowed)
+              (by
+                intro result hEq
+                cases hEq
+                simp [SourceResultOutcomeLayoutSupported]))
+              (SourceStateExactRel.ok hShared hVars hDomain) hResolveBody rfl
+              hResponses minimumTargetFuel with
+          ⟨targetFuel, hMinimumTargetFuel, hBodyPath⟩
+        rcases hBodyPath.resolves with
+          ⟨bodySourceDone, bodyTargetDone, hResolveBody', hTargetBody,
+            hBodyDone⟩
+        have hBodySourceEq : (.error err : Except Exception State) =
+            bodySourceDone :=
+          OpenExternal.OpenResultResolves.deterministic hResolveBody
+            hResolveBody'
+        subst bodySourceDone
+        cases bodyTargetDone with
+        | error targetErr =>
+            exact False.elim (hBodyDone rfl)
+        | ok targetDone =>
+            rcases targetDone with ⟨targetOutcome, targetCtx⟩
+            have hOutcomeRel := hBodyDone rfl
+            have hMode : targetOutcome.mode ≠ .regular :=
+              SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                (by simp [SourceResultNotRegularOk]) hOutcomeRel
+            refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+            exact
+              OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                hResolve
+                (compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
+                  hMode hTargetBody)
+                hResponses
+                (SourceOpenStmtHeadPathDoneRel.stopping
+                  (by simp [SourceResultNotRegularOk])
+                  (by
+                    intro _hOuterAllowed
+                    exact hOutcomeRel))
+      · rcases hBodyOk with
+          ⟨bodyTrace, cleanupTrace, bodyDone, rfl, hResolveBody,
+            hResolveCleanup⟩
+        have hResolveCleanup' :
+            OpenExternal.OpenResultResolves
+              (.done
+                (.ok
+                  (EvmYul.Yul.State.restrictStoreTo scope bodyDone)))
+              cleanupTrace sourceDone := by
+          simpa [OpenExternal.YulOpenResult.toOpenResult,
+            OpenExternal.YulOpenResult.ok] using hResolveCleanup
+        cases hResolveCleanup'
+        simp only [List.append_nil] at hResolve hResponses ⊢
+        cases bodyDone with
+        | Ok sharedAfter storeAfter =>
+            rcases
+                (hBody
+                  (bodyOutcomeLayout := layout)
+                  (allowedBody := fun result =>
+                    result =
+                      (.ok (.Ok sharedAfter storeAfter : State) :
+                        Except Exception State))
+                  (by
+                    intro result hEq
+                    cases hEq
+                    simp [SourceResultRelatable])
+                  (by
+                    intro result hEq
+                    cases hEq
+                    simp [SourceResultOutcomeLayoutSupported]))
+                  (SourceStateExactRel.ok hShared hVars hDomain) hResolveBody rfl
+                  hResponses minimumTargetFuel with
+              ⟨targetFuel, hMinimumTargetFuel, hBodyPath⟩
+            rcases hBodyPath.resolves with
+              ⟨bodySourceDone, bodyTargetDone, hResolveBody', hTargetBody,
+                hBodyDone⟩
+            have hBodySourceEq :
+                (.ok (.Ok sharedAfter storeAfter : State) :
+                    Except Exception State) =
+                  bodySourceDone :=
+              OpenExternal.OpenResultResolves.deterministic hResolveBody
+                hResolveBody'
+            subst bodySourceDone
+            cases bodyTargetDone with
+            | error targetErr =>
+                exact False.elim (hBodyDone rfl)
+            | ok targetDone =>
+                rcases targetDone with ⟨targetOutcome, targetCtx⟩
+                have hOutcomeRel := hBodyDone rfl
+                cases hOutcomeRel with
+                | ok hOk =>
+                    cases hOk with
+                    | @regular _ compilerAfter hStateRel =>
+                        have hSeqInv :
+                            OpenResultDoneInvariant
+                              (YulOpenStateDoneInv
+                                (StateCheckpointStoreContains layout canBreak
+                                  canContinue canLeave))
+                              (OpenExternal.YulOpenResult.toOpenResult
+                                (OpenExternal.YulOpen.execSeq bodyFuel body
+                                  codeOverride (.Ok shared scope))) :=
+                          yulOpenExecSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+                            hSafeBody hScopedBody hEntryContains
+                        have hAfterInv :
+                            StateCheckpointStoreContains layout canBreak
+                              canContinue canLeave
+                              (.Ok sharedAfter storeAfter) :=
+                          OpenResultDoneInvariant.of_resolves hSeqInv
+                            hResolveBody
+                        have hRelRestricted :
+                            SourceStateRel cfg layout
+                              (EvmYul.Yul.State.restrictStoreTo scope
+                                (.Ok sharedAfter storeAfter : State))
+                              (compilerAfter.restrictTo ctx.scope) :=
+                          SourceStateRel.restrictCompilerTo_of_subset
+                            (SourceStateRel.restrictStoreTo_of_scope_contains
+                              hStateRel hEntryContains)
+                            hScopeContains
+                        have hDomainRestricted :
+                            StateStoreDomainExact layout
+                              (EvmYul.Yul.State.restrictStoreTo scope
+                                (.Ok sharedAfter storeAfter : State)) :=
+                          StateStoreDomainExact.restrictStoreTo_of_contains
+                            hAfterInv.2 hDomain
+                        have hExactRestricted :
+                            SourceStateExactRel cfg layout
+                              (EvmYul.Yul.State.restrictStoreTo scope
+                                (.Ok sharedAfter storeAfter : State))
+                              (compilerAfter.restrictTo ctx.scope) := by
+                          exact
+                            SourceStateExactRel.ofRelDomain hRelRestricted
+                              (by
+                                simpa [StateStoreDomainExact,
+                                  EvmYul.Yul.State.restrictStoreTo] using
+                                    hDomainRestricted)
+                        refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+                        exact
+                          OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                            hResolve
+                            (compilerOpen_stmt_run_block_resolves_of_runOpen_regular
+                              hTargetBody)
+                            hResponses
+                            (SourceOpenStmtHeadPathDoneRel.regular
+                              hExactRestricted)
+        | OutOfFuel =>
+            have hOuterAllowed : allowed (.ok (.OutOfFuel : State)) :=
+              hStoppingAllowed
+                (by
+                  simp [SourceResultNotRegularOk,
+                    EvmYul.Yul.State.restrictStoreTo])
+            exact False.elim
+              (sourceResultRelatable_stateOutOfFuel_false
+                (hAllowed hOuterAllowed))
+        | Checkpoint jump =>
+            have hOuterAllowed :
+                allowed
+                  (.ok
+                    (EvmYul.Yul.State.restrictStoreTo scope
+                      (.Checkpoint jump : State))) :=
+              hStoppingAllowed
+                (by
+                  cases jump <;>
+                    simp [SourceResultNotRegularOk,
+                      EvmYul.Yul.State.restrictStoreTo])
+            have hSupportedInner :
+                SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+                  (.ok (.Checkpoint jump : State)) := by
+              cases jump <;>
+                simpa [SourceResultOutcomeLayoutSupported,
+                  EvmYul.Yul.State.restrictStoreTo] using
+                  (hSupported hOuterAllowed)
+            rcases
+                (hBody
+                  (bodyOutcomeLayout := outcomeLayout)
+                  (allowedBody := fun result =>
+                    result =
+                      (.ok (.Checkpoint jump : State) :
+                        Except Exception State))
+                  (by
+                    intro result hEq
+                    cases hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (hAllowed hOuterAllowed))
+                  (by
+                    intro result hEq
+                    cases hEq
+                    exact hSupportedInner))
+                  (SourceStateExactRel.ok hShared hVars hDomain) hResolveBody rfl
+                  hResponses minimumTargetFuel with
+              ⟨targetFuel, hMinimumTargetFuel, hBodyPath⟩
+            rcases hBodyPath.resolves with
+              ⟨bodySourceDone, bodyTargetDone, hResolveBody', hTargetBody,
+                hBodyDone⟩
+            have hBodySourceEq :
+                (.ok (.Checkpoint jump : State) : Except Exception State) =
+                  bodySourceDone :=
+              OpenExternal.OpenResultResolves.deterministic hResolveBody
+                hResolveBody'
+            subst bodySourceDone
+            cases bodyTargetDone with
+            | error targetErr =>
+                exact False.elim (hBodyDone rfl)
+            | ok targetDone =>
+                rcases targetDone with ⟨targetOutcome, targetCtx⟩
+                have hOutcomeRel := hBodyDone rfl
+                have hMode : targetOutcome.mode ≠ .regular :=
+                  SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                    (by simp [SourceResultNotRegularOk]) hOutcomeRel
+                have hOutcomeScopeContains :
+                    ∀ name, name ∈ outcomeLayout →
+                      (scope.lookup name).isSome = true := by
+                  intro name hMem
+                  apply (hDomain name).mpr
+                  cases jump <;>
+                    exact hSupportedInner.2 name hMem
+                have hOuterOutcomeRel :
+                    SourceResultOutcomeRel cfg outcomeLayout terminalRel
+                      revertRel
+                      (.ok
+                        (EvmYul.Yul.State.restrictStoreTo scope
+                          (.Checkpoint jump : State)))
+                      targetOutcome :=
+                  SourceResultOutcomeRel.restrictStoreTo_of_scope_contains
+                    hOutcomeScopeContains hOutcomeRel
+                refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hResolve
+                    (compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
+                      hMode hTargetBody)
+                    hResponses
+                    (SourceOpenStmtHeadPathDoneRel.stopping
+                      (by
+                        cases jump <;>
+                          simp [SourceResultNotRegularOk,
+                            EvmYul.Yul.State.restrictStoreTo])
+                      (by
+                        intro _hAllowed
+                        exact hOuterOutcomeRel))
+
+/--
 Lift an open function-body sequence relation through imported Yul block-scope
 cleanup.
 
