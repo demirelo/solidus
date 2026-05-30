@@ -53829,6 +53829,54 @@ abbrev SourceOpenSeqCallResponseRel : Type :=
         (Objects.Source.Outcome × Functions.Source.Ctx)) →
     OpenExternal.CallResponse → Prop
 
+/--
+One opaque external response is admissible independently of continuation
+shape when its reentrant state transformer preserves every already-related
+Yul/compiler shared-state pair.
+
+This is a proof-only certificate, not a concrete outside-world model. The
+status word and return data remain arbitrary, and the internal mutation may
+replace caller-visible chain state arbitrarily so long as both semantic sides
+remain related afterward.
+-/
+def RelationallyAdmissibleOpenResponse
+    (cfg : StateRelConfig) (response : OpenExternal.CallResponse) : Prop :=
+  ∀ {sourceShared : EvmYul.SharedState .Yul}
+    {compilerShared : EvmYul.SharedState .EVM},
+    Reference.SharedStateRel cfg sourceShared compilerShared →
+      Reference.SharedStateRel.ExternalResponseRelAt cfg sourceShared
+        compilerShared response
+
+/--
+Canonical outer response relation for finite open sequence traces.
+
+Generated-prelude and internal-function bind layers pull this relation back
+through their continuations internally. At the public sequence boundary it
+depends only on the opaque response certificate, not on compiler-generated
+continuation shape.
+-/
+abbrev SourceOpenTraceCallResponseRel
+    (cfg : StateRelConfig) : SourceOpenSeqCallResponseRel :=
+  fun _sourceCall _targetCall response =>
+    RelationallyAdmissibleOpenResponse cfg response
+
+/--
+Every opaque response selected by one finite trace preserves the configured
+Yul/compiler shared-state relation.
+-/
+abbrev SourceOpenTraceResponsesAdmissible
+    (cfg : StateRelConfig) (trace : OpenExternal.OpenTrace) : Prop :=
+  OpenExternal.OpenTrace.ResponsesSatisfy
+    (RelationallyAdmissibleOpenResponse cfg) trace
+
+theorem rawOpenCallResponseAdmissible_sourceOpenTraceCallResponseRel
+    (cfg : StateRelConfig) :
+    RawOpenCallResponseAdmissible cfg
+      (SourceOpenTraceCallResponseRel cfg) := by
+  intro sourceShared compilerAfter sourceCall targetCall response hShared
+    hResponse
+  exact hResponse hShared
+
 def SourceOpenResultSeqSoundAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :
@@ -53873,6 +53921,70 @@ def SourceOpenResultSeqSoundWhenAtExactHiddenCtx
               source))
           (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
             targetFuel lowerBlock compiler)
+
+/--
+Finite-trace hidden-context sequence soundness.
+
+For every concrete admitted source interaction trace that resolves to an
+allowed source result, construct one exact compiler-open cutoff and a matching
+target path over the same request/response events. The cutoff is allowed to
+depend on the selected finite trace; it is an executable proof resource, not
+an externally observable semantic value.
+-/
+def SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmts : List AstStmt)
+    (codeOverride : Option AstContract) (lowerBlock : Functions.Block)
+    (allowed : Except Exception State → Prop) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateExactRel cfg layout source compiler →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+          source))
+      trace sourceDone →
+    allowed sourceDone →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+      ∃ targetFuel,
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+            allowed)
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel lowerBlock compiler)
+
+theorem SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx.of_strong
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hStrong :
+      SourceOpenResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel sourceStmts
+        codeOverride lowerBlock allowed (SourceOpenTraceCallResponseRel cfg)) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts codeOverride
+      lowerBlock allowed := by
+  intro source compiler trace sourceDone hInitial hResolves hAllowed hResponses
+  rcases hStrong hInitial with ⟨targetFuel, hRel⟩
+  exact
+    ⟨targetFuel,
+      OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy hRel
+        hResolves hResponses⟩
 
 theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
     {cfg : StateRelConfig} {layout returns : List Name}
@@ -61613,6 +61725,55 @@ def CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
     SourceOpenResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel sourceStmts
       codeOverride lowerBlock allowed callResponseRel
+
+/--
+Checked finite-trace sequence target for the open external-CALL spine.
+
+This is the public-facing successor to the hidden existential tree target:
+checked lowering is fixed up front, while the executable compiler-open cutoff
+is constructed separately for each admitted concrete finite trace.
+-/
+def CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+    (cfg : StateRelConfig) (reserved layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel compileFuel : Nat)
+    (sourceStmts : List AstStmt) (codeOverride : Option AstContract)
+    (allowed : Except Exception State → Prop) :
+    Prop :=
+  ∀ {freshState freshState' lowerBlock},
+    FreshCoversLayout (reserved ++ layout) freshState →
+    Stmt.List.toBlockFuel? compileFuel freshState sourceStmts =
+      some (lowerBlock, freshState') →
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed
+
+theorem CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_strong
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {sourceStmts : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hStrong :
+      CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts codeOverride allowed
+        (SourceOpenTraceCallResponseRel cfg)) :
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel sourceStmts codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  exact
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx.of_strong
+      (hStrong hCovers hLower)
 
 theorem CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_atExactTarget
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
@@ -172362,6 +172523,63 @@ def CALLOpenSeqLoweringFrontierAt
       callResponseRel
 
 /--
+CALL-safe finite-path sequence frontier at one source-fuel bound.
+
+Unlike `CALLOpenSeqLoweringFrontierAt`, this is suitable for public open
+semantics: one exact compiler-open cutoff is constructed for each admitted
+finite response trace. It does not claim that one executable cutoff covers the
+whole response tree.
+-/
+def CALLOpenSeqPathLoweringFrontierAt
+    (cfg : StateRelConfig)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (yulProgram : Program) (program : Functions.Program)
+    (bound : Nat) : Prop :=
+  ∀ {reserved layout outcomeLayout : List Name}
+    {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {sourceStmts : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool},
+    Safe.CallSafe.stmts sourceStmts →
+    ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+    UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+    SourceLexical.StmtsScoped layout sourceStmts →
+    SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultRelatable sourceResult) →
+    (∀ {sourceResult}, allowed sourceResult →
+      SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+        sourceResult) →
+    (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      bound compileFuel sourceStmts (some yulProgram.contract) allowed
+
+theorem CALLOpenSeqPathLoweringFrontierAt.of_strong
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} {bound : Nat}
+    (hStrong :
+      CALLOpenSeqLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+        program bound) :
+    CALLOpenSeqPathLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+      program bound := by
+  intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+    canBreak canContinue canLeave hSafe hScoped hStmtOk hSourceScoped
+    hReserved hAllowed hSupported hScopeContains
+  exact
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_strong
+      (hStrong hSafe hScoped hStmtOk hSourceScoped hReserved hAllowed
+        hSupported hScopeContains
+        (rawOpenCallResponseAdmissible_sourceOpenTraceCallResponseRel cfg))
+
+/--
 Open CALL-safe sequence frontier at source fuel zero.
 
 No statement can expose an external CALL at this fuel; the source open
@@ -172428,6 +172646,36 @@ theorem callOpenSeqLoweringFrontierAt_one
           (rest := rest) (codeOverride := some yulProgram.contract)
           (allowed := allowed) (callResponseRel := callResponseRel)
           hAllowed
+
+/--
+Finite-path CALL-safe sequence frontier at source fuel zero.
+-/
+theorem callOpenSeqPathLoweringFrontierAt_zero
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqPathLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+      program 0 :=
+  CALLOpenSeqPathLoweringFrontierAt.of_strong
+    callOpenSeqLoweringFrontierAt_zero
+
+/--
+Finite-path CALL-safe sequence frontier at source fuel one.
+-/
+theorem callOpenSeqPathLoweringFrontierAt_one
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqPathLoweringFrontierAt cfg terminalRel revertRel prim yulProgram
+      program 1 :=
+  CALLOpenSeqPathLoweringFrontierAt.of_strong
+    callOpenSeqLoweringFrontierAt_one
 
 /--
 CALL-safe typed-continuation sequence frontier at one source-fuel bound.

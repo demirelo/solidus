@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 01:18 PDT.
+Last updated: 2026-05-30 03:07 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -20,6 +20,31 @@ callee semantics. Requested gas may stay opaque, but it must be threaded
 consistently as a call operand. The response may carry arbitrary
 caller-account/storage mutation; both sides require only the same response and
 the shared-state relation demanded by the open boundary.
+
+Finite-trace correction:
+
+- [x] Reject and remove the false global "every larger target cutoff works"
+  scaffold. `CompilerOpen` cutoff fuel is executable: after an arbitrary
+  response, an over-fueled target can expose a later request after finite-fuel
+  imported Yul has exhausted.
+- [x] Add `OpenEvent`, `OpenTrace`, `OpenResultResolves`, and
+  `OpenResultPathRel`, recording equal request sites and the same concrete
+  black-box response along one finite interaction path.
+- [x] Add trace response certificates and the generic projection from a local
+  tree-shaped `OpenResultRel` proof to one concrete admitted
+  `OpenResultPathRel`.
+- [x] Add the checked hidden-context finite-path sequence target and
+  `CALLOpenSeqPathLoweringFrontierAt`, with verified zero/one source-fuel base
+  cases.
+- [ ] Make expression-prefix, generated-argument, selected-callee body, and
+  sequence-tail composition path-native. Construct the exact target cutoff
+  from the selected finite trace rather than asking one cutoff to cover the
+  whole response tree.
+- [ ] Replace the six stale closed-shell singleton dispatch branches with the
+  path-native open sequence frontier and delete the temporary tree frontier.
+- [ ] Carry ordinary `CALL` through the preferred public checked compiler/EVM
+  theorem spine, then extend the same abstract-response trace boundary across
+  `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2`.
 
 Checked base we can rely on:
 

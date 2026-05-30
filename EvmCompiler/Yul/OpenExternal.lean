@@ -1757,6 +1757,22 @@ structure OpenEvent where
 abbrev OpenTrace : Type :=
   List OpenEvent
 
+namespace OpenTrace
+
+/--
+Every concrete response in one finite trace satisfies the supplied semantic
+response boundary.
+
+The trace itself remains plain data.  Preservation proofs carry this separate
+certificate so callers can quantify over arbitrary black-box responses while
+stating exactly which opaque mutations are admissible.
+-/
+def ResponsesSatisfy
+    (responseRel : CallResponse → Prop) (trace : OpenTrace) : Prop :=
+  ∀ event, event ∈ trace → responseRel event.response
+
+end OpenTrace
+
 /--
 Resolve one open computation along a concrete finite interaction trace.
 
@@ -1837,6 +1853,49 @@ theorem resolves
       simpa [hSite] using (OpenResultResolves.call hTarget)
 
 end OpenResultPathRel
+
+namespace OpenResultRel
+
+/--
+Project a tree-shaped open-result relation onto one concrete admitted response
+trace.
+
+This is intentionally one-way.  A fixed executable cutoff may describe a
+whole open tree locally, but the public compiler proof only needs the path
+selected by one finite black-box response trace.
+-/
+theorem path_of_resolves_of_responsesSatisfy
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {responseRel : CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β} {sourceDone : Except ε₁ α}
+    (hRel :
+      OpenResultRel (fun _sourceCall _targetCall response =>
+        responseRel response) doneRel source target)
+    (hResolves : OpenResultResolves source trace sourceDone)
+    (hResponses : OpenTrace.ResponsesSatisfy responseRel trace) :
+    OpenResultPathRel
+      (fun _sourceCall _targetCall response => responseRel response)
+      doneRel trace source target := by
+  induction hResolves generalizing target with
+  | done =>
+      cases hRel with
+      | done hDone =>
+          exact OpenResultPathRel.done hDone
+  | @call sourceCall response trace sourceDone hTail ih =>
+      cases hRel with
+      | call hSite hResume =>
+          have hResponse : responseRel response :=
+            hResponses
+              { site := sourceCall.site, response := response } (by simp)
+          apply OpenResultPathRel.call hSite
+          · exact hResponse
+          · apply ih (hRel := hResume response hResponse)
+            intro event hMem
+            exact hResponses event (List.mem_cons_of_mem _ hMem)
+
+end OpenResultRel
 
 /--
 Result relation between the stack-free primitive CALL continuation and the
