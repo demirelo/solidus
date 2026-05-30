@@ -2541,11 +2541,7 @@ theorem toFunctionsListFuel?_let_user_call_eq_succ
             some
               (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
                 state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
-            state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -2590,12 +2586,7 @@ theorem toFunctionsListFuel?_assign_user_call_eq_succ
                 Expr.List.lowerBound1? state args
             some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some
-            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
-              state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -2833,16 +2824,7 @@ theorem freshCoversLayout_toFunctionsListFuel?_let_user_call_of_some
     cases rest with
     | nil =>
       rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
-      cases hExpr :
-          Expr.lower1? state (.Call (.inr functionName) args) with
-      | none =>
-          simp [hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨preValue, lowerValue, stateAfterExpr⟩
-          simp [hExpr] at hLower
-          rcases hLower with ⟨_hLower, hState⟩
-          cases hState
-          exact freshCoversLayout_lower1?_of_some hCovers hExpr
+      simp at hLower
     | cons next rest =>
       rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
       cases hUnsupported : ObjectBuiltin.unsupported? functionName with
@@ -2914,16 +2896,7 @@ theorem freshCoversLayout_toFunctionsListFuel?_assign_user_call_of_some
     cases rest with
     | nil =>
       rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
-      cases hExpr :
-          Expr.lower1? state (.Call (.inr functionName) args) with
-      | none =>
-          simp [hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨preValue, lowerValue, stateAfterExpr⟩
-          simp [hExpr] at hLower
-          rcases hLower with ⟨_hLower, hState⟩
-          cases hState
-          exact freshCoversLayout_lower1?_of_some hCovers hExpr
+      simp at hLower
     | cons next rest =>
       rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
       cases hUnsupported : ObjectBuiltin.unsupported? functionName with
@@ -6390,6 +6363,11 @@ theorem trans
 
 theorem cons (ctx : Functions.Source.Ctx) (name : Name) :
     SourceCtxExtends ctx { ctx with scope := name :: ctx.scope } :=
+  ⟨fun oldName hMem => by simp [hMem],
+    ⟨rfl, rfl, rfl⟩⟩
+
+theorem append_left (ctx : Functions.Source.Ctx) (names : List Name) :
+    SourceCtxExtends ctx { ctx with scope := names ++ ctx.scope } :=
   ⟨fun oldName hMem => by simp [hMem],
     ⟨rfl, rfl, rfl⟩⟩
 
@@ -15494,6 +15472,29 @@ theorem sourceStoreRel_initReturns_insertZeros
           exact hEq
         rw [hTarget]
         exact hTailEq
+
+/--
+Fresh generated return slots remain hidden from the old visible layout until a
+source declaration successfully publishes them.
+-/
+theorem sourceStoreRel_initReturns_hidden
+    {layout names : List Name}
+    {store : EvmYul.Yul.VarStore} {vars : Locals.Source.Store}
+    (hRel : SourceStoreRel layout store vars)
+    (hFresh : ∀ name, name ∈ names → name ∉ layout) :
+    SourceStoreRel layout store
+      (Functions.Source.Store.initReturns names vars) := by
+  induction names generalizing vars with
+  | nil =>
+      simpa [Functions.Source.Store.initReturns] using hRel
+  | cons head tail ih =>
+      unfold Functions.Source.Store.initReturns
+      apply ih
+      · exact
+          sourceStoreRel_insert_hidden hRel
+            (hFresh head (by simp))
+      · intro name hMem
+        exact hFresh name (by simp [hMem])
 
 theorem identName_eq_self (name : EvmYul.Identifier) :
     identName name = name := rfl
@@ -36436,6 +36437,40 @@ abbrev SourceOpenTraceResponsesAdmissible
   OpenExternal.OpenTrace.ResponsesSatisfy
     (RelationallyAdmissibleOpenResponse cfg) trace
 
+/--
+Source-facing fuel adequacy for one selected internal-function body clock.
+
+The imported Yul interpreter historically represents exhausted body execution
+as a successful `State.OutOfFuel`.  This contract says that every admitted
+finite open path from an initialized callee frame finishes in the
+compiler-relatable result fragment.  It is a fuel/resource premise, not
+compiler evidence or an external-world model.
+-/
+def SourceOpenInternalUserCallBodyFuelAdequateAt
+    (cfg : StateRelConfig) (contract : AstContract) (bodyFuel : Nat) : Prop :=
+  ∀ {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {source : State} {trace : OpenExternal.OpenTrace}
+    {sourceDone : Except Exception State},
+    contract.functions.lookup functionName =
+      some (.Def params returns body) →
+    StateStoreDomainExact (identNames returns ++ identNames params) source →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq bodyFuel body (some contract) source))
+      trace sourceDone →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    SourceResultRelatable sourceDone
+
+/--
+Source-facing internal-body fuel adequacy for every recursive body clock up to
+one enclosing sequence predecessor.
+-/
+def SourceOpenInternalUserCallBodyFuelAdequateUpTo
+    (cfg : StateRelConfig) (contract : AstContract) (bound : Nat) : Prop :=
+  ∀ {bodyFuel : Nat}, bodyFuel ≤ bound →
+    SourceOpenInternalUserCallBodyFuelAdequateAt cfg contract bodyFuel
+
 abbrev SourceExprRawPreludeOpenCallResponseRel : Type :=
   OpenExternal.OpenCall
       (OpenExternal.OpenResult Exception (State × List Word)) →
@@ -38425,6 +38460,334 @@ theorem yulOpen_toOpenResult_evalArgs_append_singleton_eq_bind_evalTail
       simpa [OpenExternal.YulOpen.evalArgs] using
         hTail
           (OpenExternal.YulOpen.eval restFuel.succ first codeOverride source)
+
+/-- A call expression reached with one total fuel tick exhausts in its argument list. -/
+theorem yulOpen_evalValues_call_one_eq_outOfFuel
+    {callee : Sum (EvmYul.Operation .Yul) Name} {args : List AstExpr}
+    {codeOverride : Option AstContract} {source : State} :
+    OpenExternal.YulOpen.evalValues 1 (.Call callee args) codeOverride source =
+      .error .OutOfFuel := by
+  cases callee <;>
+    simp [OpenExternal.YulOpen.evalValues, OpenExternal.YulOpen.evalArgs,
+      OpenExternal.YulOpen.reverseResult, OpenExternal.YulOpenResult.map,
+      OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+      OpenExternal.YulOpenResult.bind]
+
+/--
+An internal user-call expression reached with two total fuel ticks cannot enter
+a productive callee body.
+
+An empty argument list reaches lookup and then either reports a missing
+function or exhausts at the selected body. A nonempty argument list exhausts
+while entering its first reversed argument. Both errors are outside the public
+successful-run boundary.
+-/
+theorem yulOpen_evalValues_user_call_two_eq_nonrelatable_error
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {args : List AstExpr} {contract : AstContract} {source : State} :
+    ∃ err,
+      OpenExternal.YulOpen.evalValues 2 (.Call (.inr functionName) args)
+          (some contract) source =
+        .error err ∧
+      (SourceResultRelatable (.error err) → False) := by
+  cases hArgs : args.reverse with
+  | nil =>
+      simp [OpenExternal.YulOpen.evalValues, hArgs,
+        OpenExternal.YulOpen.evalArgs,
+        OpenExternal.YulOpen.reverseResult, OpenExternal.YulOpenResult.map,
+        OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpen.call,
+        OpenExternal.YulOpen.exec]
+      split
+      · exact
+          ⟨.MissingContractFunction functionName, rfl, by
+            intro h
+            cases h⟩
+      · exact ⟨.OutOfFuel, rfl, sourceResultRelatable_outOfFuel_false⟩
+  | cons head tail =>
+      exact
+        ⟨.OutOfFuel, by
+          simp [OpenExternal.YulOpen.evalValues, hArgs,
+            OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpen.reverseResult, OpenExternal.YulOpenResult.map,
+            OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+            OpenExternal.YulOpenResult.bind, OpenExternal.YulOpen.eval,
+            OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalTail],
+          sourceResultRelatable_outOfFuel_false⟩
+
+/--
+An internal user-call expression reached with three total fuel ticks likewise
+cannot enter a productive callee body.
+
+The first reversed argument may perform one literal or variable lookup, but the
+remaining argument tail then exhausts. Nested call arguments exhaust at their
+own one-tick boundary. The empty argument path reaches lookup and then exhausts
+when entering the selected body.
+-/
+theorem yulOpen_evalValues_user_call_three_eq_nonrelatable_error
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {args : List AstExpr} {contract : AstContract} {source : State} :
+    ∃ err,
+      OpenExternal.YulOpen.evalValues 3 (.Call (.inr functionName) args)
+          (some contract) source =
+        .error err ∧
+      (SourceResultRelatable (.error err) → False) := by
+  cases hArgs : args.reverse with
+  | nil =>
+      simp [OpenExternal.YulOpen.evalValues, hArgs,
+        OpenExternal.YulOpen.evalArgs,
+        OpenExternal.YulOpen.reverseResult, OpenExternal.YulOpenResult.map,
+        OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpen.call,
+        OpenExternal.YulOpen.exec, OpenExternal.YulOpen.execSeq]
+      split
+      · exact
+          ⟨.MissingContractFunction functionName, rfl, by
+            intro h
+            cases h⟩
+      · exact ⟨.OutOfFuel, rfl, sourceResultRelatable_outOfFuel_false⟩
+  | cons head tail =>
+      cases head with
+      | Lit value =>
+          exact
+            ⟨.OutOfFuel, by
+              simp [OpenExternal.YulOpen.evalValues, hArgs,
+                OpenExternal.YulOpen.evalArgs,
+                OpenExternal.YulOpen.reverseResult,
+                OpenExternal.YulOpenResult.map,
+                OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+                OpenExternal.YulOpenResult.bind,
+                OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.consResult,
+                OpenExternal.YulOpen.eval, OpenExternal.YulOpen.headResult,
+                EvmYul.Yul.head'],
+              sourceResultRelatable_outOfFuel_false⟩
+      | Var name =>
+          cases hLookup : source.lookup? name with
+          | none =>
+              exact
+                ⟨.UnknownIdentifier name, by
+                  simp [OpenExternal.YulOpen.evalValues, hArgs,
+                    OpenExternal.YulOpen.evalArgs,
+                    OpenExternal.YulOpen.reverseResult,
+                    OpenExternal.YulOpenResult.map,
+                    OpenExternal.YulOpenResult.ok,
+                    OpenExternal.YulOpenResult.error,
+                    OpenExternal.YulOpenResult.bind,
+                    OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+                    OpenExternal.YulOpen.headResult, EvmYul.Yul.head', hLookup],
+                  by intro h; cases h⟩
+          | some value =>
+              exact
+                ⟨.OutOfFuel, by
+                  simp [OpenExternal.YulOpen.evalValues, hArgs,
+                    OpenExternal.YulOpen.evalArgs,
+                    OpenExternal.YulOpen.reverseResult,
+                    OpenExternal.YulOpenResult.map,
+                    OpenExternal.YulOpenResult.ok,
+                    OpenExternal.YulOpenResult.error,
+                    OpenExternal.YulOpenResult.bind,
+                    OpenExternal.YulOpen.evalTail,
+                    OpenExternal.YulOpen.consResult, OpenExternal.YulOpen.eval,
+                    OpenExternal.YulOpen.headResult, EvmYul.Yul.head', hLookup],
+                  sourceResultRelatable_outOfFuel_false⟩
+      | Call callee nestedArgs =>
+          have hNested :
+              OpenExternal.YulOpen.evalValues 1 (.Call callee nestedArgs)
+                  (some contract) source =
+                .error .OutOfFuel :=
+            yulOpen_evalValues_call_one_eq_outOfFuel
+          exact
+            ⟨.OutOfFuel, by
+              simp [OpenExternal.YulOpen.evalValues, hArgs,
+                OpenExternal.YulOpen.evalArgs,
+                OpenExternal.YulOpen.reverseResult,
+                OpenExternal.YulOpenResult.map,
+                OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.error,
+                OpenExternal.YulOpenResult.bind,
+                OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+                OpenExternal.YulOpen.headResult,
+                OpenExternal.YulOpen.reverseResult, hNested],
+              sourceResultRelatable_outOfFuel_false⟩
+
+/-- A generated argument head reached with zero residual fuel ends out of fuel. -/
+theorem yulOpen_evalTail_zero_nil_eval_zero_eq_outOfFuel
+    {head : AstExpr} {codeOverride : Option AstContract} {source : State} :
+    OpenExternal.YulOpen.evalTail 0 [] codeOverride
+        (OpenExternal.YulOpen.eval 0 head codeOverride source) =
+      .error .OutOfFuel := by
+  simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+    OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+    OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.error]
+
+/--
+A scoped generated argument head reached with one residual fuel tick ends out
+of fuel after its empty post-head tail.
+
+The variable branch uses source scoping plus store-domain containment to rule
+out an unrelated unknown-identifier error.  Calls consume their remaining tick
+when entering their argument list.
+-/
+theorem yulOpen_evalTail_one_nil_eval_one_eq_outOfFuel_of_scoped_contains
+    {layout : List Name} {head : AstExpr}
+    {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    (hScoped : SourceExprScoped layout head)
+    (hContains : StoreDomainContains layout store) :
+    OpenExternal.YulOpen.evalTail 1 [] codeOverride
+        (OpenExternal.YulOpen.eval 1 head codeOverride (.Ok shared store)) =
+      .error .OutOfFuel := by
+  cases head with
+  | Lit value =>
+      simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+        OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpen.consResult,
+        OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.bind,
+        OpenExternal.YulOpenResult.map, OpenExternal.YulOpenResult.error,
+        EvmYul.Yul.head']
+  | Var name =>
+      have hMem : identName name ∈ layout := by
+        simpa [SourceExprScoped] using hScoped
+      have hLookupSome :
+          (store.lookup (identName name)).isSome = true :=
+        hContains (identName name) hMem
+      cases hLookupStore : store.lookup (identName name) with
+      | none =>
+          simp [hLookupStore] at hLookupSome
+      | some sourceValue =>
+          have hLookupState :
+              EvmYul.Yul.State.lookup? name (.Ok shared store) =
+                some sourceValue := by
+            simpa [EvmYul.Yul.State.lookup?, identName] using hLookupStore
+          simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+            OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+            OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpen.consResult,
+            OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.bind,
+            OpenExternal.YulOpenResult.map, OpenExternal.YulOpenResult.error,
+            EvmYul.Yul.head', hLookupState]
+  | Call callee args =>
+      cases callee <;>
+        simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+          OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpen.reverseResult,
+          OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.map,
+          OpenExternal.YulOpenResult.error]
+
+/--
+A one-tick generated head reached from the imported success-valued out-of-fuel
+marker ends in a nonrelatable frontend error.
+
+Literals and calls report ordinary out-of-fuel. Variables report
+`UnknownIdentifier` because the marker has no local store. Both are outside the
+public successful-run result boundary.
+-/
+theorem yulOpen_evalTail_one_nil_eval_one_outOfFuel_eq_nonrelatable_error
+    {head : AstExpr} {codeOverride : Option AstContract} :
+    ∃ err,
+      OpenExternal.YulOpen.evalTail 1 [] codeOverride
+          (OpenExternal.YulOpen.eval 1 head codeOverride .OutOfFuel) =
+        .error err ∧
+      (SourceResultRelatable (.error err) → False) := by
+  cases head with
+  | Lit value =>
+      simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+        OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpen.consResult,
+        OpenExternal.YulOpenResult.ok, OpenExternal.YulOpenResult.bind,
+        OpenExternal.YulOpenResult.map, OpenExternal.YulOpenResult.error,
+        SourceResultRelatable, EvmYul.Yul.head']
+  | Var name =>
+      simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+        OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.error,
+        SourceResultRelatable, EvmYul.Yul.State.lookup?]
+  | Call callee args =>
+      cases callee <;>
+        simp [OpenExternal.YulOpen.evalTail, OpenExternal.YulOpen.eval,
+          OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpen.reverseResult,
+          OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.map,
+          OpenExternal.YulOpenResult.error, SourceResultRelatable]
+
+/--
+With at most two fuel ticks per argument, open argument evaluation cannot finish
+successfully.
+
+Nested external calls remain visible while evaluating reachable expressions,
+but every completed path exhausts fuel before it can return a full argument
+list.  This is the selected-path fact needed when an appended generated head is
+still unreachable.
+-/
+def SourcePairResultNoOk :
+    Except Exception (State × List Word) → Prop
+  | .ok _ => False
+  | .error _ => True
+
+theorem yulOpenEvalArgs_toOpenResult_doneInvariant_no_ok_of_fuel_le_twice_length
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {source : State}
+    (hFuel : sourceFuel ≤ 2 * args.length) :
+    OpenResultDoneInvariant SourcePairResultNoOk
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs sourceFuel args codeOverride source)) := by
+  induction args generalizing sourceFuel source with
+  | nil =>
+      have hSourceFuel : sourceFuel = 0 := by
+        simpa using hFuel
+      subst sourceFuel
+      simp [OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done True.intro
+  | cons head tail ih =>
+      cases sourceFuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpenResult.error]
+          exact OpenResultDoneInvariant.done True.intro
+      | succ evalFuel =>
+          simp only [OpenExternal.YulOpen.evalArgs]
+          unfold OpenExternal.YulOpen.evalTail
+          rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+          refine
+            OpenResultDoneInvariant.bind
+              (OpenResultDoneInvariant.any (fun _sourceDone => True.intro)
+                (OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.eval evalFuel head codeOverride source)))
+              ?_ ?_
+          · intro headResult _hHead
+            rcases headResult with ⟨sourceAfterHead, headValue⟩
+            cases evalFuel with
+            | zero =>
+                exact OpenResultDoneInvariant.done True.intro
+            | succ tailFuel =>
+                have hTailFuel : tailFuel ≤ 2 * tail.length := by
+                  simp only [List.length_cons] at hFuel
+                  omega
+                rw [yulOpen_toOpenResult_consResult_eq_bind]
+                refine OpenResultDoneInvariant.bind (ih hTailFuel) ?_ ?_
+                · intro tailResult hTailDone
+                  cases hTailDone
+                · intro err _hTailDone
+                  exact True.intro
+          · intro err _hHead
+            exact True.intro
+
+/-- A selected low-fuel open argument path cannot resolve successfully. -/
+theorem yulOpenEvalArgs_resolves_ok_false_of_fuel_le_twice_length
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {source sourceAfter : State}
+    {values : List Word} {trace : OpenExternal.OpenTrace}
+    (hFuel : sourceFuel ≤ 2 * args.length)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args codeOverride source))
+        trace (.ok (sourceAfter, values))) :
+    False :=
+  by
+    have hDone :=
+      OpenResultDoneInvariant.of_resolves
+        (yulOpenEvalArgs_toOpenResult_doneInvariant_no_ok_of_fuel_le_twice_length
+          hFuel)
+        hResolve
+    simpa [SourcePairResultNoOk] using hDone
 
 theorem exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le
     {fuel : Nat} (args : List AstExpr)
@@ -42159,7 +42522,52 @@ theorem compilerOpen_functionsArgList_eval_var_map_of_source
                 CompilerOpen.LocalsExpr.evalOne,
                 CompilerOpen.LocalsExpr.eval, hLookup,
                 OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
-                hTailOpen]
+              hTailOpen]
+
+/--
+Open target argument-list evaluation agrees with the recorded closed replay for
+lowered internal-user-call arguments.
+
+Direct argument lowering is the empty list. Generated lowering emits only
+variable reads, so the generic variable-map bridge applies without any hidden
+result-slot insertion.
+-/
+theorem compilerOpen_functionsArgList_eval_of_user_call_args
+    {prim : Objects.Source.PrimitiveSemantics}
+    {args : List AstExpr} {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {state : Objects.Source.State} {values : List Word}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hEval :
+      Functions.Source.ArgList.eval prim lowerArgs state =
+        .ok (state, values)) :
+    CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs state =
+      .done (.ok (state, values)) := by
+  cases hArgs with
+  | inl hDirect =>
+      rcases hDirect with ⟨hDirect, hToLocals, _hPreArgs, _hStateArgs⟩
+      have hLowerNil : lowerArgs = [] :=
+        toLocals1?_eq_nil_of_directCallArgsSafe hDirect hToLocals
+      subst lowerArgs
+      simpa using
+        (compilerOpen_functionsArgList_eval_var_map_of_source
+          (prim := prim) (names := ([] : List Name))
+          (state := state) (values := values)
+          (by simpa [Functions.Source.ArgList.eval] using hEval))
+  | inr hGenerated =>
+      rcases hGenerated with ⟨_hDirect, hLowerArgs⟩
+      rcases Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs with
+        ⟨names, hLowerNames⟩
+      simpa [hLowerNames] using
+        (compilerOpen_functionsArgList_eval_var_map_of_source
+          (prim := prim) (names := names) (state := state) (values := values)
+          (by simpa [hLowerNames] using hEval))
 
 /--
 Hidden result-slot insertion does not affect the lowered arguments emitted for
@@ -42311,6 +42719,49 @@ theorem sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval_insert
         (state := targetState) (values := values.reverse) hArgs hFresh
         hEvalArgs,
       SourceStateRel.insert_hidden hRelAfter hTmpFreshLayout⟩
+
+/--
+Regular terminal-aware raw argument-prefix completion replays directly into an
+internal call statement.
+
+Unlike the expression sibling, this route does not materialize a hidden result
+slot: discard, visible assignment, and fresh declaration calls all consume the
+lowered argument list in the state already produced by their prefix.
+-/
+theorem sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {args : List AstExpr} {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {sourceAfter : State} {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.ok (sourceAfter, values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter))) :
+    CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs targetState =
+        .done (.ok (targetState, values.reverse)) ∧
+      SourceStateRel cfg layout sourceAfter targetState := by
+  rcases
+      sourceArgRawPreludeOpenDoneRel_of_terminal_ok hDone with
+    ⟨hRelAfter, hEvalArgs⟩
+  exact
+    ⟨compilerOpen_functionsArgList_eval_of_user_call_args
+        (prim := prim) (args := args) (freshState := freshState)
+        (stateArgs := stateArgs) (preArgs := preArgs)
+        (lowerArgs := lowerArgs) (state := targetState)
+        (values := values.reverse) hArgs hEvalArgs,
+      hRelAfter⟩
 
 theorem sourceArgCallPreludeOpenResultRel_bind_targetArgEval_insert
     {cfg : StateRelConfig} {layout : List Name}
@@ -46521,6 +46972,51 @@ theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_
       subst expr
       exact UserCallArity.ExprsOk.mem hOk hMem)
 
+/--
+Arbitrary-fuel sibling of the checked raw argument-head singleton invariant.
+
+At fuel zero the source evaluator reports out-of-fuel, so the successful-value
+postcondition is vacuous. Successor fuel delegates to the existing checked
+dispatcher.
+-/
+theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem_actual_fuel
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat} {args : List AstExpr} {expr : AstExpr}
+    {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hMem : expr ∈ args)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState')) :
+    ∀ {source compiler},
+      SourceStateRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel expr
+              (some contract) source)) := by
+  cases sourceFuel with
+  | zero =>
+      intro source compiler _hInitial
+      simp [OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done (by
+        intro sourceAfter values hDone
+        cases hDone)
+  | succ sourceFuel =>
+      exact
+        lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem
+          (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+          (args := args) (expr := expr) (contract := contract)
+          (freshState := freshState) (freshState' := freshState')
+          (pre := pre) (lower := lower) hSafe hScoped hOk hMem hLower
+
 theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
     {cfg : StateRelConfig} {layout : List Name}
     {sourceFuel : Nat}
@@ -46564,6 +47060,55 @@ theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_l
           _hSafeUser _hScopedUser _hLowerUser (fun hEq' => hUserOk (by
             cases hEq'
             exact hEq)) hInitial)
+
+/--
+Arbitrary-fuel sibling of the checked domain-and-singleton invariant.
+
+At fuel zero the source evaluator reports out-of-fuel, so the successful
+domain-and-singleton postcondition is vacuous. Successor fuel delegates to the
+existing checked dispatcher.
+-/
+theorem lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity_actual_fuel
+    {cfg : StateRelConfig} {layout : List Name}
+    {sourceFuel : Nat}
+    {expr : AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState'))
+    (hUserOk :
+      ∀ {functionName : Name} {args : List AstExpr},
+        expr = .Call (.inr functionName) args →
+          UserCallArity.ExprOk contract
+            (.Call (.inr functionName) args)) :
+    ∀ {source compiler},
+      SourceStateExactRel cfg layout source compiler →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                StateStoreDomainExact layout sourceAfter ∧
+                  ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel expr
+              (some contract) source)) := by
+  cases sourceFuel with
+  | zero =>
+      intro source compiler _hInitial
+      simp [OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done (by
+        intro sourceAfter values hDone
+        cases hDone)
+  | succ sourceFuel =>
+      exact
+        lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+          (cfg := cfg) (layout := layout) (sourceFuel := sourceFuel)
+          (expr := expr) (contract := contract) (freshState := freshState)
+          (freshState' := freshState') (pre := pre) (lower := lower)
+          hSafe hScoped hLower hUserOk
 
 /--
 Open CALL-family expression bridge for generated argument preludes.
@@ -56936,6 +57481,45 @@ def SourceOpenBlockHeadPathSoundWhenAtExactHiddenCtx
             lowerHead compiler)
 
 /--
+Finite-path preservation target for one emitted statement block whose regular
+completion changes the source-visible layout.
+
+Declarations need this honest two-layout form: their argument prefix executes
+under the incoming layout, while successful publication exposes the freshly
+declared names to the syntactic tail.
+-/
+def SourceOpenBlockHeadPathSoundWhenAtExactHiddenCtxTo
+    (cfg : StateRelConfig) (layout resultLayout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmt : AstStmt)
+    (codeOverride : Option AstContract) (lowerHead : Functions.Block)
+    (allowed : Except Exception State → Prop) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateExactRel cfg layout source compiler →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
+      trace sourceDone →
+    (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    ∀ minimumTargetFuel,
+      ∃ targetFuel,
+        minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout ctx
+            terminalRel revertRel allowed)
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+            lowerHead compiler)
+
+/--
 Lift one statement-head path into the emitted-block-head boundary.
 
 This is the singleton adapter used by statement forms whose lowering emits
@@ -57263,6 +57847,215 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_blockHead
                       exact hOutcomeRel)
 
 /--
+Attach one selected emitted-block head to its syntactic source tail when
+regular completion changes the source-visible layout.
+
+The incoming layout is used only for the initial state. The emitted head
+publishes `resultLayout` on regular completion, and the syntactic tail starts
+from that exact state. Nonregular completion still skips the emitted tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_blockHead_to
+    {cfg : StateRelConfig} {layout resultLayout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerHead lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hHead :
+      SourceOpenBlockHeadPathSoundWhenAtExactHiddenCtxTo cfg layout resultLayout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel head
+        codeOverride lowerHead allowed)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ resultLayout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg resultLayout
+          outcomeLayout terminalRel revertRel prim program ctxAfter sourceFuel
+          rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ (head :: rest)
+      codeOverride { stmts := lowerHead.stmts ++ lowerTail.stmts } allowed := by
+  rcases lowerHead with ⟨lowerHeadStmts⟩
+  rcases lowerTail with ⟨lowerTailStmts⟩
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  have hSourceSeqResolve := hResolve
+  rw [yulOpen_toOpenResult_execSeq_cons_succ] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hHeadError | hHeadOk
+  · rcases hHeadError with ⟨err, hSourceHead, rfl⟩
+    rcases hHead hInitial hSourceHead (fun _hNotRegular => hAllowed) hResponses
+        minimumTargetFuel with
+      ⟨headFuel, hMinimumHead, hHeadPath⟩
+    rcases hHeadPath.resolves with
+      ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
+    have hSourceHeadEq : (.error err : Except Exception State) =
+        headSourceDone :=
+      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
+    subst headSourceDone
+    cases headTargetDone with
+    | error targetErr =>
+        cases hHeadDone
+    | ok targetDone =>
+        rcases targetDone with ⟨targetOutcome, targetCtx⟩
+        cases hHeadDone with
+        | stopping hNotRegular hOutcome =>
+            have hOutcomeRel := hOutcome hAllowed
+            have hMode :
+                targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+              SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                hNotRegular hOutcomeRel
+            have hTargetFull :
+                OpenExternal.OpenResultResolves
+                  (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                    (lowerHeadStmts.length + headFuel)
+                    { stmts := lowerHeadStmts ++ lowerTailStmts } compiler)
+                  trace (.ok (targetOutcome, targetCtx)) := by
+              simpa using
+                (compilerOpen_block_runOpen_append_resolves_nonregular
+                  (suffix := lowerTailStmts) (prefixFuel := headFuel)
+                  (suffixFuel := headFuel) (by omega) hMode hTargetHead)
+            refine ⟨lowerHeadStmts.length + headFuel, by omega, ?_⟩
+            exact
+              OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                hSourceSeqResolve hTargetFull hResponses (by
+                  intro _hAllowed
+                  exact hOutcomeRel)
+  · rcases hHeadOk with
+      ⟨headTrace, tailTrace, headDone, hTrace, hSourceHead, hSourceTail⟩
+    subst trace
+    have hHeadResponses : SourceOpenTraceResponsesAdmissible cfg headTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hTailResponses : SourceOpenTraceResponsesAdmissible cfg tailTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    have hHeadAllowed :
+        SourceResultNotRegularOk (.ok headDone) → allowed (.ok headDone) := by
+      intro hNotRegular
+      cases headDone with
+      | Ok shared store =>
+          cases hNotRegular
+      | OutOfFuel =>
+          have hTailDone :
+              OpenExternal.OpenResultResolves
+                (.done (.ok (.OutOfFuel : State))) tailTrace sourceDone := by
+            simpa [OpenExternal.YulOpen.execSeq,
+              OpenExternal.YulOpenResult.toOpenResult,
+              OpenExternal.YulOpenResult.ok] using hSourceTail
+          cases hTailDone
+          exact hAllowed
+      | Checkpoint jump =>
+          have hTailDone :
+              OpenExternal.OpenResultResolves
+                (.done (.ok (.Checkpoint jump : State))) tailTrace
+                sourceDone := by
+            simpa [OpenExternal.YulOpen.execSeq,
+              OpenExternal.YulOpenResult.toOpenResult,
+              OpenExternal.YulOpenResult.ok] using hSourceTail
+          cases hTailDone
+          exact hAllowed
+    rcases hHead hInitial hSourceHead hHeadAllowed hHeadResponses
+        minimumTargetFuel with
+      ⟨headFuel, hMinimumHead, hHeadPath⟩
+    rcases hHeadPath.resolves with
+      ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
+    have hSourceHeadEq : (.ok headDone : Except Exception State) =
+        headSourceDone :=
+      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
+    subst headSourceDone
+    cases headTargetDone with
+    | error targetErr =>
+        cases hHeadDone
+    | ok targetDone =>
+        rcases targetDone with ⟨targetOutcome, targetCtx⟩
+        cases headDone with
+        | Ok shared store =>
+            cases hHeadDone with
+            | regular hAfter hScopeAfter hHandlersAfter =>
+                rcases
+                    hTail (ctxAfter := targetCtx) hScopeAfter hHandlersAfter
+                      hAfter hSourceTail hAllowed hTailResponses
+                      (max minimumTargetFuel headFuel) with
+                  ⟨tailFuel, hMinimumTail, hTailPath⟩
+                rcases hTailPath.resolves with
+                  ⟨tailSourceDone, tailTargetDone, hSourceTail',
+                    hTargetTail, hTailDone⟩
+                have hSourceTailEq : sourceDone = tailSourceDone :=
+                  OpenExternal.OpenResultResolves.deterministic hSourceTail
+                    hSourceTail'
+                subst tailSourceDone
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                        (lowerHeadStmts.length + tailFuel)
+                        { stmts := lowerHeadStmts ++ lowerTailStmts } compiler)
+                      (headTrace ++ tailTrace) tailTargetDone := by
+                  exact
+                    compilerOpen_block_runOpen_append_resolves_regular
+                      (prefixFuel := headFuel) (suffixFuel := tailFuel)
+                      (by omega) hTargetHead hTargetTail
+                refine ⟨lowerHeadStmts.length + tailFuel, by omega, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses hTailDone
+            | stopping hNotRegular _hOutcome =>
+                cases hNotRegular
+        | OutOfFuel =>
+            cases hSourceTail
+            simp only [List.append_nil] at hSourceSeqResolve hResponses ⊢
+            cases hHeadDone with
+            | stopping hNotRegular hOutcome =>
+                have hOutcomeRel := hOutcome hAllowed
+                have hMode :
+                    targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+                  SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                    hNotRegular hOutcomeRel
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                        (lowerHeadStmts.length + headFuel)
+                        { stmts := lowerHeadStmts ++ lowerTailStmts } compiler)
+                      headTrace (.ok (targetOutcome, targetCtx)) := by
+                  simpa using
+                    (compilerOpen_block_runOpen_append_resolves_nonregular
+                      (suffix := lowerTailStmts) (prefixFuel := headFuel)
+                      (suffixFuel := headFuel) (by omega) hMode hTargetHead)
+                refine ⟨lowerHeadStmts.length + headFuel, by omega, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses (by
+                      intro _hAllowed
+                      exact hOutcomeRel)
+        | Checkpoint jump =>
+            cases hSourceTail
+            simp only [List.append_nil] at hSourceSeqResolve hResponses ⊢
+            cases hHeadDone with
+            | stopping hNotRegular hOutcome =>
+                have hOutcomeRel := hOutcome hAllowed
+                have hMode :
+                    targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+                  SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                    hNotRegular hOutcomeRel
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                        (lowerHeadStmts.length + headFuel)
+                        { stmts := lowerHeadStmts ++ lowerTailStmts } compiler)
+                      headTrace (.ok (targetOutcome, targetCtx)) := by
+                  simpa using
+                    (compilerOpen_block_runOpen_append_resolves_nonregular
+                      (suffix := lowerTailStmts) (prefixFuel := headFuel)
+                      (suffixFuel := headFuel) (by omega) hMode hTargetHead)
+                refine ⟨lowerHeadStmts.length + headFuel, by omega, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses (by
+                      intro _hAllowed
+                      exact hOutcomeRel)
+
+/--
 Attach one selected scoped `.Block` head through the emitted-block boundary.
 
 The target prefix is a singleton for `.Block`; using the wider composer here
@@ -57377,6 +58170,91 @@ theorem compilerOpen_functions_initNames_runOpen_regular_initReturns
       · simpa [compilerHead] using hShared
       · simpa [Functions.Source.Store.initReturns, compilerHead,
           Locals.Source.State.insert] using hVars
+
+/--
+Run generated zero-initializers with any additional positive cutoff budget.
+
+The declaration wrapper needs to choose its suffix cutoff from the selected
+call trace, then prepend these deterministic initializers at that larger total
+cutoff.
+-/
+theorem compilerOpen_functions_initNames_runOpen_regular_initReturns_add
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compiler : Objects.Source.State} :
+    ∀ (names : List Name) (extra : Nat),
+      ∃ compilerAfter,
+        CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (names.length + extra).succ { stmts := Stmt.initNames names } compiler =
+          .ok (Functions.Source.Outcome.regular compilerAfter,
+            { ctx with scope := names.reverse ++ ctx.scope }) ∧
+        compilerAfter.shared = compiler.shared ∧
+        compilerAfter.vars = Functions.Source.Store.initReturns names
+          compiler.vars
+  | [], extra => by
+      refine ⟨compiler, ?_, rfl, rfl⟩
+      simp [Stmt.initNames, CompilerOpen.FunctionsOpen.Block.runOpen,
+        OpenExternal.OpenResult.ok]
+  | name :: rest, extra => by
+      let compilerHead := compiler.insert name Stmt.zero
+      let ctxHead : Functions.Source.Ctx :=
+        { ctx with scope := name :: ctx.scope }
+      rcases
+          compilerOpen_functions_initNames_runOpen_regular_initReturns_add
+            (prim := prim) (program := program) (ctx := ctxHead)
+            (compiler := compilerHead) rest extra with
+        ⟨compilerAfter, hRestRun, hShared, hVars⟩
+      refine ⟨compilerAfter, ?_, ?_, ?_⟩
+      · have hHead :
+            CompilerOpen.FunctionsOpen.Stmt.run prim program ctx
+                (rest.length + extra).succ
+                (Functions.Stmt.let_ name
+                  (Locals.Expr.lit Stmt.zero)) compiler =
+              .ok (Functions.Source.Outcome.regular compilerHead, ctxHead) := by
+            simp [CompilerOpen.FunctionsOpen.Stmt.run,
+              CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+              compilerHead, ctxHead, Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular, OpenExternal.OpenResult.bind,
+              OpenExternal.OpenResult.ok]
+        have hFuel :
+            ((name :: rest).length + extra).succ =
+              (rest.length + extra).succ.succ := by
+          simp only [List.length_cons]
+          omega
+        rw [hFuel]
+        rw [show Stmt.initNames (name :: rest) =
+            Functions.Stmt.let_ name (Locals.Expr.lit Stmt.zero) ::
+              Stmt.initNames rest by rfl]
+        rw [CompilerOpen.FunctionsOpen.Block.runOpen]
+        rw [hHead]
+        simpa [ctxHead, compilerHead, List.append_assoc,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok] using
+          hRestRun
+      · simpa [compilerHead] using hShared
+      · simpa [Functions.Source.Store.initReturns, compilerHead,
+          Locals.Source.State.insert] using hVars
+
+/--
+Canonical-state form of the arbitrary-cutoff initializer runner.
+-/
+theorem compilerOpen_functions_initNames_runOpen_regular_initReturns_add_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compiler : Objects.Source.State} (names : List Name) (extra : Nat) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (names.length + extra).succ { stmts := Stmt.initNames names } compiler =
+      .ok
+        (Functions.Source.Outcome.regular
+          ({ shared := compiler.shared
+             vars := Functions.Source.Store.initReturns names compiler.vars } :
+            Objects.Source.State),
+          { ctx with scope := names.reverse ++ ctx.scope }) := by
+  rcases
+      compilerOpen_functions_initNames_runOpen_regular_initReturns_add
+        (prim := prim) (program := program) (ctx := ctx) (compiler := compiler)
+        names extra with
+    ⟨compilerAfter, hRun, hShared, hVars⟩
+  simpa [← hShared, ← hVars] using hRun
 
 /--
 Regular open endpoint for an uninitialized declaration head.
@@ -61099,6 +61977,874 @@ theorem sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_cal
         exact List.mem_append_left lowerFn.params hMem)
 
 /--
+Target postprocessing for a direct internal-user-call statement.
+
+Returned values are assigned to the caller targets. A terminal callee result
+remains a terminal statement outcome so the enclosing block can stop without
+attempting caller-side assignment.
+-/
+def compilerOpenUserCallAssignTargetsResult
+    (targets : List Name) (ctx : Functions.Source.Ctx)
+    (callerCompiler : Objects.Source.State)
+    (callResult : Functions.Source.CallResult) :
+    OpenExternal.OpenResult Functions.EVMException
+      (Objects.Source.Outcome × Functions.Source.Ctx) :=
+  match callResult with
+  | .returned sharedAfterCall returnValues =>
+      match Functions.Source.Store.assignMany targets returnValues
+          callerCompiler.vars with
+      | none => CompilerOpen.invalid
+      | some returnStore =>
+          OpenExternal.OpenResult.ok
+            (Functions.Source.Outcome.regular
+              { shared := sharedAfterCall
+                vars := returnStore },
+              ctx)
+  | .halted kind haltedState =>
+      OpenExternal.OpenResult.ok
+        (Functions.Source.Outcome.halt kind haltedState, ctx)
+
+/--
+One completed restored internal call replays through direct caller targets.
+
+This is the statement-level sibling of hidden-slot expression replay.  The
+source call has already restored caller locals.  The imported `multifill'` and
+the target `assignMany` therefore update the same visible targets, while
+terminal call results bypass assignment on both sides.
+-/
+theorem sourceUserCallResultDoneRel_replay_targets
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {targets : List EvmYul.Identifier} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {sourceDone : Except Exception (State × List Word)}
+    {callResult : Functions.Source.CallResult}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        callerCompiler.vars.contains name = true)
+    (hScope : ∀ name, name ∈ layout → name ∈ ctx.scope)
+    (hDone :
+      SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+        revertRel sourceDone (.ok callResult))
+    (hDomain :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          StateStoreDomainExact layout sourceAfter)
+    (hLength :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          sourceValues.length = (identNames targets).length) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
+        revertRel allowed)
+      []
+      (.done (EvmYul.Yul.multifill' targets sourceDone))
+      (compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+        callerCompiler callResult) := by
+  cases sourceDone with
+  | error err =>
+      cases err <;> try { cases hDone }
+      · rename_i source
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            cases kind <;> simp [SourceUserCallResultDoneRel] at hDone
+            exact OpenExternal.OpenResultPathRel.done (by
+              apply SourceOpenStmtHeadPathDoneRel.stopping
+              · simp [SourceResultNotRegularOk, EvmYul.Yul.multifill']
+              · intro _hAllowed
+                exact SourceResultOutcomeRel.revert hDone)
+      · rename_i source value
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            exact OpenExternal.OpenResultPathRel.done (by
+              apply SourceOpenStmtHeadPathDoneRel.stopping
+              · simp [SourceResultNotRegularOk, EvmYul.Yul.multifill']
+              · intro _hAllowed
+                exact SourceResultOutcomeRel.yulHalt hDone)
+  | ok sourceResult =>
+      rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+      cases callResult with
+      | returned sharedAfterCall returnValues =>
+          rcases hDone with ⟨hRel, hValues⟩
+          have hReturnLength :
+              returnValues.length = (identNames targets).length := by
+            simpa [hValues] using hLength rfl
+          rcases
+              source_assignMany_exists_of_length_contains
+                (names := identNames targets) (values := returnValues)
+                (store := callerCompiler.vars) hReturnLength hTargetContains with
+            ⟨returnStore, hAssign⟩
+          cases sourceAfter with
+          | Ok sharedAfter storeAfter =>
+              have hDomainAfter :
+                  StoreDomainExact layout storeAfter := by
+                simpa [StateStoreDomainExact] using hDomain rfl
+              have hFilledDomain :
+                  StateStoreDomainExact layout
+                    (EvmYul.Yul.State.multifill targets sourceValues
+                      (.Ok sharedAfter storeAfter)) :=
+                StateStoreDomainExact.multifill_mem
+                  (by simpa [StateStoreDomainExact] using hDomainAfter)
+                  hTargetsMem
+              have hFilledDomain' :
+                  StoreDomainExact layout
+                    (VarStackRel.insertPairs
+                      (List.zip targets returnValues) storeAfter) := by
+                rw [VarStackRel.multifill_ok] at hFilledDomain
+                simpa [StateStoreDomainExact, hValues] using hFilledDomain
+              have hExact :
+                  SourceStateExactRel cfg layout
+                    (.Ok sharedAfter
+                      (VarStackRel.insertPairs
+                        (List.zip targets returnValues) storeAfter))
+                    ({ shared := sharedAfterCall, vars := returnStore } :
+                      Objects.Source.State) := by
+                cases hRel with
+                | ok hShared hVars =>
+                    have hVarsCaller :
+                        SourceStoreRel layout storeAfter callerCompiler.vars := by
+                      simpa [Locals.Source.State.withShared] using hVars
+                    exact SourceStateExactRel.ok hShared
+                      (by
+                        simpa [identNames_eq_self] using
+                          (sourceStoreRel_assignMany_insertPairs
+                            (layout := layout) (names := identNames targets)
+                            (values := returnValues) (store := storeAfter)
+                            (vars := callerCompiler.vars)
+                            (vars' := returnStore) hAssign hVarsCaller
+                            hTargetsNoDup))
+                      hFilledDomain'
+              simp only [EvmYul.Yul.multifill']
+              rw [VarStackRel.multifill_ok]
+              simpa [compilerOpenUserCallAssignTargetsResult, hAssign, hValues] using
+                (OpenExternal.OpenResultPathRel.done
+                  (SourceOpenStmtHeadPathDoneRel.regular hExact hScope
+                    (SourceCtxHandlersEq.refl ctx)))
+          | OutOfFuel =>
+              cases hRel
+          | Checkpoint jump =>
+              cases hRel
+      | halted kind haltedState =>
+          cases hDone
+
+/--
+Replay one selected restored internal-call path through direct caller targets.
+
+The restored call already carries caller locals on both sides.  Domain and
+arity invariants from the source call justify pure target assignment at the
+resolved endpoint, so the observable external trace is unchanged.
+-/
+theorem sourceUserCallResultOpenResultPathRel_replay_targets
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {targets : List EvmYul.Identifier} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        Functions.Source.CallResult}
+    {trace : OpenExternal.OpenTrace}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        callerCompiler.vars.contains name = true)
+    (hScope : ∀ name, name ∈ layout → name ∈ ctx.scope)
+    (hRel :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+          revertRel)
+        trace source target)
+    (hDomain :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              StateStoreDomainExact layout sourceAfter)
+        source)
+    (hLength :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              sourceValues.length = (identNames targets).length)
+        source)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
+        revertRel allowed)
+      trace
+      (OpenExternal.OpenResult.bind source (fun sourceResult =>
+        .done (EvmYul.Yul.multifill' targets (.ok sourceResult))))
+      (OpenExternal.OpenResult.bind target
+        (compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+          callerCompiler)) := by
+  rcases hRel.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  have hDomainDone :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          StateStoreDomainExact layout sourceAfter :=
+    OpenResultDoneInvariant.of_resolves hDomain hSource
+  have hLengthDone :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          sourceValues.length = (identNames targets).length :=
+    OpenResultDoneInvariant.of_resolves hLength hSource
+  have hStrong :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (fun sourceDone targetDone =>
+          SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+              revertRel sourceDone targetDone ∧
+            (∀ {sourceAfter sourceValues},
+              sourceDone = .ok (sourceAfter, sourceValues) →
+                StateStoreDomainExact layout sourceAfter) ∧
+            ∀ {sourceAfter sourceValues},
+              sourceDone = .ok (sourceAfter, sourceValues) →
+                sourceValues.length = (identNames targets).length)
+        trace source target :=
+    OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+      hSource hTarget hResponses ⟨hDone, hDomainDone, hLengthDone⟩
+  exact
+    OpenExternal.OpenResultPathRel.bind_nil
+      (sourceNext := fun sourceResult =>
+        .done (EvmYul.Yul.multifill' targets (.ok sourceResult)))
+      (targetNext :=
+        compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+          callerCompiler)
+      (callResponseRel' := RelationallyAdmissibleOpenCallResponseRel cfg)
+      (doneRel' :=
+        SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
+          revertRel allowed)
+      hStrong (by
+        intro sourceDone targetDone hDone
+        cases targetDone with
+        | error targetErr =>
+            cases sourceDone <;>
+              simp [SourceUserCallResultDoneRel] at hDone
+        | ok callResult =>
+            cases sourceDone <;>
+              simpa [EvmYul.Yul.multifill'] using
+                (sourceUserCallResultDoneRel_replay_targets
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (allowed := allowed) (targets := targets) (ctx := ctx)
+                    (callerCompiler := callerCompiler)
+                    (callResult := callResult)
+                    hTargetsNoDup hTargetsMem hTargetContains hScope hDone.1
+                    hDone.2.1 hDone.2.2)) (by
+        intro sourceCall targetCall response hResponse
+        exact hResponse)
+
+/--
+Compose a regularly completed direct-call argument prefix with one selected
+callee-body path and visible caller-target replay.
+
+This is the regular semantic core for discarded results and multi-result
+assignments. Lowered arguments are replayed in the state produced by their
+prefix, the recursive callee body follows the admitted trace, and returned
+values fill existing visible targets without introducing another interaction.
+-/
+theorem sourceOpenStmtHeadPathRel_user_call_regular_targets_of_override_function_body_callSafe_scoped
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {lowerFn : Functions.FunDef}
+    {args : List AstExpr} {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetBodyFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {params returns targets : List EvmYul.Identifier} {body : List AstStmt}
+    {paramStore : Locals.Source.Store}
+    {trace : OpenExternal.OpenTrace}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs
+        (.ok ((.Ok callerShared callerStore : State), values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
+    (hCallerDomain : StoreDomainExact layout callerStore)
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        targetState.vars.contains name = true)
+    (hScope : ∀ name, name ∈ layout → name ∈ ctxAfter.scope)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ values.reverse.length)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params values.reverse
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hTargetsLength : (identNames targets).length = returns.length)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := targetState.shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctxAfter
+        terminalRel revertRel allowed)
+      trace
+      (OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.call sourceFuel.succ values.reverse functionName
+            (some yulProgram.contract) (.Ok callerShared callerStore)))
+        (fun callResult =>
+          .done (EvmYul.Yul.multifill' targets (.ok callResult))))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs targetState)
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+              argResult.2 targetBodyFuel.succ argResult.1.shared)
+            (compilerOpenUserCallAssignTargetsResult (identNames targets)
+              ctxAfter argResult.1))) := by
+  rcases
+      sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (args := args)
+        (freshState := freshState) (stateArgs := stateArgs)
+        (preArgs := preArgs) (lowerArgs := lowerArgs)
+        (sourceAfter := (.Ok callerShared callerStore : State))
+        (values := values) (targetState := targetState) (ctxAfter := ctxAfter)
+        hArgs hDone with
+    ⟨hArgEval, hCaller⟩
+  have hFunction :
+      OpenExternal.YulOpen.callFunction? (some functionName)
+          yulProgram.contract =
+        some (.Def params returns body) := by
+    simpa [OpenExternal.YulOpen.callFunction?] using hLookup
+  rw [hArgEval]
+  simp only [OpenExternal.OpenResult.bind]
+  exact
+    sourceUserCallResultOpenResultPathRel_replay_targets
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (targets := targets) (ctx := ctxAfter)
+      (callerCompiler := targetState) hTargetsNoDup hTargetsMem
+      hTargetContains hScope
+      (sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_callSafe_scoped
+        (cfg := cfg) (callerLayout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+        (program := program) (lowerFn := lowerFn) (sourceFuel := sourceFuel)
+        (targetBodyFuel := targetBodyFuel) (argValues := values.reverse)
+        (paramStore := paramStore) (functionName := functionName)
+        (params := params) (returns := returns) (body := body)
+        (callerShared := callerShared) (callerStore := callerStore)
+        (callerCompiler := targetState) hSafe hScoped hCaller hLookup hArgsLength
+        hInsert hLowerParams hLowerReturns hBody hResponses)
+      (YulOpenResultStateStoreDomainExact.toOpenResult_doneInvariant
+        (yulOpenCall_state_domain_exact_of_state
+          (layout := layout) (fuel := sourceFuel.succ)
+          (state := (.Ok callerShared callerStore : State))
+          (args := values.reverse) (fname := some functionName)
+          (codeOverride := some yulProgram.contract)
+          (by simpa [StateStoreDomainExact] using hCallerDomain)))
+      (OpenResultDoneInvariant.imp
+        (yulOpenCall_doneInvariant_returnValues_length_of_function
+          (fuel := sourceFuel.succ)
+          (state := (.Ok callerShared callerStore : State))
+          (args := values.reverse) (functionName := functionName)
+          (contract := yulProgram.contract) (f := .Def params returns body)
+          hFunction)
+        (by
+          intro sourceDone hLength sourceAfter returnValues hOk
+          have hReturnLength := hLength hOk
+          have hReturnLength' : returnValues.length = returns.length := by
+            simpa using hReturnLength
+          omega))
+      hResponses
+
+/--
+One completed restored internal call replays through fresh declaration targets.
+
+The target compiler initialized the declaration slots before argument
+evaluation, while imported Yul publishes them only when the call returns.  The
+regular endpoint therefore extends the visible source layout; terminal results
+still bypass assignment on both sides.
+-/
+theorem sourceUserCallResultDoneRel_replay_letTargets
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {targets : List EvmYul.Identifier} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {sourceDone : Except Exception (State × List Word)}
+    {callResult : Functions.Source.CallResult}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh :
+      ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        callerCompiler.vars.contains name = true)
+    (hScope :
+      ∀ name, name ∈ (identNames targets).reverse ++ layout →
+        name ∈ ctx.scope)
+    (hDone :
+      SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+        revertRel sourceDone (.ok callResult))
+    (hDomain :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          StateStoreDomainExact layout sourceAfter)
+    (hLength :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          sourceValues.length = (identNames targets).length) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg
+        ((identNames targets).reverse ++ layout) outcomeLayout ctx terminalRel
+        revertRel allowed)
+      []
+      (.done (EvmYul.Yul.multifill' targets sourceDone))
+      (compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+        callerCompiler callResult) := by
+  cases sourceDone with
+  | error err =>
+      cases err <;> try { cases hDone }
+      · rename_i source
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            cases kind <;> simp [SourceUserCallResultDoneRel] at hDone
+            exact OpenExternal.OpenResultPathRel.done (by
+              apply SourceOpenStmtHeadPathDoneRel.stopping
+              · simp [SourceResultNotRegularOk, EvmYul.Yul.multifill']
+              · intro _hAllowed
+                exact SourceResultOutcomeRel.revert hDone)
+      · rename_i source value
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            exact OpenExternal.OpenResultPathRel.done (by
+              apply SourceOpenStmtHeadPathDoneRel.stopping
+              · simp [SourceResultNotRegularOk, EvmYul.Yul.multifill']
+              · intro _hAllowed
+                exact SourceResultOutcomeRel.yulHalt hDone)
+  | ok sourceResult =>
+      rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+      cases callResult with
+      | returned sharedAfterCall returnValues =>
+          rcases hDone with ⟨hRel, hValues⟩
+          have hReturnLength :
+              returnValues.length = (identNames targets).length := by
+            simpa [hValues] using hLength rfl
+          rcases
+              source_assignMany_exists_of_length_contains
+                (names := identNames targets) (values := returnValues)
+                (store := callerCompiler.vars) hReturnLength hTargetContains with
+            ⟨returnStore, hAssign⟩
+          cases sourceAfter with
+          | Ok sharedAfter storeAfter =>
+              have hDomainAfter :
+                  StoreDomainExact layout storeAfter := by
+                simpa [StateStoreDomainExact] using hDomain rfl
+              have hFilledDomain :
+                  StoreDomainExact ((identNames targets).reverse ++ layout)
+                    (VarStackRel.insertPairs
+                      (List.zip targets returnValues) storeAfter) := by
+                exact
+                  StoreDomainExact.multifill_ok_exact_extend
+                    (layout := layout) (names := targets)
+                    (values := returnValues) (shared := sharedAfter)
+                    (sharedAfter := sharedAfter) (store := storeAfter)
+                    (storeAfter :=
+                      VarStackRel.insertPairs
+                        (List.zip targets returnValues) storeAfter)
+                    hDomainAfter (by omega)
+                    (VarStackRel.multifill_ok sharedAfter storeAfter targets
+                      returnValues)
+              have hExact :
+                  SourceStateExactRel cfg
+                    ((identNames targets).reverse ++ layout)
+                    (.Ok sharedAfter
+                      (VarStackRel.insertPairs
+                        (List.zip targets returnValues) storeAfter))
+                    ({ shared := sharedAfterCall, vars := returnStore } :
+                      Objects.Source.State) := by
+                cases hRel with
+                | ok hShared hVars =>
+                    have hVarsCaller :
+                        SourceStoreRel layout storeAfter callerCompiler.vars := by
+                      simpa [Locals.Source.State.withShared] using hVars
+                    exact SourceStateExactRel.ok hShared
+                      (sourceStoreRel_of_mem_iff
+                        (by
+                          simpa [identNames_eq_self] using
+                            (sourceStoreRel_assignMany_insertPairs_extend
+                              (layout := layout) (names := identNames targets)
+                              (values := returnValues) (store := storeAfter)
+                              (vars := callerCompiler.vars)
+                              (vars' := returnStore) hAssign hVarsCaller
+                              hTargetsNoDup hTargetsFresh))
+                        (by
+                          intro name
+                          simp [List.mem_append, identNames_eq_self]))
+                      hFilledDomain
+              simp only [EvmYul.Yul.multifill']
+              rw [VarStackRel.multifill_ok]
+              simpa [compilerOpenUserCallAssignTargetsResult, hAssign, hValues] using
+                (OpenExternal.OpenResultPathRel.done
+                  (SourceOpenStmtHeadPathDoneRel.regular hExact hScope
+                    (SourceCtxHandlersEq.refl ctx)))
+          | OutOfFuel =>
+              cases hRel
+          | Checkpoint jump =>
+              cases hRel
+      | halted kind haltedState =>
+          cases hDone
+
+/--
+Replay one selected restored internal-call path through fresh declaration
+targets.
+
+The selected callee path is enriched with its source domain and return-arity
+invariants before the pure declaration replay endpoint extends the visible
+layout.  No additional external interaction is introduced.
+-/
+theorem sourceUserCallResultOpenResultPathRel_replay_letTargets
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {targets : List EvmYul.Identifier} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        Functions.Source.CallResult}
+    {trace : OpenExternal.OpenTrace}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh :
+      ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        callerCompiler.vars.contains name = true)
+    (hScope :
+      ∀ name, name ∈ (identNames targets).reverse ++ layout →
+        name ∈ ctx.scope)
+    (hRel :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+          revertRel)
+        trace source target)
+    (hDomain :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              StateStoreDomainExact layout sourceAfter)
+        source)
+    (hLength :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter sourceValues},
+            sourceDone = .ok (sourceAfter, sourceValues) →
+              sourceValues.length = (identNames targets).length)
+        source)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg
+        ((identNames targets).reverse ++ layout) outcomeLayout ctx terminalRel
+        revertRel allowed)
+      trace
+      (OpenExternal.OpenResult.bind source (fun sourceResult =>
+        .done (EvmYul.Yul.multifill' targets (.ok sourceResult))))
+      (OpenExternal.OpenResult.bind target
+        (compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+          callerCompiler)) := by
+  rcases hRel.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  have hDomainDone :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          StateStoreDomainExact layout sourceAfter :=
+    OpenResultDoneInvariant.of_resolves hDomain hSource
+  have hLengthDone :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          sourceValues.length = (identNames targets).length :=
+    OpenResultDoneInvariant.of_resolves hLength hSource
+  have hStrong :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (fun sourceDone targetDone =>
+          SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+              revertRel sourceDone targetDone ∧
+            (∀ {sourceAfter sourceValues},
+              sourceDone = .ok (sourceAfter, sourceValues) →
+                StateStoreDomainExact layout sourceAfter) ∧
+            ∀ {sourceAfter sourceValues},
+              sourceDone = .ok (sourceAfter, sourceValues) →
+                sourceValues.length = (identNames targets).length)
+        trace source target :=
+    OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+      hSource hTarget hResponses ⟨hDone, hDomainDone, hLengthDone⟩
+  exact
+    OpenExternal.OpenResultPathRel.bind_nil
+      (sourceNext := fun sourceResult =>
+        .done (EvmYul.Yul.multifill' targets (.ok sourceResult)))
+      (targetNext :=
+        compilerOpenUserCallAssignTargetsResult (identNames targets) ctx
+          callerCompiler)
+      (callResponseRel' := RelationallyAdmissibleOpenCallResponseRel cfg)
+      (doneRel' :=
+        SourceOpenStmtHeadPathDoneRel cfg
+          ((identNames targets).reverse ++ layout) outcomeLayout ctx
+          terminalRel revertRel allowed)
+      hStrong (by
+        intro sourceDone targetDone hDone
+        cases targetDone with
+        | error targetErr =>
+            cases sourceDone <;>
+              simp [SourceUserCallResultDoneRel] at hDone
+        | ok callResult =>
+            cases sourceDone <;>
+              simpa [EvmYul.Yul.multifill'] using
+                (sourceUserCallResultDoneRel_replay_letTargets
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (allowed := allowed) (targets := targets) (ctx := ctx)
+                    (callerCompiler := callerCompiler)
+                    (callResult := callResult)
+                    hTargetsNoDup hTargetsFresh hTargetContains hScope hDone.1
+                    hDone.2.1 hDone.2.2)) (by
+        intro sourceCall targetCall response hResponse
+        exact hResponse)
+
+/--
+Compose a regularly completed direct-call argument prefix with one selected
+callee-body path and fresh declaration-target replay.
+
+The callee path is identical to visible assignment. The only distinction is
+the honest post-return publication of the fresh declaration slots in the source
+layout.
+-/
+theorem sourceOpenStmtHeadPathRel_user_call_regular_letTargets_of_override_function_body_callSafe_scoped
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {lowerFn : Functions.FunDef}
+    {args : List AstExpr} {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetBodyFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {params returns targets : List EvmYul.Identifier} {body : List AstStmt}
+    {paramStore : Locals.Source.Store}
+    {trace : OpenExternal.OpenTrace}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs
+        (.ok ((.Ok callerShared callerStore : State), values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
+    (hCallerDomain : StoreDomainExact layout callerStore)
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh :
+      ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hTargetContains :
+      ∀ name, name ∈ identNames targets →
+        targetState.vars.contains name = true)
+    (hScope :
+      ∀ name, name ∈ (identNames targets).reverse ++ layout →
+        name ∈ ctxAfter.scope)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ values.reverse.length)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params values.reverse
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hTargetsLength : (identNames targets).length = returns.length)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := targetState.shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceOpenStmtHeadPathDoneRel cfg
+        ((identNames targets).reverse ++ layout) outcomeLayout ctxAfter
+        terminalRel revertRel allowed)
+      trace
+      (OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.call sourceFuel.succ values.reverse functionName
+            (some yulProgram.contract) (.Ok callerShared callerStore)))
+        (fun callResult =>
+          .done (EvmYul.Yul.multifill' targets (.ok callResult))))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs targetState)
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+              argResult.2 targetBodyFuel.succ argResult.1.shared)
+            (compilerOpenUserCallAssignTargetsResult (identNames targets)
+              ctxAfter argResult.1))) := by
+  rcases
+      sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (args := args)
+        (freshState := freshState) (stateArgs := stateArgs)
+        (preArgs := preArgs) (lowerArgs := lowerArgs)
+        (sourceAfter := (.Ok callerShared callerStore : State))
+        (values := values) (targetState := targetState) (ctxAfter := ctxAfter)
+        hArgs hDone with
+    ⟨hArgEval, hCaller⟩
+  have hFunction :
+      OpenExternal.YulOpen.callFunction? (some functionName)
+          yulProgram.contract =
+        some (.Def params returns body) := by
+    simpa [OpenExternal.YulOpen.callFunction?] using hLookup
+  rw [hArgEval]
+  simp only [OpenExternal.OpenResult.bind]
+  exact
+    sourceUserCallResultOpenResultPathRel_replay_letTargets
+      (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (targets := targets) (ctx := ctxAfter)
+      (callerCompiler := targetState) hTargetsNoDup hTargetsFresh
+      hTargetContains hScope
+      (sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_callSafe_scoped
+        (cfg := cfg) (callerLayout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+        (program := program) (lowerFn := lowerFn) (sourceFuel := sourceFuel)
+        (targetBodyFuel := targetBodyFuel) (argValues := values.reverse)
+        (paramStore := paramStore) (functionName := functionName)
+        (params := params) (returns := returns) (body := body)
+        (callerShared := callerShared) (callerStore := callerStore)
+        (callerCompiler := targetState) hSafe hScoped hCaller hLookup hArgsLength
+        hInsert hLowerParams hLowerReturns hBody hResponses)
+      (YulOpenResultStateStoreDomainExact.toOpenResult_doneInvariant
+        (yulOpenCall_state_domain_exact_of_state
+          (layout := layout) (fuel := sourceFuel.succ)
+          (state := (.Ok callerShared callerStore : State))
+          (args := values.reverse) (fname := some functionName)
+          (codeOverride := some yulProgram.contract)
+          (by simpa [StateStoreDomainExact] using hCallerDomain)))
+      (OpenResultDoneInvariant.imp
+        (yulOpenCall_doneInvariant_returnValues_length_of_function
+          (fuel := sourceFuel.succ)
+          (state := (.Ok callerShared callerStore : State))
+          (args := values.reverse) (functionName := functionName)
+          (contract := yulProgram.contract) (f := .Def params returns body)
+          hFunction)
+        (by
+          intro sourceDone hLength sourceAfter returnValues hOk
+          have hReturnLength := hLength hOk
+          have hReturnLength' : returnValues.length = returns.length := by
+            simpa using hReturnLength
+          omega))
+      hResponses
+
+/--
 Successful restored internal-user-call results replay through the generated
 hidden result slot.
 
@@ -62298,6 +64044,1279 @@ theorem compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
                   .ok (Functions.Source.Outcome.halt kind haltedState, ctx))) := by
   simp [CompilerOpen.FunctionsOpen.Stmt.run, hTargets, hFind]
   rfl
+
+/--
+Running a singleton lowered internal-call block is the same as running its call
+statement with the one-step-smaller block fuel.
+
+The extra block step only enters the singleton and then observes an empty tail.
+Internal call statements preserve their context on both regular and terminal
+completion, so no additional semantic branch remains.
+-/
+theorem compilerOpen_block_runOpen_single_call_succ_eq_stmt_run
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Locals.Expr 1)} {state : Objects.Source.State}
+    {fuel : Nat} {fn : Functions.FunDef}
+    (hTargets : targets.Nodup)
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel.succ
+        { stmts := [Functions.Stmt.call targets functionName args] } state =
+      CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel
+        (Functions.Stmt.call targets functionName args) state := by
+  cases fuel with
+  | zero =>
+      simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+        CompilerOpen.FunctionsOpen.Stmt.run, CompilerOpen.invalid,
+        Functions.Source.invalid, Structured.invalid,
+        OpenExternal.OpenResult.bind]
+  | succ fuel =>
+      rw [compilerOpen_block_runOpen_cons_succ]
+      rw [compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
+        (fuel := fuel) hTargets hFind]
+      rw [openResult_bind_assoc]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro argResult
+      rw [openResult_bind_assoc]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro callResult
+      cases callResult with
+      | returned sharedAfterCall returnValues =>
+          cases hAssign :
+              Functions.Source.Store.assignMany targets returnValues
+                argResult.1.vars with
+          | none =>
+              simp [CompilerOpen.invalid, Functions.Source.invalid,
+                Structured.invalid, OpenExternal.OpenResult.bind, hAssign]
+          | some returnStore =>
+              simp [compilerOpen_block_runOpen_nil_succ,
+                OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+                Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+                hAssign]
+      | halted kind haltedState =>
+          simp [OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+            Functions.Source.Outcome.halt, Locals.Source.Outcome.halt]
+
+/--
+Expose a direct user-call expression statement as argument evaluation followed
+by one internal call and discarded-result publication.
+-/
+theorem yulOpen_toOpenResult_exec_exprStmt_user_call_succ_succ_eq_bind_args
+    (fuel : Nat) (functionName : Name) (args : List AstExpr)
+    (codeOverride : Option AstContract) (state : State) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ.succ
+          (.ExprStmtCall (.Call (.inr functionName) args)) codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel.succ args.reverse codeOverride
+            state))
+        (fun argsResult =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call fuel argsResult.2.reverse functionName
+                codeOverride argsResult.1))
+            (fun callResult =>
+              .done (EvmYul.Yul.multifill' [] (.ok callResult)))) := by
+  simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.execCall,
+    OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro pair
+  rfl
+
+/--
+Expose a checked direct user-call assignment as argument evaluation followed by
+one internal call and result publication into the existing target names.
+-/
+theorem yulOpen_toOpenResult_exec_assign_user_call_succ_succ_eq_bind_args
+    (fuel : Nat) (targets : List EvmYul.Identifier)
+    (functionName : Name) (args : List AstExpr)
+    (codeOverride : Option AstContract) (state : State)
+    (hCheck : EvmYul.Yul.checkAssignment state targets = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ.succ
+          (.Assign targets (.Call (.inr functionName) args)) codeOverride state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state))
+        (fun argsResult =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call fuel argsResult.2.reverse functionName
+                codeOverride argsResult.1))
+            (fun callResult =>
+              .done (EvmYul.Yul.multifill' targets (.ok callResult)))) := by
+  simp [OpenExternal.YulOpen.exec, hCheck,
+    yulOpen_evalValues_user_call_succ_eq_bind_args,
+    OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro pair
+  rfl
+
+/--
+Expose a checked direct user-call declaration as argument evaluation followed by
+one internal call and result publication into the fresh target names.
+-/
+theorem yulOpen_toOpenResult_exec_let_user_call_succ_succ_eq_bind_args
+    (fuel : Nat) (targets : List EvmYul.Identifier)
+    (functionName : Name) (args : List AstExpr)
+    (codeOverride : Option AstContract) (state : State)
+    (hCheck : EvmYul.Yul.checkDeclaration state targets = .ok ()) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ.succ
+          (.Let targets (some (.Call (.inr functionName) args))) codeOverride
+          state) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state))
+        (fun argsResult =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call fuel argsResult.2.reverse functionName
+                codeOverride argsResult.1))
+            (fun callResult =>
+              .done (EvmYul.Yul.multifill' targets (.ok callResult)))) := by
+  simp [OpenExternal.YulOpen.exec, hCheck,
+    yulOpen_evalValues_user_call_succ_eq_bind_args,
+    OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+  rw [openResult_bind_assoc_sourceBridge]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro pair
+  rfl
+
+/--
+Convert a terminal generated-argument endpoint into a stopping statement-head
+endpoint.
+
+Once argument evaluation halts or reverts, the direct call statement is never
+entered.  The argument-prefix relation already carries exactly the terminal or
+revert relation needed by the enclosing statement boundary.
+-/
+theorem sourceOpenStmtHeadPathDoneRel_stopping_of_arg_terminal_error
+    {cfg : StateRelConfig} {layout resultLayout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs : List (Locals.Expr 1)} {err : Exception}
+    {ctx : Functions.Source.Ctx}
+    {targetOutcome : Objects.Source.Outcome} {targetCtx : Functions.Source.Ctx}
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.error err) (.ok (targetOutcome, targetCtx))) :
+    SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout ctx terminalRel
+      revertRel allowed (.error err) (.ok (targetOutcome, targetCtx)) := by
+  apply SourceOpenStmtHeadPathDoneRel.stopping
+  · simp [SourceResultNotRegularOk]
+  · intro _hAllowed
+    rcases targetOutcome with ⟨targetState, mode⟩
+    cases err <;> cases mode <;>
+      try { simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone }
+    · rename_i kind
+      cases kind <;> try {
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone }
+      exact SourceResultOutcomeRel.revert hDone
+    · exact SourceResultOutcomeRel.yulHalt hDone
+
+/--
+Join one selected generated-argument prefix with a direct internal-call block.
+
+This is the outer path-native statement compositor.  The admitted source trace
+is split at argument completion. A terminal argument endpoint pads only the
+selected target prefix and skips the emitted call statement. A regular endpoint
+asks the supplied recursive callee continuation for one matching singleton-call
+path, pads the selected argument prefix to the resulting cutoff, and rebuilds
+the emitted `preArgs ++ [call]` block.
+-/
+theorem sourceOpenUserCallTargetsBlockPathSoundWhen_of_arg_terminal
+    {cfg : StateRelConfig} {layout resultLayout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {argsFuel callFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {functionName : Name} {targets : List EvmYul.Identifier}
+    (hArgs :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx argsFuel args codeOverride preArgs lowerArgs
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hRegular :
+      ∀ {callerShared : EvmYul.SharedState .Yul}
+        {callerStore : EvmYul.Yul.VarStore} {values : List Word}
+        {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+        {trace : OpenExternal.OpenTrace}
+        {sourceDone : Except Exception State},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs
+          (.ok ((.Ok callerShared callerStore : State), values))
+          (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call callFuel values.reverse functionName
+                codeOverride (.Ok callerShared callerStore)))
+            (fun callResult =>
+              .done (EvmYul.Yul.multifill' targets (.ok callResult))))
+          trace sourceDone →
+        SourceOpenTraceResponsesAdmissible cfg trace →
+        ∀ minimumTargetCallFuel,
+          ∃ targetCallFuel,
+            minimumTargetCallFuel ≤ targetCallFuel ∧
+            OpenExternal.OpenResultPathRel
+              (RelationallyAdmissibleOpenCallResponseRel cfg)
+              (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout ctxAfter
+                terminalRel revertRel allowed)
+              trace
+              (OpenExternal.OpenResult.bind
+                (OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.call callFuel values.reverse functionName
+                    codeOverride (.Ok callerShared callerStore)))
+                (fun callResult =>
+                  .done (EvmYul.Yul.multifill' targets (.ok callResult))))
+              (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctxAfter
+                targetCallFuel
+                { stmts :=
+                  [Functions.Stmt.call (identNames targets) functionName
+                    lowerArgs] }
+                targetState)) :
+    ∀ {source compiler trace sourceDone},
+      SourceStateExactRel cfg layout source compiler →
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs argsFuel args.reverse codeOverride
+              source))
+          (fun argsResult =>
+            OpenExternal.OpenResult.bind
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.call callFuel argsResult.2.reverse
+                  functionName codeOverride argsResult.1))
+              (fun callResult =>
+                .done (EvmYul.Yul.multifill' targets (.ok callResult)))))
+        trace sourceDone →
+      (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+      SourceOpenTraceResponsesAdmissible cfg trace →
+      ∀ minimumTargetFuel,
+        ∃ targetFuel,
+          minimumTargetFuel ≤ targetFuel ∧
+          OpenExternal.OpenResultPathRel
+            (RelationallyAdmissibleOpenCallResponseRel cfg)
+            (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout ctx
+              terminalRel revertRel allowed)
+            trace
+            (OpenExternal.OpenResult.bind
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalArgs argsFuel args.reverse codeOverride
+                  source))
+              (fun argsResult =>
+                OpenExternal.OpenResult.bind
+                  (OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.call callFuel argsResult.2.reverse
+                      functionName codeOverride argsResult.1))
+                  (fun callResult =>
+                    .done (EvmYul.Yul.multifill' targets (.ok callResult)))))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+              { stmts :=
+                preArgs ++
+                  [Functions.Stmt.call (identNames targets) functionName
+                    lowerArgs] }
+              compiler) := by
+  intro source compiler trace sourceDone hInitial hResolveFull hStoppingAllowed
+    hResponses minimumTargetFuel
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolveFull with
+    hArgsError | hArgsOk
+  · rcases hArgsError with ⟨err, hResolveArgs, rfl⟩
+    rcases
+        hArgs hInitial.toRel hInitial.stateStoreContains hResolveArgs
+          (by simpa [SourcePairResultPropagatesErrorTo] using
+            hStoppingAllowed (by simp [SourceResultNotRegularOk]))
+          hResponses 0 with
+      ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .error err :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        rcases targetArgsResult with ⟨targetOutcome, targetCtx⟩
+        rcases targetOutcome with ⟨targetState, mode⟩
+        have hMode : mode ≠ .regular := by
+          intro hMode
+          subst mode
+          cases err <;>
+            simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+        let suffixFuel := max minimumTargetFuel selectedArgsFuel
+        have hTargetFull :
+            OpenExternal.OpenResultResolves
+              (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                (preArgs.length + suffixFuel)
+                { stmts :=
+                  preArgs ++
+                    [Functions.Stmt.call (identNames targets) functionName
+                      lowerArgs] }
+                compiler)
+              trace (.ok ({ state := targetState, mode := mode }, targetCtx)) :=
+          compilerOpen_block_runOpen_append_resolves_nonregular
+            (suffix :=
+              [Functions.Stmt.call (identNames targets) functionName lowerArgs])
+            (suffixFuel := suffixFuel) (by
+              dsimp [suffixFuel]
+              omega)
+            hMode hTargetArgs
+        refine ⟨preArgs.length + suffixFuel, ?_, ?_⟩
+        · dsimp [suffixFuel]
+          omega
+        · exact
+            OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+              hResolveFull hTargetFull hResponses
+              (sourceOpenStmtHeadPathDoneRel_stopping_of_arg_terminal_error
+                hArgsDone)
+  · rcases hArgsOk with
+      ⟨argsTrace, callTrace, argsResult, rfl, hResolveArgs, hResolveCall⟩
+    have hResponsesArgs : SourceOpenTraceResponsesAdmissible cfg argsTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hResponsesCall : SourceOpenTraceResponsesAdmissible cfg callTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    rcases
+        hArgs hInitial.toRel hInitial.stateStoreContains hResolveArgs
+          (by simp [SourcePairResultPropagatesErrorTo])
+          hResponsesArgs 0 with
+      ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .ok argsResult :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        rcases targetArgsResult with ⟨targetOutcome, targetCtx⟩
+        rcases targetOutcome with ⟨targetState, mode⟩
+        cases mode with
+        | regular =>
+            rcases argsResult with ⟨sourceAfter, values⟩
+            cases sourceAfter with
+            | OutOfFuel =>
+                rcases hArgsDone with ⟨hState, _hEval⟩
+                cases hState
+            | Checkpoint jump =>
+                rcases hArgsDone with ⟨hState, _hEval⟩
+                cases hState
+            | Ok callerShared callerStore =>
+                rcases
+                    hRegular hArgsDone hResolveCall hResponsesCall
+                      (max minimumTargetFuel selectedArgsFuel) with
+                  ⟨targetCallFuel, hMinimumCall, hCallPath⟩
+                let targetFuel := preArgs.length + targetCallFuel
+                have hArgsLe : selectedArgsFuel ≤ targetFuel := by
+                  dsimp [targetFuel]
+                  omega
+                have hArgsPathPadded :=
+                  sourceArgTerminalRawPreludeOpenResultPathRel_runOpen_mono
+                    (prim := prim) (program := program) hArgsLe hResponsesArgs
+                    hArgsPath
+                have hTargetArgsPadded :=
+                  CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono
+                    prim program hArgsLe hTargetArgs
+                have hCtxExtends : SourceCtxExtends ctx targetCtx :=
+                  compilerOpen_block_runOpen_resolves_ctxExtends hTargetArgs
+                rcases hCallPath.resolves with
+                  ⟨callSourceDone, callTargetDone, hCallSource, hCallTarget,
+                    hCallDone⟩
+                have hCallPathOuter :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout
+                        ctx terminalRel revertRel allowed)
+                      callTrace
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.call callFuel values.reverse
+                            functionName codeOverride
+                            (.Ok callerShared callerStore)))
+                        (fun callResult =>
+                          .done
+                            (EvmYul.Yul.multifill' targets (.ok callResult))))
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetCtx targetCallFuel
+                        { stmts :=
+                          [Functions.Stmt.call (identNames targets) functionName
+                            lowerArgs] }
+                        targetState) :=
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hCallSource hCallTarget hResponsesCall
+                    (SourceOpenStmtHeadPathDoneRel.of_ctxExtends hCtxExtends
+                      hCallDone)
+                have hCombined :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout
+                        ctx terminalRel revertRel allowed)
+                      (argsTrace ++ callTrace)
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.evalArgs argsFuel args.reverse
+                            codeOverride source))
+                        (fun argsResult =>
+                          OpenExternal.OpenResult.bind
+                            (OpenExternal.YulOpenResult.toOpenResult
+                              (OpenExternal.YulOpen.call callFuel
+                                argsResult.2.reverse functionName codeOverride
+                                argsResult.1))
+                            (fun callResult =>
+                              .done
+                                (EvmYul.Yul.multifill' targets
+                                  (.ok callResult)))))
+                      (OpenExternal.OpenResult.bind
+                        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                          targetFuel { stmts := preArgs } compiler)
+                        (fun preResult =>
+                          match preResult.1.mode with
+                          | .regular =>
+                              CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                                preResult.2 targetCallFuel
+                                { stmts :=
+                                  [Functions.Stmt.call (identNames targets)
+                                    functionName lowerArgs] }
+                                preResult.1.state
+                          | .brk | .cont | .leave | .halt _ =>
+                              .ok preResult)) :=
+                  OpenExternal.OpenResultPathRel.bind_selected_ok
+                    hArgsPathPadded hResolveArgs hTargetArgsPadded hCallPathOuter
+                    (by
+                      intro sourceCall targetCall response hResponse
+                      exact hResponse)
+                refine ⟨targetFuel, ?_, ?_⟩
+                · dsimp [targetFuel]
+                  omega
+                · rw [compilerOpen_block_runOpen_append_eq
+                    (prim := prim) (program := program) (ctx := ctx)
+                    (pre := preArgs)
+                    (suffix :=
+                      [Functions.Stmt.call (identNames targets) functionName
+                        lowerArgs])
+                    (state := compiler) (suffixFuel := targetCallFuel)]
+                  simpa [targetFuel, Functions.Source.Outcome.regular,
+                    Locals.Source.Outcome.regular] using hCombined
+        | brk =>
+            cases hArgsDone
+        | cont =>
+            cases hArgsDone
+        | leave =>
+            cases hArgsDone
+        | halt kind =>
+            cases hArgsDone
+
+/--
+Named contract for one direct internal-call statement after its argument
+lowering has been selected.
+
+The source evaluates arguments, enters one internal call, and publishes the
+returned values. The target runs the generated argument prefix followed by one
+lowered call statement. For each admitted finite trace and requested cutoff
+floor, the target chooses one adequate cutoff along that same trace.
+-/
+def SourceOpenUserCallTargetsBlockPathSoundWhen
+    (cfg : StateRelConfig) (layout resultLayout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (allowed : Except Exception State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (argsFuel callFuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract)
+    (preArgs : List Functions.Stmt) (lowerArgs : List (Locals.Expr 1))
+    (functionName : Name) (targets : List EvmYul.Identifier) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateExactRel cfg layout source compiler →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs argsFuel args.reverse codeOverride
+            source))
+        (fun argsResult =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.call callFuel argsResult.2.reverse
+                functionName codeOverride argsResult.1))
+            (fun callResult =>
+              .done (EvmYul.Yul.multifill' targets (.ok callResult)))))
+      trace sourceDone →
+    (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    ∀ minimumTargetFuel,
+      ∃ targetFuel,
+        minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (RelationallyAdmissibleOpenCallResponseRel cfg)
+          (SourceOpenStmtHeadPathDoneRel cfg resultLayout outcomeLayout ctx
+            terminalRel revertRel allowed)
+          trace
+          (OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalArgs argsFuel args.reverse codeOverride
+                source))
+            (fun argsResult =>
+              OpenExternal.OpenResult.bind
+                (OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.call callFuel argsResult.2.reverse
+                    functionName codeOverride argsResult.1))
+                (fun callResult =>
+                  .done (EvmYul.Yul.multifill' targets (.ok callResult)))))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+            { stmts :=
+              preArgs ++
+                [Functions.Stmt.call (identNames targets) functionName
+                  lowerArgs] }
+            compiler)
+
+/--
+Expose the generic selected-trace direct-call contract at the concrete
+`ExprStmtCall` source form.
+-/
+theorem sourceOpenUserCallExprStmtBlockPathSoundWhen
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {functionName : Name}
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout outcomeLayout
+        terminalRel revertRel allowed prim program ctx fuel.succ fuel args
+        codeOverride preArgs lowerArgs functionName []) :
+    ∀ {source compiler trace sourceDone},
+      SourceStateExactRel cfg layout source compiler →
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel.succ.succ
+            (.ExprStmtCall (.Call (.inr functionName) args)) codeOverride source))
+        trace sourceDone →
+      (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+      SourceOpenTraceResponsesAdmissible cfg trace →
+      ∀ minimumTargetFuel,
+        ∃ targetFuel,
+          minimumTargetFuel ≤ targetFuel ∧
+          OpenExternal.OpenResultPathRel
+            (RelationallyAdmissibleOpenCallResponseRel cfg)
+            (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
+              revertRel allowed)
+            trace
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec fuel.succ.succ
+                (.ExprStmtCall (.Call (.inr functionName) args)) codeOverride
+                source))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+              { stmts :=
+                preArgs ++
+                  [Functions.Stmt.call
+                    (identNames ([] : List EvmYul.Identifier)) functionName
+                    lowerArgs] }
+              compiler) := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  rw [yulOpen_toOpenResult_exec_exprStmt_user_call_succ_succ_eq_bind_args]
+    at hResolve ⊢
+  exact
+    hCall hInitial hResolve hStoppingAllowed hResponses minimumTargetFuel
+
+/--
+Expose the generic selected-trace direct-call contract at a checked assignment
+source form.
+-/
+theorem sourceOpenUserCallAssignBlockPathSoundWhen
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {functionName : Name} {targets : List EvmYul.Identifier}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout outcomeLayout
+        terminalRel revertRel allowed prim program ctx fuel fuel args
+        codeOverride preArgs lowerArgs functionName targets) :
+    ∀ {source compiler trace sourceDone},
+      SourceStateExactRel cfg layout source compiler →
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel.succ.succ
+            (.Assign targets (.Call (.inr functionName) args)) codeOverride
+            source))
+        trace sourceDone →
+      (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+      SourceOpenTraceResponsesAdmissible cfg trace →
+      ∀ minimumTargetFuel,
+        ∃ targetFuel,
+          minimumTargetFuel ≤ targetFuel ∧
+          OpenExternal.OpenResultPathRel
+            (RelationallyAdmissibleOpenCallResponseRel cfg)
+            (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
+              revertRel allowed)
+            trace
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec fuel.succ.succ
+                (.Assign targets (.Call (.inr functionName) args)) codeOverride
+                source))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+              { stmts :=
+                preArgs ++
+                  [Functions.Stmt.call (identNames targets) functionName
+                    lowerArgs] }
+              compiler) := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hCheck :
+          EvmYul.Yul.checkAssignment (.Ok shared store) targets = .ok () :=
+        StoreDomainExact.checkAssignment_ok hDomain hTargetsNoDup hTargetsMem
+      rw [yulOpen_toOpenResult_exec_assign_user_call_succ_succ_eq_bind_args
+        (hCheck := hCheck)] at hResolve ⊢
+      exact
+        hCall (SourceStateExactRel.ok hShared hVars hDomain) hResolve
+          hStoppingAllowed hResponses minimumTargetFuel
+
+/--
+Expose the generic selected-trace direct-call contract at a checked fresh
+declaration source form.
+
+The target initializes fresh result slots before evaluating arguments. Those
+slots remain hidden from the old visible layout until a successful source
+return publishes them; terminal exits keep the same stopped relation.
+-/
+theorem sourceOpenUserCallLetBlockPathSoundWhen
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {functionName : Name} {targets : List EvmYul.Identifier}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh :
+      ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout
+        ((identNames targets).reverse ++ layout) outcomeLayout terminalRel
+        revertRel allowed prim program
+        { ctx with scope := (identNames targets).reverse ++ ctx.scope }
+        fuel fuel args codeOverride preArgs lowerArgs functionName targets) :
+    ∀ {source compiler trace sourceDone},
+      SourceStateExactRel cfg layout source compiler →
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel.succ.succ
+            (.Let targets (some (.Call (.inr functionName) args))) codeOverride
+            source))
+        trace sourceDone →
+      (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+      SourceOpenTraceResponsesAdmissible cfg trace →
+      ∀ minimumTargetFuel,
+        ∃ targetFuel,
+          minimumTargetFuel ≤ targetFuel ∧
+          OpenExternal.OpenResultPathRel
+            (RelationallyAdmissibleOpenCallResponseRel cfg)
+            (SourceOpenStmtHeadPathDoneRel cfg
+              ((identNames targets).reverse ++ layout) outcomeLayout ctx
+              terminalRel revertRel allowed)
+            trace
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec fuel.succ.succ
+                (.Let targets (some (.Call (.inr functionName) args)))
+                codeOverride source))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+              { stmts :=
+                Stmt.initNames (identNames targets) ++
+                  (preArgs ++
+                    [Functions.Stmt.call (identNames targets) functionName
+                      lowerArgs]) }
+              compiler) := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hCheck :
+          EvmYul.Yul.checkDeclaration (.Ok shared store) targets = .ok () :=
+        StoreDomainExact.checkDeclaration_ok hDomain hTargetsNoDup hTargetsFresh
+      rw [yulOpen_toOpenResult_exec_let_user_call_succ_succ_eq_bind_args
+        (hCheck := hCheck)] at hResolve ⊢
+      let targetNames := identNames targets
+      let ctxAfter : Functions.Source.Ctx :=
+        { ctx with scope := targetNames.reverse ++ ctx.scope }
+      let compilerAfter : Objects.Source.State :=
+        { shared := compiler.shared
+          vars := Functions.Source.Store.initReturns targetNames compiler.vars }
+      have hInitialAfter :
+          SourceStateExactRel cfg layout (.Ok shared store) compilerAfter := by
+        exact
+          SourceStateExactRel.ok
+            (by simpa [compilerAfter] using hShared)
+            (by
+              simpa [compilerAfter, targetNames] using
+                (sourceStoreRel_initReturns_hidden hVars hTargetsFresh))
+            hDomain
+      rcases
+          hCall hInitialAfter hResolve hStoppingAllowed hResponses
+            (max minimumTargetFuel 1) with
+        ⟨targetCallFuel, hMinimumCall, hCallPath⟩
+      cases targetCallFuel with
+      | zero =>
+          omega
+      | succ extra =>
+          let targetFuel := (Stmt.initNames targetNames).length + extra.succ
+          have hCtxExtends : SourceCtxExtends ctx ctxAfter := by
+            simpa [ctxAfter, targetNames] using
+              (SourceCtxExtends.append_left ctx
+                (identNames targets).reverse)
+          have hInit :
+              CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                  targetFuel { stmts := Stmt.initNames targetNames } compiler =
+                .ok (Functions.Source.Outcome.regular compilerAfter, ctxAfter) := by
+            dsimp [targetFuel]
+            simpa [Stmt.initNames, compilerAfter, ctxAfter, targetNames] using
+              (compilerOpen_functions_initNames_runOpen_regular_initReturns_add_eq
+                (prim := prim) (program := program) (ctx := ctx)
+                (compiler := compiler) targetNames extra)
+          refine ⟨targetFuel, ?_, ?_⟩
+          · dsimp [targetFuel, targetNames] at *
+            omega
+          · rw [compilerOpen_block_runOpen_append_eq
+                (prim := prim) (program := program) (ctx := ctx)
+                (pre := Stmt.initNames targetNames)
+                (suffix :=
+                  preArgs ++
+                    [Functions.Stmt.call (identNames targets) functionName
+                      lowerArgs])
+                (state := compiler) (suffixFuel := extra.succ)]
+            rw [hInit]
+            simp only [OpenExternal.OpenResult.bind,
+              Functions.Source.Outcome.regular, Locals.Source.Outcome.regular]
+            rcases hCallPath.resolves with
+              ⟨callSourceDone, callTargetDone, hCallSource, hCallTarget,
+                hCallDone⟩
+            exact
+              OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                hCallSource hCallTarget hResponses
+                (SourceOpenStmtHeadPathDoneRel.of_ctxExtends hCtxExtends
+                  hCallDone)
+
+/--
+Attach one selected discarded direct internal-call block to its syntactic tail.
+
+The concrete statement wrapper exposes the whole generated argument prefix plus
+the emitted call as one block head.  The ordinary emitted-block composer then
+enters the source tail only after regular completion.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_exprStmt_user_call
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {lowerTail : Functions.Block} {functionName : Name}
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout outcomeLayout
+        terminalRel revertRel allowed prim program ctx fuel.succ fuel args
+        codeOverride preArgs lowerArgs functionName [])
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter fuel.succ.succ rest
+          codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx fuel.succ.succ.succ
+      (.ExprStmtCall (.Call (.inr functionName) args) :: rest) codeOverride
+      { stmts :=
+        preArgs ++
+          [Functions.Stmt.call
+            (identNames ([] : List EvmYul.Identifier)) functionName lowerArgs] ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_blockHead
+    (hHead := sourceOpenUserCallExprStmtBlockPathSoundWhen hCall)
+    (hTail := hTail)
+
+/--
+Attach one selected existing-target direct internal-call assignment block to
+its syntactic tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_user_call
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {lowerTail : Functions.Block} {functionName : Name}
+    {targets : List EvmYul.Identifier}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout outcomeLayout
+        terminalRel revertRel allowed prim program ctx fuel fuel args codeOverride
+        preArgs lowerArgs functionName targets)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter fuel.succ.succ rest
+          codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx fuel.succ.succ.succ
+      (.Assign targets (.Call (.inr functionName) args) :: rest) codeOverride
+      { stmts :=
+        preArgs ++
+          [Functions.Stmt.call (identNames targets) functionName lowerArgs] ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_blockHead
+    (hHead :=
+      sourceOpenUserCallAssignBlockPathSoundWhen hTargetsNoDup hTargetsMem hCall)
+    (hTail := hTail)
+
+/--
+Attach one selected fresh-target direct internal-call declaration block to its
+syntactic tail.
+
+The declaration block starts under `layout` but publishes the fresh target
+names on regular return, so its tail uses the generalized two-layout emitted
+head composer.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_user_call
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {lowerTail : Functions.Block} {functionName : Name}
+    {targets : List EvmYul.Identifier}
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh : ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hCall :
+      SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout
+        ((identNames targets).reverse ++ layout) outcomeLayout terminalRel
+        revertRel allowed prim program
+        { ctx with scope := (identNames targets).reverse ++ ctx.scope }
+        fuel fuel args codeOverride preArgs lowerArgs functionName targets)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ (identNames targets).reverse ++ layout →
+          name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
+          ((identNames targets).reverse ++ layout) outcomeLayout terminalRel
+          revertRel prim program ctxAfter fuel.succ.succ rest codeOverride
+          lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx fuel.succ.succ.succ
+      (.Let targets (some (.Call (.inr functionName) args)) :: rest)
+      codeOverride
+      { stmts :=
+        (Stmt.initNames (identNames targets) ++
+          (preArgs ++
+            [Functions.Stmt.call (identNames targets) functionName lowerArgs])) ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_blockHead_to
+    (hHead :=
+      sourceOpenUserCallLetBlockPathSoundWhen hTargetsNoDup hTargetsFresh hCall)
+    (hTail := hTail)
+
+end SourceExprSeqPreludeOpen
+
+open SourceExprSeqPreludeOpen
+
+/--
+Checked finite-trace sequence target for the open external-CALL spine.
+
+Checked lowering is fixed up front, while the executable compiler-open cutoff
+is constructed separately for each admitted concrete finite trace.
+-/
+def CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+    (cfg : StateRelConfig) (reserved layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel compileFuel : Nat)
+    (sourceStmts : List AstStmt) (codeOverride : Option AstContract)
+    (allowed : Except Exception State → Prop) :
+    Prop :=
+  ∀ {freshState freshState' lowerBlock},
+    FreshCoversLayout (reserved ++ layout) freshState →
+    Stmt.List.toBlockFuel? compileFuel freshState sourceStmts =
+      some (lowerBlock, freshState') →
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed
+
+/--
+Decompose one checked lowered `head :: rest` block for a path-native sequence
+constructor.
+
+The callback receives the exact compiler-produced head statement list and tail
+block. Statement-family proofs can therefore focus on their semantic head
+constructor without repeating list-lowering bookkeeping.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hCons :
+      ∀ {freshState stateHead lowerFuel lowerHead lowerTail freshState'},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Stmt.toFunctionsListFuel? lowerFuel freshState head =
+          some (lowerHead, stateHead) →
+        Stmt.List.toBlockFuel? lowerFuel.succ stateHead rest =
+          some (lowerTail, freshState') →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+          (head :: rest) codeOverride
+          { stmts := lowerHead ++ lowerTail.stmts } allowed) :
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel (head :: rest) codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ functionsFuel =>
+      cases functionsFuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          cases hLowerHead :
+              Stmt.toFunctionsListFuel? lowerFuel freshState head with
+          | none =>
+              simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                hLowerHead] at hLower
+          | some headResult =>
+              rcases headResult with ⟨lowerHead, stateHead⟩
+              cases hLowerRest :
+                  Stmt.List.toFunctionsFuel? lowerFuel stateHead rest with
+              | none =>
+                  simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                    hLowerHead, hLowerRest] at hLower
+              | some restResult =>
+                  rcases restResult with ⟨lowerRest, stateRest⟩
+                  have hPair :
+                      (({ stmts := lowerHead ++ lowerRest } : Functions.Block),
+                          stateRest) =
+                        (lowerBlock, freshState') := by
+                    simpa [Stmt.List.toBlockFuel?,
+                      Stmt.List.toFunctionsFuel?, hLowerHead, hLowerRest]
+                      using hLower
+                  cases hPair
+                  unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+                  intro source compiler trace sourceDone
+                    hInitial hResolves hAllowed hResponses minimumTargetFuel
+                  exact
+                    (hCons (freshState := freshState)
+                      (stateHead := stateHead) (lowerFuel := lowerFuel)
+                      (lowerHead := lowerHead)
+                      (lowerTail := { stmts := lowerRest })
+                      (freshState' := freshState') hCovers hLowerHead
+                      (by
+                        simp [Stmt.List.toBlockFuel?, hLowerRest]))
+                      hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
+Checked compiler-output lift for a discarded direct internal-call statement
+followed by a syntactic tail.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_user_call_succ
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {functionName : Name}
+    (hName : ObjectBuiltin.unsupported? functionName = false)
+    (hCall :
+      ∀ {freshState stateArgs : Fresh.State}
+        {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout
+          outcomeLayout terminalRel revertRel allowed prim program ctx fuel.succ
+          fuel args codeOverride preArgs lowerArgs functionName [])
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter fuel.succ.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ compileFuel
+        (.ExprStmtCall (.Call (.inr functionName) args) :: rest) codeOverride
+        allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState' hCovers
+    hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ headFuel =>
+      rcases
+          toFunctionsListFuel?_expr_user_call_components_succ hName hLower with
+        ⟨preArgs, lowerArgs, hArgs, hHeadEq⟩
+      subst lowerHead
+      have hTailCovers :
+          FreshCoversLayout (reserved ++ layout) stateHead :=
+        freshCoversLayout_toFunctionsListFuel?_of_some hCovers hLower
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      simpa [identNames, List.append_assoc] using
+        (sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_exprStmt_user_call
+          (hCall hCovers hArgs) (by
+            intro ctxAfter hScopeAfter hHandlersAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                (compileFuel := headFuel.succ.succ) hScopeAfter hHandlersAfter)
+                hTailCovers hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone))
+
+/--
+Checked compiler-output lift for an existing-target direct internal-call
+assignment followed by a syntactic tail.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_succ
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {functionName : Name}
+    {targets : List EvmYul.Identifier}
+    (hNames :
+      targets = [] ∨ ∃ name next rest, targets = name :: next :: rest)
+    (hName : ObjectBuiltin.unsupported? functionName = false)
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsMem : ∀ name, name ∈ identNames targets → name ∈ layout)
+    (hCall :
+      ∀ {freshState stateArgs : Fresh.State}
+        {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout layout
+          outcomeLayout terminalRel revertRel allowed prim program ctx fuel fuel
+          args codeOverride preArgs lowerArgs functionName targets)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter fuel.succ.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ compileFuel
+        (.Assign targets (.Call (.inr functionName) args) :: rest) codeOverride
+        allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState' hCovers
+    hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ headFuel =>
+      rcases
+          toFunctionsListFuel?_assign_user_call_components_succ hNames hName
+            hLower with
+        ⟨preArgs, lowerArgs, hArgs, hHeadEq⟩
+      subst lowerHead
+      have hTailCovers :
+          FreshCoversLayout (reserved ++ layout) stateHead :=
+        freshCoversLayout_toFunctionsListFuel?_of_some hCovers hLower
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      simpa [List.append_assoc] using
+        (sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_user_call
+          hTargetsNoDup hTargetsMem (hCall hCovers hArgs) (by
+            intro ctxAfter hScopeAfter hHandlersAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                (compileFuel := headFuel.succ.succ) hScopeAfter hHandlersAfter)
+                hTailCovers hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone))
+
+/--
+Checked compiler-output lift for a fresh-target direct internal-call
+declaration followed by a syntactic tail.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_succ
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {functionName : Name}
+    {targets : List EvmYul.Identifier}
+    (hNames :
+      targets = [] ∨ ∃ name next rest, targets = name :: next :: rest)
+    (hName : ObjectBuiltin.unsupported? functionName = false)
+    (hTargetsNoDup : (identNames targets).Nodup)
+    (hTargetsFresh : ∀ name, name ∈ identNames targets → name ∉ layout)
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let targets (some (.Call (.inr functionName) args)))))
+    (hCall :
+      ∀ {freshState stateArgs : Fresh.State}
+        {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        SourceOpenUserCallTargetsBlockPathSoundWhen cfg layout
+          ((identNames targets).reverse ++ layout) outcomeLayout terminalRel
+          revertRel allowed prim program
+          { ctx with scope := (identNames targets).reverse ++ ctx.scope }
+          fuel fuel args codeOverride preArgs lowerArgs functionName targets)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ (identNames targets).reverse ++ layout →
+          name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved ((identNames targets).reverse ++ layout) outcomeLayout
+          terminalRel revertRel prim program ctxAfter fuel.succ.succ compileFuel
+          rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ compileFuel
+        (.Let targets (some (.Call (.inr functionName) args)) :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState' hCovers
+    hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ headFuel =>
+      rcases
+          toFunctionsListFuel?_let_user_call_components_succ hNames hName hLower
+          with
+        ⟨preArgs, lowerArgs, hArgs, hHeadEq⟩
+      subst lowerHead
+      have hReservedNames :
+          SourceNamesReserved reserved (identNames targets) := by
+        intro name hMem
+        exact hReservedHead name (by simp [Stmt.names, hMem])
+      have hTailCovers :
+          FreshCoversLayout
+            (reserved ++ ((identNames targets).reverse ++ layout)) stateHead :=
+        freshCoversLayout_append_reverse_append_of_reserved
+          (freshCoversLayout_toFunctionsListFuel?_of_some hCovers hLower)
+          hReservedNames
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      simpa [List.append_assoc] using
+        (sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_user_call
+          hTargetsNoDup hTargetsFresh (hCall hCovers hArgs) (by
+            intro ctxAfter hScopeAfter hHandlersAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                (compileFuel := headFuel.succ.succ) hScopeAfter hHandlersAfter)
+                hTailCovers hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone))
+
+namespace SourceExprSeqPreludeOpen
 
 /--
 Terminal-aware target shape of the hidden result-slot suffix emitted for an
@@ -64221,6 +67240,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
                 codeOverride source)))
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceCtxExtends ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
           (identName name :: layout) outcomeLayout terminalRel revertRel
           prim program
@@ -64392,8 +67412,12 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
                                 (.Ok sharedAfter storeAfter : State))))
                           right sourceDone := by
                       simpa [EvmYul.Yul.State.multifill] using hSuffix
+                    have hCtxExtends : SourceCtxExtends ctx target.ctx :=
+                      SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends
+                        hTargetPrefix
                     rcases
-                        hTail (ctxAfter := target.ctx) hFilledExact hSuffix'
+                        hTail (ctxAfter := target.ctx) hCtxExtends hFilledExact
+                          hSuffix'
                           hAllowed hRightResponses prefixFuel with
                       ⟨tailFuel, hPrefixTail, hTailPath⟩
                     rcases hTailPath.resolves with
@@ -64494,6 +67518,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
                 codeOverride source)))
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceCtxExtends ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctxAfter
           exprFuel.succ rest codeOverride lowerTail allowed) :
@@ -64681,8 +67706,12 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
                                 (.Ok sharedAfter storeAfter : State))))
                           right sourceDone := by
                       simpa [EvmYul.Yul.State.multifill] using hSuffix
+                    have hCtxExtends : SourceCtxExtends ctx target.ctx :=
+                      SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends
+                        hTargetPrefix
                     rcases
-                        hTail (ctxAfter := target.ctx) hFilledExact hSuffix'
+                        hTail (ctxAfter := target.ctx) hCtxExtends hFilledExact
+                          hSuffix'
                           hAllowed hRightResponses prefixFuel with
                       ⟨tailFuel, hPrefixTail, hTailPath⟩
                     rcases hTailPath.resolves with
@@ -66431,15 +69460,41 @@ theorem toFunctionsListFuel?_let_expr_single_components
     ∃ pre : List Functions.Stmt, ∃ lowerValue : Locals.Expr 1,
       Expr.lower1? state value = some (pre, lowerValue, state') ∧
       lowerHead = pre ++ [Functions.Stmt.let_ (identName name) lowerValue] := by
-  cases hExpr : Expr.lower1? state value with
-  | none =>
-      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-  | some exprResult =>
-      rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      rcases hLower with ⟨hHead, hState⟩
-      cases hState
-      exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+  cases value with
+  | Call callee args =>
+      cases callee with
+      | inl prim =>
+          cases hExpr : Expr.lower1? state (.Call (.inl prim) args) with
+          | none =>
+              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          | some exprResult =>
+              rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+              rcases hLower with ⟨hHead, hState⟩
+              cases hState
+              exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+      | inr functionName =>
+          simp [Stmt.toFunctionsListFuel?] at hLower
+  | Var varName =>
+      cases hExpr : Expr.lower1? state (.Var varName) with
+      | none =>
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          rcases hLower with ⟨hHead, hState⟩
+          cases hState
+          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+  | Lit literal =>
+      cases hExpr : Expr.lower1? state (.Lit literal) with
+      | none =>
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          rcases hLower with ⟨hHead, hState⟩
+          cases hState
+          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
 
 theorem toFunctionsListFuel?_assign_expr_single_components
     {fuel : Nat} {state state' : Fresh.State}
@@ -66452,15 +69507,41 @@ theorem toFunctionsListFuel?_assign_expr_single_components
     ∃ pre : List Functions.Stmt, ∃ lowerValue : Locals.Expr 1,
       Expr.lower1? state value = some (pre, lowerValue, state') ∧
       lowerHead = pre ++ [Functions.Stmt.assign (identName name) lowerValue] := by
-  cases hExpr : Expr.lower1? state value with
-  | none =>
-      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-  | some exprResult =>
-      rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      rcases hLower with ⟨hHead, hState⟩
-      cases hState
-      exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+  cases value with
+  | Call callee args =>
+      cases callee with
+      | inl prim =>
+          cases hExpr : Expr.lower1? state (.Call (.inl prim) args) with
+          | none =>
+              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          | some exprResult =>
+              rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+              rcases hLower with ⟨hHead, hState⟩
+              cases hState
+              exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+      | inr functionName =>
+          simp [Stmt.toFunctionsListFuel?] at hLower
+  | Var varName =>
+      cases hExpr : Expr.lower1? state (.Var varName) with
+      | none =>
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          rcases hLower with ⟨hHead, hState⟩
+          cases hState
+          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
+  | Lit literal =>
+      cases hExpr : Expr.lower1? state (.Lit literal) with
+      | none =>
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+          rcases hLower with ⟨hHead, hState⟩
+          cases hState
+          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
 
 /-- Open compiler expression shape for an output-one primitive cast. -/
 theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
@@ -66570,30 +69651,43 @@ def CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
       codeOverride lowerBlock allowed callResponseRel
 
 /--
-Checked finite-trace sequence target for the open external-CALL spine.
+Strong recursive callback for one checked finite-path CALL sequence frontier.
 
-This is the public-facing successor to the hidden existential tree target:
-checked lowering is fixed up front, while the executable compiler-open cutoff
-is constructed separately for each admitted concrete finite trace.
+Every recursive descent chooses a source clock no larger than `bound`; nested
+bodies and syntactic tails may freely change lexical layouts, outcome layouts,
+contexts, and selected-result predicates.
 -/
-def CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
-    (cfg : StateRelConfig) (reserved layout outcomeLayout : List Name)
+def CALLOpenSeqPathRecursiveAt
+    (cfg : StateRelConfig)
     (terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
     (revertRel : State → Objects.Source.State → Prop)
     (prim : Objects.Source.PrimitiveSemantics)
-    (program : Functions.Program) (ctx : Functions.Source.Ctx)
-    (sourceFuel compileFuel : Nat)
-    (sourceStmts : List AstStmt) (codeOverride : Option AstContract)
-    (allowed : Except Exception State → Prop) :
-    Prop :=
-  ∀ {freshState freshState' lowerBlock},
-    FreshCoversLayout (reserved ++ layout) freshState →
-    Stmt.List.toBlockFuel? compileFuel freshState sourceStmts =
-      some (lowerBlock, freshState') →
-    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
-      terminalRel revertRel prim program ctx sourceFuel sourceStmts
-      codeOverride lowerBlock allowed
+    (yulProgram : Program) (program : Functions.Program)
+    (bound : Nat) : Prop :=
+  ∀ {sourceFuelRec : Nat}
+    {reservedRec layoutRec outcomeLayoutRec : List Name}
+    {ctxRec : Functions.Source.Ctx} {compileFuelRec : Nat}
+    {sourceStmtsRec : List AstStmt}
+    {allowedRec : Except Exception State → Prop}
+    {canBreakRec canContinueRec canLeaveRec : Bool},
+    sourceFuelRec ≤ bound →
+    Safe.CallSafe.stmts sourceStmtsRec →
+    ControlFlow.ScopedStmts canBreakRec canContinueRec canLeaveRec
+      sourceStmtsRec →
+    UserCallArity.StmtsOk yulProgram.contract sourceStmtsRec →
+    SourceLexical.StmtsScoped layoutRec sourceStmtsRec →
+    SourceNamesReserved reservedRec (Stmt.List.names sourceStmtsRec) →
+    (∀ {sourceResult}, allowedRec sourceResult →
+      SourceResultRelatable sourceResult) →
+    (∀ {sourceResult}, allowedRec sourceResult →
+      SourceResultOutcomeLayoutSupported ctxRec layoutRec outcomeLayoutRec
+        sourceResult) →
+    (∀ name : Name, name ∈ layoutRec → name ∈ ctxRec.scope) →
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reservedRec layoutRec outcomeLayoutRec terminalRel revertRel prim
+      program ctxRec sourceFuelRec compileFuelRec sourceStmtsRec
+      (some yulProgram.contract) allowedRec
 
 /--
 Expose one checked local tree-shaped sequence proof through the selected
@@ -67335,83 +70429,6 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             hNoLower lowerFuel freshState
           simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
             hHeadNone] at hLower
-
-/--
-Decompose one checked lowered `head :: rest` block for a path-native sequence
-constructor.
-
-The callback receives the exact compiler-produced head statement list and tail
-block. Statement-family proofs can therefore focus on their semantic head
-constructor without repeating list-lowering bookkeeping.
--/
-theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
-    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
-    {terminalRel :
-      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
-    {revertRel : State → Objects.Source.State → Prop}
-    {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel compileFuel : Nat}
-    {head : AstStmt} {rest : List AstStmt}
-    {codeOverride : Option AstContract}
-    {allowed : Except Exception State → Prop}
-    (hCons :
-      ∀ {freshState stateHead lowerFuel lowerHead lowerTail freshState'},
-        FreshCoversLayout (reserved ++ layout) freshState →
-        Stmt.toFunctionsListFuel? lowerFuel freshState head =
-          some (lowerHead, stateHead) →
-        Stmt.List.toBlockFuel? lowerFuel.succ stateHead rest =
-          some (lowerTail, freshState') →
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctx sourceFuel
-          (head :: rest) codeOverride
-          { stmts := lowerHead ++ lowerTail.stmts } allowed) :
-    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-      reserved layout outcomeLayout terminalRel revertRel prim program ctx
-      sourceFuel compileFuel (head :: rest) codeOverride allowed := by
-  intro freshState freshState' lowerBlock hCovers hLower
-  cases compileFuel with
-  | zero =>
-      simp [Stmt.List.toBlockFuel?] at hLower
-  | succ functionsFuel =>
-      cases functionsFuel with
-      | zero =>
-          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
-      | succ lowerFuel =>
-          cases hLowerHead :
-              Stmt.toFunctionsListFuel? lowerFuel freshState head with
-          | none =>
-              simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
-                hLowerHead] at hLower
-          | some headResult =>
-              rcases headResult with ⟨lowerHead, stateHead⟩
-              cases hLowerRest :
-                  Stmt.List.toFunctionsFuel? lowerFuel stateHead rest with
-              | none =>
-                  simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
-                    hLowerHead, hLowerRest] at hLower
-              | some restResult =>
-                  rcases restResult with ⟨lowerRest, stateRest⟩
-                  have hPair :
-                      (({ stmts := lowerHead ++ lowerRest } : Functions.Block),
-                          stateRest) =
-                        (lowerBlock, freshState') := by
-                    simpa [Stmt.List.toBlockFuel?,
-                      Stmt.List.toFunctionsFuel?, hLowerHead, hLowerRest]
-                      using hLower
-                  cases hPair
-                  unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
-                  intro source compiler trace sourceDone
-                    hInitial hResolves hAllowed hResponses minimumTargetFuel
-                  exact
-                    (hCons (freshState := freshState)
-                      (stateHead := stateHead) (lowerFuel := lowerFuel)
-                      (lowerHead := lowerHead)
-                      (lowerTail := { stmts := lowerRest })
-                      (freshState' := freshState') hCovers hLowerHead
-                      (by
-                        simp [Stmt.List.toBlockFuel?, hLowerRest]))
-                      hInitial hResolves hAllowed hResponses minimumTargetFuel
 
 /--
 Checked path-native lift for an uninitialized declaration head.
@@ -115858,6 +118875,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
                 codeOverride source)))
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceCtxExtends ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctxAfter
           exprFuel.succ rest codeOverride lowerTail allowed) :
@@ -115906,10 +118924,13 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hHeadSound :
       ∀ {freshState stateHead : Fresh.State}
         {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
-        {lowerTailStmts : List Functions.Stmt},
+        {lowerTailStmts : List Functions.Stmt}
+        {tailCompileFuel : Nat} {freshState' : Fresh.State},
         FreshCoversLayout (reserved ++ layout) freshState →
         Expr.lower1? freshState sourceExpr =
           some (pre, lowerExpr, stateHead) →
+        Stmt.List.toFunctionsFuel? tailCompileFuel stateHead rest =
+          some (lowerTailStmts, freshState') →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctx
           sourceFuel.succ.succ
@@ -115963,7 +118984,9 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                 hHeadSound (freshState := freshState)
                   (stateHead := stateHead) (pre := pre)
                   (lowerExpr := lowerExpr)
-                  (lowerTailStmts := lowerRest) hCovers hExprLower
+                  (lowerTailStmts := lowerRest)
+                  (tailCompileFuel := headFuel.succ)
+                  (freshState' := freshState') hCovers hExprLower hTailLower
                   (source := source) (compiler := compiler) (trace := trace)
                   (sourceDone := sourceDone)
 
@@ -115981,10 +119004,13 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hHeadSound :
       ∀ {freshState stateHead : Fresh.State}
         {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
-        {lowerTailStmts : List Functions.Stmt},
+        {lowerTailStmts : List Functions.Stmt}
+        {tailCompileFuel : Nat} {freshState' : Fresh.State},
         FreshCoversLayout (reserved ++ layout) freshState →
         Expr.lower1? freshState sourceExpr =
           some (pre, lowerExpr, stateHead) →
+        Stmt.List.toFunctionsFuel? tailCompileFuel stateHead rest =
+          some (lowerTailStmts, freshState') →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctx
           sourceFuel.succ.succ
@@ -116038,7 +119064,9 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                 hHeadSound (freshState := freshState)
                   (stateHead := stateHead) (pre := pre)
                   (lowerExpr := lowerExpr)
-                  (lowerTailStmts := lowerRest) hCovers hExprLower
+                  (lowerTailStmts := lowerRest)
+                  (tailCompileFuel := headFuel.succ)
+                  (freshState' := freshState') hCovers hExprLower hTailLower
                   (source := source) (compiler := compiler) (trace := trace)
                   (sourceDone := sourceDone)
 
@@ -117689,6 +120717,288 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
                 cases hTailRaw
 
 /--
+Retain one emitted suffix after a selected argument-tail error.
+
+The related compiler tail is already nonregular, so the pending emitted suffix
+is present in code but cannot execute.  This is shared by both the unreachable
+head and residual boundary-clock branches.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_append_of_selected_tail_error
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preTail suffix : List Functions.Stmt}
+    {lowerTail lowerArgs : List (Locals.Expr 1)}
+    {allowed : Except Exception (State × List Word) → Prop}
+    {source : State} {compiler : Objects.Source.State}
+    {sourceFull : OpenExternal.OpenResult Exception (State × List Word)}
+    {trace : OpenExternal.OpenTrace} {err : Exception}
+    (hTail :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx sourceFuel tail codeOverride preTail lowerTail
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hInitial : SourceStateRel cfg layout source compiler)
+    (hContains : StateStoreContains layout source)
+    (hResolveFull :
+      OpenExternal.OpenResultResolves sourceFull trace (.error err))
+    (hResolveTail :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel tail.reverse codeOverride
+            source))
+        trace (.error err))
+    (hAllowed : allowed (.error err))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace)
+    (minimumTargetFuel : Nat) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (RelationallyAdmissibleOpenCallResponseRel cfg)
+          (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+            revertRel prim lowerArgs)
+          trace sourceFull
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+            { stmts := preTail ++ suffix } compiler) := by
+  rcases
+      hTail hInitial hContains hResolveTail
+        (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed) hResponses
+        minimumTargetFuel with
+    ⟨targetTailFuel, hMinimumTail, hTailPath⟩
+  rcases hTailPath.resolves with
+    ⟨sourceTailDone, targetTailDone, hSourceTail, hTargetTail, hTailDone⟩
+  have hSourceTailDone : sourceTailDone = .error err :=
+    OpenExternal.OpenResultResolves.deterministic hSourceTail hResolveTail
+  subst sourceTailDone
+  cases targetTailDone with
+  | error targetErr =>
+      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+  | ok targetTailResult =>
+      rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+      rcases targetTailOutcome with ⟨targetTailState, mode⟩
+      have hMode : mode ≠ .regular := by
+        intro hRegular
+        subst mode
+        cases err <;>
+          simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+      let targetFuel := preTail.length + targetTailFuel
+      have hTargetFull :
+          OpenExternal.OpenResultResolves
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+              { stmts := preTail ++ suffix } compiler)
+            trace
+            (.ok ({ state := targetTailState, mode := mode }, targetTailCtx)) := by
+        dsimp [targetFuel]
+        exact
+          compilerOpen_block_runOpen_append_resolves_nonregular
+            (suffixFuel := targetTailFuel) (suffix := suffix) (by omega) hMode
+            hTargetTail
+      have hDoneFull :
+          SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+            prim lowerArgs (.error err)
+            (.ok ({ state := targetTailState, mode := mode }, targetTailCtx)) :=
+        sourceArgTerminalRawPreludeOpenDoneRel_error_replace_lowerArgs hTailDone
+      refine ⟨targetFuel, ?_, ?_⟩
+      · dsimp [targetFuel]
+        omega
+      · exact
+          OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+            hResolveFull hTargetFull hResponses hDoneFull
+
+/--
+Append an unreachable generated argument head to a selected low-fuel tail path.
+
+Below the two-ticks-per-tail-item reachability boundary, imported Yul cannot
+enter the appended head.  The selected tail path therefore ends in an error,
+whose related compiler path is already nonregular; the pending generated suffix
+may be retained in emitted code without executing it.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_append_unreachable_head
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preTail suffix : List Functions.Stmt}
+    {lowerTail lowerArgs : List (Locals.Expr 1)}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hFuel : sourceFuel ≤ 2 * tail.length)
+    (hTail :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx sourceFuel tail codeOverride preTail lowerTail
+        (SourcePairResultPropagatesErrorTo allowed)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx sourceFuel (head :: tail) codeOverride
+      (preTail ++ suffix) lowerArgs allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolveFull hAllowed
+    hResponses minimumTargetFuel
+  have hSourceEq :
+      OpenExternal.YulOpen.evalArgs sourceFuel (head :: tail).reverse
+          codeOverride source =
+        OpenExternal.YulOpen.evalArgs sourceFuel tail.reverse codeOverride
+          source := by
+    rw [List.reverse_cons]
+    apply yulOpen_evalArgs_append_singleton_eq_of_fuel_le_twice_length
+    simpa using hFuel
+  have hResolveTail :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel tail.reverse codeOverride
+            source))
+        trace sourceDone := by
+    rw [← hSourceEq]
+    exact hResolveFull
+  have hSourceError : ∃ err, sourceDone = .error err := by
+    cases sourceDone with
+    | error err =>
+        exact ⟨err, rfl⟩
+    | ok sourceResult =>
+        rcases sourceResult with ⟨sourceAfter, values⟩
+        exact False.elim
+          (yulOpenEvalArgs_resolves_ok_false_of_fuel_le_twice_length
+            (args := tail.reverse) (by simpa using hFuel) hResolveTail)
+  rcases hSourceError with ⟨err, rfl⟩
+  exact
+    sourceArgTerminalRawPreludeOpenPathSoundWhen_append_of_selected_tail_error
+      (suffix := suffix) (lowerArgs := lowerArgs) hTail hInitial hContains
+      hResolveFull hResolveTail hAllowed hResponses minimumTargetFuel
+
+/--
+Append a generated argument head at either residual boundary clock.
+
+After the selected tail succeeds, zero residual ticks always report out-of-fuel.
+With one residual tick, an ordinary scoped state also reports out-of-fuel. The
+imported historical success-valued out-of-fuel marker may instead report
+`UnknownIdentifier` for a variable head; that frontend error is likewise
+outside the enclosing successful-run result boundary.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_append_boundary_head
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {headFuel : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {preTail suffix : List Functions.Stmt}
+    {lowerTail lowerArgs : List (Locals.Expr 1)}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hHeadFuel : headFuel ≤ 1)
+    (hHeadScoped : SourceExprScoped layout head)
+    (hTailSafe : Safe.CallSafe.exprs tail)
+    (hAllowedRelatable :
+      ∀ {err}, allowed (.error err) → SourceResultRelatable (.error err))
+    (hTail :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx (headFuel + (2 * tail.length + 1)) tail
+        codeOverride preTail lowerTail (SourcePairResultPropagatesErrorTo allowed)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx (headFuel + (2 * tail.length + 1))
+      (head :: tail) codeOverride (preTail ++ suffix) lowerArgs allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolveFull hAllowed
+    hResponses minimumTargetFuel
+  have hResolveOriginal := hResolveFull
+  have hSourceEq :
+      OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs (headFuel + (2 * tail.length + 1))
+            (head :: tail).reverse codeOverride source) =
+        OpenExternal.OpenResult.bind
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs
+              (headFuel + (2 * tail.length + 1)) tail.reverse codeOverride
+              source))
+          (fun prefixResult =>
+            OpenExternal.OpenResult.bind
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+                  (OpenExternal.YulOpen.eval headFuel head codeOverride
+                    prefixResult.1)))
+              (sourceArgAppendValues prefixResult.2)) := by
+    rw [List.reverse_cons]
+    simpa using
+      (yulOpen_toOpenResult_evalArgs_append_singleton_eq_bind_evalTail
+        headFuel (argsPrefix := tail.reverse) (head := head)
+        (codeOverride := codeOverride) (source := source))
+  rw [hSourceEq] at hResolveFull
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolveFull with
+    hTailError | hTailOk
+  · rcases hTailError with ⟨err, hResolveTail, hSourceDone⟩
+    subst sourceDone
+    exact
+      sourceArgTerminalRawPreludeOpenPathSoundWhen_append_of_selected_tail_error
+        (suffix := suffix) (lowerArgs := lowerArgs) hTail hInitial hContains
+        hResolveOriginal hResolveTail hAllowed hResponses minimumTargetFuel
+  · rcases hTailOk with
+      ⟨tailTrace, headTrace, sourceTailResult, hTrace, hResolveTail,
+        hResolveHead⟩
+    have hInitialAllowed : StateCheckpointAllowed false false false source := by
+      cases hInitial with
+      | ok =>
+          simp [StateCheckpointAllowed]
+    have hTailInv :
+        OpenResultDoneInvariant
+          (YulOpenPairStateDoneInv
+            (StateCheckpointStoreContains layout false false false))
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs
+              (headFuel + (2 * tail.length + 1)) tail.reverse codeOverride
+              source)) :=
+      yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+        hTailSafe hInitialAllowed hContains
+    have hTailCheckpoint :
+        StateCheckpointStoreContains layout false false false
+          sourceTailResult.1 :=
+      OpenResultDoneInvariant.of_resolves hTailInv hResolveTail
+    rcases sourceTailResult with ⟨sourceTailState, tailValues⟩
+    simp only at hTailCheckpoint hResolveHead
+    rcases StateCheckpointStoreContains.ok_or_outOfFuel_of_top hTailCheckpoint with
+      hTailOutOfFuel | hTailOk
+    · subst sourceTailState
+      cases headFuel with
+      | zero =>
+          rw [yulOpen_evalTail_zero_nil_eval_zero_eq_outOfFuel] at hResolveHead
+          cases hResolveHead
+          exact False.elim
+            (sourceResultRelatable_outOfFuel_false
+              (hAllowedRelatable hAllowed))
+      | succ fuel =>
+          have hFuelZero : fuel = 0 := by omega
+          subst fuel
+          rcases
+              yulOpen_evalTail_one_nil_eval_one_outOfFuel_eq_nonrelatable_error
+                (head := head) (codeOverride := codeOverride) with
+            ⟨err, hResidual, hNotRelatable⟩
+          rw [hResidual] at hResolveHead
+          cases hResolveHead
+          exact False.elim (hNotRelatable (hAllowedRelatable hAllowed))
+    · rcases hTailOk with ⟨shared, store, hTailState, hStoreContains⟩
+      subst sourceTailState
+      cases headFuel with
+      | zero =>
+          rw [yulOpen_evalTail_zero_nil_eval_zero_eq_outOfFuel] at hResolveHead
+          cases hResolveHead
+          exact False.elim
+            (sourceResultRelatable_outOfFuel_false
+              (hAllowedRelatable hAllowed))
+      | succ fuel =>
+          have hFuelZero : fuel = 0 := by omega
+          subst fuel
+          rw [yulOpen_evalTail_one_nil_eval_one_eq_outOfFuel_of_scoped_contains
+            hHeadScoped hStoreContains] at hResolveHead
+          cases hResolveHead
+          exact False.elim
+            (sourceResultRelatable_outOfFuel_false
+              (hAllowedRelatable hAllowed))
+
+/--
 Compiler-output wrapper for path-native terminal-aware reverse-cons argument
 composition.
 
@@ -118034,6 +121344,240 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_m
         (hCons (source := source) (compiler := compiler) (trace := trace)
           (sourceDone := sourceDone) hInitial hContains hResolveCons hAllowed
           hResponses minimumTargetFuel)
+
+/--
+Actual-fuel compiler-output dispatcher for selected terminal-aware arguments.
+
+Unlike the private reverse scheduler above, this theorem follows the imported
+evaluator at its real source fuel. Unreachable generated heads are retained
+without execution, the two residual boundary clocks are filtered explicitly,
+and productive heads delegate to expression preservation at the exact residual
+fuel exposed by the evaluator.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem_actual_fuel
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel fuelBound : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hAllowedRelatable :
+      ∀ {err}, allowed (.error err) → SourceResultRelatable (.error err))
+    (hHead :
+      ∀ {sourceFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx}
+        {allowedHead : Except Exception (State × List Word) → Prop},
+        sourceFuel ≤ fuelBound →
+        head ∈ args →
+        (∀ {err},
+          allowedHead (.error err) → SourceResultRelatable (.error err)) →
+        FreshCoversLayout coverLayout stateHeadStart →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+          prim program ctxHead sourceFuel head codeOverride preHead lowerHead
+          allowedHead)
+    (hHeadSingle :
+      ∀ {sourceFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {sourceTailResult : State × List Word}
+        {targetState : Objects.Source.State},
+        head ∈ args →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceStateRel cfg layout sourceTailResult.1 targetState →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues sourceFuel head codeOverride
+              sourceTailResult.1)))
+    (hFuelBound : sourceFuel ≤ fuelBound)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
+      allowed := by
+  induction args generalizing sourceFuel freshState stateFresh pre lowerArgs ctx
+      allowed with
+  | nil =>
+      cases sourceFuel with
+      | zero =>
+          intro source compiler trace sourceDone hInitial hContains hResolve
+            hAllowed hResponses minimumTargetFuel
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error] at hResolve
+          cases hResolve
+          exact False.elim
+            (sourceResultRelatable_outOfFuel_false
+              (hAllowedRelatable hAllowed))
+      | succ sourceFuel =>
+          exact
+            sourceArgTerminalRawPreludeOpenPathSoundWhen_nil_of_lowerBound1?
+              (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (freshState := freshState) (stateFresh := stateFresh)
+              (pre := pre) (lowerArgs := lowerArgs) (sourceFuel := sourceFuel)
+              (codeOverride := codeOverride) (allowed := allowed) hLower
+  | cons head tail ih =>
+      rcases lowerBound1?_cons_some_components hLower with
+        ⟨preTail, lowerTail, stateTail, preHead, lowerHead, stateHead, tmp,
+          hTailLower, hHeadLower, hFresh, hPre, hArgs⟩
+      subst pre
+      subst lowerArgs
+      have hAllowedTailRelatable :
+          ∀ {err},
+            SourcePairResultPropagatesErrorTo allowed (.error err) →
+              SourceResultRelatable (.error err) := by
+        intro err hAllowed
+        exact hAllowedRelatable (by
+          simpa [SourcePairResultPropagatesErrorTo] using hAllowed)
+      have hTail :
+          SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+            revertRel prim program ctx sourceFuel tail codeOverride preTail
+            lowerTail (SourcePairResultPropagatesErrorTo allowed) :=
+        ih
+          (hHead := by
+            intro sourceFuel' head' stateHeadStart' preHead' lowerHead'
+              stateHead' ctxHead' allowedHead' hHeadFuelBound hMem hAllowedHead
+              hCoversHead hLowerHead
+            exact
+              hHead (head := head') (allowedHead := allowedHead')
+                hHeadFuelBound (List.mem_cons_of_mem head hMem) hAllowedHead
+                hCoversHead hLowerHead)
+          (hHeadSingle := by
+            intro sourceFuel' head' stateHeadStart' preHead' lowerHead'
+              stateHead' sourceTailResult' targetState' hMem hLowerHead hInitial
+            exact
+              hHeadSingle (sourceFuel := sourceFuel') (head := head')
+                (List.mem_cons_of_mem head hMem) hLowerHead hInitial)
+          (sourceFuel := sourceFuel) (freshState := freshState)
+          (stateFresh := stateTail) (pre := preTail) (lowerArgs := lowerTail)
+          (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
+          hAllowedTailRelatable hFuelBound hCovers hSafe.2 hScoped.2 hTailLower
+      unfold SourceArgTerminalRawPreludeOpenPathSoundWhen
+      intro source compiler trace sourceDone hInitial hContains hResolve hAllowed
+        hResponses minimumTargetFuel
+      by_cases hUnreachable : sourceFuel ≤ 2 * tail.length
+      · simpa only [List.append_assoc] using
+          (sourceArgTerminalRawPreludeOpenPathSoundWhen_append_unreachable_head
+            (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim) (program := program)
+            (ctx := ctx) (sourceFuel := sourceFuel) (head := head)
+            (tail := tail) (codeOverride := codeOverride) (preTail := preTail)
+            (suffix := preHead ++ [Functions.Stmt.let_ tmp lowerHead])
+            (lowerTail := lowerTail) (lowerArgs := .var tmp :: lowerTail)
+            (allowed := allowed) hUnreachable hTail hInitial hContains hResolve
+            hAllowed hResponses minimumTargetFuel)
+      · by_cases hBoundary : sourceFuel ≤ 2 * tail.length + 2
+        · let headFuel := sourceFuel - (2 * tail.length + 1)
+          have hSourceFuel :
+              sourceFuel = headFuel + (2 * tail.length + 1) := by
+            dsimp [headFuel]
+            omega
+          have hHeadFuel : headFuel ≤ 1 := by
+            dsimp [headFuel]
+            omega
+          have hTailBoundary :
+              SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout
+                terminalRel revertRel prim program ctx
+                (headFuel + (2 * tail.length + 1)) tail codeOverride preTail
+                lowerTail (SourcePairResultPropagatesErrorTo allowed) := by
+            rw [← hSourceFuel]
+            exact hTail
+          have hResolveBoundary := hResolve
+          rw [hSourceFuel] at hResolveBoundary
+          simpa only [← hSourceFuel, List.append_assoc] using
+            (sourceArgTerminalRawPreludeOpenPathSoundWhen_append_boundary_head
+              (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (headFuel := headFuel) (head := head)
+              (tail := tail) (codeOverride := codeOverride)
+              (preTail := preTail)
+              (suffix := preHead ++ [Functions.Stmt.let_ tmp lowerHead])
+              (lowerTail := lowerTail) (lowerArgs := .var tmp :: lowerTail)
+              (allowed := allowed) hHeadFuel hScoped.1 hSafe.2
+              hAllowedRelatable hTailBoundary hInitial hContains
+              hResolveBoundary hAllowed hResponses minimumTargetFuel)
+        · let base := sourceFuel - (2 * tail.length + 3)
+          have hSourceFuel :
+              yulOpenEvalArgsAppendFuel base tail.reverse = sourceFuel := by
+            dsimp [base]
+            rw [yulOpenEvalArgsAppendFuel_eq_add_length]
+            simp only [List.length_reverse]
+            omega
+          have hTailScheduled :
+              SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout
+                terminalRel revertRel prim program ctx
+                (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride
+                preTail lowerTail (SourcePairResultPropagatesErrorTo allowed) := by
+            rw [hSourceFuel]
+            exact hTail
+          have hCons :
+              SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+                revertRel prim program ctx
+                (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail)
+                codeOverride
+                (preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]))
+                (.var tmp :: lowerTail) allowed :=
+            sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBound1?_components_head_expr
+              (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              (prim := prim) (program := program) (ctx := ctx)
+              (freshState := freshState) (stateTail := stateTail)
+              (stateHead := stateHead) (stateFresh := stateFresh)
+              (preTail := preTail) (preHead := preHead) (lowerTail := lowerTail)
+              (lowerHead := lowerHead) (tmp := tmp) (base := base)
+              (head := head) (tail := tail) (codeOverride := codeOverride)
+              (allowed := allowed) hLayoutSubset hCovers hTailLower hHeadLower
+              hFresh hSafe.2 hTailScheduled
+              (hHead (sourceFuel := base.succ.succ) (head := head)
+                (allowedHead := SourcePairResultPropagatesErrorTo allowed)
+                (by omega) (by simp) (by
+                  intro err hAllowed
+                  exact hAllowedRelatable (by
+                    simpa [SourcePairResultPropagatesErrorTo] using hAllowed))
+                (freshCoversLayout_lowerBound1?_of_some hCovers hTailLower)
+                hHeadLower)
+              (by
+                intro sourceTailResult targetTailResult hTailDone
+                have hTailRaw :
+                    SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+                      (.ok sourceTailResult) (.ok targetTailResult) :=
+                  sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+                rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+                cases targetTailOutcome with
+                | mk targetTailState mode =>
+                    cases mode with
+                    | regular =>
+                        exact
+                          hHeadSingle (sourceFuel := base.succ.succ)
+                            (head := head) (by simp) hHeadLower hTailRaw.1
+                    | brk =>
+                        cases hTailRaw
+                    | cont =>
+                        cases hTailRaw
+                    | leave =>
+                        cases hTailRaw
+                    | halt kind =>
+                        cases hTailRaw)
+          rw [hSourceFuel] at hCons
+          simpa only [List.append_assoc] using
+            (hCons hInitial hContains hResolve hAllowed hResponses
+              minimumTargetFuel)
 
 /--
 Terminal-aware raw reverse-cons argument composition.
@@ -121782,7 +125326,9 @@ theorem SourceExprRawPreludeOpenUserCallRegularAt.of_recursive_body_seq
           some (.Def params returns body) →
         Stmt.List.toBlock? freshBefore body =
           some (fn.body, freshAfter) →
-        FreshCoversLayout (fn.returns ++ fn.params) freshBefore →
+        FreshCoversLayout
+          (Contract.names yulProgram.contract ++ (fn.returns ++ fn.params))
+          freshBefore →
       ∀ {callResponseRel : SourceOpenSeqCallResponseRel},
         SourceOpenResultSeqSoundAtExactHiddenCtx cfg
           (fn.returns ++ fn.params) (fn.returns ++ fn.params)
@@ -121810,13 +125356,13 @@ theorem SourceExprRawPreludeOpenUserCallRegularAt.of_recursive_body_seq
       rcases hExprOk.1 with
         ⟨params, returns, body, hLookup, _hReturnsLength, _hArgsLength⟩
       rcases
-          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh
+          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh_contract
             (program := yulProgram) (functionProgram := program)
             (functionName := functionName)
             (fn := .Def params returns body) context.toObjects hLookup with
         ⟨lowerFn, hFindLower, params0, returns0, body0, freshBefore,
           freshAfter, hFnEq, hBodyLower, _hLowerName, hLowerParams,
-          hLowerReturns, hFreshBody⟩
+          hLowerReturns, hFreshContract⟩
       cases hFnEq
       have hFindLower' :
           Functions.FunList.find? functionName program.functions =
@@ -121826,6 +125372,18 @@ theorem SourceExprRawPreludeOpenUserCallRegularAt.of_recursive_body_seq
             hFindLower
       rw [hFind] at hFindLower'
       cases hFindLower'
+      have hFreshBody :
+          FreshCoversLayout
+            (Contract.names yulProgram.contract ++ (fn.returns ++ fn.params))
+            freshBefore := by
+        intro name hMem
+        apply hFreshContract
+        rcases List.mem_append.mp hMem with hContract | hFrame
+        · exact hContract
+        · exact
+            FunctionEntryList.params_returns_mem_contract_names_of_lookup
+              hLookup (by
+                simpa [hLowerReturns, hLowerParams] using hFrame)
       have hCoversArgs : FreshCoversLayout coverLayout stateArgs := by
         rcases hArgs with hDirect | hGenerated
         · simpa [hDirect.2.2.2] using hCovers
@@ -121983,14 +125541,24 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
     (hExprOk :
       UserCallArity.ExprOk yulProgram.contract
         (.Call (.inr functionName) args))
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateAt cfg yulProgram.contract
+        base.succ)
     (hBody :
       ∀ {params returns : List EvmYul.Identifier} {body : List AstStmt}
-        {freshBefore freshAfter : Fresh.State},
+        {freshBefore freshAfter : Fresh.State}
+        {bodyDone : Except Exception State},
         yulProgram.contract.functions.lookup functionName =
           some (.Def params returns body) →
         Stmt.List.toBlock? freshBefore body =
           some (fn.body, freshAfter) →
-        FreshCoversLayout (fn.returns ++ fn.params) freshBefore →
+        fn.params = identNames params →
+        fn.returns = identNames returns →
+        FreshCoversLayout
+          (Contract.names yulProgram.contract ++ (fn.returns ++ fn.params))
+          freshBefore →
+        SourceResultRelatable bodyDone →
+        SourceResultCheckpointAllowed false false true bodyDone →
           SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
             (fn.returns ++ fn.params) (fn.returns ++ fn.params)
             terminalRel revertRel prim program
@@ -121998,7 +125566,7 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
                 (fn.returns ++ fn.params)) with
               scope := fn.returns ++ fn.params }
             base.succ body (some yulProgram.contract) fn.body
-            (SourceResultCheckpointAllowed false false true)) :
+            (fun candidate => candidate = bodyDone)) :
     SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
       revertRel prim program base functionName args yulProgram.contract
       freshState freshState' fn := by
@@ -122017,13 +125585,13 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
       rcases hExprOk.1 with
         ⟨params, returns, body, hLookup, _hReturnsLength, _hArgsLength⟩
       rcases
-          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh
+          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh_contract
             (program := yulProgram) (functionProgram := program)
             (functionName := functionName)
             (fn := .Def params returns body) context.toObjects hLookup with
         ⟨lowerFn, hFindLower, params0, returns0, body0, freshBefore,
           freshAfter, hFnEq, hBodyLower, _hLowerName, hLowerParams,
-          hLowerReturns, hFreshBody⟩
+          hLowerReturns, hFreshContract⟩
       cases hFnEq
       have hFindLower' :
           Functions.FunList.find? functionName program.functions =
@@ -122033,6 +125601,18 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
             hFindLower
       rw [hFind] at hFindLower'
       cases hFindLower'
+      have hFreshBody :
+          FreshCoversLayout
+            (Contract.names yulProgram.contract ++ (fn.returns ++ fn.params))
+            freshBefore := by
+        intro name hMem
+        apply hFreshContract
+        rcases List.mem_append.mp hMem with hContract | hFrame
+        · exact hContract
+        · exact
+            FunctionEntryList.params_returns_mem_contract_names_of_lookup
+              hLookup (by
+                simpa [hLowerReturns, hLowerParams] using hFrame)
       have hCoversArgs : FreshCoversLayout coverLayout stateArgs := by
         rcases hArgs with hDirect | hGenerated
         · simpa [hDirect.2.2.2] using hCovers
@@ -122092,6 +125672,16 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
         simpa [hLowerParams, hLowerReturns, StateStoreContains,
           EvmYul.Yul.State.mkOk, initcall_ok_insertPairs] using
           (StateStoreContains.initcall_of_length
+            (shared := callerShared) (callerStore := callerStore)
+            (params := params) (rets := returns)
+            (args := values.reverse) (by omega))
+      have hInitialDomain :
+          StateStoreDomainExact (identNames returns ++ identNames params)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore))) := by
+        simpa [EvmYul.Yul.State.mkOk, initcall_ok_insertPairs] using
+          (StateStoreDomainExact.initcall_of_length
             (shared := callerShared) (callerStore := callerStore)
             (params := params) (rets := returns)
             (args := values.reverse) (by omega))
@@ -122164,10 +125754,49 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
             trivial
         | ok state =>
             exact hDoneInv.1
+      have hBodyRelatable : SourceResultRelatable bodyDone :=
+        hBodyFuelAdequate hLookup hInitialDomain hResolveSeq hResponses
       rcases
-          hBody hLookup hBodyLower hFreshBody hInitial hResolveSeq hAllowedBody
-            hResponses minimumTargetTailFuel with
+          hBody (bodyDone := bodyDone) hLookup hBodyLower hLowerParams
+            hLowerReturns hFreshBody
+            hBodyRelatable hAllowedBody hInitial hResolveSeq rfl hResponses
+            minimumTargetTailFuel with
         ⟨targetBodyFuel, hMinimumTargetTailFuel, hBodySeqPath⟩
+      have hBodySeqCheckpointPath :
+          OpenExternal.OpenResultPathRel
+            (SourceOpenTraceCallResponseRel cfg)
+            (SourceOpenResultSeqDoneRel cfg
+              (fn.returns ++ fn.params) terminalRel revertRel
+              (SourceResultCheckpointAllowed false false true))
+            trace
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.execSeq base.succ body
+                (some yulProgram.contract)
+                (EvmYul.Yul.State.mkOk
+                  (EvmYul.Yul.State.initcall params returns values.reverse
+                    (.Ok callerShared callerStore)))))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+              { (Functions.Source.Ctx.initial.withLeaveScope
+                  (fn.returns ++ fn.params)) with
+                scope := fn.returns ++ fn.params }
+              targetBodyFuel fn.body
+              ({ shared := (targetState.insert tmp Expr.zero).shared
+                 vars :=
+                   Functions.Source.Store.initReturns fn.returns
+                     paramStore } :
+                Objects.Source.State)) := by
+        rcases hBodySeqPath.resolves with
+          ⟨bodySourceDone, bodyTargetDone, hResolveBodySource,
+            hResolveBodyTarget, hBodyDone⟩
+        have hBodySourceEq : bodyDone = bodySourceDone :=
+          OpenExternal.OpenResultResolves.deterministic hResolveSeq
+            hResolveBodySource
+        subst bodySourceDone
+        exact
+          OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+            hResolveSeq hResolveBodyTarget hResponses (by
+              intro _hAllowed
+              exact hBodyDone rfl)
       have hBodyBlockPath :=
         sourceOpenResultSeqPathRel_exec_block_succ_of_seq_checkpoint_scope_contains
           (cfg := cfg) (layout := fn.returns ++ fn.params)
@@ -122189,7 +125818,7 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
                   Functions.Source.Store.initReturns fn.returns
                     paramStore } :
                 Objects.Source.State))
-          hScope hBodySeqPath
+          hScope hBodySeqCheckpointPath
       exact
         ⟨targetBodyFuel, hMinimumTargetTailFuel,
           SourceExprSeqPreludeOpen.sourceExprRawPreludeOpenResultPathRel_user_call_regular_of_override_function_body_callSafe_scoped
@@ -122208,6 +125837,163 @@ theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
             context.callSafe context.controlScoped hArgs hFresh
             hTmpFreshLayout hDoneCanonical hLookup (by omega) hInsert
             hLowerParams hLowerReturns hBodyBlockPath hExprOk hResponses⟩
+
+/--
+Construct the selected internal-callee callback from the strong-fuel checked
+sequence recursion.
+
+Only the concrete callee endpoint chosen by the admitted finite trace enters
+the recursive sequence theorem.  The initialized function frame supplies its
+own lexical layout and contract-name reserve, while the explicit body-fuel
+witness makes the recursive descent honest.
+-/
+theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_checked_body
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {tailFuel base : Nat}
+    {functionName : Name} {args : List AstExpr}
+    {freshState freshState' : Fresh.State} {fn : Functions.FunDef}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hBodyFuel : base.succ ≤ tailFuel)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateAt cfg yulProgram.contract
+        base.succ)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program tailFuel) :
+    SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
+      revertRel prim program base functionName args yulProgram.contract
+      freshState freshState' fn :=
+  SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_body_seq
+    context hLayoutSubset hCovers hFind hExprOk hBodyFuelAdequate (by
+      intro params returns body freshBefore freshAfter bodyDone hLookup
+        hBodyLower hLowerParams hLowerReturns hFreshBody hBodyRelatable
+        hCheckpoint
+      rcases context.function_body_facts_of_lookup hLookup with
+        ⟨hSafeBody, hScopedBody, hStmtsOkBody⟩
+      have hSourceScopedBody :
+          SourceLexical.StmtsScoped (fn.returns ++ fn.params) body :=
+        context.function_body_source_scoped_of_lookup_lower hLookup
+          hLowerParams hLowerReturns
+      have hReservedBody :
+          SourceNamesReserved (Contract.names yulProgram.contract)
+            (Stmt.List.names body) :=
+        FunctionEntryList.sourceNamesReserved_contract_body_of_lookup hLookup
+      have hSupportedBody :
+          SourceResultOutcomeLayoutSupported
+            { (Functions.Source.Ctx.initial.withLeaveScope
+                (fn.returns ++ fn.params)) with
+              scope := fn.returns ++ fn.params }
+            (fn.returns ++ fn.params) (fn.returns ++ fn.params) bodyDone := by
+        simpa [Functions.Source.FunDef.bodyCtx] using
+          SourceResultOutcomeLayoutSupported.of_compatible
+            (sourceResultOutcomeLayoutCompatible_bodyCtx_same_of_checkpoint
+              (fn := fn) hCheckpoint)
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone hInitial hResolve hAllowed
+        hResponses minimumTargetFuel
+      exact
+        ((hRec (sourceFuelRec := base.succ)
+          (reservedRec := Contract.names yulProgram.contract)
+          (layoutRec := fn.returns ++ fn.params)
+          (outcomeLayoutRec := fn.returns ++ fn.params)
+          (ctxRec :=
+            { (Functions.Source.Ctx.initial.withLeaveScope
+                (fn.returns ++ fn.params)) with
+              scope := fn.returns ++ fn.params })
+          (compileFuelRec := Stmt.List.fuel body)
+          (sourceStmtsRec := body)
+          (allowedRec := fun candidate => candidate = bodyDone)
+          (canBreakRec := false) (canContinueRec := false)
+          (canLeaveRec := true) hBodyFuel hSafeBody hScopedBody hStmtsOkBody
+          hSourceScopedBody hReservedBody
+          (by
+            intro sourceResult hEq
+            subst sourceResult
+            exact hBodyRelatable)
+          (by
+            intro sourceResult hEq
+            subst sourceResult
+            exact hSupportedBody)
+          (by
+            intro name hMem
+            simpa [Functions.Source.FunDef.bodyCtx] using hMem))
+          hFreshBody (by simpa [Stmt.List.toBlock?] using hBodyLower))
+          hInitial hResolve hAllowed hResponses minimumTargetFuel)
+
+/--
+Recover the compiled internal-function entry from accepted expression-call
+typing and the checked program lowering.
+-/
+theorem ProgramCALLBridgeContext.find_function_of_user_expr_ok
+    {yulProgram : Program} {program : Functions.Program}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    {functionName : Name} {args : List AstExpr}
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args)) :
+    ∃ fn,
+      Functions.FunList.find? functionName program.functions = some fn := by
+  rcases hExprOk.1 with
+    ⟨params, returns, body, hLookup, _hReturnsLength, _hArgsLength⟩
+  rcases
+      FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?
+        context.toObjects hLookup with
+    ⟨fn, hFind, _params, _returns, _body, _freshBefore, _freshAfter,
+      _hDef, _hBodyLower, _hLowerName, _hLowerParams, _hLowerReturns⟩
+  exact
+    ⟨fn, by
+      simpa [Functions.SourceDirect.FunList.source_find?_eq] using hFind⟩
+
+/--
+Package the strong checked sequence callback as the selected internal-callee
+hook consumed by recursive expression preservation.
+
+The caller layout is covered by `reserved ++ layout`; the recursive body clock
+is checked against the enclosing statement predecessor, and source-facing body
+fuel adequacy is selected at exactly that smaller clock.
+-/
+theorem SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {tailFuel base : Nat}
+    {functionName : Name} {args : List AstExpr}
+    {freshState freshState' : Fresh.State} {fn : Functions.FunDef}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hCovers : FreshCoversLayout (reserved ++ layout) freshState)
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hBodyFuel : base.succ ≤ tailFuel)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        tailFuel)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program tailFuel) :
+    SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
+      revertRel prim program base functionName args yulProgram.contract
+      freshState freshState' fn :=
+  SourceExprRawPreludeOpenUserCallRegularPathWhen.of_recursive_checked_body
+    context (fun name hMem => List.mem_append_right reserved hMem) hCovers hFind
+    hExprOk hBodyFuel (hBodyFuelAdequate hBodyFuel) hRec
 
 /--
 Recursive finite-path raw expression preservation.
@@ -122480,6 +126266,348 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
                       hHeadLower hInitial)
                 hArgsReserve hCovers hArgsSafe hGenerated)
           · exact hUserRegular hReserve hCovers hSafe hScoped hOk hFind
+
+/--
+Arbitrary-actual-fuel finite-path raw expression preservation.
+
+The imported evaluator's real fuel is followed directly. Leaves consume one
+tick. Call expressions reject the one-tick argument-entry boundary. Productive
+primitive heads recurse through the arbitrary-fuel generated-argument
+dispatcher. Internal user calls additionally reject the two and three total
+tick boundaries before delegating to the existing selected-callee compositor.
+-/
+theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_actual_fuel_recursive
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {fuelBound : Nat}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef},
+        base.succ ≤ fuelBound →
+        FreshCoversLayout coverLayout freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn) :
+    ∀ {expr : AstExpr} {sourceFuel : Nat}
+      {freshState freshState' : Fresh.State}
+      {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+      {ctx : Functions.Source.Ctx}
+      {allowed : Except Exception (State × List Word) → Prop},
+      sourceFuel ≤ fuelBound →
+      (∀ {err}, allowed (.error err) → SourceResultRelatable (.error err)) →
+      FreshCoversLayout coverLayout freshState →
+      Safe.CallSafe.expr expr →
+      SourceExprScoped layout expr →
+      UserCallArity.ExprOk contract expr →
+      Expr.lower1? freshState expr = some (pre, lower, freshState') →
+        SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+          prim program ctx sourceFuel expr (some contract) pre lower allowed := by
+  intro expr
+  apply (measure sizeOf).wf.induction expr
+  intro expr ih sourceFuel freshState freshState' pre lower ctx allowed
+    hFuelBound hAllowedRelatable hCovers hSafe hScoped hOk hLower
+  cases sourceFuel with
+  | zero =>
+      intro source compiler trace sourceDone _hInitial _hContains hResolve
+        hAllowed _hResponses _minimumTargetFuel
+      simp [OpenExternal.YulOpen.evalValues,
+        OpenExternal.YulOpenResult.error] at hResolve
+      cases hResolve
+      exact False.elim
+        (sourceResultRelatable_outOfFuel_false (hAllowedRelatable hAllowed))
+  | succ exprFuel =>
+      cases expr with
+      | Lit value =>
+          exact
+            SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+              (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_lit_of_lower1?
+                (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+                (revertRel := revertRel) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := exprFuel) (targetFuel := 1)
+                (value := value) (codeOverride := some contract)
+                (freshState := freshState) (freshState' := freshState')
+                (pre := pre) (lower := lower)
+                (callResponseRel := RelationallyAdmissibleOpenCallResponseRel cfg)
+                (by omega) hLower)
+      | Var name =>
+          exact
+            SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+              (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
+                (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+                (revertRel := revertRel) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := exprFuel) (targetFuel := 1)
+                (name := name) (codeOverride := some contract)
+                (freshState := freshState) (freshState' := freshState')
+                (pre := pre) (lower := lower)
+                (callResponseRel := RelationallyAdmissibleOpenCallResponseRel cfg)
+                (by omega) hScoped hLower)
+      | Call callee args =>
+          cases exprFuel with
+          | zero =>
+              intro source compiler trace sourceDone _hInitial _hContains
+                hResolve hAllowed _hResponses _minimumTargetFuel
+              rw [yulOpen_evalValues_call_one_eq_outOfFuel] at hResolve
+              cases hResolve
+              exact False.elim
+                (sourceResultRelatable_outOfFuel_false
+                  (hAllowedRelatable hAllowed))
+          | succ callFuel =>
+              cases callee with
+              | inl yulPrim =>
+                  have hArgsSafe : Safe.CallSafe.exprs args := hSafe.2
+                  have hArgsScoped : SourceExprsScoped layout args := by
+                    simpa [SourceExprScoped] using hScoped
+                  have hArgsOk : UserCallArity.ExprsOk contract args := by
+                    simpa [UserCallArity.ExprOk] using hOk
+                  rcases lower1?_primitive_call_some_components hLower with
+                    ⟨op, argExprs, seq, hOutputs, hBasic, hLowerArgs, hSeq,
+                      hLowerEq⟩
+                  rcases Expr.List.lowerBound1?_lowerArgs_vars hLowerArgs with
+                    ⟨names, hLowerVars⟩
+                  rw [hLowerEq]
+                  apply
+                    sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
+                      (cfg := cfg) (layout := layout)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (prim := prim) (program := program) (ctx := ctx)
+                      (sourceFuel := callFuel.succ) (yulPrim := yulPrim)
+                      (op := op) (args := args) (codeOverride := some contract)
+                      (pre := pre) (argExprs := argExprs) (results := 1)
+                      (lowerArgs := seq) (allowed := allowed) hOutputs
+                  · exact
+                      sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem_actual_fuel
+                        (cfg := cfg) (coverLayout := coverLayout)
+                        (layout := layout) (terminalRel := terminalRel)
+                        (revertRel := revertRel) (prim := prim)
+                        (program := program) (ctx := ctx)
+                        (freshState := freshState) (stateFresh := freshState')
+                        (pre := pre) (lowerArgs := argExprs)
+                        (sourceFuel := callFuel.succ) (fuelBound := fuelBound)
+                        (args := args)
+                        (codeOverride := some contract)
+                        (allowed := SourcePairResultPropagatesErrorTo allowed)
+                        hLayoutSubset
+                        (by
+                          intro err hAllowed
+                          exact hAllowedRelatable (by
+                            simpa [SourcePairResultPropagatesErrorTo] using
+                              hAllowed))
+                        (by
+                          intro sourceFuel' head stateHeadStart preHead lowerHead
+                            stateHead ctxHead allowedHead hHeadFuelBound hMem
+                            hAllowedHead hCoversHead hHeadLower
+                          exact
+                            ih head
+                              (sizeOf_expr_lt_sizeOf_call_of_mem
+                                (callee := .inl yulPrim) hMem)
+                              (sourceFuel := sourceFuel') (ctx := ctxHead)
+                              (allowed := allowedHead) hHeadFuelBound
+                              hAllowedHead hCoversHead
+                              (callSafe_exprs_mem hArgsSafe hMem)
+                              (SourceExprsScoped.mem hArgsScoped hMem)
+                              (UserCallArity.ExprsOk.mem hArgsOk hMem)
+                              hHeadLower)
+                        (by
+                          intro sourceFuel' head stateHeadStart preHead lowerHead
+                            stateHead sourceTailResult targetState hMem
+                            hHeadLower hInitial
+                          exact
+                            lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem_actual_fuel
+                              (cfg := cfg) (layout := layout)
+                              (sourceFuel := sourceFuel') (args := args)
+                              (expr := head) (contract := contract)
+                              (freshState := stateHeadStart)
+                              (freshState' := stateHead) (pre := preHead)
+                              (lower := lowerHead) hArgsSafe hArgsScoped hArgsOk
+                              hMem hHeadLower hInitial)
+                        (by omega) hCovers hArgsSafe hArgsScoped hLowerArgs
+                  · intro sourceArgsResult targetArgsResult hDone
+                    rcases
+                        (Safe.CallSafe.primitive_iff_safe_or_call yulPrim).mp
+                          hSafe.1 with
+                      hSafePrim | hCall
+                    · exact
+                        sourceExprRawPreludeOpenResultRel_prim_regular_safe_of_arg_terminal
+                          (cfg := cfg) (layout := layout)
+                          (terminalRel := terminalRel) (revertRel := revertRel)
+                          (prim := prim) (sourceFuel := callFuel.succ)
+                          (yulPrim := yulPrim) (op := op)
+                          (argExprs := argExprs) (names := names)
+                          (results := 1) (seq := seq) (hOutputs := hOutputs)
+                          (sourceArgsResult := sourceArgsResult)
+                          (targetArgsResult := targetArgsResult)
+                          (exprCallResponseRel :=
+                            RelationallyAdmissibleOpenCallResponseRel cfg)
+                          hSafePrim hBasic hLowerVars hSeq hDone
+                          (hPrim hSafePrim hBasic)
+                          (SourcePrimitiveCallNoErrorAt.of_safe_one_output_positive_fuel
+                            (sourceFuel := callFuel.succ)
+                            (yulPrim := yulPrim) (op := op) (by omega)
+                            hSafePrim hBasic hOutputs)
+                    · subst yulPrim
+                      exact
+                        sourceExprRawPreludeOpenResultRel_prim_regular_call_of_arg_terminal
+                          (cfg := cfg) (layout := layout)
+                          (terminalRel := terminalRel) (revertRel := revertRel)
+                          (prim := prim) (sourceFuel := callFuel.succ)
+                          (yulPrim := .System .CALL) (op := op)
+                          (kind := OpenExternal.CallKind.call)
+                          (argExprs := argExprs) (names := names)
+                          (results := 1) (seq := seq) (hOutputs := hOutputs)
+                          (sourceArgsResult := sourceArgsResult)
+                          (targetArgsResult := targetArgsResult)
+                          (exprCallResponseRel :=
+                            RelationallyAdmissibleOpenCallResponseRel cfg)
+                          (by rfl) hBasic hLowerVars hSeq hDone (by
+                            intro sourceShared sourceStore compilerAfter
+                              sourceCall targetCall response hRel hResponse
+                            cases hRel with
+                            | ok hShared _hVars =>
+                                exact hResponse hShared)
+              | inr functionName =>
+                  have hArgsSafe : Safe.CallSafe.exprs args :=
+                    callSafe_exprs_of_callSafe_expr_user_call hSafe
+                  have hArgsScoped : SourceExprsScoped layout args :=
+                    SourceLexical.expr_user_call_args hScoped
+                  have hArgsOk : UserCallArity.ExprsOk contract args := by
+                    simpa [UserCallArity.ExprOk] using hOk.2
+                  rcases hFindUser hOk with ⟨fn, hFind⟩
+                  cases callFuel with
+                  | zero =>
+                      intro source compiler trace sourceDone _hInitial
+                        _hContains hResolve hAllowed _hResponses
+                        _minimumTargetFuel
+                      rcases
+                          yulOpen_evalValues_user_call_two_eq_nonrelatable_error
+                            (functionName := functionName) (args := args)
+                            (contract := contract) (source := source) with
+                        ⟨err, hEval, hNotRelatable⟩
+                      rw [hEval] at hResolve
+                      cases hResolve
+                      exact False.elim
+                        (hNotRelatable (hAllowedRelatable hAllowed))
+                  | succ userFuel =>
+                      cases userFuel with
+                      | zero =>
+                          intro source compiler trace sourceDone _hInitial
+                            _hContains hResolve hAllowed _hResponses
+                            _minimumTargetFuel
+                          rcases
+                              yulOpen_evalValues_user_call_three_eq_nonrelatable_error
+                                (functionName := functionName) (args := args)
+                                (contract := contract) (source := source) with
+                            ⟨err, hEval, hNotRelatable⟩
+                          rw [hEval] at hResolve
+                          cases hResolve
+                          exact False.elim
+                            (hNotRelatable (hAllowedRelatable hAllowed))
+                      | succ base =>
+                          apply
+                            lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
+                              (cfg := cfg) (layout := layout)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (program := program) (ctx := ctx) (base := base)
+                              (functionName := functionName) (args := args)
+                              (contract := contract) (freshState := freshState)
+                              (freshState' := freshState') (pre := pre)
+                              (lowerExpr := lower) (fn := fn)
+                              (allowed := allowed) hLower hFind
+                          · intro preArgs lowerArgs stateArgs tmp hArgsLower
+                              hFresh
+                            apply
+                              sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?
+                                (cfg := cfg) (layout := layout)
+                                (terminalRel := terminalRel)
+                                (revertRel := revertRel) (prim := prim)
+                                (program := program) (ctx := ctx)
+                                (freshState := freshState)
+                                (stateArgs := stateArgs) (preArgs := preArgs)
+                                (lowerArgs := lowerArgs)
+                                (sourceFuel := base.succ.succ.succ)
+                                (args := args) (codeOverride := some contract)
+                                (allowed :=
+                                  SourcePairResultPropagatesErrorTo allowed)
+                                (by omega) hArgsLower
+                            intro hGenerated
+                            exact
+                              sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem_actual_fuel
+                                (cfg := cfg) (coverLayout := coverLayout)
+                                (layout := layout)
+                                (terminalRel := terminalRel)
+                                (revertRel := revertRel) (prim := prim)
+                                (program := program) (ctx := ctx)
+                                (freshState := freshState)
+                                (stateFresh := stateArgs) (pre := preArgs)
+                                (lowerArgs := lowerArgs)
+                                (sourceFuel := base.succ.succ.succ)
+                                (fuelBound := fuelBound)
+                                (args := args) (codeOverride := some contract)
+                                (allowed :=
+                                  SourcePairResultPropagatesErrorTo allowed)
+                                hLayoutSubset
+                                (by
+                                  intro err hAllowed
+                                  exact hAllowedRelatable (by
+                                    simpa [SourcePairResultPropagatesErrorTo]
+                                      using hAllowed))
+                                (by
+                                  intro sourceFuel' head stateHeadStart preHead
+                                    lowerHead stateHead ctxHead allowedHead
+                                    hHeadFuelBound hMem hAllowedHead hCoversHead
+                                    hHeadLower
+                                  exact
+                                    ih head
+                                      (sizeOf_expr_lt_sizeOf_call_of_mem
+                                        (callee := .inr functionName) hMem)
+                                      (sourceFuel := sourceFuel')
+                                      (ctx := ctxHead) (allowed := allowedHead)
+                                      hHeadFuelBound hAllowedHead hCoversHead
+                                      (callSafe_exprs_mem hArgsSafe hMem)
+                                      (SourceExprsScoped.mem hArgsScoped hMem)
+                                      (UserCallArity.ExprsOk.mem hArgsOk hMem)
+                                      hHeadLower)
+                                (by
+                                  intro sourceFuel' head stateHeadStart preHead
+                                    lowerHead stateHead sourceTailResult
+                                    targetState hMem hHeadLower hInitial
+                                  exact
+                                    lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem_actual_fuel
+                                      (cfg := cfg) (layout := layout)
+                                      (sourceFuel := sourceFuel')
+                                      (args := args) (expr := head)
+                                      (contract := contract)
+                                      (freshState := stateHeadStart)
+                                      (freshState' := stateHead)
+                                      (pre := preHead) (lower := lowerHead)
+                                      hArgsSafe hArgsScoped hArgsOk hMem
+                                      hHeadLower hInitial)
+                                (by omega) hCovers hArgsSafe hArgsScoped
+                                hGenerated
+                          · exact
+                              hUserRegular (by omega) hCovers hSafe hScoped hOk
+                                hFind
 
 /--
 Recursive raw expression preservation with a selected-callee body hook.
@@ -122988,7 +127116,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {exprFuel : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {freshState freshState' : Fresh.State}
@@ -123011,8 +127139,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ exprFuel.succ →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123021,7 +127148,9 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
           SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
             terminalRel revertRel prim program base functionName args contract
             freshState freshState' fn)
-    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hFresh : identName name ∉ layout)
     (hSafe : Safe.CallSafe.expr sourceExpr)
@@ -123032,14 +127161,15 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
         some (pre, lowerExpr, freshState'))
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceCtxExtends ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
           (identName name :: layout) outcomeLayout terminalRel revertRel
           prim program
           { ctxAfter with scope := identName name :: ctxAfter.scope }
-          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          exprFuel.succ rest (some contract) lowerTail
           allowed) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
-      terminalRel revertRel prim program ctx base.succ.succ.succ.succ.succ.succ
+      terminalRel revertRel prim program ctx exprFuel.succ.succ
       (.Let [name] (some sourceExpr) :: rest) (some contract)
       { stmts :=
         pre ++ [Functions.Stmt.let_ (identName name) lowerExpr] ++
@@ -123049,17 +127179,22 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
     (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
     (program := program) (ctx := ctx)
-    (exprFuel := base.succ.succ.succ.succ) (name := name)
+    (exprFuel := exprFuel) (name := name)
     (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hFresh
-    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
-      hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
-      hOk hLower)
-    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_actual_fuel_recursive
+      (ctx := ctx) (sourceFuel := exprFuel) (fuelBound := exprFuel.succ)
+      (allowed := SourcePairResultPropagatesErrorTo allowed)
+      hLayoutSubset hPrim hFindUser hUserRegular (by omega)
+      (by
+        intro err hError
+        exact hAllowed (by
+          simpa [SourcePairResultPropagatesErrorTo] using hError))
+      hCovers hSafe hScoped hOk hLower)
+    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity_actual_fuel
       (cfg := cfg) (layout := layout)
-      (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+      (sourceFuel := exprFuel) (expr := sourceExpr)
       (contract := contract) (freshState := freshState)
       (freshState' := freshState') (pre := pre) (lower := lowerExpr)
       hSafe hScoped hLower (by
@@ -123075,7 +127210,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {exprFuel : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {freshState freshState' : Fresh.State}
@@ -123098,8 +127233,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ exprFuel.succ →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123108,7 +127242,9 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
           SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
             terminalRel revertRel prim program base functionName args contract
             freshState freshState' fn)
-    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hTargetMem : identName name ∈ layout)
     (hPreWrites : SourceWritesDisjoint [identName name] pre)
@@ -123120,12 +127256,13 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
         some (pre, lowerExpr, freshState'))
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceCtxExtends ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctxAfter
-          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          exprFuel.succ rest (some contract) lowerTail
           allowed) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
-      terminalRel revertRel prim program ctx base.succ.succ.succ.succ.succ.succ
+      terminalRel revertRel prim program ctx exprFuel.succ.succ
       (.Assign [name] sourceExpr :: rest) (some contract)
       { stmts :=
         pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
@@ -123135,17 +127272,22 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
     (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
     (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
     (program := program) (ctx := ctx)
-    (exprFuel := base.succ.succ.succ.succ) (name := name)
+    (exprFuel := exprFuel) (name := name)
     (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hTargetMem hPreWrites
-    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
-      hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
-      hOk hLower)
-    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_actual_fuel_recursive
+      (ctx := ctx) (sourceFuel := exprFuel) (fuelBound := exprFuel.succ)
+      (allowed := SourcePairResultPropagatesErrorTo allowed)
+      hLayoutSubset hPrim hFindUser hUserRegular (by omega)
+      (by
+        intro err hError
+        exact hAllowed (by
+          simpa [SourcePairResultPropagatesErrorTo] using hError))
+      hCovers hSafe hScoped hOk hLower)
+    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity_actual_fuel
       (cfg := cfg) (layout := layout)
-      (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+      (sourceFuel := exprFuel) (expr := sourceExpr)
       (contract := contract) (freshState := freshState)
       (freshState' := freshState') (pre := pre) (lower := lowerExpr)
       hSafe hScoped hLower (by
@@ -123168,7 +127310,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {bodyFuel : Nat}
     {ctx : Functions.Source.Ctx} {cond : AstExpr} {body rest : List AstStmt}
     {freshState freshState' : Fresh.State}
     {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
@@ -123191,8 +127333,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ bodyFuel.succ.succ →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123201,7 +127342,6 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
           SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
             revertRel prim program base functionName args contract freshState
             freshState' fn)
-    (hReserve : sourceExprRawPreludeBaseReserve cond ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafeCond : Safe.CallSafe.expr cond)
     (hCondScoped : SourceExprScoped layout cond)
@@ -123231,17 +127371,17 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
             sourceResult) →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           bodyOutcomeLayout terminalRel revertRel prim program ctxAfter
-          base.succ.succ.succ body (some contract) lowerBody allowedBody)
+          bodyFuel body (some contract) lowerBody allowedBody)
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
         (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
         SourceCtxHandlersEq ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
           terminalRel revertRel prim program ctxAfter
-          base.succ.succ.succ.succ.succ rest (some contract) lowerTail allowed) :
+          bodyFuel.succ.succ rest (some contract) lowerTail allowed) :
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx
-      base.succ.succ.succ.succ.succ.succ (.If cond body :: rest)
+      bodyFuel.succ.succ.succ (.If cond body :: rest)
       (some contract)
       { stmts := pre ++ [Functions.Stmt.if_ lowerCond lowerBody] ++
           lowerTail.stmts }
@@ -123249,18 +127389,24 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
   sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_prelude_raw
     (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
     (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-    (program := program) (ctx := ctx) (bodyFuel := base.succ.succ.succ)
+    (program := program) (ctx := ctx) (bodyFuel := bodyFuel)
     (cond := cond) (body := body) (rest := rest) (codeOverride := some contract)
     (pre := pre) (lowerCond := lowerCond) (lowerBody := lowerBody)
     (lowerTail := lowerTail) (allowed := allowed) hAllowed hSupported
     hScopeContains hSafeBody hScopedBody
-    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
-      hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafeCond
-      hCondScoped hCondOk hLower)
-    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_actual_fuel_recursive
+      (ctx := ctx) (sourceFuel := bodyFuel.succ)
+      (fuelBound := bodyFuel.succ.succ)
+      (allowed := SourcePairResultPropagatesErrorTo allowed)
+      hLayoutSubset hPrim hFindUser hUserRegular (by omega)
+      (by
+        intro err hError
+        exact hAllowed (by
+          simpa [SourcePairResultPropagatesErrorTo] using hError))
+      hCovers hSafeCond hCondScoped hCondOk hLower)
+    (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity_actual_fuel
       (cfg := cfg) (layout := layout)
-      (sourceFuel := base.succ.succ.succ) (expr := cond) (contract := contract)
+      (sourceFuel := bodyFuel.succ) (expr := cond) (contract := contract)
       (freshState := freshState) (freshState' := freshState') (pre := pre)
       (lower := lowerCond) hSafeCond hCondScoped hLower (by
         intro functionName args hEq
@@ -123278,13 +127424,20 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {exprFuel : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {allowed : Except Exception State → Prop}
     (hSourceScoped :
       SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
-    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
     (hPrim :
       ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
         {op : Structured.BasicOp},
@@ -123300,8 +127453,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ exprFuel.succ →
         FreshCoversLayout (reserved ++ layout) freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123312,32 +127464,89 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             freshState freshState' fn)
     (hSafe : Safe.CallSafe.expr sourceExpr)
     (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let [name] (some sourceExpr))))
     (hTail :
-      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ other : Name, other ∈ identName name :: layout →
+          other ∈ ({ ctxAfter with
+            scope := identName name :: ctxAfter.scope } :
+              Functions.Source.Ctx).scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported
+            { ctxAfter with scope := identName name :: ctxAfter.scope }
+            (identName name :: layout) outcomeLayout sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved
           (identName name :: layout) outcomeLayout terminalRel revertRel
           prim program
           { ctxAfter with scope := identName name :: ctxAfter.scope }
-          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
-          allowed) :
+          exprFuel.succ compileFuel rest (some contract) allowed) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        base.succ.succ.succ.succ.succ.succ compileFuel
+        exprFuel.succ.succ compileFuel
         (.Let [name] (some sourceExpr) :: rest) (some contract) allowed := by
   exact
     checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
-      (sourceFuel := base.succ.succ.succ.succ) (by
-        intro freshState stateHead pre lowerExpr lowerTailStmts hCovers hLower
+      (sourceFuel := exprFuel) (by
+        intro freshState stateHead pre lowerExpr lowerTailStmts tailCompileFuel
+          freshState' hCovers hLower hTailLower
+        have hTailCoversBase :
+            FreshCoversLayout (reserved ++ layout) stateHead :=
+          freshCoversLayout_lower1?_of_some hCovers hLower
+        have hNameReserved : identName name ∈ reserved :=
+          hReservedHead (identName name) (by
+            simp [Stmt.names, identNames])
+        have hTailCovers :
+            FreshCoversLayout (reserved ++ (identName name :: layout))
+              stateHead := by
+          intro other hMem
+          apply hTailCoversBase
+          rcases List.mem_append.mp hMem with hReserved | hTailLayout
+          · exact List.mem_append_left layout hReserved
+          · rcases List.mem_cons.mp hTailLayout with hEq | hLayout
+            · subst other
+              exact List.mem_append_left layout hNameReserved
+            · exact List.mem_append_right reserved hLayout
+        have hTailLowerBlock :
+            Stmt.List.toBlockFuel? tailCompileFuel.succ stateHead rest =
+              some ({ stmts := lowerTailStmts }, freshState') := by
+          simp [Stmt.List.toBlockFuel?, hTailLower]
+        unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+        intro source compiler trace sourceDone hInitial hResolve hAllowedResult
+          hResponses minimumTargetFuel
         exact
-          sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
+          (sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
             (lowerTail := { stmts := lowerTailStmts })
             (by
               intro other hMem
               simp [hMem])
-            hPrim hFindUser hUserRegular hReserve hCovers
+            hPrim hFindUser hUserRegular hAllowed hCovers
             (hSourceScoped.1.2 (identName name) (by simp [identNames]))
-            hSafe hSourceScoped.2 hOk hLower hTail)
+            hSafe hSourceScoped.2 hOk hLower (by
+              intro ctxAfter hCtxExtends
+              exact
+                (hTail (ctxAfter := ctxAfter)
+                  (compileFuel := tailCompileFuel.succ)
+                  (by
+                    intro other hMem
+                    simp only [List.mem_cons] at hMem ⊢
+                    rcases hMem with hEq | hLayout
+                    · exact Or.inl hEq
+                    · exact Or.inr
+                        (hCtxExtends.scopeContains other
+                          (hScopeContains other hLayout)))
+                  (by
+                    intro sourceResult hAllow
+                    simpa using
+                      SourceResultOutcomeLayoutSupported.mono_layout
+                        (fun other hMem => List.mem_cons_of_mem _ hMem)
+                        (SourceCtxHandlersEq.supported hCtxExtends.handlersEq
+                          (hSupported hAllow))))
+                  hTailCovers hTailLowerBlock))
+            hInitial hResolve hAllowedResult hResponses minimumTargetFuel)
 
 /--
 Checked compiler-output finite-path assignment head backed by recursive raw
@@ -123350,13 +127559,20 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {exprFuel : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {allowed : Except Exception State → Prop}
     (hSourceScoped :
       SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
-    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
     (hPrim :
       ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
         {op : Structured.BasicOp},
@@ -123372,8 +127588,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ exprFuel.succ →
         FreshCoversLayout (reserved ++ layout) freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123385,20 +127600,24 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     (hSafe : Safe.CallSafe.expr sourceExpr)
     (hOk : UserCallArity.ExprOk contract sourceExpr)
     (hTail :
-      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
-        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
-          outcomeLayout terminalRel revertRel prim program ctxAfter
-          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
-          allowed) :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter exprFuel.succ compileFuel rest (some contract) allowed) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        base.succ.succ.succ.succ.succ.succ compileFuel
+        exprFuel.succ.succ compileFuel
         (.Assign [name] sourceExpr :: rest) (some contract) allowed := by
   exact
     checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
-      (sourceFuel := base.succ.succ.succ.succ) (by
-        intro freshState stateHead pre lowerExpr lowerTailStmts hCovers hLower
+      (sourceFuel := exprFuel) (by
+        intro freshState stateHead pre lowerExpr lowerTailStmts tailCompileFuel
+          freshState' hCovers hLower hTailLower
         have hTargetMem : identName name ∈ layout :=
           hSourceScoped.1.2 (identName name) (by simp [identNames])
         have hCoversTarget :
@@ -123411,19 +127630,43 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
         have hPreWrites :
             SourceWritesDisjoint [identName name] pre :=
           lower1?_sourceWritesDisjoint hCoversTarget hLower
+        have hTailCovers :
+            FreshCoversLayout (reserved ++ layout) stateHead :=
+          freshCoversLayout_lower1?_of_some hCovers hLower
+        have hTailLowerBlock :
+            Stmt.List.toBlockFuel? tailCompileFuel.succ stateHead rest =
+              some ({ stmts := lowerTailStmts }, freshState') := by
+          simp [Stmt.List.toBlockFuel?, hTailLower]
         unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
-        intro source compiler trace sourceDone
+        intro source compiler trace sourceDone hInitial hResolve hAllowedResult
+          hResponses minimumTargetFuel
         exact
-          sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive
+          (sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive
             (ctx := ctx)
             (lowerTail := { stmts := lowerTailStmts })
             (by
               intro other hMem
               simp [hMem])
-            hPrim hFindUser hUserRegular hReserve hCovers hTargetMem hPreWrites
-            hSafe hSourceScoped.2 hOk hLower hTail
+            hPrim hFindUser hUserRegular hAllowed hCovers hTargetMem hPreWrites
+            hSafe hSourceScoped.2 hOk hLower (by
+              intro ctxAfter hCtxExtends
+              exact
+                (hTail (ctxAfter := ctxAfter)
+                  (compileFuel := tailCompileFuel.succ)
+                  (by
+                    intro other hMem
+                    exact
+                      hCtxExtends.scopeContains other
+                        (hScopeContains other hMem))
+                  (by
+                    intro sourceResult hAllow
+                    exact
+                      SourceCtxHandlersEq.supported hCtxExtends.handlersEq
+                        (hSupported hAllow)))
+                  hTailCovers hTailLowerBlock)
             (source := source) (compiler := compiler) (trace := trace)
             (sourceDone := sourceDone))
+            hInitial hResolve hAllowedResult hResponses minimumTargetFuel)
 
 /--
 Checked compiler-output finite-path conditional head backed by recursive raw
@@ -123440,11 +127683,10 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {base : Nat}
+    {bodyFuel : Nat}
     {ctx : Functions.Source.Ctx} {cond : AstExpr} {body rest : List AstStmt}
     {allowed : Except Exception State → Prop}
     {canBreak canContinue canLeave : Bool}
-    (hReserve : sourceExprRawPreludeBaseReserve cond ≤ base)
     (hPrim :
       ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
         {op : Structured.BasicOp},
@@ -123460,8 +127702,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
         {fn : Functions.FunDef},
-        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
-            base →
+        base.succ ≤ bodyFuel.succ.succ →
         FreshCoversLayout (reserved ++ layout) freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -123494,7 +127735,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             sourceResult) →
         CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
           reserved layout bodyOutcomeLayout terminalRel revertRel prim program
-          ctxAfter base.succ.succ.succ compileFuel body (some contract)
+          ctxAfter bodyFuel compileFuel body (some contract)
           allowedBody)
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
@@ -123504,12 +127745,12 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             sourceResult) →
         CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
           reserved layout outcomeLayout terminalRel revertRel prim program
-          ctxAfter base.succ.succ.succ.succ.succ compileFuel rest
+          ctxAfter bodyFuel.succ.succ compileFuel rest
           (some contract) allowed) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
-        base.succ.succ.succ.succ.succ.succ compileFuel (.If cond body :: rest)
+        bodyFuel.succ.succ.succ compileFuel (.If cond body :: rest)
         (some contract) allowed := by
   intro compileFuel
   apply
@@ -123537,14 +127778,15 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
         sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
           (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
-          (program := program) (contract := contract) (base := base) (ctx := ctx)
+          (program := program) (contract := contract) (bodyFuel := bodyFuel)
+          (ctx := ctx)
           (cond := cond) (body := body) (rest := rest) (freshState := freshState)
           (freshState' := stateAfterCond) (pre := pre) (lowerCond := lowerCond)
           (lowerBody := lowerBody) (lowerTail := lowerTail) (allowed := allowed)
           (by
             intro other hMem
             simp [hMem])
-          hPrim hFindUser hUserRegular hReserve hCovers hSafeCond hCondScoped
+          hPrim hFindUser hUserRegular hCovers hSafeCond hCondScoped
           hCondOk hCondLower hAllowed hSupported hScopeContains hSafeBody
           hScopedBody
           (by
@@ -123567,6 +127809,545 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                       (hSupported hAllow))) hTailCovers hLowerTail)
           (source := source) (compiler := compiler) (trace := trace)
           (sourceDone := sourceDone)
+
+/--
+Fuel-dispatched checked selected-path constructor for a single initialized
+declaration. The one-tick branch exhausts before the head executes; every
+successor branch evaluates the initializer at its exact residual fuel.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef},
+        base.succ ≤ tailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let [name] (some sourceExpr))))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ other : Name, other ∈ identName name :: layout →
+          other ∈ ({ ctxAfter with
+            scope := identName name :: ctxAfter.scope } :
+              Functions.Source.Ctx).scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported
+            { ctxAfter with scope := identName name :: ctxAfter.scope }
+            (identName name :: layout) outcomeLayout sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved
+          (identName name :: layout) outcomeLayout terminalRel revertRel
+          prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          tailFuel compileFuel rest (some contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Let [name] (some sourceExpr) :: rest)
+        (some contract) allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel)
+          (head := .Let [name] (some sourceExpr)) (rest := rest)
+          (codeOverride := some contract) (allowed := allowed) hAllowed
+  | succ exprFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (contract := contract) (exprFuel := exprFuel) (ctx := ctx)
+          (name := name) (sourceExpr := sourceExpr) (rest := rest)
+          (allowed := allowed) hSourceScoped hAllowed hSupported hScopeContains
+          hPrim hFindUser
+          hUserRegular hSafe hOk hReservedHead hTail
+          (compileFuel := compileFuel)
+
+/--
+Fuel-dispatched checked selected-path constructor for a single assignment.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef},
+        base.succ ≤ tailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest (some contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Assign [name] sourceExpr :: rest)
+        (some contract) allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel)
+          (head := .Assign [name] sourceExpr) (rest := rest)
+          (codeOverride := some contract) (allowed := allowed) hAllowed
+  | succ exprFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (contract := contract) (exprFuel := exprFuel) (ctx := ctx)
+          (name := name) (sourceExpr := sourceExpr) (rest := rest)
+          (allowed := allowed) hSourceScoped hAllowed hSupported hScopeContains
+          hPrim hFindUser
+          hUserRegular hSafe hOk hTail (compileFuel := compileFuel)
+
+/--
+Fuel-dispatched checked selected-path constructor for a conditional head.
+
+At source fuel one the statement head is unreachable. At source fuel two the
+head is entered but the condition evaluator is immediately out-of-fuel.
+Every larger clock exposes the exact residual body fuel.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_if_expr_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {cond : AstExpr} {body rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef},
+        base.succ ≤ tailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
+            revertRel prim program base functionName args contract freshState
+            freshState' fn)
+    (hSafeCond : Safe.CallSafe.expr cond)
+    (hCondScoped : SourceExprScoped layout cond)
+    (hCondOk : UserCallArity.ExprOk contract cond)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBody : Safe.CallSafe.stmts body)
+    (hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body)
+    (hBody :
+      ∀ {bodyFuel : Nat} {ctxAfter : Functions.Source.Ctx}
+        {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        bodyFuel ≤ tailFuel →
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout bodyOutcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout bodyOutcomeLayout terminalRel revertRel prim program
+          ctxAfter bodyFuel compileFuel body (some contract) allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest (some contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.If cond body :: rest) (some contract)
+        allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .If cond body)
+          (rest := rest) (codeOverride := some contract) (allowed := allowed)
+          hAllowed
+  | succ tailFuel =>
+      cases tailFuel with
+      | zero =>
+          exact
+            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := 2) (compileFuel := compileFuel)
+              (sourceStmts := .If cond body :: rest)
+              (codeOverride := some contract) (allowed := allowed) hAllowed
+              (by
+                intro source compiler _hInitial
+                simp [OpenExternal.YulOpen.execSeq,
+                  OpenExternal.YulOpen.exec,
+                  OpenExternal.YulOpen.eval,
+                  OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpen.headResult,
+                  OpenExternal.YulOpenResult.bind,
+                  OpenExternal.YulOpenResult.error])
+      | succ bodyFuel =>
+          exact
+            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_if_expr_recursive
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (contract := contract) (bodyFuel := bodyFuel) (ctx := ctx)
+              (cond := cond) (body := body) (rest := rest)
+              (allowed := allowed) hPrim hFindUser hUserRegular hSafeCond
+              hCondScoped hCondOk hAllowed hSupported hScopeContains hSafeBody
+              hScopedBody
+              (by
+                intro ctxAfter bodyOutcomeLayout allowedBody compileFuel
+                  hScopeAfter hSupportedBody
+                exact
+                  hBody (bodyFuel := bodyFuel) (by omega) hScopeAfter
+                    hSupportedBody)
+              hTail (compileFuel := compileFuel)
+
+/--
+Program-context declaration wrapper for the recursive expression-level
+finite-path frontier.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_dispatch_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        tailFuel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk yulProgram.contract sourceExpr)
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let [name] (some sourceExpr))))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ other : Name, other ∈ identName name :: layout →
+          other ∈ ({ ctxAfter with
+            scope := identName name :: ctxAfter.scope } :
+              Functions.Source.Ctx).scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported
+            { ctxAfter with scope := identName name :: ctxAfter.scope }
+            (identName name :: layout) outcomeLayout sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved
+          (identName name :: layout) outcomeLayout terminalRel revertRel
+          prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          tailFuel compileFuel rest (some yulProgram.contract) allowed)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program tailFuel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Let [name] (some sourceExpr) :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_dispatch
+    hSourceScoped hAllowed hSupported hScopeContains hPrim
+    (fun hExprOk => context.find_function_of_user_expr_ok hExprOk)
+    (by
+      intro base functionName args freshState freshState' fn hBodyFuel hCovers
+        _hSafeCall _hScopedCall hExprOk hFind
+      exact
+        SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALL_recursive
+          context hCovers hFind hExprOk hBodyFuel hBodyFuelAdequate hRec)
+    hSafe hOk hReservedHead hTail
+
+/--
+Program-context assignment wrapper for the recursive expression-level
+finite-path frontier.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_dispatch_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        tailFuel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk yulProgram.contract sourceExpr)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest (some yulProgram.contract) allowed)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program tailFuel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Assign [name] sourceExpr :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_dispatch
+    hSourceScoped hAllowed hSupported hScopeContains hPrim
+    (fun hExprOk => context.find_function_of_user_expr_ok hExprOk)
+    (by
+      intro base functionName args freshState freshState' fn hBodyFuel hCovers
+        _hSafeCall _hScopedCall hExprOk hFind
+      exact
+        SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALL_recursive
+          context hCovers hFind hExprOk hBodyFuel hBodyFuelAdequate hRec)
+    hSafe hOk hTail
+
+/--
+Program-context conditional wrapper for the recursive expression-level
+finite-path frontier.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_if_expr_dispatch_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {tailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {cond : AstExpr} {body rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        tailFuel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hSafeCond : Safe.CallSafe.expr cond)
+    (hCondScoped : SourceExprScoped layout cond)
+    (hCondOk : UserCallArity.ExprOk yulProgram.contract cond)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBody : Safe.CallSafe.stmts body)
+    (hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body)
+    (hBody :
+      ∀ {bodyFuel : Nat} {ctxAfter : Functions.Source.Ctx}
+        {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        bodyFuel ≤ tailFuel →
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout bodyOutcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout bodyOutcomeLayout terminalRel revertRel prim program
+          ctxAfter bodyFuel compileFuel body (some yulProgram.contract)
+          allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest (some yulProgram.contract) allowed)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program tailFuel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.If cond body :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_if_expr_dispatch
+    hPrim (fun hExprOk => context.find_function_of_user_expr_ok hExprOk)
+    (by
+      intro base functionName args freshState freshState' fn hBodyFuel hCovers
+        _hSafeCall _hScopedCall hExprOk hFind
+      exact
+        SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALL_recursive
+          context hCovers hFind hExprOk hBodyFuel hBodyFuelAdequate hRec)
+    hSafeCond hCondScoped hCondOk hAllowed hSupported hScopeContains hSafeBody
+    hScopedBody hBody hTail
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
@@ -176661,20 +181442,62 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_programAccepted_fr
                                 simp [Stmt.toFunctionsList?, Stmt.fuel,
                                   Stmt.toFunctionsListFuel?])
               | inr functionName =>
-                  exact
-                    checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
-                      (cfg := cfg) (reserved := reserved) (layout := layout)
-                      (outcomeLayout := outcomeLayout)
-                      (terminalRel := terminalRel) (revertRel := revertRel)
-                      (prim := prim) (yulProgram := yulProgram)
-                      (program := program) (context := context)
-                      (bound := bound) (ctx := ctx) (names := names)
-                      (functionName := functionName) (args := args)
-                      (allowed := allowed) (canBreak := canBreak)
-                      (canContinue := canContinue) (canLeave := canLeave)
-                      hRecursive hSafe hScoped hStmtOk
-                      (by cases names <;> simp) hSourceScoped hAllowed hCompat
-                      hScope
+                  cases names with
+                  | nil =>
+                      exact
+                        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout)
+                          (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram)
+                          (program := program) (context := context)
+                          (bound := bound) (ctx := ctx) (names := [])
+                          (functionName := functionName) (args := args)
+                          (allowed := allowed) (canBreak := canBreak)
+                          (canContinue := canContinue) (canLeave := canLeave)
+                          hRecursive hSafe hScoped hStmtOk (by simp)
+                          hSourceScoped hAllowed hCompat hScope
+                  | cons name rest =>
+                      cases rest with
+                      | nil =>
+                          exact
+                            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_no_lowering
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout)
+                              (outcomeLayout := outcomeLayout)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (program := program) (ctx := ctx)
+                              (sourceFuel := bound.succ)
+                              (sourceStmt :=
+                                .Let [name]
+                                  (some (.Call (.inr functionName) args)))
+                              (codeOverride := some yulProgram.contract)
+                              (allowed := allowed)
+                              (by
+                                intro freshState
+                                simp [Stmt.toFunctionsList?, Stmt.fuel,
+                                  Stmt.toFunctionsListFuel?])
+                      | cons next rest =>
+                          exact
+                            checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout)
+                              (outcomeLayout := outcomeLayout)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (yulProgram := yulProgram)
+                              (program := program) (context := context)
+                              (bound := bound) (ctx := ctx)
+                              (names := name :: next :: rest)
+                              (functionName := functionName) (args := args)
+                              (allowed := allowed) (canBreak := canBreak)
+                              (canContinue := canContinue)
+                              (canLeave := canLeave)
+                              hRecursive hSafe hScoped hStmtOk
+                              (by simp) hSourceScoped hAllowed hCompat hScope
   | Assign names value =>
       cases value with
       | Lit value =>
@@ -176814,20 +181637,59 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_programAccepted_fr
                             simp [Stmt.toFunctionsList?, Stmt.fuel,
                               Stmt.toFunctionsListFuel?])
           | inr functionName =>
-              exact
-                checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
-                  (cfg := cfg) (reserved := reserved) (layout := layout)
-                  (outcomeLayout := outcomeLayout)
-                  (terminalRel := terminalRel) (revertRel := revertRel)
-                  (prim := prim) (yulProgram := yulProgram)
-                  (program := program) (context := context)
-                  (bound := bound) (ctx := ctx) (names := names)
-                  (functionName := functionName) (args := args)
-                  (allowed := allowed) (canBreak := canBreak)
-                  (canContinue := canContinue) (canLeave := canLeave)
-                  hRecursive hSafe hScoped hStmtOk
-                  (by cases names <;> simp) hSourceScoped hAllowed hCompat
-                  hScope
+              cases names with
+              | nil =>
+                  exact
+                    checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
+                      (cfg := cfg) (reserved := reserved) (layout := layout)
+                      (outcomeLayout := outcomeLayout)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (prim := prim) (yulProgram := yulProgram)
+                      (program := program) (context := context)
+                      (bound := bound) (ctx := ctx) (names := [])
+                      (functionName := functionName) (args := args)
+                      (allowed := allowed) (canBreak := canBreak)
+                      (canContinue := canContinue) (canLeave := canLeave)
+                      hRecursive hSafe hScoped hStmtOk (by simp)
+                      hSourceScoped hAllowed hCompat hScope
+              | cons name rest =>
+                  cases rest with
+                  | nil =>
+                      exact
+                        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_no_lowering
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout)
+                          (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (program := program) (ctx := ctx)
+                          (sourceFuel := bound.succ)
+                          (sourceStmt :=
+                            .Assign [name]
+                              (.Call (.inr functionName) args))
+                          (codeOverride := some yulProgram.contract)
+                          (allowed := allowed)
+                          (by
+                            intro freshState
+                            simp [Stmt.toFunctionsList?, Stmt.fuel,
+                              Stmt.toFunctionsListFuel?])
+                  | cons next rest =>
+                      exact
+                        checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_program_accepted_recursive_actual_or_arg_terminal_frontier
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout)
+                          (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram)
+                          (program := program) (context := context)
+                          (bound := bound) (ctx := ctx)
+                          (names := name :: next :: rest)
+                          (functionName := functionName) (args := args)
+                          (allowed := allowed) (canBreak := canBreak)
+                          (canContinue := canContinue) (canLeave := canLeave)
+                          hRecursive hSafe hScoped hStmtOk (by simp)
+                          hSourceScoped hAllowed hCompat hScope
   | ExprStmtCall value =>
       cases value with
       | Lit value =>
@@ -204561,22 +209423,66 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
           | Call target args =>
               cases target with
               | inr functionName =>
-                  exact
-                    checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
-                      (cfg := cfg) (reserved := reserved) (layout := layout)
-                      (outcomeLayout := outcomeLayout)
-                      (terminalRel := terminalRel) (revertRel := revertRel)
-                      (prim := prim) (yulProgram := yulProgram)
-                      (program := program) (context := context)
-                      (bound := bound) (tailFuel := tailFuel) (ctx := ctx)
-                      (names := names) (functionName := functionName)
-                      (args := args) (rest := rest) (allowed := allowed)
-                      (canBreak := canBreak) (canContinue := canContinue)
-                      (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                      hStmtOk (by cases names <;> simp) hSourceScoped
-                      hTailScoped hReservedHead hAllowed hSupported
-                      hScopeContains hReservedTail hTail
-                      (compileFuel := compileFuel)
+                  cases names with
+                  | nil =>
+                      exact
+                        checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout) (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram) (program := program)
+                          (context := context) (bound := bound)
+                          (tailFuel := tailFuel) (ctx := ctx)
+                          (names := []) (functionName := functionName)
+                          (args := args) (rest := rest) (allowed := allowed)
+                          (canBreak := canBreak) (canContinue := canContinue)
+                          (canLeave := canLeave) hRecursive hFuel hSafe
+                          hScoped hStmtOk (by simp) hSourceScoped
+                          hTailScoped hReservedHead hAllowed hSupported
+                          hScopeContains hReservedTail hTail
+                          (compileFuel := compileFuel)
+                  | cons name more =>
+                      cases more with
+                      | nil =>
+                          exact
+                            checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_no_lowering_reserved_supported
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout)
+                              (outcomeLayout := outcomeLayout)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (program := program) (ctx := ctx)
+                              (tailFuel := tailFuel)
+                              (head := .Let [name]
+                                (some (.Call (.inr functionName) args)))
+                              (rest := rest)
+                              (codeOverride := some yulProgram.contract)
+                              (allowed := allowed)
+                              (by intro fuel freshState; cases fuel <;>
+                                simp [Stmt.toFunctionsListFuel?])
+                              (compileFuel := compileFuel)
+                      | cons next more =>
+                          exact
+                            checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout)
+                              (outcomeLayout := outcomeLayout)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (yulProgram := yulProgram) (program := program)
+                              (context := context) (bound := bound)
+                              (tailFuel := tailFuel) (ctx := ctx)
+                              (names := name :: next :: more)
+                              (functionName := functionName)
+                              (args := args) (rest := rest)
+                              (allowed := allowed) (canBreak := canBreak)
+                              (canContinue := canContinue)
+                              (canLeave := canLeave) hRecursive hFuel hSafe
+                              hScoped hStmtOk (by simp) hSourceScoped
+                              hTailScoped hReservedHead hAllowed hSupported
+                              hScopeContains hReservedTail hTail
+                              (compileFuel := compileFuel)
               | inl yulPrim =>
                   cases names with
                   | nil =>
@@ -204782,21 +209688,64 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
       | Call target args =>
           cases target with
           | inr functionName =>
-              exact
-                checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
-                  (cfg := cfg) (reserved := reserved) (layout := layout)
-                  (outcomeLayout := outcomeLayout)
-                  (terminalRel := terminalRel) (revertRel := revertRel)
-                  (prim := prim) (yulProgram := yulProgram)
-                  (program := program) (context := context) (bound := bound)
-                  (tailFuel := tailFuel) (ctx := ctx) (names := names)
-                  (functionName := functionName) (args := args)
-                  (rest := rest) (allowed := allowed)
-                  (canBreak := canBreak) (canContinue := canContinue)
-                  (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                  hStmtOk (by cases names <;> simp) hSourceScoped hTailScoped
-                  hAllowed hSupported hScopeContains hReservedTail hTail
-                  (compileFuel := compileFuel)
+              cases names with
+              | nil =>
+                  exact
+                    checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
+                      (cfg := cfg) (reserved := reserved) (layout := layout)
+                      (outcomeLayout := outcomeLayout)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (prim := prim) (yulProgram := yulProgram)
+                      (program := program) (context := context)
+                      (bound := bound) (tailFuel := tailFuel) (ctx := ctx)
+                      (names := []) (functionName := functionName)
+                      (args := args) (rest := rest) (allowed := allowed)
+                      (canBreak := canBreak) (canContinue := canContinue)
+                      (canLeave := canLeave) hRecursive hFuel hSafe hScoped
+                      hStmtOk (by simp) hSourceScoped hTailScoped hAllowed
+                      hSupported hScopeContains hReservedTail hTail
+                      (compileFuel := compileFuel)
+              | cons name more =>
+                  cases more with
+                  | nil =>
+                      exact
+                        checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_no_lowering_reserved_supported
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout)
+                          (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (program := program) (ctx := ctx)
+                          (tailFuel := tailFuel)
+                          (head := .Assign [name]
+                            (.Call (.inr functionName) args))
+                          (rest := rest)
+                          (codeOverride := some yulProgram.contract)
+                          (allowed := allowed)
+                          (by intro fuel freshState; cases fuel <;>
+                            simp [Stmt.toFunctionsListFuel?])
+                          (compileFuel := compileFuel)
+                  | cons next more =>
+                      exact
+                        checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout)
+                          (outcomeLayout := outcomeLayout)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram) (program := program)
+                          (context := context) (bound := bound)
+                          (tailFuel := tailFuel) (ctx := ctx)
+                          (names := name :: next :: more)
+                          (functionName := functionName) (args := args)
+                          (rest := rest) (allowed := allowed)
+                          (canBreak := canBreak)
+                          (canContinue := canContinue)
+                          (canLeave := canLeave) hRecursive hFuel hSafe
+                          hScoped hStmtOk (by simp) hSourceScoped
+                          hTailScoped hAllowed hSupported hScopeContains
+                          hReservedTail hTail
+                          (compileFuel := compileFuel)
           | inl yulPrim =>
               cases names with
               | nil =>
@@ -209520,51 +214469,119 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
           | Call target args =>
               cases target with
               | inr functionName =>
-                  exact
-                    checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
-                      (cfg := cfg) (reserved := reserved) (layout := layout)
-                      (konts := konts) (terminalRel := terminalRel)
-                      (revertRel := revertRel) (prim := prim)
-                      (yulProgram := yulProgram) (program := program)
-                      (context := context) (bound := bound)
-                      (tailFuel := tailFuel) (ctx := ctx)
-                      (names := names) (functionName := functionName)
-                      (args := args) (rest := rest) (allowed := allowed)
-                      (canBreak := canBreak) (canContinue := canContinue)
-                      (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                      hStmtOk (by cases names <;> simp) hSourceScoped
-                      hReservedHead hAllowed hSupported hScopeContains
-                      (by
-                        intro compileFuel ctxMid hScopeMid hSupportedMid
-                        exact
-                          hRec (sourceFuelRec := tailFuel)
-                            (reservedRec := reserved)
-                            (layoutRec := (identNames names).reverse ++ layout)
-                            (kontsRec := konts) (ctxRec := ctxMid)
-                            (compileFuelRec := compileFuel)
-                            (sourceStmtsRec := rest)
-                            (allowedRec := allowed)
-                            (canBreakRec := canBreak)
-                            (canContinueRec := canContinue)
-                            (canLeaveRec := canLeave)
-                            (Nat.le_refl tailFuel) hSafeTail hScopedTail
-                            hStmtOkTail
-                            (SourceLexical.tail_scoped_of_cons_let_reverse
-                              (layout := layout) (names := names)
-                              (value? := some (.Call (.inr functionName) args))
-                              (rest := rest) ⟨hSourceScoped, hTailScoped⟩)
-                            hReservedTail hAllowed hSupportedMid
-                            (SourceModeKontLayouts.ControlWithin.mono_current
-                              (currentLayout := layout)
-                              (currentLayout' :=
-                                (identNames names).reverse ++ layout)
-                              (konts := konts)
+                  cases names with
+                  | nil =>
+                      exact
+                        checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout) (konts := konts)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram) (program := program)
+                          (context := context) (bound := bound)
+                          (tailFuel := tailFuel) (ctx := ctx)
+                          (names := []) (functionName := functionName)
+                          (args := args) (rest := rest) (allowed := allowed)
+                          (canBreak := canBreak) (canContinue := canContinue)
+                          (canLeave := canLeave) hRecursive hFuel hSafe
+                          hScoped hStmtOk (by simp) hSourceScoped
+                          hReservedHead hAllowed hSupported hScopeContains
+                          (by
+                            intro compileFuel ctxMid hScopeMid hSupportedMid
+                            exact
+                              hRec (sourceFuelRec := tailFuel)
+                                (reservedRec := reserved)
+                                (layoutRec := layout)
+                                (kontsRec := konts) (ctxRec := ctxMid)
+                                (compileFuelRec := compileFuel)
+                                (sourceStmtsRec := rest)
+                                (allowedRec := allowed)
+                                (canBreakRec := canBreak)
+                                (canContinueRec := canContinue)
+                                (canLeaveRec := canLeave)
+                                (Nat.le_refl tailFuel) hSafeTail hScopedTail
+                                hStmtOkTail
+                                (SourceLexical.tail_scoped_of_cons_let_reverse
+                                  (layout := layout) (names := [])
+                                  (value? := some (.Call (.inr functionName) args))
+                                  (rest := rest) ⟨hSourceScoped, hTailScoped⟩)
+                                hReservedTail hAllowed hSupportedMid
+                                hWithin hScopeMid)
+                          (compileFuel := compileFuel)
+                  | cons name more =>
+                      cases more with
+                      | nil =>
+                          exact
+                            checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_no_lowering
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout) (konts := konts)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (program := program) (ctx := ctx)
+                              (sourceFuel := tailFuel.succ)
+                              (compileFuel := compileFuel)
+                              (head := .Let [name]
+                                (some (.Call (.inr functionName) args)))
+                              (rest := rest)
+                              (codeOverride := some yulProgram.contract)
+                              (allowed := allowed)
+                              (by intro fuel freshState; cases fuel <;>
+                                simp [Stmt.toFunctionsListFuel?])
+                      | cons next more =>
+                          exact
+                            checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_user_call_reserved_supported
+                              (cfg := cfg) (reserved := reserved)
+                              (layout := layout) (konts := konts)
+                              (terminalRel := terminalRel)
+                              (revertRel := revertRel) (prim := prim)
+                              (yulProgram := yulProgram) (program := program)
+                              (context := context) (bound := bound)
+                              (tailFuel := tailFuel) (ctx := ctx)
+                              (names := name :: next :: more)
+                              (functionName := functionName)
+                              (args := args) (rest := rest)
+                              (allowed := allowed) (canBreak := canBreak)
+                              (canContinue := canContinue)
+                              (canLeave := canLeave) hRecursive hFuel hSafe
+                              hScoped hStmtOk (by simp) hSourceScoped
+                              hReservedHead hAllowed hSupported hScopeContains
                               (by
-                                intro other hMem
-                                exact List.mem_append_right _ hMem)
-                              hWithin)
-                            hScopeMid)
-                      (compileFuel := compileFuel)
+                                intro compileFuel ctxMid hScopeMid hSupportedMid
+                                exact
+                                  hRec (sourceFuelRec := tailFuel)
+                                    (reservedRec := reserved)
+                                    (layoutRec :=
+                                      (identNames (name :: next :: more)).reverse ++
+                                        layout)
+                                    (kontsRec := konts) (ctxRec := ctxMid)
+                                    (compileFuelRec := compileFuel)
+                                    (sourceStmtsRec := rest)
+                                    (allowedRec := allowed)
+                                    (canBreakRec := canBreak)
+                                    (canContinueRec := canContinue)
+                                    (canLeaveRec := canLeave)
+                                    (Nat.le_refl tailFuel) hSafeTail
+                                    hScopedTail hStmtOkTail
+                                    (SourceLexical.tail_scoped_of_cons_let_reverse
+                                      (layout := layout)
+                                      (names := name :: next :: more)
+                                      (value? :=
+                                        some (.Call (.inr functionName) args))
+                                      (rest := rest)
+                                      ⟨hSourceScoped, hTailScoped⟩)
+                                    hReservedTail hAllowed hSupportedMid
+                                    (SourceModeKontLayouts.ControlWithin.mono_current
+                                      (currentLayout := layout)
+                                      (currentLayout' :=
+                                        (identNames (name :: next :: more)).reverse ++
+                                          layout)
+                                      (konts := konts)
+                                      (by
+                                        intro other hMem
+                                        exact List.mem_append_right _ hMem)
+                                      hWithin)
+                                    hScopeMid)
+                              (compileFuel := compileFuel)
               | inl yulPrim =>
                   cases names with
                   | nil =>
@@ -209766,31 +214783,81 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
       | Call target args =>
           cases target with
           | inr functionName =>
-              exact
-                checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
-                  (cfg := cfg) (reserved := reserved) (layout := layout)
-                  (konts := konts) (terminalRel := terminalRel)
-                  (revertRel := revertRel) (prim := prim)
-                  (yulProgram := yulProgram) (program := program)
-                  (context := context) (bound := bound)
-                  (tailFuel := tailFuel) (ctx := ctx) (names := names)
-                  (functionName := functionName) (args := args)
-                  (rest := rest) (allowed := allowed)
-                  (canBreak := canBreak) (canContinue := canContinue)
-                  (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                  hStmtOk (by cases names <;> simp) hSourceScoped hAllowed
-                  hSupported hScopeContains
-                  (by
-                    intro compileFuel ctxMid hScopeMid hSupportedMid
-                    exact
-                      hTailAt
-                        (layoutTail := layout) (ctxTail := ctxMid)
-                        (compileFuelTail := compileFuel)
-                        (by
-                          simpa [SourceLexical.StmtOutLayout]
-                            using hTailScoped)
-                        hReservedTail hScopeMid hWithin hSupportedMid)
-                  (compileFuel := compileFuel)
+              cases names with
+              | nil =>
+                  exact
+                    checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
+                      (cfg := cfg) (reserved := reserved) (layout := layout)
+                      (konts := konts) (terminalRel := terminalRel)
+                      (revertRel := revertRel) (prim := prim)
+                      (yulProgram := yulProgram) (program := program)
+                      (context := context) (bound := bound)
+                      (tailFuel := tailFuel) (ctx := ctx) (names := [])
+                      (functionName := functionName) (args := args)
+                      (rest := rest) (allowed := allowed)
+                      (canBreak := canBreak) (canContinue := canContinue)
+                      (canLeave := canLeave) hRecursive hFuel hSafe hScoped
+                      hStmtOk (by simp) hSourceScoped hAllowed
+                      hSupported hScopeContains
+                      (by
+                        intro compileFuel ctxMid hScopeMid hSupportedMid
+                        exact
+                          hTailAt
+                            (layoutTail := layout) (ctxTail := ctxMid)
+                            (compileFuelTail := compileFuel)
+                            (by
+                              simpa [SourceLexical.StmtOutLayout]
+                                using hTailScoped)
+                            hReservedTail hScopeMid hWithin hSupportedMid)
+                      (compileFuel := compileFuel)
+              | cons name more =>
+                  cases more with
+                  | nil =>
+                      exact
+                        checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_no_lowering
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout) (konts := konts)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (program := program) (ctx := ctx)
+                          (sourceFuel := tailFuel.succ)
+                          (compileFuel := compileFuel)
+                          (head := .Assign [name]
+                            (.Call (.inr functionName) args))
+                          (rest := rest)
+                          (codeOverride := some yulProgram.contract)
+                          (allowed := allowed)
+                          (by intro fuel freshState; cases fuel <;>
+                            simp [Stmt.toFunctionsListFuel?])
+                  | cons next more =>
+                      exact
+                        checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_user_call_reserved_supported
+                          (cfg := cfg) (reserved := reserved)
+                          (layout := layout) (konts := konts)
+                          (terminalRel := terminalRel)
+                          (revertRel := revertRel) (prim := prim)
+                          (yulProgram := yulProgram) (program := program)
+                          (context := context) (bound := bound)
+                          (tailFuel := tailFuel) (ctx := ctx)
+                          (names := name :: next :: more)
+                          (functionName := functionName) (args := args)
+                          (rest := rest) (allowed := allowed)
+                          (canBreak := canBreak)
+                          (canContinue := canContinue)
+                          (canLeave := canLeave) hRecursive hFuel hSafe
+                          hScoped hStmtOk (by simp) hSourceScoped hAllowed
+                          hSupported hScopeContains
+                          (by
+                            intro compileFuel ctxMid hScopeMid hSupportedMid
+                            exact
+                              hTailAt
+                                (layoutTail := layout) (ctxTail := ctxMid)
+                                (compileFuelTail := compileFuel)
+                                (by
+                                  simpa [SourceLexical.StmtOutLayout]
+                                    using hTailScoped)
+                                hReservedTail hScopeMid hWithin hSupportedMid)
+                          (compileFuel := compileFuel)
           | inl yulPrim =>
               cases names with
               | nil =>

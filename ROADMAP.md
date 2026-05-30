@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 03:46 PDT.
+Last updated: 2026-05-30 13:11 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -61,7 +61,14 @@ Finite-trace correction:
   chooses the tail cutoff from the actual filled state, pads the completed raw
   target prefix to that cutoff, and rebuilds the full compiled path. Assignment
   additionally derives its destination-preservation invariant from arbitrary
-  prefix write-disjointness. The recursive checked-lowering lift remains.
+  prefix write-disjointness. Recursive expressions, including nested internal
+  user calls, are checked. Direct internal-call post-return replay is checked
+  for discard/existing-assignment targets and fresh declaration targets. The
+  generic direct emitted-block wrapper and concrete `ExprStmtCall`,
+  multi-`Assign`, and multi-`Let` source-form wrappers are checked. The
+  checked compiler-output lifts for those three direct forms are checked.
+  Selected-callee callback synthesis, the exhaustive successor dispatcher, and
+  public-spine replacement remain.
 - [ ] Replace the six stale closed-shell singleton dispatch branches with the
   path-native open sequence frontier and delete the temporary tree frontier.
 - [ ] Carry ordinary `CALL` through the preferred public checked compiler/EVM
@@ -160,8 +167,8 @@ Checked base we can rely on:
 - [x] Checked expression-level `Safe.CallSafe.expr` dispatcher over
   `Expr.lower1?`, so literals, scoped variables, and primitive heads all enter
   the open expression-prelude proof through one interface. Internal user calls
-  now have a live open-body `YulOpen` semantic target; their preservation still
-  needs the recursive function-body bridge.
+  now enter the same recursive expression route, including nested calls in
+  arguments and compound expressions.
 - [x] Checked expression-level single-result invariant dispatcher over
   `Expr.lower1?`, so generated argument cons can derive the head one-value fact
   through the same literal/variable/primitive/user-call case split as expression
@@ -170,6 +177,26 @@ Checked base we can rely on:
   store-domain preservation with the single-result fact, so open let/assign
   sequence constructors can consume one expression-head completed-branch
   theorem instead of separately rebuilding domain and result-count facts.
+- [x] Path-native direct internal-user-call restored-result replay for discarded
+  results and existing assignment targets, including terminal halt/revert
+  propagation, exact visible source-domain preservation, and selected-trace
+  lifting.
+- [x] Path-native direct internal-user-call restored-result replay for fresh
+  multi-result declarations, extending the visible source layout only after a
+  regular return while terminal exits bypass publication.
+- [x] Regular-argument direct internal-user-call semantic heads for
+  discard/existing-assignment and fresh-declaration targets, composing lowered
+  target argument replay, recursively selected callee-body execution, return
+  arity, caller restoration, and pure target publication.
+- [x] Generic path-native direct internal-user-call emitted-block join: terminal
+  argument exits pad only the selected generated prefix and skip the call;
+  regular argument exits append one recursively selected singleton-call path
+  and rebuild `preArgs ++ [call]`.
+- [x] Concrete direct internal-user-call statement wrappers for discarded
+  `ExprStmtCall`, existing-target multi-`Assign`, and fresh multi-`Let`.
+  Multi-`Let` initializes target return slots as hidden compiler state, retains
+  the old source-visible layout during argument/callee execution, and publishes
+  the extended layout only after successful return.
 - [x] Safe one-output primitive singleton/domain invariants no longer consume
   primitive no-error evidence. If the source primitive errors, the singleton
   postcondition is vacuous; the remaining no-error boundary is confined to the
@@ -829,7 +856,16 @@ Remaining work:
      enclosing sequence without direct let-CALL or assign-CALL cases.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
-   - [ ] Relate or rule out expression error and out-of-fuel branches using
+   - [x] Close the arbitrary-actual-fuel generated-argument frontier:
+     unreachable heads retain their unexecuted compiler suffix, the two
+     residual boundary clocks are rejected through the relatable-result
+     filter, and productive heads reconstruct the private scheduler only
+     after its exact residual base is available.
+   - [x] Prove the expression-level low-clock semantic leaves: every call
+     expression at one total tick exhausts before argument completion, and
+     internal user-call expressions at totals two and three reduce to explicit
+     nonrelatable frontend/resource errors before a productive callee body.
+   - [x] Relate or rule out expression error and out-of-fuel branches using
      existing acceptedness/resource premises.
    - [ ] Delete direct let-CALL and assign-CALL scaffolding as soon as the
      expression theorem subsumes it; do not leave compatibility aliases.
@@ -839,6 +875,17 @@ Remaining work:
    - [x] Update no-internal-user-call expression `let` and assignment sequence
      constructors to derive expression evidence internally from checked
      lowering plus the recursive argument-prelude route.
+   - [x] Move path-native `let`, assignment, and `if` expression heads onto
+     their actual evaluator clocks, discharge the low-clock leaves explicitly,
+     and thread `calleeBodyFuel <= enclosingTailFuel` through recursive
+     expressions so selected internal calls can invoke the strong sequence
+     callback honestly.
+   - [x] Narrow the selected internal-callee continuation from the old broad
+     checkpoint scaffold to the admitted concrete body result before invoking
+     recursive sequence preservation. Imported success-valued `State.OutOfFuel`
+     is isolated behind the explicit source-facing
+     `SourceOpenInternalUserCallBodyFuelAdequateAt` resource contract rather
+     than reappearing as an all-results callee premise.
    - [ ] Add matching sequence constructors for internal user-call
      declarations and assignments whose arguments may suspend.
    - [ ] Thread open expression preservation through block sequencing without
@@ -1372,13 +1419,13 @@ actual modules rather than preserved through audit aliases.
      `EncodingCorrect`/`DecodeSafety` inside
      `XRunListPathReady.of_emitInstr_checks_and_budget`.
    - [x] Hide the remaining source-run stack-headroom premise behind checked
-     compiler acceptance:
-     `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticStackSafeNoReturnDataCopy?`.
-     Checked success now carries
-     `RecursiveBridgeSourceRunStackHeadroomCertificate program asm target`, so
-     recursive internal-call cycles can be admitted whenever their stack growth
-     is proved bounded enough, and the preferred public theorem no longer takes
-     `RecursiveBridgeActualSourceRunFrameStackHeadroom` directly.
+     compiler acceptance.  The old proof-carrying
+     `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticStackSafeNoReturnDataCopy?`
+     route has been removed from `NoCallRuntime`; the preferred public theorem
+     now uses
+     `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?`,
+     which combines the executable source recurrence checker with the inferred
+     assembly stack-bound checker.
    - [x] Wire the core predicate through the preferred public no-CALL roots.
      `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and its
      no-out companion now point at the strict no-`RETURNDATACOPY` core theorem,
@@ -4388,3 +4435,845 @@ Nethermind Yul reference semantics -> source-complete Yul bridge -> objects/data
   from accepted CALL wrappers, and then compose to the EVM stack boundary.
 - [ ] Replace the explicit bytecode jumpdest check with an imported or locally proved emitted-jumpdest theorem if EVMYulLean exposes enough scanner internals.
 - [ ] Keep every new layer adjacent: prove preservation only to the layer immediately below, then expose a composed top theorem.
+
+## Executable Stack Recurrence Analysis Roadmap
+
+This roadmap records the replacement of the former proof-carrying
+`RecursiveBridgeSourceRunStackHeadroomCertificate` boundary with an executable
+static analysis that checks EVM operand-stack safety for accepted programs,
+including recursive internal-call cycles whenever a finite bound can be proved.
+
+Definition of done: the preferred public no-CALL/CALL-compatible theorem uses a
+checked compiler entry point whose stack-safety success is computed by Lean code,
+not by `decide` over a semantic `Prop`. Checked success produces a theorem that
+every source-frame state aligned with the compiled target trace satisfies
+`Structured.Preservation.Frame.SourceStackHeadroom`, hence the target trace
+satisfies `state.stack.length + 17 <= 1024` at every gas-aware `EVM.X` replay
+point. The old proof-carrying semantic certificate has been deleted from the
+preferred no-CALL path; remaining source-run headroom names are derived facts
+or transitional theorem variants, not compiler-acceptance evidence.
+
+Non-goals:
+
+- Do not solve the EVM top-16 `DUP`/`SWAP` addressability problem here. That is
+  a separate compiler code-generation limitation and remains enforced by
+  existing `StackOp.dup?`/`StackOp.swap?` compile failure until a stack-spilling
+  pass is designed.
+- Do not accept general unbounded recursion. If an internal-call cycle can run
+  for an unbounded number of active frames for some accepted input/state, the
+  stack-safe checked compiler must reject it.
+- Do not use source fuel as the stack proof. Source fuel is a semantic
+  execution bound; compiler acceptance must prove a stack bound from the program
+  and accepted static resource information.
+- Do not hide compiler-generated call-depth or ranking evidence inside source
+  acceptedness unless that evidence is produced and checked by an executable
+  analyzer theorem.
+
+### Current Boundary To Replace
+
+- [x] Existing structured stack measure:
+  `returnStackWeight returns`, `sourceStackWeight source`, and
+  `SourceStackHeadroom source := sourceStackWeight source + 17 <= 1024`.
+- [x] Existing target bridge:
+  `Frame.StateRel.target_stack_headroom_of_source_headroom` converts source
+  frame headroom into concrete target EVM stack headroom.
+- [x] Former public wrapper:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticStackSafeNoReturnDataCopy?`
+  hid `RecursiveBridgeActualSourceRunFrameStackHeadroom` behind a
+  proof-carrying semantic certificate.  That wrapper has now been removed from
+  `NoCallRuntime`.
+- [x] Replace the wrapper with an executable stack-resource check that returns
+  data in `Type` plus a checked soundness theorem.
+- [x] Staged checkpoint: the stack-safe no-CALL wrapper now requires an
+  executable lowered-function call-depth certificate in `Type` before the old
+  semantic stack-headroom certificate is consulted.
+- [x] Additive executable-only no-CALL gates now exist:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?`
+  for the default executable checker and
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?`
+  for explicit checked ranked graphs. The default checker first tries the
+  inferred acyclic rank-zero call graph, then the narrow `SelfGuardedOnce`
+  and `MutualGuardedOnce` bounded-recursion checkers, and finally the generic
+  `GuardedZeroCalls` one-step finite-function checker. All expose theorem
+  projections to the base no-CALL compiler result and executable stack
+  certificate.
+- [x] Add a checked branch-audit theorem for the preferred gate:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceAcceptedShape`
+  proves successful preferred compilation came from the inferred ranked
+  checker, the `SelfGuardedOnce` fallback, the `MutualGuardedOnce` fallback,
+  or the `GuardedZeroCalls` fallback.  In the narrow recursive fallback cases
+  the checked graph is either empty, exactly the single self edge `1 -> 0`, or
+  exactly the two mutual edges `left(1) -> right(0)` and
+  `right(1) -> left(0)`.
+- [x] Add preferred-gate source-side stack-resource projections:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCertificate`
+  and `_stackResourceSafe` expose the semantic `StackResourceSafe` theorem
+  produced by the executable source recurrence certificate directly from the
+  same checked compile success used by `LayerAudit`.
+- [x] Delete or demote the proof-carrying stack certificate from the preferred
+  `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` path.
+
+### Phase 0: Truth And Scope Audit
+
+- [x] Inventory every place the current public theorem or checked compiler path
+  mentions `RecursiveBridgeSourceRunStackHeadroomCertificate`,
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`,
+  the now-deleted `RecursiveBridgeActualSourceFrameStackHeadroomBound`, and
+  `RecursiveBridgeActualEVMStackHeadroomBound`.
+- [x] Confirm the first executable analysis target is the lowered function
+  program plus the structured/procedure runtime frame shape: function
+  `FrameBound` gives the 16-slot visible/caller-frame limit, while structured
+  `returns` carries hidden return frames.
+- [ ] Confirm the source-facing theorem target:
+  executable analysis success implies all actual structured source frames in
+  any accepted run satisfy `SourceStackHeadroom`.
+- [x] Confirm the target-facing theorem target:
+  source frame headroom plus existing frame relation implies the gas-aware
+  target replay headroom needed by `EVM.X`.
+- [x] Record the theorem-boundary audit in `PROGRESS_LOG.md`.
+
+### Phase 1: Stack-Effect Algebra
+
+- [x] Add a small executable stack-effect API near the structured layer:
+  `StackDelta`, `StackPeak`, `StackSummary`, or equivalent.
+- [ ] For each `Structured.BasicOp`, compute:
+  required input height, output delta, maximum transient stack growth, and
+  whether the operation can suspend/open-call in the CALL-enabled branch.
+- [x] For `Structured.BasicInstr` and `Structured.Code`, compute exact
+  stack-height transformers over a symbolic visible height, returning `none`
+  on possible underflow or unknown effect.
+- [ ] Prove soundness:
+  if code analysis succeeds at visible height `h`, any successful `Code.run`
+  from a state with stack length `h` has the predicted final height and never
+  exceeds the predicted peak.
+- [x] Staged soundness checkpoint: proved final-stack-height soundness for
+  `Structured.Code.run` when the executable analyzer succeeds over supported
+  continuing primitive steps.
+- [x] Staged peak checkpoint: proved `Code.RunStackBoundedBy`, so any
+  successful straight-line `Code.run` stays below the analyzed peak at every
+  instruction boundary for the supported continuing primitive fragment.
+- [x] Strengthened straight-line peak checkpoint:
+  `Code.runStackBoundedBy_of_analyzeFrom?` proves the per-instruction stack
+  bound directly from executable analysis without requiring a completed run,
+  and `Code.source_runResult_stackBoundPoints_of_analyzeFrom?` turns that
+  bound into annotated assembly-source replay points.
+- [x] Prove monotonicity:
+  if a summary is safe at height `h`, it remains safe at `h + k` with peak
+  shifted by `k`.
+- [ ] Keep this phase independent of procedures and recursion.
+
+### Phase 2: Structured Statement Summaries
+
+- [ ] Define executable outcome summaries for statements and blocks, indexed by
+  mode: regular, break, continue, leave, and terminal halt/revert.
+- [ ] Track for each possible outcome:
+  final visible stack delta, maximum visible-stack peak before that outcome,
+  and call-site obligations encountered along the path.
+- [ ] Prove sequence composition generically:
+  `summary(s1; s2)` is sound from `summary(s1)` plus `summary(s2)` at each
+  regular final height.
+- [ ] Prove branch composition generically:
+  `if`/`switch` summaries take the maximum peak of condition evaluation and
+  selected branches, with all branch outcomes preserved.
+- [ ] Prove loop summaries with explicit invariants:
+  continue edges must return to the loop header height, break edges must match
+  the loop exit shape, and the body peak is bounded by the loop invariant.
+- [ ] Reject or report any construct whose existing `WF` permits stack-shape
+  behavior the analyzer cannot summarize.
+
+### Phase 3: Procedure And Call-Graph Extraction
+
+- [ ] Compute one local non-recursive summary per procedure body with internal
+  call sites left as symbolic edges.
+- [ ] For each internal call edge, record:
+  caller procedure, callee procedure, call-site prefix peak, visible-height
+  delta at the call, callee argument count, callee return count, and normal
+  return continuation height.
+- [x] Prove the key internal-call weight equation:
+  after `splitArgs?` and `pushReturn`, `sourceStackWeight` increases by exactly
+  `1` over the caller pre-call weight.
+- [ ] Prove call-return weight equations for regular and leave/terminal
+  outcomes, including `attachReturns` and hidden return-frame popping.
+- [x] Staged return-weight checkpoint:
+  `popReturn?` plus `attachReturns?` proves the caller-restored
+  `sourceStackWeight` is exactly one word less than the callee pre-return
+  weight; terminal no-attach paths still need outcome-specific wiring.
+- [ ] Prove local summary soundness assuming a symbolic bound for each callee.
+- [x] Build an executable call graph over function/procedure names, including
+  main as a distinguished root. Current checked integration uses the lowered
+  function graph; `Structured.StackResource` also has a structured call graph
+  skeleton.
+- [x] Prove static call-depth checker soundness for the acyclic lowered
+  function graph: every root-reachable `FunctionPath` has length bounded by
+  the executable `StackDepthCertificate.depth`.
+- [x] Add endpoint-aware static paths and an active call-stack relation:
+  `FunctionPathTo` records the current function reached by a root call path,
+  `ActiveCallStack` tracks the proof-side internal function chain, and the
+  executable `StackDepthCertificate` bounds the active chain length.
+
+Core recurrence model:
+
+- [ ] Define procedure entry weight abstractly as
+  `ambientHiddenWeight + argc(proc)`, where `ambientHiddenWeight` accounts for
+  caller frames already in `returns`.
+- [ ] Define `ProcExtraPeak[p]` as the maximum extra `sourceStackWeight` above
+  procedure `p` entry over every execution path of `p`.
+- [ ] For an internal call edge from `p` to `q`, prove and use:
+  `calleeEntryWeight = callerPreCallWeight + 1`.  The `+1` is the hidden return
+  token; the callee arguments replace the visible caller stack, but the caller
+  stack is moved into `returns`, so no other weight is lost.
+- [ ] For an acyclic call edge, the callee contribution is:
+  `edgePrefixExtra + 1 + ProcExtraPeak[q]`.
+- [ ] For a bounded recursive SCC with active-frame bound `D`, the SCC
+  contribution is bounded by the maximum checked call path of length at most
+  `D`, adding one hidden token per active internal call plus each procedure's
+  local peak along that path.
+- [ ] The checker accepts only when the root bound satisfies:
+  `initialSourceStackWeight + ProcExtraPeak[root] + 17 <= 1024`.
+
+### Phase 4: Acyclic Recurrence Solver
+
+- [ ] Detect strongly connected components and topologically order the acyclic
+  component graph.
+- [ ] For acyclic components, solve exact maximum active-frame/stack peak by
+  longest-path dynamic programming over call edges.
+- [ ] Compute procedure bounds:
+  `ProcExtraPeak[p]` is the maximum additional `sourceStackWeight` above the
+  procedure entry weight for all executions of `p`.
+- [ ] Compute root bound from canonical entry:
+  main entry visible stack plus hidden return weight plus `ProcExtraPeak[main]`
+  plus the reserved 17 slots is at most 1024.
+- [ ] Prove solver soundness by induction over the component topological order.
+- [ ] Wire acyclic success into the checked compiler as the first executable
+  replacement for the proof-carrying stack certificate.
+
+### Phase 5: Bounded Recursive SCC Certificates
+
+- [ ] Define a checked `SCCRecurrenceCertificate` in `Type`, generated or
+  verified by executable code, not by arbitrary semantic `Prop`.
+- [ ] Certificate fields should include:
+  SCC procedures, entry procedures, maximum active frames per procedure or per
+  SCC, edge traversal bounds, and proof/check data explaining why every cycle
+  decreases a finite measure or is otherwise finitely unfoldable.
+- [ ] Start with a simple fully executable certificate:
+  user/program-side finite unfolding bound for an SCC plus an executable check
+  that all paths up to that bound either leave the SCC or are rejected.
+- [x] Add the generic ranked call-state checker kernel:
+  `CallDepth.Ranked` checks a finite graph of `(functionName, rank)` nodes,
+  proves every accepted root path is bounded by the computed depth, accepts
+  abstract finite countdown graphs, and rejects an unranked self-loop. The
+  generic kernel alone does not certify a raw recursive source body; source
+  patterns need a separate executable analyzer that ties ranks to reachable
+  calls.
+- [x] Add the ranked active-stack bridge:
+  `CallDepth.Ranked.ActiveCallStack` relates runtime active function-name
+  stacks to ranked node paths and proves the ranked certificate gives the
+  active-length bound consumed by `RuntimeCallStackShape.WithBound`.
+- [x] Add executable ranked graph conformance checking:
+  `graphConforms?` verifies that ranked roots cover real main-body internal
+  calls and every ranked function node has a ranked successor for each
+  syntactic internal call in that function body; its soundness theorem supplies
+  the next ranked node during root and nested call threading.
+- [x] Add `RankedResourceContext`: the ranked active-node path is packaged with
+  source/direct stack-resource context, with checked constructors for main,
+  root internal calls, nested internal calls, and returns over the shared
+  generic stack budget.
+- [x] Add the first state-sensitive call-summary proof interface suggested by
+  the oracle architecture critique: `ConcreteCallChain` and `CallGraphSound`
+  abstract over concrete frames, root frames, direct-call steps, and a
+  `Matches : Node -> Frame -> Prop` relation.  The generic theorem
+  `CallGraphSound.chain_to_path` turns any matched concrete call chain into a
+  ranked graph `Path`, and the existing all-syntactic `ProgramConformance`
+  checker is now exposed as one coarse function-name instance of this
+  interface via `ProgramConformance.toCallGraphSound` and
+  `CheckedProgramCertificate.callGraphSound`.
+- [x] Connect the state-sensitive call-summary interface to checked ranked
+  depth: `CallGraphSound.chain_frame_count_bound` combines any
+  `CallGraphSound` instance with `Program.RankedDepthCertificate` to prove
+  `depth + 1 <= cert.depth` for concrete call chains, and
+  `CheckedProgramCertificate.directNameCallChain_frame_count_bound` gives this
+  theorem for the existing coarse function-name conformance checker.
+- [x] Instantiate the state-sensitive call-summary interface for the
+  `GuardedZeroCalls` checker over its abstract rank-frame model:
+  `GuardedZeroCalls.CheckedCertificate.callGraphSound` proves that every
+  accepted abstract direct call `(rank 1 caller) -> (rank 0 callee)` is backed
+  by a checked ranked edge, and
+  `GuardedZeroCalls.CheckedCertificate.abstractCallChain_frame_count_bound`
+  derives the checked frame-count bound from the generic ranked-depth theorem.
+- [ ] Prove this certificate sound:
+  no accepted execution can have more active frames in the SCC than the checked
+  bound.
+- [ ] Combine SCC-local bounds with local per-procedure peaks:
+  peak inside a bounded SCC is at most entry weight plus the maximum prefix
+  peak along one bounded call path plus one hidden return-token word per active
+  frame.
+- [ ] Reject SCCs with no checked finite-depth certificate.
+
+### Phase 6: Ranking-Based Recursive Power
+
+- [ ] Add interval/range abstract interpretation over relevant Yul/structured
+  values so bounds can be inferred from guards like `x < C`, `x <= C`, and
+  constant assignments.
+- [ ] Add affine ranking certificates:
+  a measure is a bounded natural expression over procedure arguments/locals,
+  each recursive edge proves the measure decreases, and all non-recursive paths
+  preserve the measure domain.
+- [ ] Add lexicographic ranking certificates for mutual recursion.
+- [ ] Add finite-state certificates for enum-like recursion, dispatch tables,
+  and bounded switches.
+- [ ] Add path-sensitive guard refinement so mutually exclusive branches do not
+  force worst-case joins too early.
+- [ ] Add loop-call integration:
+  loops that contain recursive calls must either have a loop-iteration bound or
+  contribute to the same SCC ranking certificate.
+- [ ] Prove each ranking family sound by reducing it to the generic
+  `SCCRecurrenceCertificate` active-frame bound.
+
+### Phase 7: Analyzer/Checker Split
+
+- [x] Separate inference from checking:
+  `inferStackRecurrences? program` may be heuristic and incomplete, while
+  `checkStackRecurrenceCertificate? program cert` is small, executable, and
+  proved sound.
+  Current API:
+  `CallDepth.Ranked.StackRecurrenceCertificate` is the small sidecar format,
+  `checkStackRecurrenceCertificate?` validates it, and
+  `inferStackRecurrenceCertificate?`/`inferStackRecurrences?` are deliberately
+  separate from the checker.
+- [x] Add checked ranked-certificate packaging:
+  `checkedProgramCertificate?` combines executable ranked-depth checking and
+  executable ranked graph conformance into a single `CheckedProgramCertificate`
+  in `Type`, with theorem projections to stack budget and conformance.
+- [x] Add a conservative built-in analyzer/checker path:
+  `inferAcyclicCertificate?` emits a rank-zero graph from the lowered
+  function call graph and immediately validates it with
+  `checkedProgramCertificate?`. This gives the compiler tower an executable
+  inference surface for acyclic programs while keeping recursive cycles rejected
+  until a real guard/ranking analysis supplies path-sensitive ranked nodes.
+- [x] Add the first path-sensitive executable recursive source checker:
+  `CallDepth.Ranked.SelfGuardedOnce.checkedCertificate?` recognizes the narrow
+  lowered-functions pattern `f(counter) { if counter { f(0) } }` with literal
+  root calls, assigns rank zero to zero roots and rank one to nonzero roots,
+  rebuilds the finite ranked graph, and rechecks the depth/budget certificate.
+  `CallDepth.Ranked.MutualGuardedOnce.checkedCertificate?` extends the same
+  finite rank-one idea to exactly two functions that guard on their own
+  counter and call the other function with literal zero.  The default
+  executable source-side certificate now also tries
+  `CallDepth.Ranked.GuardedZeroCalls.checkedCertificate?`, which accepts any
+  finite set of one-step guarded functions `if counter { callee(0) }` whose
+  callees stay inside the checked function set.  The preferred public no-CALL
+  gate combines that source recurrence check with inferred target assembly
+  stack bounds.
+- [x] Let the compiler use inference by default, then verify the inferred
+  certificate with the checker.
+  Current default:
+  `recursiveBridgeExecutableStackCertificate?` first delegates to
+  `recursiveBridgeExecutableInferredRankedStackCertificateAsStack?`, whose
+  current analyzer emits a conservative rank-zero graph and validates it with
+  `checkedProgramCertificate?`. If that fails, it now tries the checked
+  `SelfGuardedOnce`, `MutualGuardedOnce`, and generic `GuardedZeroCalls`
+  source recurrence paths, so the default executable source-side certificate
+  accepts bounded one-step self, mutual, and larger finite recursive cycles.
+- [x] Add default-branch equations for the executable source recurrence checker:
+  `recursiveBridgeExecutableStackCertificate?_of_inferredRanked`,
+  `recursiveBridgeExecutableStackCertificate?_of_selfGuardedOnceChecked`,
+  `recursiveBridgeExecutableStackCertificate?_of_mutualGuardedOnceChecked`,
+  `recursiveBridgeExecutableStackCertificate?_of_guardedZeroCallsChecked`, and
+  `recursiveBridgeExecutableStackCertificate?_none_of_branches_none` prove that
+  the default checker accepts exactly through the inferred ranked branch or the
+  checked guarded fallbacks, and rejects when all branches fail.
+- [x] Permit optional explicit certificates only if they are checked by the same
+  executable checker and are not trusted by theorem statements.
+  Current explicit ranked route:
+  `recursiveBridgeExecutableRankedStackCertificate? program edges roots` first
+  validates the supplied graph with `checkedProgramCertificate?`, and the
+  stack-certificate wrapper only exposes checked-success projections. The
+  default public route still uses inferred certificates.
+- [x] Keep certificate formats stable and small enough that Lean proofs can
+  reason about checker success without unfolding the whole analyzer.
+  Current guarded projections expose `maxRank <= 1` and prove the checked graph
+  is either empty, exactly the single `1 -> 0` self edge, or exactly the two
+  `left(1) -> right(0)` / `right(1) -> left(0)` mutual edges.  The generic
+  `GuardedZeroCalls` projection proves every accepted root has rank at most
+  one, the checked function-name set is duplicate-free, every guarded callee
+  stays inside that checked set, and every generated body edge goes from rank
+  one to rank zero.
+- [x] Expose the default-branch proof at the combined public gate:
+  successful
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?`
+  now proves the source recurrence checker accepted through the inferred
+  ranked branch, through the `SelfGuardedOnce` branch with the same
+  empty-or-`1 -> 0` graph fact, or through the `MutualGuardedOnce` branch with
+  the empty-or-two-edge mutual graph fact, or through the generic
+  `GuardedZeroCalls` branch with its rank-one-root, duplicate-free checked
+  names, callee-closure, checked function-body call facts, and
+  rank-one-to-zero-edge facts.
+- [x] Add negative examples where the executable checker must reject unsafe
+  recursive shapes.  Current examples reject unguarded self-recursion,
+  non-decreasing guarded self-recursion, and guarded mutual recursion; the
+  plain inferred checker still rejects the accepted `SelfGuardedOnce` program,
+  proving that bounded recursive acceptance comes only from the path-sensitive
+  fallback.
+
+### Phase 8: Source-Run Headroom Theorem
+
+- [x] Define the source/direct semantic `StackResourceSafe` surface produced by
+  executable checker success.  Current checked location:
+  `Functions.CallDepth.Program.StackResourceSafe` over the lowered function
+  program, with `StackResourceCertificate` projections for acyclic and ranked
+  executable certificates.
+- [x] Prove the arithmetic bridge:
+  `RuntimeFrameShape depth source` plus the executable budget
+  `16 + 17 * depth + 17 <= 1024` implies
+  `Structured.Preservation.Frame.SourceStackHeadroom source`.
+- [x] Add the source/direct frame-shape bridge:
+  source/direct `StateRel`, a 16-slot layout bound, and a checked hidden-return
+  shape imply `RuntimeFrameShape`.
+- [x] Prove checked hidden-return shape evolution lemmas for the source/direct
+  internal-call boundary: `splitArgs?` plus a shaped caller frame pushes a
+  shaped hidden return frame, `popReturn?` recovers the tail shape, and
+  `attachReturns?` composes with the frame-visible bound to recover headroom
+  after return.
+- [x] Add `RuntimeCallStackShape`: active static call chain, visible-stack
+  bound, hidden-return length alignment, and caller-frame bounds now derive
+  `RuntimeFrameShape` and `SourceStackHeadroom` from the executable depth
+  certificate. Root/internal call push and return-pop/attach constructors are
+  checked.
+- [x] Add `SourceDirectResourceContext`: source/direct `StateRel` is packaged
+  with `RuntimeCallStackShape`, with checked main, root-call, internal-call,
+  and return constructors. This is the additive invariant future recursive
+  callbacks can thread without touching the parallel CALL refactor.
+- [x] Decouple runtime headroom shape from the acyclic proof route:
+  `RuntimeCallStackShape` now carries the active-length bound explicitly, and
+  exposes `WithBound` constructors for source/direct call and return threading.
+  The current acyclic checker still derives those bounds, while future bounded
+  recursive certificates can supply them directly.
+- [x] Refactor the runtime/source-direct resource boundary to consume a generic
+  `StackBudgetCertificate`; acyclic `StackDepthCertificate` and ranked
+  `RankedDepthCertificate` both project into that budget, so later recursive
+  analyzers do not need to fork the headroom proof.
+- [ ] Prove:
+  checker success implies every structured `Block.Eval` frame visited by any
+  accepted execution has `SourceStackHeadroom`.
+- [x] Prove the local semantic projection:
+  `StackResourceSafe` turns any threaded `SourceDirectResourceContext` into
+  `Frame.SourceStackHeadroom`, and successful acyclic/ranked executable compile
+  gates recover this semantic certificate from checked compiler output.
+- [x] Expose a checked-success theorem:
+  `Functions.CallDepth.Program.stackResourceSafe_of_stackResourceChecked`
+  turns boolean `stackResourceChecked` success into a verified
+  `StackResourceCertificate` and `StackResourceSafe` theorem.
+- [ ] Use existing lowering/preservation annotations, or add an annotated
+  preservation theorem if necessary, to convert `StackResourceSafe` into
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`.
+- [x] Add the trace-context conversion target:
+  `RecursiveBridgeActualBlockTraceSourceDirectResourceContext` records the
+  source/direct resource context plus structured `Frame.StateRel` at each
+  actual block-trace point, and a checked theorem converts it to
+  `RecursiveBridgeActualBlockTraceSourceStackHeadroom` using the executable
+  certificate's `StackResourceSafe`.
+- [x] Add source-run context wrappers:
+  `RecursiveBridgeActualSourceRunFrameStackResourceContext.toHeadroom` converts
+  the trace-context package into the old
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`, and acyclic/ranked
+  executable theorem roots now consume the context package instead of direct
+  source-frame headroom.
+- [x] Add generic annotated preservation plumbing:
+  `Structured.Preservation.SourceRunResultPoints`/`ARunResultPoints` record
+  predicates at actual source/assembly replay points, and
+  `BlockTraceResultPoints` converts annotated assembly-source runs into
+  annotated target block traces using checked assembly compilation.
+- [x] Add the direct target-trace annotation route:
+  `Structured.Preservation.BlockTraceResultPoints.of_blockTraceResult_invariant`
+  derives per-block target-trace points directly from an initial point plus a
+  block-step invariant. The no-CALL runtime now has matching
+  `RecursiveBridgeActual...of_blockTraceResult_invariant` wrappers, so target
+  trace annotation no longer needs to detour through a reconstructed
+  `Assembly.Source.runNResult` equality.
+- [x] Add the concrete-headroom annotation bridge:
+  `RecursiveBridgeActualBlockTraceStackHeadroom.of_sourceRunResultPoints`
+  converts assembly-source points carrying
+  `state.stack.length + 17 <= 1024` into the target block-trace headroom
+  structure consumed by the gas-aware bridge.
+- [x] Add the actual source-run EVM headroom point package:
+  `RecursiveBridgeActualSourceRunEVMStackHeadroomPoints` records concrete
+  stack-headroom points on the actual gasless assembly replay, then converts
+  them through checked `Assembly.compile?` into
+  `RecursiveBridgeActualEVMStackHeadroomBound`. Acyclic/ranked executable
+  compile gates now have direct projections from this point package to the
+  target-side gas-aware stack resource.
+- [x] Add the invariant-to-points bridge:
+  `SourceRunResultPoints.of_runNResult_invariant` constructs annotated assembly
+  runs from an ordinary `runNResult`, an initial point, and a one-step
+  preservation invariant. The no-CALL runtime wrapper
+  `RecursiveBridgeActualSourceRunFrameStackResourcePoints.of_runNResult_invariant`
+  specializes this to transient stack-resource points.
+- [x] Derive the initial source-run resource point:
+  `RecursiveBridgeSourceDirectResourcePoint.initial` constructs the canonical
+  empty-stack entry point from the executable stack-resource certificate,
+  `SourceDirect.StateRel.initial`, and `Frame.stateRel_initial`. Acyclic and
+  ranked checked-gate wrappers now need only the actual run equality plus the
+  remaining compiler-output one-step resource invariant.
+- [x] Add the resource-point bridge:
+  `RecursiveBridgeSourceDirectResourcePoint` packages a source/direct resource
+  context plus a bounded transient structured stack prefix and structured
+  `Frame.StateRel` at a target block boundary. This is deliberately stronger
+  than raw target stack headroom but weaker than requiring a plain source/direct
+  context at every compiler-temporary instruction. `RecursiveBridgeActualSourceRunFrameStackResourcePoints.toContext`
+  and the acyclic/ranked checked-gate wrappers convert annotated source-run
+  points into `RecursiveBridgeActualSourceRunFrameStackResourceContext`.
+- [x] Add the resource-to-concrete-headroom projection:
+  `RecursiveBridgeSourceDirectResourcePoint.to_stack_headroom` derives concrete
+  target stack headroom from the source/direct transient context and
+  `Frame.StateRel`, and
+  `RecursiveBridgeActualSourceRunFrameStackResourcePoints.toEVMStackHeadroomPoints`
+  maps stronger resource annotations to the concrete headroom point package.
+  The acyclic/ranked executable compile gates also project resource points
+  directly to `RecursiveBridgeActualEVMStackHeadroomBound`.
+- [x] Add prefix algebra for compiler temporaries:
+  `Frame.StateRel.with_visible_prefix`,
+  `SourceDirectTransientResourceContext.of_prefix`, and
+  `RecursiveBridgeSourceDirectResourcePoint.of_resourceContext_prefix`
+  preserve the hidden-frame relation while placing checked temporary operands
+  above a base source/direct resource context.
+- [ ] Avoid adding a public per-block trace witness; it must be derived from
+  the accepted source run and checked compiler output.
+
+### Phase 9: Conservative Compiler Integration
+
+- [x] Add the stack-resource checker to the structured `CompilationBounds` or
+  an adjacent checked compiler resource package. Current staged location:
+  `recursiveBridgeExecutableStackDepthCertificate?` in the no-CALL runtime
+  boundary.
+- [x] Add the conservative accepted-fragment gate
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?`.
+  It first requires the executable source-side recurrence certificate, then
+  infers a word-PC assembly stack-bound table and rechecks that table into an
+  `AssemblyBounds.ProgramBoundCertificate`; neither the source recurrence facts
+  nor the inferred table are trusted without checker success.
+- [x] Add checked-success projections for the preferred gate:
+  base no-CALL/no-`RETURNDATACOPY` checked compile, executable stack-resource
+  certificate, semantic `StackResourceSafe`, source-recursion branch audit, and
+  concrete EVM stack-headroom bound.
+- [x] Staged checkpoint: the preferred public wrapper now uses this combined
+  source-plus-target gate and derives the concrete target headroom facts
+  internally. Source-frame headroom is kept on the honest annotated
+  preservation route below, rather than reconstructed from target headroom
+  alone.
+- [x] Add honest preferred-gate projections to source-frame resource points,
+  source-frame resource context, and
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`. These now require the
+  preservation one-step invariant for
+  `RecursiveBridgeSourceDirectResourcePoint`; only the concrete EVM headroom
+  projection follows from the inferred assembly-bound certificate plus the
+  preservation-produced `Assembly.Source.runNResult` equality by itself.
+- [x] Checked-success projection checkpoint: the acyclic and ranked executable
+  stack-safe compile gates now recover `RecursiveBridgeExecutableStackResourceCertificate`
+  and its `StackResourceSafe` theorem from the computed stack certificate.
+  The actual-trace `RecursiveBridgeActualSourceRunFrameStackHeadroom` projection
+  remains the open annotated-preservation step.
+- [x] Annotated source-run projection checkpoint: the acyclic and ranked
+  executable stack-safe compile gates now derive
+  `RecursiveBridgeActualSourceRunFrameStackResourceContext` from annotated
+  source-run points and checked assembly compilation. The remaining work is to
+  produce those annotated points from the preservation theorem output.
+- [x] Staged executable projection checkpoint:
+  the new acyclic and ranked executable gates prove the base checked compile
+  result plus the checked stack certificate. They deliberately do not claim the
+  semantic source-run headroom fact yet.
+- [x] Add transitional theorem roots over executable stack gates plus an
+  explicit `RecursiveBridgeActualSourceRunFrameStackHeadroom` premise. These
+  remove the proof-carrying compile artifact from the theorem statement, but
+  are not yet the definition of done because the headroom premise still must be
+  derived from checked preservation annotations.
+- [x] Derive the concrete target block-trace headroom package directly from
+  actual `Assembly.Preservation.BlockTraceResult` and the checked assembly
+  bound certificate. This removes the public target replay equality and
+  per-block headroom witness from the preferred no-CALL roots.
+- [x] Update `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`
+  and no-out-of-gas companion to the combined executable-source plus
+  inferred-assembly-bound roots. The preferred checked compile gate now requires
+  both `recursiveBridgeExecutableStackCertificate?` and
+  `AssemblyBounds.inferProgramBoundCertificate?` to succeed.
+- [x] Add matching no-out-of-gas executable resource-context roots:
+  the result theorem and no-out companion now both have acyclic/ranked
+  executable stack-safe variants over
+  `RecursiveBridgeActualSourceRunFrameStackResourceContext`.
+- [x] Delete the old proof-carrying compile route from the no-CALL public
+  theorem lane. Ranked wrappers that remain are executable checked routes or
+  compatibility helpers; they are not the proof-carrying semantic stack
+  certificate.
+- [ ] Defer general path-sensitive/ranked recursive-cycle acceptance. The public
+  theorem is complete for the conservative accepted fragment: if the combined
+  executable source-recurrence plus inferred assembly-bound gate accepts the
+  program, the target stack-resource facts used by the gas-aware EVM bridge are
+  derived internally.
+
+### Phase 10: CALL Compatibility
+
+- [ ] Ensure ordinary external `CALL` does not enter the internal-call
+  recursion graph; it is an open external event, not a structured internal
+  frame push.
+- [ ] Account for CALL-family primitive stack effects in the stack-effect
+  algebra: operands consumed, result words pushed, and no hidden internal
+  return frame.
+- [ ] For reentrant external responses, require only that the response resumes
+  with the related shared state demanded by the open boundary; do not model
+  callee stack frames.
+- [ ] Compose the executable internal-stack checker with the CALL open
+  request/response theorem once the CALL agent finishes the public spine.
+- [ ] Add tests/examples mixing bounded internal recursion with external CALL
+  suspensions.
+
+### Phase 11: Tests And Counterexamples
+
+- [x] Add accepted acyclic examples that compute exact small bounds.
+- [x] Add direct recursion rejected as unbounded.
+- [x] Add unresolved-root rejection examples for the executable depth checker.
+- [x] Add mutual recursion rejected without a certificate.
+- [x] Add bounded direct recursion accepted by finite unfolding for the first
+  narrow source pattern: `SelfGuardedOnce.checkedCertificate?` accepts the
+  one-step guarded self-call case and rejects the same raw recursive body under
+  the all-syntactic-calls conformance checker.
+- [x] Add bounded mutual recursion accepted by finite unfolding for the first
+  narrow two-function source pattern: `MutualGuardedOnce.checkedCertificate?`
+  accepts the one-step guarded mutual-call case while the all-syntactic-calls
+  conformance checker still rejects the same raw recursive bodies.
+- [x] Add bounded larger recursive cycles accepted by finite unfolding for the
+  generic one-step source pattern: `GuardedZeroCalls.checkedCertificate?`
+  accepts a guarded three-function cycle where every recursive body calls the
+  next function with literal zero, while the narrower self and mutual checkers
+  reject that program.
+- [x] Broaden the generic guarded-cycle root recognizer without weakening the
+  recurrence proof: `GuardedZeroCalls.rootsFromStmt?` now structurally accepts
+  bare literal root calls, `block` statements whose contents are accepted root
+  statements, and `if` bodies whose contents are accepted root statements.
+  The checker proves every extracted root is still a real syntactic internal
+  call into the checked function set with rank at most one, and has
+  native-decide examples accepting guarded three-function cycles with nested
+  and composite main roots.
+- [x] Broaden the generic guarded-cycle function-body recognizer in the same
+  structural style: `GuardedZeroCalls.functionShape?` now accepts the guarded
+  zero-call body through accepted `block` wrappers, proves every accepted
+  function shape contributes an actual syntactic internal call in the checked
+  function body, and exposes that fact through the preferred compile gate's
+  source-recurrence branch theorem.
+- [x] Add the abstract-frame `CallGraphSound` instance for
+  `GuardedZeroCalls`, proving that checked `(functionName, rank)` frames and
+  abstract direct calls compose through the same generic ranked path/depth
+  theorem as future source-frame instances.
+- [x] Expose the guarded abstract call-graph soundness and abstract chain
+  frame-count bound through
+  `RecursiveBridgeExecutableGuardedZeroCallsStackCertificate`, so the Yul
+  compile-gate certificate wrapper can project these checked facts without
+  adding a public theorem premise.
+- [ ] Instantiate `CallGraphSound` for `GuardedZeroCalls` with a real
+  path-sensitive frame-matching relation: rank zero means the checked argument
+  is zero, rank one is the conservative/top state, zero-ranked guarded calls
+  are unreachable, and rank-one guarded calls step to rank-zero callees.
+- [x] Add bounded direct recursion accepted by the generic ranked call-state
+  kernel. This is not yet wired to source-expression inference.
+- [x] Add bounded mutual recursion accepted by the generic ranked call-state
+  kernel. This is not yet wired to source-expression inference.
+- [x] Add source-facing ranked conformance examples: a simple checked program
+  whose ranked roots/edges cover the real call graph is accepted, and the same
+  program with a missing ranked edge is rejected.
+- [x] Add inferred-checker examples:
+  `inferAcyclicCertificate?` accepts the simple acyclic lowered function
+  program and rejects a direct self-recursive function, confirming that the
+  conservative analyzer does not smuggle in recursive-call boundedness.
+- [ ] Add loop-contained recursion accepted only with loop and recursion bounds.
+- [x] Add examples whose maximum stack is exactly `1024 - 17` accepted and
+  exactly one word above rejected:
+  `Structured.StackResource.Examples.pushMany 1007` is accepted by
+  `Code.stackSafeFrom? 0 17 1024`, while `pushMany 1008` is rejected. The
+  function call-depth checker also accepts the largest current acyclic budget
+  boundary (`chainProgram 58`) and rejects the first overflow boundary
+  (`chainProgram 59`).
+- [x] Add assembly-bound checker examples: `pushPopAsm` and a zero-net-stack
+  loop are accepted by `AssemblyBounds.programBoundOk?`, while a positive
+  stack-growth loop is rejected.
+- [ ] Add CALL-family examples showing external calls do not count as internal
+  return-frame recursion.
+- [x] Add regression tests proving the public theorem cannot be invoked with
+  only the old proof-carrying stack certificate. `LayerAudit` now contains
+  public-spine tripwire examples that apply the exported result and
+  no-out-of-gas roots using only the combined executable source-recurrence plus
+  inferred assembly-bound compile gate; repointing those aliases to an older
+  headroom-premise root makes the file stop type-checking.
+
+### Phase 12: Public Theorem And Audit Cleanup
+
+- [x] Grep public theorem surfaces for:
+  `RecursiveBridgeSourceRunStackHeadroomCertificate`,
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`,
+  `StackResourceSafe`, `SCCRecurrenceCertificate`, `Layout`, `Evidence`,
+  `Obligation`, and `Replay`.
+- [x] Any remaining public occurrence must be either a checked compiler theorem
+  output or a deliberately source-facing semantic premise.  Current audit:
+  `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and the
+  no-out-of-gas companion take the combined executable checked compile success
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+  program = some (asm, target)` as their only stack-related premise.  They do
+  not take `RecursiveBridgeActualSourceRunFrameStackHeadroom`,
+  `StackResourceSafe`, a source stack certificate, a layout witness, or a replay
+  obligation.  Remaining public `NoCallRuntime` occurrences are checked-success
+  projection helpers derived from executable compiler gates, or source-facing
+  semantic projection helpers that explicitly require the one-step
+  `RecursiveBridgeSourceDirectResourcePoint` preservation invariant rather than
+  reconstructing source frames from target headroom.
+- [ ] Run focused checks:
+  `lake env lean EvmCompiler/Structured/Preservation.lean`,
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`,
+  `lake env lean EvmCompiler/LayerAudit.lean`, and the CALL public root once
+  available.
+- [x] Focused stack-resource checkpoint:
+  `lake build EvmCompiler.Functions.CallDepth EvmCompiler.Structured.StackResource`
+  passes after adding the modules to the aggregate `Functions` and
+  `Structured` imports.
+- [x] Focused additive resource-context checkpoint:
+  `lake env lean EvmCompiler/Structured/StackResource.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepth.lean`, and
+  `lake env lean EvmCompiler/Functions/CallDepthExamples.lean` pass after the
+  monotone straight-line analyzer theorem, source/direct resource context, and
+  mutual-recursion rejection example.
+- [x] Focused staged integration checkpoint:
+  `lake env lean EvmCompiler/Functions/CallDepth.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepthExamples.lean`, and
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean` pass after decoupling
+  active-length bounds from the acyclic-only path proof.
+- [x] Focused ranked-kernel checkpoint:
+  `lake env lean EvmCompiler/Functions/CallDepthRanked.lean`,
+  `lake build EvmCompiler.Functions.CallDepthRanked`, and
+  `lake env lean EvmCompiler/Functions.lean` pass.
+- [x] Focused ranked conformance/resource-context checkpoint:
+  `lake env lean EvmCompiler/Structured/StackResource.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepth.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepthExamples.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepthRanked.lean`,
+  `lake env lean EvmCompiler/Functions.lean`,
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`,
+  `lake env lean EvmCompiler/LayerAudit.lean`, and
+  `lake build EvmCompiler.Functions.CallDepthRanked
+  EvmCompiler.Functions.CallDepth EvmCompiler.Structured.StackResource` pass.
+- [x] Focused executable public-root staging checkpoint:
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`,
+  `lake env lean EvmCompiler/LayerAudit.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepth.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepthRanked.lean`, and
+  `lake env lean EvmCompiler/Structured/StackResource.lean` pass after adding
+  transitional executable-gate theorem roots. A full `lake build
+  EvmCompiler.Yul.NoCallRuntime` is currently blocked by parallel CALL-owned
+  `NoCallCreate` failures before the new `NoCallRuntime` olean can be emitted.
+- [x] Focused semantic resource-certificate checkpoint:
+  `lake build EvmCompiler.Functions.CallDepth`,
+  `lake build EvmCompiler.Functions.CallDepthRanked`,
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`,
+  `lake env lean EvmCompiler/Functions.lean`,
+  `lake env lean EvmCompiler/Functions/CallDepthExamples.lean`, and
+  `lake env lean EvmCompiler/Structured/StackResource.lean` pass after adding
+  `StackResourceSafe`/`StackResourceCertificate` projections and executable
+  gate stack-resource certificate recovery.
+- [x] Focused annotated resource-point checkpoint:
+  `lake env lean EvmCompiler/Structured/Preservation.lean` and
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean` pass after adding generic
+  source-run/block-trace point annotations plus acyclic/ranked conversion
+  wrappers from those points to the executable resource context.
+- [x] Focused checker/analyzer split checkpoint:
+  `lake build EvmCompiler.Functions.CallDepthRanked`,
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`,
+  `lake env lean EvmCompiler/LayerAudit.lean`, `git diff --check`, and the
+  focused no-`sorry`/`admit`/`axiom`/`unsafe` scan pass after splitting
+  `StackRecurrenceCertificate`, `checkStackRecurrenceCertificate?`,
+  `inferStackRecurrenceCertificate?`, and `inferStackRecurrences?`.
+- [x] Run `#print axioms` or local axiom scans for the new public theorem roots.
+  Source-fed axiom print for the current `NoCallRuntime.lean` executable
+  stack roots reports only the existing Lean/library axioms
+  (`propext`, `Classical.choice`, `Quot.sound`, and `Lean.ofReduceBool` on the
+  top theorem roots).  The checked-sidecar EVM headroom root reports only
+  `propext`, `Classical.choice`, and `Quot.sound`; the inferred-bound EVM
+  headroom root reports the same.
+- [x] Focused executable assembly-bound checkpoint:
+  `lake env lean EvmCompiler/Structured/StackResource.lean`,
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean`, and
+  `git diff --check -- EvmCompiler/Structured/StackResource.lean` pass after
+  adding the word-PC keyed assembly bound table, per-instruction and
+  whole-program executable checkers, running successor-PC soundness, and the
+  `programBoundOk?` theorem deriving source-run EVM stack-headroom points.
+- [x] Focused no-CALL assembly-bound bridge checkpoint:
+  `lake build EvmCompiler.Structured.StackResource` and
+  `lake env lean EvmCompiler/Yul/NoCallRuntime.lean` pass after adding
+  `RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCertificate`
+  plus compile-gate projection helpers for EVM headroom points and frame
+  resource points.
+  A checked sidecar compiler boundary now exists:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?`
+  checks the emitted assembly against a supplied word-PC bound table and
+  projects checked success to concrete EVM stack-headroom.  An inferred
+  compiler boundary also exists, and the preferred public gate wraps it with
+  the executable source recurrence checker:
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?`
+  first checks source recurrence safety, then runs the monotone assembly-bound
+  inference pass, rechecks the inferred table into a certificate, derives the
+  canonical empty-entry initial point, and projects checked success to concrete
+  EVM stack-headroom without a supplied table.
+- [x] Record a `PROGRESS_LOG.md` audit entry naming the final executable
+  checker, soundness theorem, public root theorem, tests, and any remaining
+  fundamental resource assumptions. Current conservative public root is exposed
+  through `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM`;
+  accepted no-CALL programs use
+  `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?`,
+  which runs and rechecks the executable source recurrence checker and assembly
+  bound inference pass before the theorem derives EVM stack headroom.
+- [ ] Delete stale private compatibility wrappers after downstream callers move
+  to the executable checked compiler boundary.  Current cleanup checkpoint:
+  removed the unused explicit-ranked gas-aware theorem roots
+  `...rankedExecutableStackSafeCompile_actualSourceRunFrameStackHeadroom...`
+  and `...rankedExecutableStackSafeCompile_actualSourceRunFrameStackResourceContext...`
+  for both result and no-out-of-gas forms, and removed the default executable
+  stack-safe variants that still took
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom` or its resource-context
+  wrappers directly.  It also removed the no-CALL gas-aware theorem roots that
+  could be invoked with only a caller-supplied
+  `RecursiveBridgeActualSourceRunEVMStackHeadroomPoints` package or with only
+  the assembly-inferred stack-bound gate.  The obsolete global
+  `RecursiveBridgeActualSourceFrameStackHeadroomBound` certificate type has
+  also been deleted; the live source-frame package is the actual-run-scoped
+  `RecursiveBridgeActualSourceRunFrameStackHeadroom`, with preferred
+  projections requiring the preservation one-step resource invariant.  The
+  remaining direct residual/headroom gas-aware helper roots in
+  `NoCallRuntime` have been marked `private`, so imports cannot call the
+  target-headroom-premise route directly.  The checked ranked/default sidecar
+  certificate/projection helpers remain available for future checker work.
+
+### Acceptance Power Ladder
+
+Each rung should be independently useful and checked before moving upward:
+
+- [ ] Rung A: all acyclic internal-call graphs.
+- [ ] Rung B: recursive SCCs with explicit finite active-frame certificates.
+- [ ] Rung C: recursive SCCs with constant/range guards inferred by interval
+  analysis.
+- [ ] Rung D: affine and lexicographic ranking certificates over bounded word
+  ranges.
+- [ ] Rung E: path-sensitive refinement for switches, loops, and mutually
+  recursive dispatch patterns.
+- [ ] Rung F: optional sidecar certificates checked by the same executable
+  checker, so power can grow without enlarging trusted theorem assumptions.
+
+### Architecture Risks
+
+- [ ] Ranking inference over full Yul arithmetic is undecidable in general; the
+  checker must stay sound and incomplete rather than clever and opaque.
+- [ ] Worst-case 256-bit measures are usually too large for the 1024-word stack;
+  useful accepted recursion needs small constant/range bounds, not merely
+  "decreases a word".
+- [ ] Existing structured preservation may not expose every intermediate frame
+  annotation needed by the stack theorem. If so, add an annotated preservation
+  theorem rather than reintroducing a public trace witness.
+- [ ] Avoid broad `simp` over compiled programs in checker soundness proofs;
+  prove small algebraic soundness lemmas for summaries and recurrence solver
+  output.
+- [ ] Keep CALL and internal recursion separate: external CALL reentrancy can
+  mutate shared state, but it must not be counted as an internal return-frame
+  stack push in this analyzer.
