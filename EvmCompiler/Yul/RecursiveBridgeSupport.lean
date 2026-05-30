@@ -57614,6 +57614,63 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_arg_terminal
         (args := args) (contract := contract) hExprOk)
       hCallResponse
 
+namespace SourceExprRawPreludeOpenCallResponseRel
+
+/--
+Canonical response relation while replaying the hidden result slot after an
+open internal user call.
+-/
+def beforeUserCallReplay
+    (prim : Objects.Source.PrimitiveSemantics)
+    (tmp : Name) (ctx : Functions.Source.Ctx)
+    (callerCompiler : Objects.Source.State)
+    (rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
+    OpenExternal.OpenCall
+        (OpenExternal.OpenResult Exception (State × List Word)) →
+      OpenExternal.OpenCall
+        (OpenExternal.OpenResult Functions.EVMException
+          Functions.Source.CallResult) →
+      OpenExternal.CallResponse → Prop :=
+  fun sourceCall targetCall response =>
+    rawCallResponseRel sourceCall
+      { site := targetCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (targetCall.resume response)
+            (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+              callerCompiler) }
+      response
+
+/--
+Canonical response relation while running the selected internal user-call
+body. A suspended body resumes through caller restoration before entering the
+hidden-slot replay relation.
+-/
+def beforeUserCallRestore
+    (caller : State) (returns : List EvmYul.Identifier)
+    (lowerFn : Functions.FunDef)
+    (callResponseRel :
+      OpenExternal.OpenCall
+          (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            Functions.Source.CallResult) →
+        OpenExternal.CallResponse → Prop) :
+    SourceOpenSeqCallResponseRel :=
+  fun sourceCall targetCall response =>
+    callResponseRel
+      { site := sourceCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (sourceCall.resume response)
+            (yulOpenUserCallRestoreResult caller returns) }
+      { site := targetCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (targetCall.resume response)
+            (fun bodyResult =>
+              compilerOpenUserCallBodyResult lowerFn bodyResult.1) }
+      response
+
+end SourceExprRawPreludeOpenCallResponseRel
+
 /--
 Selected-function specialization of the regular raw internal-call expression
 bridge.
@@ -57784,9 +57841,143 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_bod
         (callerCompiler := targetState.insert tmp Expr.zero)
         (bodyCallResponseRel := bodyCallResponseRel)
         (callResponseRel := callResponseRel)
-        hSafe hScoped hRelInserted hFind hLookup hArgsLength hInsert
+      hSafe hScoped hRelInserted hFind hLookup hArgsLength hInsert
         hLowerParams hLowerReturns hBody hBodyCallResponse)
       hExprOk hReplayResponse
+
+/--
+Canonical-response specialization of the selected-function raw internal-call
+bridge.
+
+The body and hidden-slot replay response relations are determined by the raw
+expression continuation. Recursive callers provide only the selected body
+relation itself.
+-/
+theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_body_callSafe_scoped_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {lowerFn : Functions.FunDef}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetBodyFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {yulContract : EvmYul.Account .Yul}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {paramStore : Locals.Source.Store}
+    {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.ok ((.Ok callerShared callerStore : State), values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
+    (hFind :
+      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
+        some yulContract)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ values.reverse.length)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params values.reverse
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hBody :
+      OpenExternal.OpenResultRel
+        (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallRestore
+          (.Ok callerShared callerStore) returns lowerFn
+          (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
+            { ctxAfter with scope := tmp :: ctxAfter.scope }
+            (targetState.insert tmp Expr.zero) rawCallResponseRel))
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := (targetState.insert tmp Expr.zero).shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args)) :
+    OpenExternal.OpenResultRel rawCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel.succ values.reverse functionName
+          (some yulProgram.contract) (.Ok callerShared callerStore)))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+          (targetState.insert tmp Expr.zero))
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+              argResult.2 targetBodyFuel.succ argResult.1.shared)
+            (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+              { ctxAfter with scope := tmp :: ctxAfter.scope }
+              argResult.1))) :=
+  sourceExprRawPreludeOpenResultRel_user_call_regular_of_find_function_body_callSafe_scoped
+    (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+    (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+    (program := program) (lowerFn := lowerFn) (args := args)
+    (freshState := freshState) (stateArgs := stateArgs)
+    (freshState' := freshState') (preArgs := preArgs) (lowerArgs := lowerArgs)
+    (tmp := tmp) (callerShared := callerShared) (callerStore := callerStore)
+    (values := values) (targetState := targetState) (ctxAfter := ctxAfter)
+    (sourceFuel := sourceFuel) (targetBodyFuel := targetBodyFuel)
+    (functionName := functionName) (yulContract := yulContract)
+    (params := params) (returns := returns) (body := body)
+    (paramStore := paramStore)
+    (bodyCallResponseRel :=
+      SourceExprRawPreludeOpenCallResponseRel.beforeUserCallRestore
+        (.Ok callerShared callerStore) returns lowerFn
+        (SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
+          { ctxAfter with scope := tmp :: ctxAfter.scope }
+          (targetState.insert tmp Expr.zero) rawCallResponseRel))
+    (callResponseRel :=
+      SourceExprRawPreludeOpenCallResponseRel.beforeUserCallReplay prim tmp
+        { ctxAfter with scope := tmp :: ctxAfter.scope }
+        (targetState.insert tmp Expr.zero) rawCallResponseRel)
+    (rawCallResponseRel := rawCallResponseRel)
+    hSafe hScoped hArgs hFresh hTmpFreshLayout hDone hFind hLookup hArgsLength
+    hInsert hLowerParams hLowerReturns hBody
+    (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
+    hExprOk
+    (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
 
 /--
 Target-side open shape of an internal function-call statement after the callee
