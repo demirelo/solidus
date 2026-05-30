@@ -36009,6 +36009,103 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
       (source := source) (compiler := compiler) hInitial)
 
 /--
+Checked direct-fast-path base case for terminal-aware raw argument preludes.
+
+`directCallArgsSafe?` is true exactly for the empty source argument list, and
+`toLocals1?` then produces the empty lowered list. The positive source-fuel
+premise is explicit because imported `evalArgs 0 []` reports out of fuel.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_directCallArgsSafe
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {args : List AstExpr} {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel targetFuel : Nat} {codeOverride : Option AstContract}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hSourceFuel : 0 < sourceFuel)
+    (hTargetFuel : 0 < targetFuel)
+    (hDirect : Expr.List.directCallArgsSafe? args = true)
+    (hToLocals : Expr.List.toLocals1? args = some lowerArgs) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride [] lowerArgs
+      targetFuel callResponseRel := by
+  have hLowerNil : lowerArgs = [] :=
+    toLocals1?_eq_nil_of_directCallArgsSafe hDirect hToLocals
+  have hArgsNil : args = [] := directCallArgsSafe_eq_true_iff_nil.mp hDirect
+  subst args
+  subst lowerArgs
+  cases sourceFuel with
+  | zero =>
+      omega
+  | succ sourceFuel =>
+      cases targetFuel with
+      | zero =>
+          omega
+      | succ targetFuel =>
+          intro source compiler hInitial
+          simpa using
+            sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
+              (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := sourceFuel)
+              (targetFuel := targetFuel) (codeOverride := codeOverride)
+              (callResponseRel := callResponseRel)
+              (source := source) (compiler := compiler) hInitial
+
+/--
+Checked direct/generated dispatcher for terminal-aware raw argument preludes.
+
+Internal user-call lowering either selects the empty direct fast path or emits
+the checked generated argument prelude. The direct branch is constructed here;
+callers provide only the generated branch theorem.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_direct_or_lowerBound1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel targetFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hSourceFuel : 0 < sourceFuel)
+    (hTargetFuel : 0 < targetFuel)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hGenerated :
+      Expr.List.lowerBound1? freshState args =
+          some (preArgs, lowerArgs, stateArgs) →
+        SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
+          terminalRel revertRel prim program ctx sourceFuel args codeOverride
+          preArgs lowerArgs targetFuel callResponseRel) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride preArgs lowerArgs
+      targetFuel callResponseRel := by
+  rcases hArgs with hDirect | hGeneratedArgs
+  · rcases hDirect with ⟨hDirect, hToLocals, hPre, _hState⟩
+    subst preArgs
+    exact
+      sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_directCallArgsSafe
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (ctx := ctx) (args := args) (lowerArgs := lowerArgs)
+        (sourceFuel := sourceFuel) (targetFuel := targetFuel)
+        (codeOverride := codeOverride) (callResponseRel := callResponseRel)
+        hSourceFuel hTargetFuel hDirect hToLocals
+  · exact hGenerated hGeneratedArgs.2
+
+/--
 Compose a terminal-aware generated argument prefix with a raw expression
 continuation.
 

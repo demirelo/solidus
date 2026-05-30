@@ -673,6 +673,10 @@ Remaining work:
      argument-response relation and add its whole-expression wrapper.
      Suspended argument requests now resume into the full selected-callee
      continuation without an ad hoc response adapter premise.
+   - [x] Construct the checked internal-user-call direct argument fast path
+     from `directCallArgsSafe?`, `toLocals1?`, and explicit positive source
+     and target fuel; dispatch direct versus generated arguments without
+     exposing empty-list replay plumbing.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
