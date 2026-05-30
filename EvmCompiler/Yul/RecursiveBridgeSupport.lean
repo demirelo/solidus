@@ -36442,6 +36442,37 @@ abbrev SourceExprRawPreludeOpenCallResponseRel : Type :=
     OpenExternal.OpenCall SourceExprPreludeOpen.RawResult →
     OpenExternal.CallResponse → Prop
 
+/--
+Admit a raw expression-prefix result exactly when it can still contribute to an
+enclosing statement path.
+
+Successful prefixes remain available to the enclosing continuation.  Prefix
+errors are propagated unchanged by declaration, assignment, and conditional
+heads, so they are admitted only when the enclosing statement filter admits the
+same error.  In particular, this keeps low-fuel `OutOfFuel` prefixes out of the
+public successful-run spine without imposing a static expression reserve.
+-/
+def SourcePairResultPropagatesErrorTo
+    {α : Type _} (allowed : Except Exception α → Prop) :
+    Except Exception (State × List Word) → Prop
+  | .ok _ => True
+  | .error err => allowed (.error err)
+
+/-- Public successful-run filters exclude propagated raw-prefix out-of-fuel. -/
+theorem sourcePairResultPropagatesErrorTo_outOfFuel_false
+    {allowed : Except Exception State → Prop}
+    (hRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    SourcePairResultPropagatesErrorTo allowed
+        (.error (.OutOfFuel : Exception)) →
+      False := by
+  intro hAllowed
+  exact
+    sourceResultRelatable_outOfFuel_false
+      (hRelatable (by
+        simpa [SourcePairResultPropagatesErrorTo] using hAllowed))
+
 def SourceExprRawPreludeOpenSoundAtExactTarget
     (cfg : StateRelConfig) (layout : List Name)
     (terminalRel :
@@ -38594,6 +38625,42 @@ theorem openResultResolves_bind_sourceArgAppendHeadValues_inv_left
     simp only [List.append_nil] at hTrace
     subst trace
     exact ⟨.ok value, hHead⟩
+
+/--
+An admitted generated-head replay admits its selected raw head resolution under
+the propagated-error filter.
+
+Successful raw heads may continue into temporary insertion.  A raw-head error
+is the final generated-prefix error unchanged, so the enclosing filter already
+admits it.
+-/
+theorem openResultResolves_bind_sourceArgAppendHeadValues_inv_left_allowed
+    {α : Type _} {allowed : Except Exception α → Prop}
+    {sourceHead :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {tailValues : List Word} {trace : OpenExternal.OpenTrace}
+    {result : Except Exception (State × List Word)}
+    (hAllowed : SourcePairResultPropagatesErrorTo allowed result)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind sourceHead
+          (sourceArgAppendHeadValues tailValues))
+        trace result) :
+    ∃ sourceHeadDone,
+      OpenExternal.OpenResultResolves sourceHead trace sourceHeadDone ∧
+        SourcePairResultPropagatesErrorTo allowed sourceHeadDone := by
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hError | hOk
+  · rcases hError with ⟨err, hHead, hResult⟩
+    subst result
+    exact ⟨.error err, hHead, hAllowed⟩
+  · rcases hOk with ⟨left, right, value, hTrace, hHead, hAppend⟩
+    have hRight : right = [] :=
+      sourceArgAppendHeadValues_resolves_trace_eq_nil hAppend
+    subst right
+    simp only [List.append_nil] at hTrace
+    subst trace
+    exact ⟨.ok value, hHead, by simp [SourcePairResultPropagatesErrorTo]⟩
 
 /--
 Terminal-aware scheduled reverse-cons source equation.
@@ -63956,7 +64023,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
     (hExpr :
       SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
         prim program ctx exprFuel sourceExpr codeOverride pre lowerExpr
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hExprDone :
       ∀ {source compiler},
         SourceStateExactRel cfg layout source compiler →
@@ -64016,7 +64083,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hResponses minimumTargetFuel with
+              hPrefix (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed)
+              hResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64080,7 +64148,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hLeftResponses minimumTargetFuel with
+              hPrefix (by simp [SourcePairResultPropagatesErrorTo])
+              hLeftResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64227,7 +64296,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
     (hExpr :
       SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
         prim program ctx exprFuel sourceExpr codeOverride pre lowerExpr
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hExprDone :
       ∀ {source compiler},
         SourceStateExactRel cfg layout source compiler →
@@ -64287,7 +64356,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hResponses minimumTargetFuel with
+              hPrefix (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed)
+              hResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64367,7 +64437,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hLeftResponses minimumTargetFuel with
+              hPrefix (by simp [SourcePairResultPropagatesErrorTo])
+              hLeftResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64524,7 +64595,7 @@ theorem sourceOpenBlockHeadPathSoundWhenAtExactHiddenCtx_if_expr_prelude_raw
     (hExpr :
       SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
         prim program ctx bodyFuel.succ cond codeOverride pre lowerCond
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hExprDone :
       ∀ {source compiler},
         SourceStateExactRel cfg layout source compiler →
@@ -64572,7 +64643,11 @@ theorem sourceOpenBlockHeadPathSoundWhenAtExactHiddenCtx_if_expr_prelude_raw
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hResponses minimumTargetFuel with
+              hPrefix
+                (by
+                  simp [SourcePairResultPropagatesErrorTo]
+                  exact hStoppingAllowed (by simp [SourceResultNotRegularOk]))
+              hResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64632,7 +64707,8 @@ theorem sourceOpenBlockHeadPathSoundWhenAtExactHiddenCtx_if_expr_prelude_raw
         rcases
             hExpr (SourceStateExactRel.toRel hInitialExact)
               (SourceStateExactRel.stateStoreContains hInitialExact)
-              hPrefix True.intro hLeftResponses minimumTargetFuel with
+              hPrefix (by simp [SourcePairResultPropagatesErrorTo])
+              hLeftResponses minimumTargetFuel with
           ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
         rcases hPrefixPath.resolves with
           ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
@@ -64839,7 +64915,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_prelude_ra
     (hExpr :
       SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
         prim program ctx bodyFuel.succ cond codeOverride pre lowerCond
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hExprDone :
       ∀ {source compiler},
         SourceStateExactRel cfg layout source compiler →
@@ -115584,7 +115660,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelud
     (hExpr :
       SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
         prim program ctx exprFuel sourceExpr codeOverride pre lowerExpr
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hExprDone :
       ∀ {source compiler},
         SourceStateExactRel cfg layout source compiler →
@@ -117062,12 +117138,12 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
       SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
         revertRel prim program ctx
         (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride preTail
-        lowerTail (fun _sourceDone => True))
+        lowerTail (SourcePairResultPropagatesErrorTo allowed))
     (hHead :
       ∀ {ctxHead : Functions.Source.Ctx},
         SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
           prim program ctxHead base.succ.succ head codeOverride preHead
-          lowerHead (fun _sourceDone => True))
+          lowerHead (SourcePairResultPropagatesErrorTo allowed))
     (hHeadSingle :
       ∀ {sourceTailResult : State × List Word}
         {targetTailResult :
@@ -117109,7 +117185,7 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
     exact fresh?_name_not_mem_used hFresh
       (hCoversHead tmp (hLayoutSubset tmp hMem))
   intro source compiler trace sourceDone hInitial hContains hResolveFull
-    _hAllowed hResponses minimumTargetFuel
+    hAllowed hResponses minimumTargetFuel
   have hTailContains :
       OpenResultDoneInvariant
         (fun sourceDone =>
@@ -117147,7 +117223,8 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
   · rcases hTailError with ⟨err, hResolveTail, hSourceDone⟩
     subst sourceDone
     rcases
-        hTail hInitial hContains hResolveTail True.intro hResponses
+        hTail hInitial hContains hResolveTail
+          (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed) hResponses
           (max minimumTargetFuel preTail.length) with
       ⟨targetTailFuel, hMinimumTail, hTailPath⟩
     rcases hTailPath.resolves with
@@ -117251,7 +117328,8 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
     have hResponsesHead : SourceOpenTraceResponsesAdmissible cfg headTrace :=
       OpenExternal.OpenTrace.right_of_append hResponses
     rcases
-        hTail hInitial hContains hResolveTail True.intro hResponsesTail
+        hTail hInitial hContains hResolveTail
+          (by simp [SourcePairResultPropagatesErrorTo]) hResponsesTail
           (max minimumTargetFuel preTail.length) with
       ⟨targetTailFuel, hMinimumTail, hTailPath⟩
     rcases hTailPath.resolves with
@@ -117278,11 +117356,19 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
                   (OpenResultDoneInvariant.of_resolves hTailContains
                     hResolveTail) rfl
                 rcases
-                    openResultResolves_bind_sourceArgAppendHeadValues_inv_left
+                    openResultResolves_bind_sourceArgAppendHeadValues_inv_left_allowed
+                      (allowed := allowed)
+                      (by
+                        cases sourceDone with
+                        | error err =>
+                            simpa [SourcePairResultPropagatesErrorTo] using
+                              hAllowed
+                        | ok pair =>
+                            simp [SourcePairResultPropagatesErrorTo])
                       hResolveHeadReplay with
-                  ⟨sourceHeadDone, hResolveHead⟩
+                  ⟨sourceHeadDone, hResolveHead, hAllowedHead⟩
                 rcases
-                    hHead hRelTail hContainsAfter hResolveHead True.intro
+                    hHead hRelTail hContainsAfter hResolveHead hAllowedHead
                       hResponsesHead (preHead.length + 2) with
                   ⟨targetHeadFuel, hMinimumHead, hHeadPath⟩
                 let targetFuel :=
@@ -117454,7 +117540,7 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
         SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
           revertRel prim program ctx
           (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride
-          preTail lowerTail (fun _sourceDone => True))
+          preTail lowerTail (SourcePairResultPropagatesErrorTo allowed))
     (hHead :
       ∀ {stateTail preHead lowerHead stateHead}
         {ctxHead : Functions.Source.Ctx},
@@ -117463,7 +117549,7 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
           prim program ctxHead base.succ.succ head codeOverride preHead
-          lowerHead (fun _sourceDone => True))
+          lowerHead (SourcePairResultPropagatesErrorTo allowed))
     (hHeadSingle :
       ∀ {stateTail preHead lowerHead stateHead}
         {sourceTailResult : State × List Word}
@@ -117635,7 +117721,8 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_m
     (hHead :
       ∀ {base : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
-        {ctxHead : Functions.Source.Ctx},
+        {ctxHead : Functions.Source.Ctx}
+        {allowedHead : Except Exception (State × List Word) → Prop},
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
         FreshCoversLayout coverLayout stateHeadStart →
@@ -117643,7 +117730,7 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_m
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
           prim program ctxHead base.succ.succ.succ.succ head codeOverride
-          preHead lowerHead (fun _sourceDone => True))
+          preHead lowerHead allowedHead)
     (hHeadSingle :
       ∀ {base : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
@@ -117716,10 +117803,11 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_m
               ih
                 (hHead := by
                   intro base' head' stateHeadStart' preHead' lowerHead'
-                    stateHead' ctxHead' hHeadMem hHeadReserve hHeadCovers
+                    stateHead' ctxHead' allowedHead' hHeadMem hHeadReserve hHeadCovers
                     hHeadLower'
                   exact
-                    hHead (List.mem_cons_of_mem head hHeadMem) hHeadReserve
+                    hHead (allowedHead := allowedHead')
+                      (List.mem_cons_of_mem head hHeadMem) hHeadReserve
                       hHeadCovers hHeadLower')
                 (hHeadSingle := by
                   intro base' head' stateHeadStart' preHead' lowerHead'
@@ -117731,13 +117819,15 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_m
                 (base := base.succ.succ) (freshState := freshState)
                 (stateFresh := stateTail) (pre := preTail)
                 (lowerArgs := lowerTail) (ctx := ctx)
-                (allowed := fun _sourceDone => True) hReserveTail hCovers
+                (allowed := SourcePairResultPropagatesErrorTo allowed)
+                hReserveTail hCovers
                 hSafe.2 hTailLower)
           (by
             intro stateTail preHead lowerHead stateHead ctxHead hHeadCovers
               hHeadLower
             exact
-              hHead (base := base) (head := head) (by simp)
+              hHead (base := base) (head := head)
+                (allowedHead := SourcePairResultPropagatesErrorTo allowed) (by simp)
                 hReserveHead hHeadCovers hHeadLower)
           (by
             intro stateTail preHead lowerHead stateHead sourceTailResult
@@ -120068,7 +120158,7 @@ theorem sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
     (hArgs :
       SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
         revertRel prim program ctx sourceFuel args codeOverride pre argExprs
-        (fun _sourceDone => True))
+        (SourcePairResultPropagatesErrorTo allowed))
     (hRegular :
       ∀ {sourceArgsResult : State × List Word}
         {targetArgsResult :
@@ -120093,7 +120183,7 @@ theorem sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
       program ctx sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
       (Expr.cast hOutputs (.prim op lowerArgs)) allowed := by
   intro source compiler trace sourceDone hInitial hContains hResolveFull
-    _hAllowed hResponses minimumTargetFuel
+    hAllowed hResponses minimumTargetFuel
   have hResolve := hResolveFull
   rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
@@ -120101,7 +120191,8 @@ theorem sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
   · rcases hArgsError with ⟨err, hResolveArgs, hSourceDone⟩
     subst sourceDone
     rcases
-        hArgs hInitial hContains hResolveArgs True.intro hResponses
+        hArgs hInitial hContains hResolveArgs
+          (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed) hResponses
           minimumTargetFuel with
       ⟨targetFuel, hMinimumTargetFuel, hArgsPath⟩
     rcases hArgsPath.resolves with
@@ -120190,7 +120281,8 @@ theorem sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
     have hResponsesPrim : SourceOpenTraceResponsesAdmissible cfg primTrace :=
       OpenExternal.OpenTrace.right_of_append hResponses
     rcases
-        hArgs hInitial hContains hResolveArgs True.intro hResponsesArgs
+        hArgs hInitial hContains hResolveArgs
+          (by simp [SourcePairResultPropagatesErrorTo]) hResponsesArgs
           minimumTargetFuel with
       ⟨targetFuel, hMinimumTargetFuel, hArgsPath⟩
     rcases hArgsPath.resolves with
@@ -121240,7 +121332,8 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
         Fresh.fresh? stateArgs = some (tmp, freshState') →
         SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
           revertRel prim program ctx base.succ.succ.succ args
-          (some contract) preArgs lowerArgs (fun _sourceDone => True))
+          (some contract) preArgs lowerArgs
+          (SourcePairResultPropagatesErrorTo allowed))
     (hRegular :
       SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
         revertRel prim program base functionName args contract freshState
@@ -121249,7 +121342,7 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
       program ctx base.succ.succ.succ.succ (.Call (.inr functionName) args)
       (some contract) pre lowerExpr allowed := by
   intro source compiler trace sourceDone hInitial hContains hResolveFull
-    _hAllowed hResponses minimumTargetFuel
+    hAllowed hResponses minimumTargetFuel
   rcases
       SourceExprSeqPreludeOpen.sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
         (prim := prim) (program := program) (ctx := ctx)
@@ -121268,7 +121361,8 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
   · rcases hArgsError with ⟨err, hResolveArgs, hSourceDone⟩
     subst sourceDone
     rcases
-        hArgs hArgsLower hFresh hInitial hContains hResolveArgs True.intro
+        hArgs hArgsLower hFresh hInitial hContains hResolveArgs
+          (by simpa [SourcePairResultPropagatesErrorTo] using hAllowed)
           hResponses 0 with
       ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
     rcases hArgsPath.resolves with
@@ -121368,7 +121462,8 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
     have hResponsesCall : SourceOpenTraceResponsesAdmissible cfg callTrace :=
       OpenExternal.OpenTrace.right_of_append hResponses
     rcases
-        hArgs hArgsLower hFresh hInitial hContains hResolveArgs True.intro
+        hArgs hArgsLower hFresh hInitial hContains hResolveArgs
+          (by simp [SourcePairResultPropagatesErrorTo])
           hResponsesArgs 0 with
       ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
     rcases hArgsPath.resolves with
@@ -122047,7 +122142,7 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
               SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout
                 terminalRel revertRel prim program ctx
                 (base + 3) args (some contract) pre argExprs
-                (fun _sourceDone => True)
+                (SourcePairResultPropagatesErrorTo allowed)
             rw [← hArgsFuel]
             exact
               (sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem
@@ -122057,15 +122152,16 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
                 (freshState := freshState) (stateFresh := freshState')
                 (pre := pre) (lowerArgs := argExprs) (base := argsBase)
                 (args := args) (codeOverride := some contract)
-                (allowed := fun _sourceDone => True) hLayoutSubset
+                (allowed := SourcePairResultPropagatesErrorTo allowed) hLayoutSubset
                 (by
                   intro headBase head stateHeadStart preHead lowerHead
-                    stateHead ctxHead hMem hHeadReserve hHeadCovers hHeadLower
+                    stateHead ctxHead allowedHead hMem hHeadReserve hHeadCovers
+                    hHeadLower
                   exact
                     ih head
                       (sizeOf_expr_lt_sizeOf_call_of_mem
                         (callee := .inl yulPrim) hMem)
-                      (ctx := ctxHead) (allowed := fun _sourceDone => True)
+                      (ctx := ctxHead) (allowed := allowedHead)
                       hHeadReserve hHeadCovers
                       (callSafe_exprs_mem hArgsSafe hMem)
                       (SourceExprsScoped.mem hArgsScoped hMem)
@@ -122151,7 +122247,8 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
                 (stateArgs := stateArgs) (preArgs := preArgs)
                 (lowerArgs := lowerArgs) (sourceFuel := base.succ.succ.succ)
                 (args := args) (codeOverride := some contract)
-                (allowed := fun _sourceDone => True) (by omega) hArgsLower
+                (allowed := SourcePairResultPropagatesErrorTo allowed) (by omega)
+                hArgsLower
             intro hGenerated
             rcases
                 exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le
@@ -122160,7 +122257,8 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
             change
               SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout
                 terminalRel revertRel prim program ctx (base + 3) args
-                (some contract) preArgs lowerArgs (fun _sourceDone => True)
+                (some contract) preArgs lowerArgs
+                (SourcePairResultPropagatesErrorTo allowed)
             rw [← hArgsFuel]
             exact
               (sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem
@@ -122170,15 +122268,16 @@ theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_r
                 (freshState := freshState) (stateFresh := stateArgs)
                 (pre := preArgs) (lowerArgs := lowerArgs) (base := argsBase)
                 (args := args) (codeOverride := some contract)
-                (allowed := fun _sourceDone => True) hLayoutSubset
+                (allowed := SourcePairResultPropagatesErrorTo allowed) hLayoutSubset
                 (by
                   intro headBase head stateHeadStart preHead lowerHead
-                    stateHead ctxHead hMem hHeadReserve hHeadCovers hHeadLower
+                    stateHead ctxHead allowedHead hMem hHeadReserve hHeadCovers
+                    hHeadLower
                   exact
                     ih head
                       (sizeOf_expr_lt_sizeOf_call_of_mem
                         (callee := .inr functionName) hMem)
-                      (ctx := ctxHead) (allowed := fun _sourceDone => True)
+                      (ctx := ctxHead) (allowed := allowedHead)
                       hHeadReserve hHeadCovers
                       (callSafe_exprs_mem hArgsSafe hMem)
                       (SourceExprsScoped.mem hArgsScoped hMem)
@@ -122772,7 +122871,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hFresh
     (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := fun _sourceDone => True)
+      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
       hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
       hOk hLower)
     (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
@@ -122858,7 +122957,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hTargetMem hPreWrites
     (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := fun _sourceDone => True)
+      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
       hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
       hOk hLower)
     (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
@@ -122973,7 +123072,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_if_expr_recursive
     (lowerTail := lowerTail) (allowed := allowed) hAllowed hSupported
     hScopeContains hSafeBody hScopedBody
     (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
-      (ctx := ctx) (allowed := fun _sourceDone => True)
+      (ctx := ctx) (allowed := SourcePairResultPropagatesErrorTo allowed)
       hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafeCond
       hCondScoped hCondOk hLower)
     (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
