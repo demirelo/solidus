@@ -107532,6 +107532,59 @@ theorem compilerOpen_finalArgSeq_eval_of_tail_varMap_head_insert_toStackSeq
       hSeq' hArgRunRev
   simpa [insertedState, List.reverse_cons] using hOpen
 
+/--
+Closed replay core for one generated argument head.
+
+The already-generated tail variables retain their values while the head
+expression runs.  Inserting the fresh head temporary therefore makes the
+variable-only lowered argument list replay the new head first, followed by the
+tail values already recorded by the recursive prefix proof.
+-/
+theorem sourceArgList_eval_of_tail_varMap_head_insert
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerTail : List (Locals.Expr 1)} {lowerNames : List Name}
+    {tmp : Name} {headValue : Word}
+    {state stateAfterHead : Objects.Source.State}
+    {tailValues : List Word}
+    (hLowerTailVars :
+      lowerTail = lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+    (hTailEval :
+      Functions.Source.ArgList.eval prim lowerTail state =
+        .ok (state, tailValues))
+    (hAgree : SourceVarsAgree lowerNames state.vars stateAfterHead.vars)
+    (hTmpFreshLower : tmp ∉ lowerNames) :
+    Functions.Source.ArgList.eval prim (.var tmp :: lowerTail)
+        (stateAfterHead.insert tmp headValue) =
+      .ok (stateAfterHead.insert tmp headValue, headValue :: tailValues) := by
+  subst lowerTail
+  have hTailReplay :
+      Functions.Source.ArgList.eval prim
+          (lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+          stateAfterHead =
+        .ok (stateAfterHead, tailValues) :=
+    sourceArgList_eval_var_map_of_agree hTailEval hAgree
+  have hTailInserted :
+      Functions.Source.ArgList.eval prim
+          (lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+          (stateAfterHead.insert tmp headValue) =
+        .ok (stateAfterHead.insert tmp headValue, tailValues) :=
+    sourceArgList_eval_var_map_insert_of_not_mem hTailReplay
+      hTmpFreshLower
+  have hTailInserted' :
+      Functions.Source.ArgList.eval prim
+          (lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+          { shared := stateAfterHead.shared
+            vars := stateAfterHead.vars.insert tmp headValue } =
+        .ok
+          ({ shared := stateAfterHead.shared
+             vars := stateAfterHead.vars.insert tmp headValue },
+            tailValues) := by
+    simpa [Locals.Source.State.insert] using hTailInserted
+  simp [Functions.Source.ArgList.eval, Functions.Source.Expr.evalOne,
+    Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
+    Locals.Source.State.insert, Locals.Source.Store.insert_self,
+    hTailInserted']
+
 theorem sourceArgOpenResultRel_final_replay_done_of_tail_varMap_head_insert_toStackSeq
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
