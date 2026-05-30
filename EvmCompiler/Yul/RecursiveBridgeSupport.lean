@@ -56688,6 +56688,142 @@ theorem compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
   rfl
 
 /--
+Terminal-aware target shape of the hidden result-slot suffix emitted for an
+internal user-call expression.
+
+Unlike the older strict suffix equation, a terminal call result is retained as
+a stopped raw prelude.  Regular completion still reads the hidden slot back as
+the expression value.
+-/
+theorem sourceExprPreludeOpen_runRaw_user_call_suffix_eq
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tmp functionName : Name}
+    {lowerArgs : List (Locals.Expr 1)}
+    {tailFuel : Nat} {compiler : Objects.Source.State} :
+    SourceExprPreludeOpen.runRaw prim program ctx
+        ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ)
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs]
+        (.var tmp) compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.Stmt.run prim program
+          { ctx with scope := tmp :: ctx.scope } tailFuel.succ
+          (Functions.Stmt.call [tmp] functionName lowerArgs)
+          (compiler.insert tmp Expr.zero))
+        (fun callResult =>
+          match callResult.1.mode with
+          | .regular =>
+              OpenExternal.OpenResult.map
+                (fun exprResult =>
+                  .values
+                    { state := exprResult.1
+                      ctx := callResult.2
+                      values := exprResult.2 })
+                (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                  callResult.1.state)
+          | .brk | .cont | .leave | .halt _ =>
+              OpenExternal.OpenResult.ok
+                (.stopped
+                  (callResult.1,
+                    { ctx with scope := tmp :: ctx.scope }))) := by
+  unfold SourceExprPreludeOpen.runRaw
+  have hFuel :
+      [Functions.Stmt.let_ tmp (.lit Expr.zero),
+        Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ =
+        tailFuel.succ.succ.succ := by
+    simp
+    omega
+  conv_lhs =>
+    rw [hFuel]
+    rw [compilerOpen_block_runOpen_cons_succ]
+    simp [CompilerOpen.FunctionsOpen.Stmt.run,
+      CompilerOpen.LocalsExpr.evalOne, CompilerOpen.LocalsExpr.eval,
+      OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok,
+      Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+      Locals.Source.State.insert]
+    rw [compilerOpen_block_runOpen_cons_succ]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro callResult
+  rcases callResult with ⟨callOutcome, callCtx⟩
+  cases callOutcome with
+  | mk callState mode =>
+      cases mode <;>
+        simp [SourceExprPreludeOpen.runRaw,
+          OpenExternal.OpenResult.bind, OpenExternal.OpenResult.map,
+          OpenExternal.OpenResult.ok, Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          CompilerOpen.LocalsExpr.eval, Locals.Source.State.insert,
+          compilerOpen_block_runOpen_nil_succ]
+
+/--
+Resolved terminal-aware target shape of the generated hidden-slot suffix.
+
+The lowered argument evaluator runs after the hidden slot is initialized, the
+selected body remains open, and its restored result enters the raw replay
+endpoint.
+-/
+theorem sourceExprPreludeOpen_runRaw_user_call_suffix_eq_bind_body_of_find_function
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tmp functionName : Name}
+    {lowerArgs : List (Locals.Expr 1)}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {fn : Functions.FunDef}
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    SourceExprPreludeOpen.runRaw prim program ctx
+        ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs].length +
+          tailFuel.succ)
+        [Functions.Stmt.let_ tmp (.lit Expr.zero),
+          Functions.Stmt.call [tmp] functionName lowerArgs]
+        (.var tmp) compiler =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+          (compiler.insert tmp Expr.zero))
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn
+              argResult.2 tailFuel argResult.1.shared)
+            (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+              { ctx with scope := tmp :: ctx.scope } argResult.1)) := by
+  rw [sourceExprPreludeOpen_runRaw_user_call_suffix_eq
+    (prim := prim) (program := program) (ctx := ctx) (tmp := tmp)
+    (functionName := functionName) (lowerArgs := lowerArgs)
+    (tailFuel := tailFuel) (compiler := compiler)]
+  rw [compilerOpen_stmt_run_call_succ_eq_bind_body_of_find_function
+    (prim := prim) (program := program)
+    (ctx := { ctx with scope := tmp :: ctx.scope })
+    (targets := [tmp]) (functionName := functionName)
+    (args := lowerArgs) (state := compiler.insert tmp Expr.zero)
+    (fuel := tailFuel) (fn := fn) (by simp) hFind]
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro argResult
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro callResult
+  cases callResult with
+  | returned sharedAfterCall returnValues =>
+      cases hAssign :
+          Functions.Source.Store.assignMany [tmp] returnValues
+            argResult.1.vars <;>
+        simp [compilerOpenUserCallReadHiddenTempRawResult,
+          compilerOpenUserCallAssignHiddenTempResult, hAssign,
+          CompilerOpen.invalid, Structured.invalid,
+          OpenExternal.OpenResult.bind,
+          OpenExternal.OpenResult.ok]
+  | halted kind haltedState =>
+      simp [compilerOpenUserCallReadHiddenTempRawResult,
+        compilerOpenUserCallAssignHiddenTempResult,
+        OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+
+/--
 Exact target-side shape of the hidden result-slot suffix emitted for an
 internal user-call expression at the expression-prelude level.
 
