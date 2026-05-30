@@ -637,6 +637,9 @@ Remaining work:
      argument singleton callback. Recursive one-result proofs can now be
      derived from actual compiler output instead of a lowering-independent
      expression oracle.
+   - [x] Scope each raw argument singleton callback to the related regular tail
+     state already produced by recursive prefix preservation. Head one-result
+     facts no longer need to hold for arbitrary unrelated source states.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

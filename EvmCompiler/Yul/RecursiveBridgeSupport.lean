@@ -109169,7 +109169,11 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (preHead.length + tailFuel.succ.succ) preHead lowerHead
             targetTailResult.1.state))
     (hHeadSingle :
-      ∀ {sourceTailResult : State × List Word},
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109267,7 +109271,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult)
             hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
-            (hHead hTailDone) hHeadSingle
+            (hHead hTailDone) (hHeadSingle hTailDone)
             (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
               (names := lowerNames) (prim := prim) (program := program)
               (ctx := targetTailResult.2)
@@ -109327,7 +109331,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
           preHead lowerHead (preHead.length + tailFuel.succ.succ)
           headCallResponseRel)
     (hHeadSingle :
-      ∀ {sourceTailResult : State × List Word},
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109505,9 +109513,12 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
           headCallResponseRel)
     (hHeadSingle :
       ∀ {stateTail preHead lowerHead stateHead}
-        {sourceTailResult : State × List Word},
+        {sourceTailResult : State × List Word}
+        {targetState : Objects.Source.State},
         Expr.lower1? stateTail head =
           some (preHead, lowerHead, stateHead) →
+        SourceStateRel cfg layout sourceTailResult.1
+          targetState →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109601,7 +109612,27 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (headCallResponseRel := headCallResponseRel)
       hLayoutSubset hCovers hTailLower hHeadLower hFresh
       (hTail hTailLower hHeadLower)
-      (hHead hHeadLower) (hHeadSingle hHeadLower)
+      (hHead hHeadLower)
+      (by
+        intro sourceTailResult targetTailResult hTailDone
+        have hTailRaw :
+            SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+              (.ok sourceTailResult) (.ok targetTailResult) :=
+          sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+        rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+        cases targetTailOutcome with
+        | mk targetTailState mode =>
+            cases mode with
+            | regular =>
+                exact hHeadSingle hHeadLower hTailRaw.1
+            | brk =>
+                cases hTailRaw
+            | cont =>
+                cases hTailRaw
+            | leave =>
+                cases hTailRaw
+            | halt kind =>
+                cases hTailRaw)
       (hTailResponse hTailLower hHeadLower hFresh)
       (by
         intro sourceTailResult targetTailResult sourceCall targetCall response
@@ -109648,10 +109679,13 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     (hHeadSingle :
       ∀ {base : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
-        {sourceTailResult : State × List Word},
+        {sourceTailResult : State × List Word}
+        {targetState : Objects.Source.State},
         head ∈ args →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
+        SourceStateRel cfg layout sourceTailResult.1
+          targetState →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109780,10 +109814,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                     hHead (List.mem_cons_of_mem head hHeadMem) hHeadLower)
                 (hHeadSingle := by
                   intro base' head' stateHeadStart' preHead' lowerHead'
-                    stateHead' sourceTailResult' hHeadMem hHeadLower
+                    stateHead' sourceTailResult' targetState' hHeadMem
+                    hHeadLower hInitial
                   exact
                     hHeadSingle (List.mem_cons_of_mem head hHeadMem)
-                      hHeadLower)
+                      hHeadLower hInitial)
                 (base := base.succ.succ)
                 (targetTailFuel := preHead.length + targetTailFuel.succ)
                 (freshState := freshState) (stateFresh := stateTail)
@@ -109800,10 +109835,10 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                 (by simp) hHeadLower)
           (by
             intro stateTail preHead lowerHead stateHead sourceTailResult
-              hHeadLower
+              targetState hHeadLower hInitial
             exact
               hHeadSingle (base := base) (head := head) (by simp)
-                hHeadLower)
+                hHeadLower hInitial)
           (by
             intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
               hTailLower hHeadLower hFresh sourceCall targetCall response
