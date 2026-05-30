@@ -64738,6 +64738,83 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             hHeadNone] at hLower
 
 /--
+Decompose one checked lowered `head :: rest` block for a path-native sequence
+constructor.
+
+The callback receives the exact compiler-produced head statement list and tail
+block. Statement-family proofs can therefore focus on their semantic head
+constructor without repeating list-lowering bookkeeping.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hCons :
+      ∀ {freshState stateHead lowerFuel lowerHead lowerTail freshState'},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Stmt.toFunctionsListFuel? lowerFuel freshState head =
+          some (lowerHead, stateHead) →
+        Stmt.List.toBlockFuel? lowerFuel.succ stateHead rest =
+          some (lowerTail, freshState') →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+          (head :: rest) codeOverride
+          { stmts := lowerHead ++ lowerTail.stmts } allowed) :
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel (head :: rest) codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ functionsFuel =>
+      cases functionsFuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          cases hLowerHead :
+              Stmt.toFunctionsListFuel? lowerFuel freshState head with
+          | none =>
+              simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                hLowerHead] at hLower
+          | some headResult =>
+              rcases headResult with ⟨lowerHead, stateHead⟩
+              cases hLowerRest :
+                  Stmt.List.toFunctionsFuel? lowerFuel stateHead rest with
+              | none =>
+                  simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                    hLowerHead, hLowerRest] at hLower
+              | some restResult =>
+                  rcases restResult with ⟨lowerRest, stateRest⟩
+                  have hPair :
+                      (({ stmts := lowerHead ++ lowerRest } : Functions.Block),
+                          stateRest) =
+                        (lowerBlock, freshState') := by
+                    simpa [Stmt.List.toBlockFuel?,
+                      Stmt.List.toFunctionsFuel?, hLowerHead, hLowerRest]
+                      using hLower
+                  cases hPair
+                  unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+                  intro source compiler trace sourceDone
+                    hInitial hResolves hAllowed hResponses minimumTargetFuel
+                  exact
+                    (hCons (freshState := freshState)
+                      (stateHead := stateHead) (lowerFuel := lowerFuel)
+                      (lowerHead := lowerHead)
+                      (lowerTail := { stmts := lowerRest })
+                      (freshState' := freshState') hCovers hLowerHead
+                      (by
+                        simp [Stmt.List.toBlockFuel?, hLowerRest]))
+                      hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
 Open hidden-context sequence soundness for impossible source out-of-fuel
 branches.
 
