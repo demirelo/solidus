@@ -517,7 +517,7 @@ Remaining work:
      rather than by direct statement-shape lemmas.
    - [x] Adapt internal user-call expression preservation when arguments may
      suspend.
-   - [ ] Connect completed internal-user-call argument states to the recursive
+   - [x] Connect completed internal-user-call argument states to the recursive
      function-body bridge at the sequence frontier.
    - [x] Correct the selected-callee target-proof-fuel boundary in recursive
      expression preservation: thread an explicit minimum residual target fuel

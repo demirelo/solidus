@@ -113045,6 +113045,217 @@ def SourceExprRawPreludeOpenUserCallRegularAt
         program fn lowerArgs tmp targetTailFuel.succ targetArgsResult)
 
 /--
+Construct a regular selected-callee continuation from recursive open sequence
+preservation.
+
+Compiler provenance resolves the selected lowered function and its body
+lowering. The completed argument prefix supplies the related caller state,
+arity reconstructs parameter insertion, and no-shadowing constructs the exact
+callee-entry frame. Recursive `execSeq` preservation is then lifted through
+the scoped `.Block` executed by imported Yul before the existing
+restore/hidden-slot replay bridge is applied.
+-/
+theorem SourceExprRawPreludeOpenUserCallRegularAt.of_recursive_body_seq
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {base targetTailFuel : Nat}
+    {functionName : Name} {args : List AstExpr}
+    {freshState freshState' : Fresh.State} {fn : Functions.FunDef}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hBody :
+      ∀ {params returns : List EvmYul.Identifier} {body : List AstStmt}
+        {freshBefore freshAfter : Fresh.State},
+        yulProgram.contract.functions.lookup functionName =
+          some (.Def params returns body) →
+        Stmt.List.toBlock? freshBefore body =
+          some (fn.body, freshAfter) →
+        FreshCoversLayout (fn.returns ++ fn.params) freshBefore →
+      ∀ {callResponseRel : SourceOpenSeqCallResponseRel},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg
+          (fn.returns ++ fn.params) (fn.returns ++ fn.params)
+          terminalRel revertRel prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (fn.returns ++ fn.params)) with
+            scope := fn.returns ++ fn.params }
+          base.succ body (some yulProgram.contract) fn.body targetTailFuel
+          (SourceResultCheckpointAllowed false false true)
+          callResponseRel) :
+    SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel revertRel
+      prim program base targetTailFuel functionName args yulProgram.contract
+      freshState freshState' fn exprCallResponseRel := by
+  intro preArgs lowerArgs stateArgs tmp hArgs hFresh sourceArgsResult
+    targetArgsResult hDone
+  rcases sourceArgsResult with ⟨sourceAfter, values⟩
+  rcases targetArgsResult with ⟨targetOutcome, ctxAfter⟩
+  rcases targetOutcome with ⟨targetState, mode⟩
+  have hDoneCanonical := hDone
+  cases mode <;>
+    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+  rcases hDone with ⟨hCaller, hArgsRun⟩
+  cases hCaller with
+  | @ok callerShared callerStore targetState hShared hVars =>
+      rcases hExprOk.1 with
+        ⟨params, returns, body, hLookup, _hReturnsLength, _hArgsLength⟩
+      rcases
+          FunctionEntryList.toObjects?_find?_of_contract_lookup_toBlock?_fresh
+            (program := yulProgram) (functionProgram := program)
+            (functionName := functionName)
+            (fn := .Def params returns body) context.toObjects hLookup with
+        ⟨lowerFn, hFindLower, params0, returns0, body0, freshBefore,
+          freshAfter, hFnEq, hBodyLower, _hLowerName, hLowerParams,
+          hLowerReturns, hFreshBody⟩
+      cases hFnEq
+      have hFindLower' :
+          Functions.FunList.find? functionName program.functions =
+            some lowerFn :=
+        by
+          simpa [Functions.SourceDirect.FunList.source_find?_eq] using
+            hFindLower
+      rw [hFind] at hFindLower'
+      cases hFindLower'
+      have hCoversArgs : FreshCoversLayout coverLayout stateArgs := by
+        rcases hArgs with hDirect | hGenerated
+        · simpa [hDirect.2.2.2] using hCovers
+        · exact
+            freshCoversLayout_lowerBound1?_of_some hCovers hGenerated.2
+      have hTmpFreshLayout : tmp ∉ layout := by
+        intro hMem
+        exact
+          fresh?_name_not_mem_used hFresh
+            (hCoversArgs tmp (hLayoutSubset tmp hMem))
+      have hLowerArgsLength : lowerArgs.length = args.length := by
+        rcases hArgs with hDirect | hGenerated
+        · exact toLocals1?_length hDirect.2.1
+        · exact Expr.List.lowerBound1?_length_lowerArgs_eq hGenerated.2
+      have hValuesLength :
+          values.reverse.length = (identNames params).length := by
+        have hRunLength := Functions.Source.ArgList.eval_length prim hArgsRun
+        calc
+          values.reverse.length = lowerArgs.length := hRunLength
+          _ = args.length := hLowerArgsLength
+          _ = params.length :=
+            UserCallArity.expr_user_lookup_args_length hExprOk hLookup
+          _ = (identNames params).length := by simp [identNames]
+      rcases
+          source_insertMany_exists_of_length
+            (names := fn.params) (values := values.reverse)
+            (store := Locals.Source.Store.empty)
+            (by simpa [hLowerParams] using hValuesLength) with
+        ⟨paramStore, hInsert⟩
+      rcases
+          NoShadowing.contract_lookup_param_return_facts
+            (program := yulProgram) context.noShadowing hLookup with
+        ⟨hParamsNoDup, hReturnsNoDup, hDisjoint⟩
+      have hCallerInserted :
+          SourceStateRel cfg layout (.Ok callerShared callerStore)
+            (targetState.insert tmp Expr.zero) :=
+        SourceStateRel.insert_hidden (SourceStateRel.ok hShared hVars)
+          hTmpFreshLayout
+      have hInitial :
+          SourceStateExactRel cfg (fn.returns ++ fn.params)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))
+            ({ shared := (targetState.insert tmp Expr.zero).shared
+               vars :=
+                Functions.Source.Store.initReturns fn.returns
+                  paramStore } :
+              Objects.Source.State) :=
+        sourceStateExactRel_initcall_of_lowerFun_insertMany hCallerInserted
+          hInsert hLowerParams hLowerReturns hParamsNoDup hReturnsNoDup
+          hDisjoint
+      have hScope :
+          ∀ name, name ∈ fn.returns ++ fn.params →
+            ((EvmYul.Yul.State.mkOk
+                (EvmYul.Yul.State.initcall params returns values.reverse
+                  (.Ok callerShared callerStore))).store.lookup name).isSome =
+              true := by
+        intro name hMem
+        have hContains :
+            StoreDomainContains (fn.returns ++ fn.params)
+              (EvmYul.Yul.State.mkOk
+                (EvmYul.Yul.State.initcall params returns values.reverse
+                  (.Ok callerShared callerStore))).store := by
+          simpa [hLowerParams, hLowerReturns, StateStoreContains,
+            EvmYul.Yul.State.mkOk, initcall_ok_insertPairs] using
+            (StateStoreContains.initcall_of_length
+              (shared := callerShared) (callerStore := callerStore)
+              (params := params) (rets := returns)
+              (args := values.reverse) (by omega))
+        exact hContains name hMem
+      let bodyCallResponseRel : SourceOpenSeqCallResponseRel :=
+        SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeUserCallBody
+          prim (.Ok callerShared callerStore) returns fn tmp
+            { ctxAfter with scope := tmp :: ctxAfter.scope }
+            (targetState.insert tmp Expr.zero) exprCallResponseRel
+      have hBodySeq :=
+        (hBody hLookup hBodyLower hFreshBody
+          (callResponseRel :=
+            OpenExternal.OpenCallResponseRel.comapBind bodyCallResponseRel
+              (fun sourceAfter =>
+                OpenExternal.OpenResult.ok
+                  (EvmYul.Yul.State.restrictStoreTo
+                    (EvmYul.Yul.State.mkOk
+                      (EvmYul.Yul.State.initcall params returns
+                        values.reverse
+                        (.Ok callerShared callerStore))).store
+                    sourceAfter))
+              (fun targetAfter => OpenExternal.OpenResult.ok targetAfter)))
+          hInitial
+      have hBodyBlock :=
+        sourceOpenResultSeqRel_exec_block_succ_of_seq_checkpoint_scope_contains
+          (cfg := cfg) (layout := fn.returns ++ fn.params)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (fuel := base.succ) (body := body)
+          (codeOverride := some yulProgram.contract)
+          (source :=
+            EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))
+          (target :=
+            CompilerOpen.FunctionsOpen.Block.runOpen prim program
+              { (Functions.Source.Ctx.initial.withLeaveScope
+                  (fn.returns ++ fn.params)) with
+                scope := fn.returns ++ fn.params }
+              targetTailFuel fn.body
+              ({ shared := (targetState.insert tmp Expr.zero).shared
+                 vars :=
+                  Functions.Source.Store.initReturns fn.returns
+                    paramStore } :
+                Objects.Source.State))
+          (callResponseRel := bodyCallResponseRel) hScope hBodySeq
+      exact
+        SourceExprSeqPreludeOpen.sourceExprRawPreludeOpenResultRel_user_call_regular_of_override_function_body_callSafe_scoped_canonical
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (lowerFn := fn) (args := args)
+          (freshState := freshState) (stateArgs := stateArgs)
+          (freshState' := freshState') (preArgs := preArgs)
+          (lowerArgs := lowerArgs) (tmp := tmp)
+          (callerShared := callerShared) (callerStore := callerStore)
+          (values := values) (targetState := targetState)
+          (ctxAfter := ctxAfter) (sourceFuel := base.succ.succ)
+          (targetBodyFuel := targetTailFuel)
+          (functionName := functionName) (params := params)
+          (returns := returns) (body := body) (paramStore := paramStore)
+          (rawCallResponseRel := exprCallResponseRel)
+          context.callSafe context.controlScoped hArgs hFresh
+          hTmpFreshLayout hDoneCanonical hLookup (by omega) hInsert hLowerParams
+          hLowerReturns hBodyBlock hExprOk
+
+/--
 Recursive raw expression preservation with a selected-callee body hook.
 
 Expression recursion is well-founded on syntax size. Primitive and internal
