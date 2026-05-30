@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 20:36 PDT.
+Last updated: 2026-05-29 20:39 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -466,6 +466,11 @@ Remaining work:
      assign returned values after completion, and keep exposed ordinary
      `CALL` requests open; `if` and `switch` compose scalar evaluation into
      recursively supplied blocks.
+   - [x] Prove the exact open out-of-fuel expression invariant: nested
+     arguments, arbitrary exposed ordinary-`CALL` responses, malformed
+     non-suspending fallback, and internal caller restoration all keep
+     `.OutOfFuel` sticky. This is the honest exceptional branch needed before
+     scoped block recursion.
    - [ ] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
