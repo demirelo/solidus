@@ -551,6 +551,9 @@ Remaining work:
    - [x] Name strict and terminal-aware raw generated-argument soundness at the
      exact target block boundary, and lift any checked strict raw proof into
      the terminal-aware interface without changing its observable call trace.
+   - [x] Factor one generated argument head on the target through the raw
+     expression runner: successful singleton values populate the fresh
+     temporary, while stopped nested-call preludes skip that binding unchanged.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

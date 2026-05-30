@@ -55073,6 +55073,39 @@ theorem runLetTarget_eq_bind_runRaw
             OpenExternal.OpenResult.ok]
 
 /--
+Raw target equation for one generated argument head.
+
+The head expression prelude may itself stop after a nested internal call.  In
+that case the generated temporary binding is skipped and the stopped block
+outcome is retained.  A successful singleton expression value is inserted into
+the fresh generated temporary before the empty suffix finishes.
+-/
+theorem compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre : List Functions.Stmt} {name : Name}
+    {lowerExpr : Locals.Expr 1}
+    {state : Objects.Source.State} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + 2) { stmts := pre ++ [Functions.Stmt.let_ name lowerExpr] }
+        state =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx (pre.length + 2) pre
+          lowerExpr state)
+        (runLetTargetAfterRaw prim program name [] 1) := by
+  rw [show pre ++ [Functions.Stmt.let_ name lowerExpr] =
+      pre ++ ([Functions.Stmt.let_ name lowerExpr] ++ []) by simp]
+  rw [compilerOpen_expr_prelude_let_single_append_raw_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := []) (name := name) (lowerExpr := lowerExpr)
+    (state := state) (suffixFuel := 1)]
+  exact
+    runLetTarget_eq_bind_runRaw
+      (prim := prim) (program := program) (ctx := ctx)
+      (pre := pre) (tail := []) (name := name) (lowerExpr := lowerExpr)
+      (tailFuel := 1) (compiler := state)
+
+/--
 Assignments consume terminal-aware expression preludes generically.
 
 Successful singleton values update the existing local and enter the tail.
