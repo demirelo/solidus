@@ -1744,6 +1744,101 @@ theorem bind
 end OpenResultRel
 
 /--
+One externally observable interaction in a finite open-execution trace.
+
+The requested site is retained alongside the black-box response so trace
+preservation states both halves of the contract: the compiler makes the same
+request and resumes from the same arbitrary response.
+-/
+structure OpenEvent where
+  site : CallSite
+  response : CallResponse
+
+abbrev OpenTrace : Type :=
+  List OpenEvent
+
+/--
+Resolve one open computation along a concrete finite interaction trace.
+
+This relation does not require a globally sufficient executable cutoff.  A
+caller may choose a fresh proof clock when constructing the open computation
+for a particular finite trace, while the trace itself records only semantic
+external observations.
+-/
+inductive OpenResultResolves
+    {ε : Type u} {α : Type v} :
+    OpenResult ε α → OpenTrace → Except ε α → Prop where
+  | done {result : Except ε α} :
+      OpenResultResolves (.done result) [] result
+  | call
+      {call : OpenCall (OpenResult ε α)}
+      {response : CallResponse} {trace : OpenTrace}
+      {result : Except ε α} :
+      OpenResultResolves (call.resume response) trace result →
+      OpenResultResolves (.call call)
+        ({ site := call.site, response := response } :: trace) result
+
+/--
+Pathwise relation between two open computations.
+
+Unlike `OpenResultRel`, this relation follows one concrete finite response
+trace.  Quantifying over traces at a public theorem boundary gives arbitrary
+black-box responses without requiring a single executable proof-fuel cutoff
+to cover every response-dependent path at once.
+-/
+inductive OpenResultPathRel
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    (callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop)
+    (doneRel : Except ε₁ α → Except ε₂ β → Prop) :
+    OpenTrace → OpenResult ε₁ α → OpenResult ε₂ β → Prop where
+  | done {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β} :
+      doneRel sourceDone targetDone →
+      OpenResultPathRel callResponseRel doneRel []
+        (.done sourceDone) (.done targetDone)
+  | call
+      {sourceCall : OpenCall (OpenResult ε₁ α)}
+      {targetCall : OpenCall (OpenResult ε₂ β)}
+      {response : CallResponse} {trace : OpenTrace} :
+      sourceCall.site = targetCall.site →
+      callResponseRel sourceCall targetCall response →
+      OpenResultPathRel callResponseRel doneRel trace
+        (sourceCall.resume response) (targetCall.resume response) →
+      OpenResultPathRel callResponseRel doneRel
+        ({ site := sourceCall.site, response := response } :: trace)
+        (.call sourceCall) (.call targetCall)
+
+namespace OpenResultPathRel
+
+/--
+A related finite path resolves both computations along the same observable
+trace and ends in related done results.
+-/
+theorem resolves
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    (hRel : OpenResultPathRel callResponseRel doneRel trace source target) :
+    ∃ sourceDone targetDone,
+      OpenResultResolves source trace sourceDone ∧
+        OpenResultResolves target trace targetDone ∧
+          doneRel sourceDone targetDone := by
+  induction hRel with
+  | done hDone =>
+      exact ⟨_, _, OpenResultResolves.done, OpenResultResolves.done, hDone⟩
+  | @call sourceCall targetCall response trace hSite _hResponse _hTail ih =>
+      rcases ih with ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+      refine ⟨sourceDone, targetDone, OpenResultResolves.call hSource, ?_, hDone⟩
+      simpa [hSite] using (OpenResultResolves.call hTarget)
+
+end OpenResultPathRel
+
+/--
 Result relation between the stack-free primitive CALL continuation and the
 EVM-stack continuation at the same primitive boundary.
 

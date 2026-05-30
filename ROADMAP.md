@@ -523,18 +523,22 @@ Remaining work:
      expression preservation: thread an explicit minimum residual target fuel
      through generated argument prefixes, and request selected-callee callbacks
      only above that floor instead of at impossible clocks such as zero.
-   - [x] Add the uniform sequence-level target-proof-fuel contract: one minimum
-     clock is chosen before execution, exact preservation holds at every larger
-     clock, and the existing hidden-fuel public shape follows by selecting that
-     minimum itself.
+   - [x] Reject and remove the attempted uniform at-or-above target-proof-fuel
+     contract after theorem-truth audit: extra executable target cutoff can
+     expose a later CALL after finite-fuel Yul has exhausted on the same
+     response path.
+   - [x] Add finite open interaction traces and pathwise result preservation:
+     each event records the equal external request site and one shared
+     arbitrary black-box response, without pretending executable proof fuel is
+     a semantic monotone.
    - [x] Lift recursive open sequence preservation through the actual scoped
      `.Block` executed by an internal Yul call: source local-store restriction
      is threaded through a bind pullback, target execution remains unchanged,
      and every exposed external response keeps the same relation.
-   - [ ] Construct the compiler-derived minimum residual target fuel (or an
-     equivalent checked exact-target adequacy invariant) at the recursive
-     sequence frontier so suspended continuations carry one uniform sufficient
-     clock choice across every abstract external response.
+   - [ ] Replace the scalar-floor sequence target with a pathwise finite-trace
+     target: quantify over every concrete arbitrary response trace and
+     construct exact target cutoff adequacy for that trace from compiler
+     output and source-fuel/resource premises.
    - [x] Construct the selected-callee open body invariant from CALL-safe body
      scoping and initialized local-store exactness: after every shared external
      response, completed source bodies must satisfy function checkpoint
@@ -797,11 +801,12 @@ Remaining work:
    - [ ] Thread open preservation through `if`, `switch`, loop conditions,
      loop bodies, `break`, `continue`, `leave`, terminal statements, handler
      sequences, and kont/callee-return continuations.
-   - [ ] Close `CALLOpenSeqLoweringFrontierAt` for the exact successor-fuel
-     step using the recursive induction hypothesis.
-   - [ ] Prove successor-fuel and all-bounds wrappers for the open sequence
-     frontier without adding all-callees-preserve, replay, or concrete-world
-     premises.
+   - [ ] Replace `CALLOpenSeqLoweringFrontierAt` with the finite-trace
+     successor frontier and close its pathwise source-fuel step using the
+     recursive induction hypothesis.
+   - [ ] Prove pathwise successor-fuel and all-bounds wrappers for the open
+     sequence frontier without adding all-callees-preserve, replay, monotone
+     executable-cutoff, or concrete-world premises.
    - [ ] Replace closed `CALLSeqKontFrontierAt` dependencies with open
      handler/kont frontiers wherever calls can hide in conditions, user-call
      arguments, generated preludes, or recursive continuations.
@@ -849,8 +854,9 @@ Remaining work:
 6. [ ] Add ordinary CALL to the public compiler spine.
    - [ ] Update checked feature coverage so ordinary `CALL` is admitted by the
      preferred public theorem while unproved external families remain rejected.
-   - [ ] Add the CALL-capable public theorem over the open CALL observation
-     model and universally related responses.
+   - [ ] Add the CALL-capable public theorem over finite open CALL interaction
+     traces, universally quantified over arbitrary related black-box responses
+     on each concrete trace.
    - [ ] Keep the existing no-CALL theorem only as a proved fragment until the
      CALL theorem has passed the same audit gates.
    - [ ] Rename public no-CALL runtime/spine names where they become
