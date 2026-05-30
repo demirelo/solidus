@@ -37082,6 +37082,77 @@ theorem exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le
   rw [yulOpenEvalArgsAppendFuel_eq_add_length]
   omega
 
+mutual
+
+  /--
+  Residual base fuel needed by the terminal-aware raw expression recursion.
+
+  Leaves need no reserve beyond the fixed four ticks supplied by their caller.
+  A call reserves two traversal ticks per argument plus enough residual fuel
+  for its deepest nested argument expression.
+  -/
+  def sourceExprRawPreludeBaseReserve : AstExpr → Nat
+    | .Lit _value => 0
+    | .Var _name => 0
+    | .Call _callee args =>
+        2 * args.length + sourceExprsRawPreludeBaseReserve args
+
+  /-- Maximum residual raw-expression reserve among a list of arguments. -/
+  def sourceExprsRawPreludeBaseReserve : List AstExpr → Nat
+    | [] => 0
+    | head :: tail =>
+        max (sourceExprRawPreludeBaseReserve head)
+          (sourceExprsRawPreludeBaseReserve tail)
+
+end
+
+theorem sourceExprRawPreludeBaseReserve_le_sourceExprs_of_mem
+    {expr : AstExpr} {args : List AstExpr}
+    (hMem : expr ∈ args) :
+    sourceExprRawPreludeBaseReserve expr ≤
+      sourceExprsRawPreludeBaseReserve args := by
+  induction args with
+  | nil =>
+      simp at hMem
+  | cons head tail ih =>
+      simp only [List.mem_cons] at hMem
+      simp only [sourceExprsRawPreludeBaseReserve]
+      cases hMem with
+      | inl hEq =>
+          subst expr
+          exact Nat.le_max_left _ _
+      | inr hTail =>
+          exact (ih hTail).trans (Nat.le_max_right _ _)
+
+/--
+Split an adequate raw call-expression reserve into the exact reversed-argument
+scheduler base and an adequacy fact for every selected nested head.
+-/
+theorem exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le
+    {callee : Sum (EvmYul.Operation .Yul) Name} {args : List AstExpr}
+    {base : Nat}
+    (hReserve :
+      sourceExprRawPreludeBaseReserve (.Call callee args) ≤ base) :
+    ∃ argsBase,
+      yulOpenEvalArgsAppendFuel argsBase args.reverse = base + 3 ∧
+        ∀ {head}, head ∈ args →
+          sourceExprRawPreludeBaseReserve head ≤ argsBase := by
+  let argsBase := base - 2 * args.length
+  refine ⟨argsBase, ?_, ?_⟩
+  · rw [yulOpenEvalArgsAppendFuel_eq_add_length]
+    simp only [List.length_reverse]
+    simp only [sourceExprRawPreludeBaseReserve] at hReserve
+    dsimp [argsBase]
+    omega
+  · intro head hMem
+    have hHead :
+        sourceExprRawPreludeBaseReserve head ≤
+          sourceExprsRawPreludeBaseReserve args :=
+      sourceExprRawPreludeBaseReserve_le_sourceExprs_of_mem hMem
+    simp only [sourceExprRawPreludeBaseReserve] at hReserve
+    dsimp [argsBase]
+    omega
+
 /--
 Compiler-output base case for generated open argument preludes.
 

@@ -692,6 +692,10 @@ Remaining work:
    - [x] Widen all-residual-base raw argument preservation to arbitrary source
      fuel above the fixed reversed-list traversal overhead. Nested-head
      adequacy remains an explicit recursive obligation.
+   - [x] Define syntax-aware raw expression residual reserves and split an
+     adequate call reserve into the exact reversed-argument scheduler base plus
+     a reserve proof for every selected nested argument head. No fuel
+     monotonicity assumption is used.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
