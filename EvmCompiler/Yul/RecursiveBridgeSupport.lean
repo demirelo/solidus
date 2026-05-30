@@ -37070,6 +37070,66 @@ theorem yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_eval
       (base := base) (argsPrefix := tail.reverse) (head := head)
       (codeOverride := codeOverride) (source := source))
 
+/--
+Open imported `eval` as terminal-aware `evalValues` followed by its checked
+single-value projection.
+-/
+theorem yulOpen_toOpenResult_eval_eq_bind_evalValues
+    {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {source : State} :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.eval fuel expr codeOverride source) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues fuel expr codeOverride source))
+        (fun sourceResult =>
+          (.done (EvmYul.Yul.head' (.ok sourceResult)) :
+            OpenExternal.OpenResult Exception (State × Word))) := by
+  simp [OpenExternal.YulOpen.eval, OpenExternal.YulOpen.headResult,
+    OpenExternal.YulOpenResult.toOpenResult_bind,
+    OpenExternal.YulOpenResult.toOpenResult]
+
+def sourceArgAppendHeadValues
+    (tailValues : List Word) (headResult : State × List Word) :
+    OpenExternal.OpenResult Exception (State × List Word) :=
+  OpenExternal.OpenResult.bind
+    (.done (EvmYul.Yul.head' (.ok headResult)))
+    (fun headValue =>
+      .done (.ok (headValue.1, tailValues ++ [headValue.2])))
+
+/--
+Terminal-aware scheduled reverse-cons source equation.
+
+The tail still evaluates first.  The head remains in `evalValues` form until
+the supplied continuation projects its singleton, which lets recursive CALL
+preservation retain a terminal head outcome before any generated temporary is
+bound.
+-/
+theorem yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_evalValues
+    (base : Nat) {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract} {source : State} :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs
+          (yulOpenEvalArgsAppendFuel base tail.reverse)
+          (head :: tail).reverse codeOverride source) =
+      OpenExternal.OpenResult.bind
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source))
+        (fun tailResult =>
+          OpenExternal.OpenResult.bind
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues base.succ.succ head
+                codeOverride tailResult.1))
+            (sourceArgAppendHeadValues tailResult.2)) := by
+  rw [yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_eval]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro tailResult
+  rw [yulOpen_toOpenResult_eval_eq_bind_evalValues]
+  rw [openResult_bind_assoc_sourceBridge]
+  rfl
+
 def SourceExprHeadPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name) :
     Except EvmYul.Yul.Exception (State × Word) →

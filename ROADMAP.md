@@ -560,6 +560,9 @@ Remaining work:
    - [x] Preserve generated-tail variable agreement across the terminal-aware
      raw head runner: only successful value completions need replay evidence;
      stopped nested-call outcomes bypass replay and remain intact.
+   - [x] Factor imported reverse-cons argument evaluation through raw
+     `evalValues` for the head before its singleton projection, so nested calls
+     remain visible at the recursive expression boundary in source order.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
