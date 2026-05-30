@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 01:05 PDT.
+Last updated: 2026-05-30 01:16 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -519,6 +519,14 @@ Remaining work:
      suspend.
    - [ ] Connect completed internal-user-call argument states to the recursive
      function-body bridge at the sequence frontier.
+   - [x] Correct the selected-callee target-proof-fuel boundary in recursive
+     expression preservation: thread an explicit minimum residual target fuel
+     through generated argument prefixes, and request selected-callee callbacks
+     only above that floor instead of at impossible clocks such as zero.
+   - [ ] Construct the compiler-derived minimum residual target fuel (or an
+     equivalent checked exact-target adequacy invariant) at the recursive
+     sequence frontier so suspended continuations carry one uniform sufficient
+     clock choice across every abstract external response.
    - [x] Construct the selected-callee open body invariant from CALL-safe body
      scoping and initialized local-store exactness: after every shared external
      response, completed source bodies must satisfy function checkpoint

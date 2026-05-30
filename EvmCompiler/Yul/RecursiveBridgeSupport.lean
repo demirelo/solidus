@@ -110691,7 +110691,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {freshState stateFresh : Fresh.State}
     {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
-    {base targetTailFuel : Nat} {args : List AstExpr}
+    {base minimumTargetTailFuel targetTailFuel : Nat} {args : List AstExpr}
     {codeOverride : Option AstContract}
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
@@ -110704,6 +110704,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
+        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
         RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
         Expr.lower1? stateHeadStart head =
@@ -110730,6 +110731,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (OpenExternal.YulOpenResult.toOpenResult
             (OpenExternal.YulOpen.evalValues base.succ.succ.succ.succ head
               codeOverride sourceTailResult.1)))
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
     (hReserve : sourceExprsRawPreludeBaseReserve args ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hLower :
@@ -110790,12 +110792,12 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (hHead := by
                     intro base' targetTailFuel' head' stateHeadStart' preHead'
                       lowerHead' stateHead' ctxHead' headCallResponseRel
-                      hHeadMem hHeadReserve hHeadCovers hHeadAdmissible
-                      hHeadLower
+                      hHeadMem hHeadReserve hHeadMinimum hHeadCovers
+                      hHeadAdmissible hHeadLower
                     exact
                       hHead headCallResponseRel
                         (List.mem_cons_of_mem head hHeadMem) hHeadReserve
-                        hHeadCovers hHeadAdmissible hHeadLower)
+                        hHeadMinimum hHeadCovers hHeadAdmissible hHeadLower)
                   (hHeadSingle := by
                     intro base' head' stateHeadStart' preHead' lowerHead'
                       stateHead' sourceTailResult' targetState' hHeadMem
@@ -110813,7 +110815,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                       base.succ.succ targetTailFuel finalCallResponseRel)
                   (hFinalAdmissible :=
                     RawOpenCallResponseAdmissible.comapBind hFinalAdmissible)
-                  hReserveTail hCovers hTailLower (source := source)
+                  (by omega) hReserveTail hCovers hTailLower (source := source)
                   (compiler := compiler) hInitial))
             (by
               intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
@@ -110824,7 +110826,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedHead
                     prim program tmp targetTailFuel sourceTailResult.2
                     finalCallResponseRel)
-                  (by simp) hReserveHead
+                  (by simp) hReserveHead hMinimumTargetTailFuel
                   (freshCoversLayout_lowerBound1?_of_some hCovers hTailLower)
                   (RawOpenCallResponseAdmissible.comapBind hFinalAdmissible)
                   hHeadLower)
@@ -110857,7 +110859,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {freshState stateFresh : Fresh.State}
     {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
-    {base targetTailFuel : Nat} {args : List AstExpr}
+    {base minimumTargetTailFuel targetTailFuel : Nat} {args : List AstExpr}
     {contract : AstContract}
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
@@ -110870,6 +110872,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
+        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
         RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
         Expr.lower1? stateHeadStart head =
@@ -110878,6 +110881,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           revertRel prim program ctxHead base.succ.succ.succ.succ head
           (some contract) preHead lowerHead
           (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
     (hReserve : sourceExprsRawPreludeBaseReserve args ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafe : Safe.CallSafe.exprs args)
@@ -110895,7 +110899,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
     (program := program) (ctx := ctx) (freshState := freshState)
     (stateFresh := stateFresh) (pre := pre) (lowerArgs := lowerArgs)
-    (base := base) (targetTailFuel := targetTailFuel) (args := args)
+    (base := base) (minimumTargetTailFuel := minimumTargetTailFuel)
+    (targetTailFuel := targetTailFuel) (args := args)
     (codeOverride := some contract)
     (finalCallResponseRel := finalCallResponseRel) hLayoutSubset
     hFinalAdmissible hHead
@@ -110909,7 +110914,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (contract := contract) (freshState := stateHeadStart)
           (freshState' := stateHead) (pre := preHead) (lower := lowerHead)
           hSafe hScoped hOk hMem hHeadLower hInitial)
-    hReserve hCovers hLower
+    hMinimumTargetTailFuel hReserve hCovers hLower
 
 /--
 Structural compiler-output dispatcher for terminal-aware raw arguments.
@@ -112527,13 +112532,14 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {base targetTailFuel : Nat}
+    {base minimumTargetTailFuel targetTailFuel : Nat}
     {expr : AstExpr} {contract : AstContract}
     {freshState freshState' : Fresh.State}
     {pre : List Functions.Stmt} {lower : Locals.Expr 1}
     {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
     (hReserve : sourceExprRawPreludeBaseReserve expr ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafe : Safe.CallSafe.expr expr)
     (hScoped : SourceExprScoped layout expr)
@@ -112553,6 +112559,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
         sourceExprRawPreludeBaseReserve head ≤ headBase →
         sizeOf head < sizeOf expr →
+        minimumTargetTailFuel ≤ headTargetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
         Safe.CallSafe.expr head →
         SourceExprScoped layout head →
@@ -112623,7 +112630,9 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
         (program := program) (ctx := ctx) (freshState := freshState)
         (stateFresh := freshState') (pre := pre) (lowerArgs := argExprs)
-        (base := argsBase) (targetTailFuel := targetTailFuel.succ)
+        (base := argsBase)
+        (minimumTargetTailFuel := minimumTargetTailFuel)
+        (targetTailFuel := targetTailFuel.succ)
         (args := args) (contract := contract)
         (finalCallResponseRel :=
           SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
@@ -112632,19 +112641,19 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         (by
           intro headBase headTargetTailFuel head stateHeadStart preHead
             lowerHead stateHead ctxHead headCallResponseRel hMem hHeadReserve
-            hHeadCovers hHeadAdmissible hHeadLower
+            hHeadMinimumTargetTailFuel hHeadCovers hHeadAdmissible hHeadLower
           exact
             hHead hHeadReserve
               (by
                 simpa [hExprEq] using
                   (sizeOf_expr_lt_sizeOf_call_of_mem
                     (callee := .inl yulPrim) hMem))
-              hHeadCovers
+              hHeadMinimumTargetTailFuel hHeadCovers
               (callSafe_exprs_mem hArgsSafe hMem)
               (SourceExprsScoped.mem hArgsScoped hMem)
               (UserCallArity.ExprsOk.mem hArgsOk hMem) hHeadAdmissible
               hHeadLower)
-        hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
+        (by omega) hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
         (source := source) (compiler := compiler) hInitial)
   · intro yulPrim args _hExprEq hSafePrim op hBasic
     exact hPrim hSafePrim hBasic
@@ -112674,7 +112683,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {base targetTailFuel : Nat}
+    {base minimumTargetTailFuel targetTailFuel : Nat}
     {functionName : Name} {args : List AstExpr} {contract : AstContract}
     {freshState freshState' : Fresh.State}
     {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
@@ -112683,6 +112692,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
     (hReserve :
       sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hSafe : Safe.CallSafe.expr (.Call (.inr functionName) args))
     (hScoped : SourceExprScoped layout (.Call (.inr functionName) args))
@@ -112700,6 +112710,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
         sourceExprRawPreludeBaseReserve head ≤ headBase →
         sizeOf head <
           sizeOf (.Call (.inr functionName) args : AstExpr) →
+        minimumTargetTailFuel ≤ headTargetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
         Safe.CallSafe.expr head →
         SourceExprScoped layout head →
@@ -112777,6 +112788,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
             (prim := prim) (program := program) (ctx := ctx)
             (freshState := freshState) (stateFresh := stateArgs)
             (pre := preArgs) (lowerArgs := lowerArgs) (base := argsBase)
+            (minimumTargetTailFuel := minimumTargetTailFuel)
             (targetTailFuel :=
               [Functions.Stmt.let_ tmp (.lit Expr.zero),
                 Functions.Stmt.call [tmp] functionName lowerArgs].length +
@@ -112790,15 +112802,18 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
             (by
               intro headBase headTargetTailFuel head stateHeadStart preHead
                 lowerHead stateHead ctxHead headCallResponseRel hMem
-                hHeadReserve hHeadCovers hHeadAdmissible hHeadLower
+                hHeadReserve hHeadMinimumTargetTailFuel hHeadCovers
+                hHeadAdmissible hHeadLower
               exact
                 hHead hHeadReserve
-                  (sizeOf_expr_lt_sizeOf_call_of_mem hMem) hHeadCovers
+                  (sizeOf_expr_lt_sizeOf_call_of_mem hMem)
+                  hHeadMinimumTargetTailFuel hHeadCovers
                   (callSafe_exprs_mem hArgsSafe hMem)
                   (SourceExprsScoped.mem hArgsScoped hMem)
                   (UserCallArity.ExprsOk.mem hArgsOk hMem) hHeadAdmissible
                   hHeadLower)
-            hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
+            (by omega) hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk
+            hLowerArgs
             (source := source) (compiler := compiler) hInitial))
       hRegular (source := source) (compiler := compiler) hInitial
 
@@ -112858,6 +112873,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel : Nat}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
     (hStoreContains :
       ∀ {shared : EvmYul.SharedState .Yul}
@@ -112883,6 +112899,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
         sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
             base →
+        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
@@ -112898,6 +112915,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
       {ctx : Functions.Source.Ctx}
       {callResponseRel : SourceExprRawPreludeOpenCallResponseRel},
       sourceExprRawPreludeBaseReserve expr ≤ base →
+      minimumTargetTailFuel ≤ targetTailFuel →
       FreshCoversLayout coverLayout freshState →
       Safe.CallSafe.expr expr →
       SourceExprScoped layout expr →
@@ -112911,26 +112929,31 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
   intro expr
   apply (measure sizeOf).wf.induction expr
   intro expr ih base targetTailFuel freshState freshState' pre lower ctx
-    callResponseRel hReserve hCovers hSafe hScoped hOk hLower hAdmissible
+    callResponseRel hReserve hMinimumTargetTailFuel hCovers hSafe hScoped hOk
+    hLower hAdmissible
   exact
     lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_reserve_cases
       (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
           (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
           (program := program) (ctx := ctx) (base := base)
+          (minimumTargetTailFuel := minimumTargetTailFuel)
           (targetTailFuel := targetTailFuel) (expr := expr)
           (contract := contract) (freshState := freshState)
           (freshState' := freshState') (pre := pre) (lower := lower)
-          (callResponseRel := callResponseRel) hLayoutSubset hReserve hCovers
-          hSafe hScoped hOk hStoreContains hLower
+          (callResponseRel := callResponseRel) hLayoutSubset hReserve
+          hMinimumTargetTailFuel hCovers hSafe hScoped hOk hStoreContains
+          hLower
           (by
             intro headBase headTargetTailFuel head stateHeadStart preHead
               lowerHead stateHead ctxHead headCallResponseRel hHeadReserve
-              hHeadSize hHeadCovers hHeadSafe hHeadScoped hHeadOk
+              hHeadSize hHeadMinimumTargetTailFuel hHeadCovers hHeadSafe
+              hHeadScoped hHeadOk
               hHeadAdmissible hHeadLower
             intro source compiler hInitial
             exact
-              ih head hHeadSize hHeadReserve hHeadCovers hHeadSafe hHeadScoped
-                hHeadOk hHeadLower hHeadAdmissible (source := source)
+              ih head hHeadSize hHeadReserve hHeadMinimumTargetTailFuel
+                hHeadCovers hHeadSafe hHeadScoped hHeadOk hHeadLower
+                hHeadAdmissible (source := source)
                 (compiler := compiler) hInitial)
           hPrim
           (by
@@ -112956,29 +112979,34 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
                 (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
                 (terminalRel := terminalRel) (revertRel := revertRel)
                 (prim := prim) (program := program) (ctx := ctx)
-                (base := base) (targetTailFuel := targetTailFuel)
+                (base := base)
+                (minimumTargetTailFuel := minimumTargetTailFuel)
+                (targetTailFuel := targetTailFuel)
                 (functionName := functionName) (args := args)
                 (contract := contract) (freshState := freshState)
                 (freshState' := freshState') (pre := pre)
                 (lowerExpr := lower) (fn := fn)
                 (exprCallResponseRel := callResponseRel) hLayoutSubset
-                hReserveUser hCovers hSafeUser hScopedUser hOkUser
+                hReserveUser hMinimumTargetTailFuel hCovers hSafeUser
+                hScopedUser hOkUser
                 (by simpa [hExprEq] using hLower) hFind
                 (by
                   intro headBase headTargetTailFuel head stateHeadStart preHead
                     lowerHead stateHead ctxHead headCallResponseRel
-                    hHeadReserve hHeadSize hHeadCovers hHeadSafe hHeadScoped
-                    hHeadOk hHeadAdmissible hHeadLower
+                    hHeadReserve hHeadSize hHeadMinimumTargetTailFuel
+                    hHeadCovers hHeadSafe hHeadScoped hHeadOk hHeadAdmissible
+                    hHeadLower
                   have hHeadSize' : sizeOf head < sizeOf expr := by
                     rw [hExprEq]
                     exact hHeadSize
                   intro source compiler hInitial
                   exact
-                    ih head hHeadSize' hHeadReserve hHeadCovers hHeadSafe
+                    ih head hHeadSize' hHeadReserve
+                      hHeadMinimumTargetTailFuel hHeadCovers hHeadSafe
                       hHeadScoped hHeadOk hHeadLower hHeadAdmissible
                       (source := source) (compiler := compiler) hInitial)
-                (hUserRegular hReserveUser hCovers hSafeUser hScopedUser hOkUser
-                  hAdmissible hFind)
+                (hUserRegular hReserveUser hMinimumTargetTailFuel hCovers
+                  hSafeUser hScopedUser hOkUser hAdmissible hFind)
                 hAdmissible (source := source) (compiler := compiler) hInitial)
       hAdmissible
 
