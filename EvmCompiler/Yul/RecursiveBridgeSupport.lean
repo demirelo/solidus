@@ -35697,6 +35697,70 @@ abbrev SourceArgRawPreludeOpenCallResponseRel : Type :=
     OpenExternal.CallResponse → Prop
 
 /--
+Any response admitted by a continuation-shaped local relation is admissible at
+the actual related pre-call shared states.
+
+Internal bind pullbacks may change the suspended continuations, but they must
+not weaken this semantic boundary.
+-/
+def RawOpenCallResponseAdmissible
+    {SourceResult TargetResult : Type _}
+    (cfg : StateRelConfig) (layout : List Name)
+    (callResponseRel :
+      OpenExternal.OpenCall SourceResult →
+        OpenExternal.OpenCall TargetResult →
+          OpenExternal.CallResponse → Prop) : Prop :=
+  ∀ {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    {compilerAfter : Objects.Source.State}
+    {sourceCall : OpenExternal.OpenCall SourceResult}
+    {targetCall : OpenExternal.OpenCall TargetResult}
+    {response : OpenExternal.CallResponse},
+    SourceStateRel cfg layout (.Ok sourceShared sourceStore) compilerAfter →
+      callResponseRel sourceCall targetCall response →
+        Reference.SharedStateRel.ExternalResponseRelAt cfg sourceShared
+          compilerAfter.shared response
+
+namespace RawOpenCallResponseAdmissible
+
+theorem comapBind
+    {ε₁ ε₂ α β γ δ : Type _}
+    {cfg : StateRelConfig} {layout : List Name}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ γ) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ δ) →
+          OpenExternal.CallResponse → Prop}
+    {sourceNext : α → OpenExternal.OpenResult ε₁ γ}
+    {targetNext : β → OpenExternal.OpenResult ε₂ δ}
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
+    RawOpenCallResponseAdmissible cfg layout
+      (OpenExternal.OpenCallResponseRel.comapBind callResponseRel sourceNext
+        targetNext) := by
+  intro sourceShared sourceStore compilerAfter sourceCall targetCall response
+    hRel hResponse
+  exact hAdmissible hRel hResponse
+
+theorem comapRightBind
+    {ε₁ ε₂ α β δ : Type _}
+    {cfg : StateRelConfig} {layout : List Name}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ α) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ δ) →
+          OpenExternal.CallResponse → Prop}
+    {targetNext : β → OpenExternal.OpenResult ε₂ δ}
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
+    RawOpenCallResponseAdmissible cfg layout
+      (OpenExternal.OpenCallResponseRel.comapRightBind callResponseRel
+        targetNext) := by
+  intro sourceShared sourceStore compilerAfter sourceCall targetCall response
+    hRel hResponse
+  exact hAdmissible hRel hResponse
+
+end RawOpenCallResponseAdmissible
+
+/--
 Terminal-aware generated-argument-prefix completion relation.
 
 The regular branch is the existing raw argument-prefix contract: the generated
@@ -110794,6 +110858,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {codeOverride : Option AstContract}
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hFinalAdmissible :
+      RawOpenCallResponseAdmissible cfg layout finalCallResponseRel)
     (hHead :
       ∀ {base targetTailFuel : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
@@ -110802,6 +110868,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
         FreshCoversLayout coverLayout stateHeadStart →
+        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -110886,11 +110953,12 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (hHead := by
                     intro base' targetTailFuel' head' stateHeadStart' preHead'
                       lowerHead' stateHead' ctxHead' headCallResponseRel
-                      hHeadMem hHeadReserve hHeadCovers hHeadLower
+                      hHeadMem hHeadReserve hHeadCovers hHeadAdmissible
+                      hHeadLower
                     exact
                       hHead headCallResponseRel
                         (List.mem_cons_of_mem head hHeadMem) hHeadReserve
-                        hHeadCovers hHeadLower)
+                        hHeadCovers hHeadAdmissible hHeadLower)
                   (hHeadSingle := by
                     intro base' head' stateHeadStart' preHead' lowerHead'
                       stateHead' sourceTailResult' targetState' hHeadMem
@@ -110906,6 +110974,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                     SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedTail
                       prim program head codeOverride preHead lowerHead tmp
                       base.succ.succ targetTailFuel finalCallResponseRel)
+                  (hFinalAdmissible :=
+                    RawOpenCallResponseAdmissible.comapBind hFinalAdmissible)
                   hReserveTail hCovers hTailLower (source := source)
                   (compiler := compiler) hInitial))
             (by
@@ -110919,6 +110989,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                     finalCallResponseRel)
                   (by simp) hReserveHead
                   (freshCoversLayout_lowerBound1?_of_some hCovers hTailLower)
+                  (RawOpenCallResponseAdmissible.comapBind hFinalAdmissible)
                   hHeadLower)
             (by
               intro stateTail preHead lowerHead stateHead sourceTailResult
@@ -110953,6 +111024,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {contract : AstContract}
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hFinalAdmissible :
+      RawOpenCallResponseAdmissible cfg layout finalCallResponseRel)
     (hHead :
       ∀ {base targetTailFuel : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
@@ -110961,6 +111034,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
         FreshCoversLayout coverLayout stateHeadStart →
+        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -110986,7 +111060,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     (stateFresh := stateFresh) (pre := pre) (lowerArgs := lowerArgs)
     (base := base) (targetTailFuel := targetTailFuel) (args := args)
     (codeOverride := some contract)
-    (finalCallResponseRel := finalCallResponseRel) hLayoutSubset hHead
+    (finalCallResponseRel := finalCallResponseRel) hLayoutSubset
+    hFinalAdmissible hHead
     (by
       intro base' head stateHeadStart preHead lowerHead stateHead
         sourceTailResult targetState hMem hHeadLower hInitial
