@@ -633,6 +633,10 @@ Remaining work:
      recursive expression constructor. The live theorem now threads
      `head ∈ args` through cons recursion, so its callback cannot ask an
      induction hypothesis to prove arbitrary expressions.
+   - [x] Thread each checked head `lower1?` equation into the structural raw
+     argument singleton callback. Recursive one-result proofs can now be
+     derived from actual compiler output instead of a lowering-independent
+     expression oracle.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

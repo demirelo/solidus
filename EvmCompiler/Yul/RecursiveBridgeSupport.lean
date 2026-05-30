@@ -109504,7 +109504,10 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
           preHead lowerHead (preHead.length + tailFuel.succ.succ)
           headCallResponseRel)
     (hHeadSingle :
-      ∀ {sourceTailResult : State × List Word},
+      ∀ {stateTail preHead lowerHead stateHead}
+        {sourceTailResult : State × List Word},
+        Expr.lower1? stateTail head =
+          some (preHead, lowerHead, stateHead) →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109598,7 +109601,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (headCallResponseRel := headCallResponseRel)
       hLayoutSubset hCovers hTailLower hHeadLower hFresh
       (hTail hTailLower hHeadLower)
-      (hHead hHeadLower) hHeadSingle
+      (hHead hHeadLower) (hHeadSingle hHeadLower)
       (hTailResponse hTailLower hHeadLower hFresh)
       (by
         intro sourceTailResult targetTailResult sourceCall targetCall response
@@ -109644,8 +109647,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
     (hHeadSingle :
       ∀ {base : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
         {sourceTailResult : State × List Word},
         head ∈ args →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
         OpenResultDoneInvariant
           (fun sourceDone =>
             ∀ {sourceAfter values},
@@ -109773,9 +109779,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   exact
                     hHead (List.mem_cons_of_mem head hHeadMem) hHeadLower)
                 (hHeadSingle := by
-                  intro base' head' sourceTailResult' hHeadMem
+                  intro base' head' stateHeadStart' preHead' lowerHead'
+                    stateHead' sourceTailResult' hHeadMem hHeadLower
                   exact
-                    hHeadSingle (List.mem_cons_of_mem head hHeadMem))
+                    hHeadSingle (List.mem_cons_of_mem head hHeadMem)
+                      hHeadLower)
                 (base := base.succ.succ)
                 (targetTailFuel := preHead.length + targetTailFuel.succ)
                 (freshState := freshState) (stateFresh := stateTail)
@@ -109790,7 +109798,12 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                 (preHead := preHead) (lowerHead := lowerHead)
                 (stateHead := stateHead) (ctxHead := ctxHead)
                 (by simp) hHeadLower)
-          (hHeadSingle (base := base) (head := head) (by simp))
+          (by
+            intro stateTail preHead lowerHead stateHead sourceTailResult
+              hHeadLower
+            exact
+              hHeadSingle (base := base) (head := head) (by simp)
+                hHeadLower)
           (by
             intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
               hTailLower hHeadLower hFresh sourceCall targetCall response
