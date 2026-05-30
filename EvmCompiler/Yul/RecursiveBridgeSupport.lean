@@ -110915,6 +110915,70 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (hCons (source := source) (compiler := compiler) hInitial)
 
 /--
+Checked structural compiler-output dispatcher for terminal-aware raw arguments
+with canonical response pullbacks.
+
+Whole-list CALL safety, lexical scope, and user-call arity construct the
+selected-head singleton invariant internally. Recursive callers provide only
+expression preservation under each induced response relation.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {base targetTailFuel : Nat} {args : List AstExpr}
+    {contract : AstContract}
+    {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hHead :
+      ∀ {base targetTailFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx}
+        (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
+        head ∈ args →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead base.succ.succ.succ.succ head
+          (some contract) preHead lowerHead
+          (preHead.length + targetTailFuel.succ.succ) headCallResponseRel)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hScoped : SourceExprsScoped layout args)
+    (hOk : UserCallArity.ExprsOk contract args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx (yulOpenEvalArgsAppendFuel base args.reverse)
+      args (some contract) pre lowerArgs (pre.length + targetTailFuel.succ)
+      finalCallResponseRel :=
+  sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_canonical
+    (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (freshState := freshState)
+    (stateFresh := stateFresh) (pre := pre) (lowerArgs := lowerArgs)
+    (base := base) (targetTailFuel := targetTailFuel) (args := args)
+    (codeOverride := some contract)
+    (finalCallResponseRel := finalCallResponseRel) hLayoutSubset hHead
+    (by
+      intro base' head stateHeadStart preHead lowerHead stateHead
+        sourceTailResult targetState hMem hHeadLower hInitial
+      exact
+        lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity_of_mem
+          (cfg := cfg) (layout := layout)
+          (sourceFuel := base'.succ.succ.succ) (args := args) (expr := head)
+          (contract := contract) (freshState := stateHeadStart)
+          (freshState' := stateHead) (pre := preHead) (lower := lowerHead)
+          hSafe hScoped hOk hMem hHeadLower hInitial)
+    hCovers hLower
+
+/--
 Structural compiler-output dispatcher for terminal-aware raw arguments.
 
 The source scheduler budgets two more ticks when a reversed head is appended.

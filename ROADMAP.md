@@ -711,6 +711,9 @@ Remaining work:
    - [x] Recurse structurally over generated argument lists with canonical
      pulled-back response relations. Nested heads are proved at the expression
      interface under the exact continuation that remains around each head.
+   - [x] Add the checked canonical generated-argument facade: whole-list CALL
+     safety, lexical scope, and user-call arity now construct selected-head
+     singleton invariants internally.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
