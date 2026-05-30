@@ -58265,6 +58265,24 @@ def runAssignSource
       | .OutOfFuel => .done (.ok sourceAfter)
       | .Checkpoint _ => .done (.ok sourceAfter))
 
+def runIfSource
+    (exprFuel : Nat) (cond : AstExpr) (body : List AstStmt)
+    (codeOverride : Option AstContract) (source : State) :
+    OpenExternal.OpenResult Exception State :=
+  OpenExternal.OpenResult.bind
+    (OpenExternal.YulOpenResult.toOpenResult
+      (OpenExternal.YulOpen.evalValues exprFuel cond codeOverride source))
+    (fun result =>
+      OpenExternal.OpenResult.bind
+        (.done (EvmYul.Yul.head' (.ok result)))
+        (fun condResult =>
+          if condResult.2 ≠ EvmYul.UInt256.ofNat 0 then
+            OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec exprFuel (.Block body) codeOverride
+                condResult.1)
+          else
+            OpenExternal.OpenResult.ok condResult.1))
+
 theorem yulOpen_toOpenResult_execSeq_let_single_eq_runLetSource
     (fuel : Nat) (name : EvmYul.Identifier) (expr : AstExpr)
     (rest : List AstStmt) (codeOverride : Option AstContract)
@@ -58292,6 +58310,25 @@ theorem yulOpen_toOpenResult_execSeq_assign_single_eq_runAssignSource
     (fuel := fuel) (name := name) (expr := expr) (rest := rest)
     (codeOverride := codeOverride) (state := state) hCheck]
   rfl
+
+theorem yulOpen_toOpenResult_exec_if_succ_eq_runIfSource
+    (fuel : Nat) (cond : AstExpr) (body : List AstStmt)
+    (codeOverride : Option AstContract) (state : State) :
+    OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.If cond body) codeOverride state) =
+      runIfSource fuel cond body codeOverride state := by
+  simp only [OpenExternal.YulOpen.exec,
+    OpenExternal.YulOpenResult.toOpenResult_bind]
+  rw [yulOpen_toOpenResult_eval_eq_bind_evalValues]
+  rw [openResult_bind_assoc_sourceBridge]
+  unfold runIfSource
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro result
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro condResult
+  by_cases hCond : condResult.2 ≠ EvmYul.UInt256.ofNat 0 <;>
+    simp [hCond, OpenExternal.YulOpenResult.toOpenResult,
+      OpenExternal.YulOpenResult.ok, OpenExternal.OpenResult.ok]
 
 theorem runLetSource_user_call_succ_eq_bind_args
     (fuel : Nat) (name : EvmYul.Identifier) (functionName : Name)
@@ -58442,6 +58479,151 @@ def runAssignTargetAfterRaw
       | _ => CompilerOpen.invalid
   | .stopped target =>
       OpenExternal.OpenResult.ok target
+
+def runIfTargetAfterRaw
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (lowerBody : Functions.Block)
+    (bodyFuel : Nat) :
+    SourceExprPreludeOpen.RawTarget →
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)
+  | .values target =>
+      match target.values with
+      | [value] =>
+          if value != EvmYul.UInt256.ofNat 0 then
+            CompilerOpen.FunctionsOpen.Stmt.run prim program target.ctx bodyFuel
+              (.block lowerBody) target.state
+          else
+            OpenExternal.OpenResult.ok
+              (Functions.Source.Outcome.regular target.state, target.ctx)
+      | _ => CompilerOpen.invalid
+  | .stopped target =>
+      OpenExternal.OpenResult.ok target
+
+/--
+Normalize a compiled conditional-expression head through the terminal-aware raw
+condition runner. The raw runner evaluates the generated prefix and final
+lowered condition exactly once; the continuation only chooses the branch.
+-/
+theorem compilerOpen_block_runOpen_if_expr_prelude_eq_bind_runRaw
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerBody : Functions.Block} {bodyFuel : Nat}
+    {compiler : Objects.Source.State} :
+    CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + bodyFuel.succ.succ)
+        { stmts := pre ++ [Functions.Stmt.if_ lowerCond lowerBody] } compiler =
+      OpenExternal.OpenResult.bind
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + bodyFuel.succ.succ) pre lowerCond compiler)
+        (runIfTargetAfterRaw prim program lowerBody bodyFuel) := by
+  rw [show pre ++ [Functions.Stmt.if_ lowerCond lowerBody] =
+      pre ++ ([Functions.Stmt.if_ lowerCond lowerBody] ++ []) by simp]
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx) (pre := pre)
+    (suffix := [Functions.Stmt.if_ lowerCond lowerBody] ++ [])
+    (state := compiler) (suffixFuel := bodyFuel.succ.succ)]
+  unfold SourceExprPreludeOpen.runRaw
+  rw [openResult_bind_assoc]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  rcases preOutcome with ⟨compilerAfterPre, mode⟩
+  cases mode with
+  | regular =>
+      simp [compilerOpen_block_runOpen_cons_succ,
+        CompilerOpen.FunctionsOpen.Stmt.run,
+        CompilerOpen.LocalsExpr.evalCondition,
+        CompilerOpen.LocalsExpr.evalOne,
+        OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+        runIfTargetAfterRaw, Functions.Source.Outcome.regular,
+        Locals.Source.Outcome.regular]
+      conv_lhs =>
+        rw [openResult_bind_assoc
+          (CompilerOpen.LocalsExpr.eval prim lowerCond compilerAfterPre)]
+        rw [openResult_bind_assoc
+          (CompilerOpen.LocalsExpr.eval prim lowerCond compilerAfterPre)]
+        rw [openResult_bind_assoc
+          (CompilerOpen.LocalsExpr.eval prim lowerCond compilerAfterPre)]
+      conv_rhs =>
+        rw [openResult_bind_assoc
+          (CompilerOpen.LocalsExpr.eval prim lowerCond compilerAfterPre)]
+      apply OpenExternal.OpenResult.bind_congr_next
+      intro exprResult
+      rcases exprResult with ⟨compilerAfterExpr, values⟩
+      cases values with
+      | nil =>
+          simp [runIfTargetAfterRaw, CompilerOpen.invalid, Functions.Source.invalid,
+            Structured.invalid, OpenExternal.OpenResult.bind]
+      | cons value rest =>
+          cases rest with
+          | nil =>
+              cases hTruth : (value != EvmYul.UInt256.ofNat 0) with
+              | false =>
+                  simp [hTruth, runIfTargetAfterRaw,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    CompilerOpen.FunctionsOpen.Block.runOpen,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+              | true =>
+                  simp [hTruth, runIfTargetAfterRaw,
+                    CompilerOpen.FunctionsOpen.Stmt.run,
+                    CompilerOpen.FunctionsOpen.Block.runOpen,
+                    CompilerOpen.FunctionsOpen.Block.runScoped,
+                    OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
+                  rw [openResult_bind_assoc]
+                  apply OpenExternal.OpenResult.bind_congr_next
+                  intro outcome
+                  rcases outcome with ⟨outcomeState, outcomeMode⟩
+                  cases outcomeMode <;>
+                    simp [OpenExternal.OpenResult.bind,
+                      OpenExternal.OpenResult.ok,
+                      Locals.Source.Outcome.regular]
+          | cons value' rest' =>
+              simp [runIfTargetAfterRaw, CompilerOpen.invalid,
+                Functions.Source.invalid,
+                Structured.invalid, OpenExternal.OpenResult.bind]
+  | brk =>
+      simp [runIfTargetAfterRaw, OpenExternal.OpenResult.bind,
+        OpenExternal.OpenResult.ok]
+  | cont =>
+      simp [runIfTargetAfterRaw, OpenExternal.OpenResult.bind,
+        OpenExternal.OpenResult.ok]
+  | leave =>
+      simp [runIfTargetAfterRaw, OpenExternal.OpenResult.bind,
+        OpenExternal.OpenResult.ok]
+  | halt kind =>
+      simp [runIfTargetAfterRaw, OpenExternal.OpenResult.bind,
+        OpenExternal.OpenResult.ok]
+
+/-- Rebuild one selected compiled conditional path from its raw condition and branch. -/
+theorem compilerOpen_block_runOpen_if_expr_prelude_resolves
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerBody : Functions.Block} {bodyFuel : Nat}
+    {compiler : Objects.Source.State}
+    {left right : OpenExternal.OpenTrace}
+    {rawTarget : SourceExprPreludeOpen.RawTarget}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hRaw :
+      OpenExternal.OpenResultResolves
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + bodyFuel.succ.succ) pre lowerCond compiler)
+        left (.ok rawTarget))
+    (hTail :
+      OpenExternal.OpenResultResolves
+        (runIfTargetAfterRaw prim program lowerBody bodyFuel rawTarget)
+        right targetDone) :
+    OpenExternal.OpenResultResolves
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (pre.length + bodyFuel.succ.succ)
+        { stmts := pre ++ [Functions.Stmt.if_ lowerCond lowerBody] } compiler)
+      (left ++ right) targetDone := by
+  rw [compilerOpen_block_runOpen_if_expr_prelude_eq_bind_runRaw]
+  exact OpenExternal.OpenResultResolves.bind_ok hRaw hTail
 
 namespace SourceExprRawPreludeOpenCallResponseRel
 
