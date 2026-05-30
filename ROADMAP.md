@@ -669,6 +669,10 @@ Remaining work:
      expression lowering, terminal-aware recursive argument preservation, and
      the regular selected-callee continuation now compose without direct
      declaration-CALL or assignment-CALL statement shapes.
+   - [x] Name the canonical terminal-aware raw internal-user-call
+     argument-response relation and add its whole-expression wrapper.
+     Suspended argument requests now resume into the full selected-callee
+     continuation without an ad hoc response adapter premise.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

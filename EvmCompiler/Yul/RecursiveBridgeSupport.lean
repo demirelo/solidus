@@ -58003,6 +58003,42 @@ def compilerOpenUserCallRawAfterArgs
   | .brk | .cont | .leave | .halt _ =>
       OpenExternal.OpenResult.ok (.stopped preResult)
 
+namespace SourceExprRawPreludeOpenCallResponseRel
+
+/--
+Canonical response relation while evaluating an internal user-call
+expression's generated argument prefix.
+
+Any suspended argument request resumes into the selected callee only after
+regular prefix completion. A terminal prefix remains stopped and never enters
+the callee continuation.
+-/
+def beforeUserCall
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (fn : Functions.FunDef)
+    (sourceFuel : Nat) (functionName : Name) (contract : AstContract)
+    (lowerArgs : List (Locals.Expr 1)) (tmp : Name) (tailFuel : Nat)
+    (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) :
+    SourceArgRawPreludeOpenCallResponseRel :=
+  fun sourceCall targetCall response =>
+    callResponseRel
+      { site := sourceCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (sourceCall.resume response)
+            (fun sourceArgsResult =>
+              OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.call sourceFuel
+                  sourceArgsResult.2.reverse functionName (some contract)
+                  sourceArgsResult.1)) }
+      { site := targetCall.site
+        resume := fun response =>
+          OpenExternal.OpenResult.bind (targetCall.resume response)
+            (compilerOpenUserCallRawAfterArgs prim program fn lowerArgs tmp
+              tailFuel) }
+      response
+
+end SourceExprRawPreludeOpenCallResponseRel
+
 /--
 Compact terminal-aware target decomposition for a complete lowered internal
 user-call expression.
@@ -58207,6 +58243,129 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
       (by
         intro sourceCall targetCall response hResponse
         exact hArgResponse hArgsLower hFresh hResponse))
+
+/--
+Canonical-response wrapper for a whole lowered internal user-call expression.
+
+The compiler decomposition fixes the generated argument prefix, hidden result
+slot, and selected callee. The argument-side response relation is then chosen
+internally so a suspended argument request resumes into the same full
+post-prefix callee continuation on both sides.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_terminal_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel tailFuel : Nat}
+    {functionName : Name} {args : List AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {fn : Functions.FunDef}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hArgs :
+      ∀ {preArgs : List Functions.Stmt}
+        {lowerArgs : List (Locals.Expr 1)} {stateArgs : Fresh.State}
+        {tmp : Name},
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        Fresh.fresh? stateArgs = some (tmp, freshState') →
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+          OpenExternal.OpenResultRel
+            (SourceExprRawPreludeOpenCallResponseRel.beforeUserCall prim
+              program fn sourceFuel functionName contract lowerArgs tmp
+              tailFuel exprCallResponseRel)
+            (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+              revertRel prim lowerArgs)
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+                (some contract) source))
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              (preArgs.length +
+                ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                  Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                    tailFuel.succ))
+              { stmts := preArgs } compiler))
+    (hRegular :
+      ∀ {preArgs : List Functions.Stmt}
+        {lowerArgs : List (Locals.Expr 1)} {stateArgs : Fresh.State}
+        {tmp : Name},
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        Fresh.fresh? stateArgs = some (tmp, freshState') →
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel exprCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.call sourceFuel
+              sourceArgsResult.2.reverse functionName (some contract)
+              sourceArgsResult.1))
+          (compilerOpenUserCallRawAfterRegularArgs prim program fn lowerArgs
+            tmp tailFuel targetArgsResult)) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx sourceFuel.succ (.Call (.inr functionName) args)
+      (some contract) pre lowerExpr (pre.length + tailFuel.succ)
+      exprCallResponseRel := by
+  intro source compiler hInitial
+  rcases
+      sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (tailFuel := tailFuel)
+        (compiler := compiler) (fn := fn) hLower hFind with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, _hUnsupported, hArgsLower, hFresh,
+      hTarget⟩
+  rw [hTarget]
+  simpa [compilerOpenUserCallRawAfterArgs] using
+    (sourceExprRawPreludeOpenResultRel_user_call_of_arg_terminal
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (sourceFuel := sourceFuel)
+      (functionName := functionName) (args := args) (contract := contract)
+      (source := source) (lowerArgs := lowerArgs)
+      (argCallResponseRel :=
+        SourceExprRawPreludeOpenCallResponseRel.beforeUserCall prim program fn
+          sourceFuel functionName contract lowerArgs tmp tailFuel
+          exprCallResponseRel)
+      (exprCallResponseRel := exprCallResponseRel)
+      (targetArgs :=
+        CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (preArgs.length +
+            ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+              Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                tailFuel.succ))
+          { stmts := preArgs } compiler)
+      (targetRegular :=
+        compilerOpenUserCallRawAfterRegularArgs prim program fn lowerArgs tmp
+          tailFuel)
+      (hArgs hArgsLower hFresh hInitial)
+      (by
+        intro sourceArgsResult targetArgsResult hDone
+        exact hRegular hArgsLower hFresh hDone)
+      (by
+        intro sourceCall targetCall response hResponse
+        simpa [SourceExprRawPreludeOpenCallResponseRel.beforeUserCall] using
+          hResponse))
 
 /--
 Exact target-side shape of the hidden result-slot suffix emitted for an
