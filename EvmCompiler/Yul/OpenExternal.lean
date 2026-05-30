@@ -1936,6 +1936,33 @@ theorem bind_inv
       source) hResolve
 
 /--
+Invert resolution through a bind whose continuation is pure successful
+postprocessing.
+
+The suffix cannot add interaction events, so the bound prefix resolves on the
+exact same trace.  The completed prefix result is intentionally left
+existential: callers that need its value can recover it from their local
+invariant.
+-/
+theorem bind_ok_inv_left
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source : OpenResult ε α} {next : α → β}
+    {trace : OpenTrace} {result : Except ε β}
+    (hResolve :
+      OpenResultResolves
+        (OpenResult.bind source (fun value => OpenResult.ok (next value)))
+        trace result) :
+    ∃ sourceDone, OpenResultResolves source trace sourceDone := by
+  rcases bind_inv hResolve with hError | hOk
+  · rcases hError with ⟨err, hSource, _hResult⟩
+    exact ⟨.error err, hSource⟩
+  · rcases hOk with ⟨left, right, value, hTrace, hSource, hNext⟩
+    cases hNext
+    simp at hTrace
+    subst trace
+    exact ⟨.ok value, hSource⟩
+
+/--
 Transport one resolved bound path when both the prefix computation and each
 selected successful continuation preserve the same concrete trace and result.
 -/

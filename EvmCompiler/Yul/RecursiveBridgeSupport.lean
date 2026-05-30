@@ -57542,6 +57542,94 @@ theorem sourceUserCallBodyOpenResultRel_of_seq_callSafe_scoped_function
         exact List.mem_append_left lowerFn.params hMem)
 
 /--
+Selected-path counterpart of
+`sourceUserCallBodyOpenResultRel_of_seq_callSafe_scoped_function`.
+
+The recursive sequence theorem supplies one concrete body path.  The
+CALL-safe source invariant enriches only that resolved endpoint with the
+return lookup needed by caller restoration.
+-/
+theorem sourceUserCallBodyOpenResultPathRel_of_seq_callSafe_scoped_function
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {yulProgram : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {lowerFn : Functions.FunDef}
+    {sharedArgs : EvmYul.SharedState .Yul}
+    {storeArgs : EvmYul.Yul.VarStore} {argValues : List Word}
+    {bodyFuel : Nat}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {trace : OpenExternal.OpenTrace}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ argValues.length)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns argValues
+                (.Ok sharedArgs storeArgs)))))
+        targetBody)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (SourceOpenTraceCallResponseRel cfg)
+      (SourceUserCallBodyDoneRel cfg
+        (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true) lowerFn)
+      trace
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+          (some yulProgram.contract)
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall params returns argValues
+              (.Ok sharedArgs storeArgs)))))
+      targetBody := by
+  rcases hBody.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  have hInv :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains
+            (lowerFn.returns ++ lowerFn.params) false false true))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns argValues
+                (.Ok sharedArgs storeArgs))))) := by
+    simpa [hLowerParams, hLowerReturns] using
+      (yulOpenExec_function_body_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+        hSafe hScoped hLookup hArgsLength)
+  exact
+    OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+      hSource hTarget hResponses
+      (sourceUserCallBodyDoneRel_of_seq_checkpoint_contains
+        (OpenResultDoneInvariant.of_resolves
+          (openResultDoneInvariant_sourceResultCheckpointAllowed_stateStoreContains_of_checkpointStoreContains
+            hInv)
+          hSource)
+        hDone
+        (by
+          intro name hMem
+          exact List.mem_append_left lowerFn.params hMem))
+
+/--
 Recursively related open callee bodies compose into related internal-user-call
 results before any caller-specific replay.
 
@@ -57972,6 +58060,105 @@ theorem sourceUserCallResultOpenResultRel_succ_of_override_function_body_callSaf
       (sourceUserCallBodyOpenResultRel_of_seq_callSafe_scoped_function
         hSafe hScoped hLookup hArgsLength hLowerParams hLowerReturns hBody)
       hLowerReturns hCallResponse
+
+/--
+Selected-path CALL-safe internal-user-call body bridge.
+
+Imported Yul `call` and compiler-open `runBody` are rewritten to their matching
+body binds.  Recursive body preservation supplies one concrete finite path,
+which is enriched and restored without adding external events.
+-/
+theorem sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_callSafe_scoped
+    {cfg : StateRelConfig} {callerLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {lowerFn : Functions.FunDef}
+    {sourceFuel targetBodyFuel : Nat} {argValues : List Word}
+    {paramStore : Locals.Source.Store}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hCaller :
+      SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ argValues.length)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns argValues
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := callerCompiler.shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceUserCallResultDoneRel cfg callerLayout callerCompiler terminalRel
+        revertRel)
+      trace
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel.succ argValues functionName
+          (some yulProgram.contract) (.Ok callerShared callerStore)))
+      (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+        argValues targetBodyFuel.succ callerCompiler.shared) := by
+  rw [yulOpen_toOpenResult_call_succ_eq_bind_body_of_override_function
+    (fuel := sourceFuel) (args := argValues)
+    (functionName? := some functionName) (contract := yulProgram.contract)
+    (state := (.Ok callerShared callerStore : State))
+    (f := .Def params returns body)
+    (by simpa [OpenExternal.YulOpen.callFunction?] using hLookup)]
+  rw [compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
+    (prim := prim) (program := program) (fn := lowerFn)
+    (args := argValues) (fuel := targetBodyFuel)
+    (shared := callerCompiler.shared) (paramStore := paramStore) hInsert]
+  exact
+    sourceUserCallResultOpenResultPathRel_bind_body
+      (cfg := cfg) (callerLayout := callerLayout)
+      (bodyLayout := lowerFn.returns ++ lowerFn.params)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := SourceResultCheckpointAllowed false false true)
+      (fn := lowerFn) (callerShared := callerShared)
+      (callerStore := callerStore) (callerCompiler := callerCompiler)
+      (rets := returns) hCaller
+      (sourceUserCallBodyOpenResultPathRel_of_seq_callSafe_scoped_function
+        hSafe hScoped hLookup hArgsLength hLowerParams hLowerReturns hBody
+        hResponses)
+      hLowerReturns
+      (by
+        intro name hMem
+        exact List.mem_append_left lowerFn.params hMem)
 
 /--
 Successful restored internal-user-call results replay through the generated
@@ -58991,6 +59178,145 @@ theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_override_function
     (by
       intro sourceCall targetCall response hResponse
       exact hResponse)
+
+/--
+Selected-path internal-user-call expression bridge after regular argument
+completion.
+
+The completed argument prefix fixes the caller state and lowered argument
+replay.  Recursive body preservation chooses its cutoff for the concrete body
+trace, caller restoration remains path-native, and the generated hidden slot is
+replayed without adding interactions.
+-/
+theorem sourceExprRawPreludeOpenResultPathRel_user_call_regular_of_override_function_body_callSafe_scoped
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {lowerFn : Functions.FunDef}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetBodyFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {paramStore : Locals.Source.Store}
+    {trace : OpenExternal.OpenTrace}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.ok ((.Ok callerShared callerStore : State), values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ values.reverse.length)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params values.reverse
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hBody :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns values.reverse
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := (targetState.insert tmp Expr.zero).shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hExprOk :
+      UserCallArity.ExprOk yulProgram.contract
+        (.Call (.inr functionName) args))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      trace
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel.succ values.reverse functionName
+          (some yulProgram.contract) (.Ok callerShared callerStore)))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+          (targetState.insert tmp Expr.zero))
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+              argResult.2 targetBodyFuel.succ argResult.1.shared)
+            (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+              { ctxAfter with scope := tmp :: ctxAfter.scope }
+              argResult.1))) := by
+  rcases
+      sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval_insert
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (args := args)
+        (freshState := freshState) (stateArgs := stateArgs)
+        (freshState' := freshState') (preArgs := preArgs)
+        (lowerArgs := lowerArgs) (tmp := tmp)
+        (sourceAfter := (.Ok callerShared callerStore : State))
+        (values := values) (targetState := targetState) (ctxAfter := ctxAfter)
+        hArgs hFresh hTmpFreshLayout hDone with
+    ⟨hArgEval, hRelInserted⟩
+  rw [hArgEval]
+  simp only [OpenExternal.OpenResult.bind]
+  exact
+    sourceUserCallResultOpenResultPathRel_replay_hidden_temp_raw
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (tmp := tmp)
+      (ctx := { ctxAfter with scope := tmp :: ctxAfter.scope })
+      (callerCompiler := targetState.insert tmp Expr.zero)
+      hTmpFreshLayout
+      (by
+        simp [Locals.Source.State.insert, Locals.Source.Store.contains,
+          Locals.Source.Store.insert_self])
+      (sourceUserCallResultOpenResultPathRel_succ_of_override_function_body_callSafe_scoped
+        (cfg := cfg) (callerLayout := layout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (prim := prim) (yulProgram := yulProgram) (program := program)
+        (lowerFn := lowerFn) (sourceFuel := sourceFuel)
+        (targetBodyFuel := targetBodyFuel) (argValues := values.reverse)
+        (paramStore := paramStore) (functionName := functionName)
+        (params := params) (returns := returns) (body := body)
+        (callerShared := callerShared) (callerStore := callerStore)
+        (callerCompiler := targetState.insert tmp Expr.zero)
+        hSafe hScoped hRelInserted hLookup hArgsLength hInsert hLowerParams
+        hLowerReturns hBody hResponses)
+      (yulOpenCall_doneInvariant_single_of_exprOk
+        (fuel := sourceFuel.succ) (state := (.Ok callerShared callerStore))
+        (argValues := values.reverse) (functionName := functionName)
+        (args := args) (contract := yulProgram.contract) hExprOk)
+      hResponses
 
 /--
 Target-side open shape of an internal function-call statement after the callee
