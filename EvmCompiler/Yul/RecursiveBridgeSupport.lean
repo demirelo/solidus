@@ -60874,6 +60874,308 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_prelude_r
                       OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
                         hResolve hTargetFull hResponses hTailDone
 
+/--
+Finite-path assignment-expression successor over the raw expression boundary.
+
+The destination local is visible initially and the caller supplies preservation
+of that destination through the compiled expression prefix at any selected
+cutoff.  The selected raw-expression path may therefore be padded to the
+recursively selected tail cutoff without losing the destination needed by the
+assignment head.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelude_raw
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hTargetMem : identName name ∈ layout)
+    (hPreContainsAt :
+      ∀ {targetFuel : Nat} {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun preDone =>
+              ∀ {compilerAfterPre : Objects.Source.State}
+                {ctxAfter : Functions.Source.Ctx},
+                preDone =
+                  .ok (Functions.Source.Outcome.regular compilerAfterPre,
+                    ctxAfter) →
+                compilerAfterPre.vars.contains (identName name) = true)
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              targetFuel { stmts := pre } compiler))
+    (hExpr :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program ctx exprFuel sourceExpr codeOverride pre lowerExpr
+        (fun _sourceDone => True))
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          exprFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx exprFuel.succ.succ
+      (.Assign [name] sourceExpr :: rest) codeOverride
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hInitialExact :
+          SourceStateExactRel cfg layout (.Ok shared store) compiler :=
+        SourceStateExactRel.ok hShared hVars hDomain
+      have hCheck :
+          EvmYul.Yul.checkAssignment (.Ok shared store) [name] = .ok () :=
+        StoreDomainExact.checkAssignment_ok
+          (layout := layout) (store := store) (shared := shared)
+          (names := [name]) hDomain (by simp [identNames])
+          (by
+            intro assignedName hMem
+            have hEq : assignedName = identName name := by
+              simpa [identNames] using hMem
+            subst assignedName
+            exact hTargetMem)
+      have hResolveRun :
+          OpenExternal.OpenResultResolves
+            (SourceExprSeqPreludeOpen.runAssignSource exprFuel name sourceExpr
+              rest codeOverride (.Ok shared store))
+            trace sourceDone := by
+        simpa only [
+          SourceExprSeqPreludeOpen.yulOpen_toOpenResult_execSeq_assign_single_eq_runAssignSource
+            exprFuel name sourceExpr rest codeOverride (.Ok shared store)
+              hCheck] using hResolve
+      unfold SourceExprSeqPreludeOpen.runAssignSource at hResolveRun
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolveRun with
+        hError | hValue
+      · rcases hError with ⟨err, hPrefix, hDoneEq⟩
+        subst sourceDone
+        rcases
+            hExpr (SourceStateExactRel.toRel hInitialExact)
+              (SourceStateExactRel.stateStoreContains hInitialExact)
+              hPrefix True.intro hResponses minimumTargetFuel with
+          ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
+        rcases hPrefixPath.resolves with
+          ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
+            hPrefixDone⟩
+        have hSourcePrefixEq :
+            (.error err : Except Exception (State × List Word)) =
+              sourcePrefixDone :=
+          OpenExternal.OpenResultResolves.deterministic hPrefix hSourcePrefix
+        subst sourcePrefixDone
+        cases targetPrefixDone with
+        | error targetErr =>
+            simp [SourceExprRawPreludeOpenDoneRel] at hPrefixDone
+        | ok rawTarget =>
+            cases rawTarget with
+            | values target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hPrefixDone
+            | stopped target =>
+                have hTargetPrefixPadded :
+                    OpenExternal.OpenResultResolves
+                      (SourceExprPreludeOpen.runRaw prim program ctx
+                        (pre.length + prefixFuel.succ) pre lowerExpr compiler)
+                      trace (.ok (.stopped target)) :=
+                  SourceExprPreludeOpen.runRaw_resolves_mono
+                    (by omega) hTargetPrefix
+                have hPreContains :
+                    OpenResultDoneInvariant
+                      (fun preDone =>
+                        ∀ {compilerAfterPre : Objects.Source.State}
+                          {ctxAfter : Functions.Source.Ctx},
+                          preDone =
+                            .ok
+                              (Functions.Source.Outcome.regular
+                                compilerAfterPre, ctxAfter) →
+                            compilerAfterPre.vars.contains
+                              (identName name) = true)
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        ctx (pre.length + prefixFuel.succ) { stmts := pre }
+                        compiler) :=
+                  hPreContainsAt hInitialExact
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                        (pre.length + prefixFuel.succ)
+                        { stmts :=
+                          pre ++
+                            [Functions.Stmt.assign (identName name)
+                              lowerExpr] ++
+                            lowerTail.stmts }
+                        compiler)
+                      trace (.ok target) := by
+                  simpa using
+                    (SourceExprSeqPreludeOpen.compilerOpen_block_runOpen_assign_expr_prelude_resolves
+                      (tail := lowerTail.stmts)
+                      (name := identName name) (tailFuel := prefixFuel)
+                      hPreContains hTargetPrefixPadded
+                      (OpenExternal.OpenResultResolves.done :
+                        OpenExternal.OpenResultResolves
+                          (SourceExprSeqPreludeOpen.runAssignTargetAfterRaw prim
+                            program (identName name) lowerTail.stmts prefixFuel
+                            (.stopped target))
+                          [] (.ok target)))
+                refine ⟨pre.length + prefixFuel.succ, by omega, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hResolve hTargetFull hResponses
+                    (sourceOpenResultSeqDoneRel_of_exprRaw_stopped
+                      hPrefixDone)
+      · rcases hValue with
+          ⟨left, right, sourceResult, hTrace, hPrefix, hSuffix⟩
+        subst trace
+        have hLeftResponses :
+            SourceOpenTraceResponsesAdmissible cfg left :=
+          OpenExternal.OpenTrace.left_of_append hResponses
+        have hRightResponses :
+            SourceOpenTraceResponsesAdmissible cfg right :=
+          OpenExternal.OpenTrace.right_of_append hResponses
+        rcases
+            hExpr (SourceStateExactRel.toRel hInitialExact)
+              (SourceStateExactRel.stateStoreContains hInitialExact)
+              hPrefix True.intro hLeftResponses minimumTargetFuel with
+          ⟨prefixFuel, hMinimumPrefix, hPrefixPath⟩
+        rcases hPrefixPath.resolves with
+          ⟨sourcePrefixDone, targetPrefixDone, hSourcePrefix, hTargetPrefix,
+            hPrefixDone⟩
+        have hSourcePrefixEq :
+            (.ok sourceResult : Except Exception (State × List Word)) =
+              sourcePrefixDone :=
+          OpenExternal.OpenResultResolves.deterministic hPrefix hSourcePrefix
+        subst sourcePrefixDone
+        cases targetPrefixDone with
+        | error targetErr =>
+            simp [SourceExprRawPreludeOpenDoneRel] at hPrefixDone
+        | ok rawTarget =>
+            cases rawTarget with
+            | stopped target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hPrefixDone
+            | values target =>
+                rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+                have hDoneInv :
+                    ∀ {sourceAfter' values'},
+                      (.ok (sourceAfter, sourceValues) :
+                        Except Exception (State × List Word)) =
+                          .ok (sourceAfter', values') →
+                        StateStoreDomainExact layout sourceAfter' ∧
+                          ∃ value, values' = [value] :=
+                  OpenResultDoneInvariant.of_resolves
+                    (hExprDone hInitialExact) hPrefix
+                rcases hDoneInv rfl with
+                  ⟨hDomainAfterState, value, hValues⟩
+                subst sourceValues
+                rcases hPrefixDone with ⟨hRelAfter, hTargetValues⟩
+                cases hRelAfter with
+                | @ok sharedAfter storeAfter targetState hSharedAfter
+                    hVarsAfter =>
+                    have hDomainAfter :
+                        StoreDomainExact layout storeAfter := by
+                      simpa [StateStoreDomainExact] using hDomainAfterState
+                    have hTargetValuesEq : target.values = [value] := by
+                      simpa using hTargetValues.symm
+                    have hFilledExact :
+                        SourceStateExactRel cfg layout
+                          (EvmYul.Yul.State.multifill [name] [value]
+                            (.Ok sharedAfter storeAfter : State))
+                          (target.state.insert (identName name) value) := by
+                      simp [EvmYul.Yul.State.multifill,
+                        EvmYul.Yul.State.insert, identName]
+                      exact
+                        SourceStateExactRel.ok hSharedAfter
+                          (sourceStoreRel_insert_visible hVarsAfter)
+                          (StoreDomainExact.insert_mem hDomainAfter hTargetMem)
+                    have hSuffix' :
+                        OpenExternal.OpenResultResolves
+                          (OpenExternal.YulOpenResult.toOpenResult
+                            (OpenExternal.YulOpen.execSeq exprFuel.succ rest
+                              codeOverride
+                              (EvmYul.Yul.State.multifill [name] [value]
+                                (.Ok sharedAfter storeAfter : State))))
+                          right sourceDone := by
+                      simpa [EvmYul.Yul.State.multifill] using hSuffix
+                    rcases
+                        hTail (ctxAfter := target.ctx) hFilledExact hSuffix'
+                          hAllowed hRightResponses prefixFuel with
+                      ⟨tailFuel, hPrefixTail, hTailPath⟩
+                    rcases hTailPath.resolves with
+                      ⟨tailSourceDone, tailTargetDone, hTailSource, hTailTarget,
+                        hTailDone⟩
+                    have hTailSourceEq : sourceDone = tailSourceDone :=
+                      OpenExternal.OpenResultResolves.deterministic hSuffix'
+                        hTailSource
+                    subst tailSourceDone
+                    have hTargetPrefixPadded :
+                        OpenExternal.OpenResultResolves
+                          (SourceExprPreludeOpen.runRaw prim program ctx
+                            (pre.length + tailFuel.succ) pre lowerExpr
+                            compiler)
+                          left (.ok (.values target)) :=
+                      SourceExprPreludeOpen.runRaw_resolves_mono
+                        (by omega) hTargetPrefix
+                    have hPreContains :
+                        OpenResultDoneInvariant
+                          (fun preDone =>
+                            ∀ {compilerAfterPre : Objects.Source.State}
+                              {ctxAfter : Functions.Source.Ctx},
+                              preDone =
+                                .ok
+                                  (Functions.Source.Outcome.regular
+                                    compilerAfterPre, ctxAfter) →
+                                compilerAfterPre.vars.contains
+                                  (identName name) = true)
+                          (CompilerOpen.FunctionsOpen.Block.runOpen prim
+                            program ctx (pre.length + tailFuel.succ)
+                            { stmts := pre } compiler) :=
+                      hPreContainsAt hInitialExact
+                    have hTargetTail :
+                        OpenExternal.OpenResultResolves
+                          (SourceExprSeqPreludeOpen.runAssignTargetAfterRaw prim
+                            program (identName name) lowerTail.stmts tailFuel
+                            (.values target))
+                          right tailTargetDone := by
+                      simp only [
+                        SourceExprSeqPreludeOpen.runAssignTargetAfterRaw,
+                        hTargetValuesEq]
+                      cases lowerTail
+                      exact hTailTarget
+                    have hTargetFull :
+                        OpenExternal.OpenResultResolves
+                          (CompilerOpen.FunctionsOpen.Block.runOpen prim
+                            program ctx (pre.length + tailFuel.succ)
+                            { stmts :=
+                              pre ++
+                                [Functions.Stmt.assign (identName name)
+                                  lowerExpr] ++
+                                lowerTail.stmts }
+                            compiler)
+                          (left ++ right) tailTargetDone :=
+                      SourceExprSeqPreludeOpen.compilerOpen_block_runOpen_assign_expr_prelude_resolves
+                        hPreContains hTargetPrefixPadded hTargetTail
+                    refine ⟨pre.length + tailFuel.succ, by omega, ?_⟩
+                    exact
+                      OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                        hResolve hTargetFull hResponses hTailDone
+
 theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_expr_prelude_raw
     {cfg : StateRelConfig} {layout outcomeLayout : List Name}
     {terminalRel :
@@ -110364,6 +110666,73 @@ theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of
               (ctx := ctx) (fuel := pre.length + tailFuel.succ)
               (pre := pre) (state := compiler) hPreWrites hContains)
     hHead
+
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hTargetMem : identName name ∈ layout)
+    (hPreWrites : SourceWritesDisjoint [identName name] pre)
+    (hExpr :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program ctx exprFuel sourceExpr codeOverride pre lowerExpr
+        (fun _sourceDone => True))
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          exprFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx exprFuel.succ.succ
+      (.Assign [name] sourceExpr :: rest) codeOverride
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_prelude_raw
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (exprFuel := exprFuel)
+    (name := name) (sourceExpr := sourceExpr) (rest := rest)
+    (codeOverride := codeOverride) (pre := pre) (lowerExpr := lowerExpr)
+    (lowerTail := lowerTail) (allowed := allowed) hTargetMem
+    (by
+      intro targetFuel source compiler hInitial
+      cases hInitial with
+      | @ok shared store compiler hShared hVars hDomain =>
+          have hInitialRel :
+              SourceStateRel cfg layout (.Ok shared store) compiler :=
+            SourceStateRel.ok hShared hVars
+          have hContains :
+              compiler.vars.contains (identName name) = true :=
+            SourceStateRel.contains_of_domain hInitialRel hDomain hTargetMem
+          exact
+            compilerOpen_runOpen_doneInvariant_contains_of_writes
+              (name := identName name) (prim := prim) (program := program)
+              (ctx := ctx) (fuel := targetFuel) (pre := pre)
+              (state := compiler) hPreWrites hContains)
+    hExpr hExprDone hTail
 
 theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}

@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-30 03:42 PDT.
+Last updated: 2026-05-30 03:46 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -56,11 +56,12 @@ Finite-trace correction:
   sequence-tail composition path-native. Construct the exact target cutoff
   from the selected finite trace rather than asking one cutoff to cover the
   whole response tree.
-  The declaration-expression successor is checked: it splits the selected
-  source trace at the raw-expression bind, recursively chooses the tail cutoff
-  from the actual filled state, pads the completed raw target prefix to that
-  cutoff, and rebuilds the full compiled path. Assignment and the recursive
-  checked-lowering lift remain.
+  The declaration- and assignment-expression successors are checked: each
+  splits the selected source trace at the raw-expression bind, recursively
+  chooses the tail cutoff from the actual filled state, pads the completed raw
+  target prefix to that cutoff, and rebuilds the full compiled path. Assignment
+  additionally derives its destination-preservation invariant from arbitrary
+  prefix write-disjointness. The recursive checked-lowering lift remains.
 - [ ] Replace the six stale closed-shell singleton dispatch branches with the
   path-native open sequence frontier and delete the temporary tree frontier.
 - [ ] Carry ordinary `CALL` through the preferred public checked compiler/EVM
