@@ -36363,6 +36363,97 @@ theorem SourceArgTerminalRawPreludeOpenPathSoundWhen.of_atExact
         OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
           hSource hTargetPadded hResponses hDone
 
+/--
+Pad one already selected terminal-aware argument-prefix target path.
+-/
+theorem sourceArgTerminalRawPreludeOpenResultPathRel_runOpen_mono
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel fuel' : Nat} {pre : List Functions.Stmt}
+    {lowerArgs : List (Locals.Expr 1)}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {compiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace}
+    (hLe : fuel ≤ fuel')
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace)
+    (hPath :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+          revertRel prim lowerArgs)
+        trace source
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel
+          { stmts := pre } compiler)) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs)
+      trace source
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel'
+        { stmts := pre } compiler) := by
+  rcases hPath.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  cases targetDone with
+  | error targetErr =>
+      cases sourceDone <;>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+  | ok targetResult =>
+      exact
+        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+          hSource
+          (CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+            hLe hTarget)
+          hResponses hDone
+
+/--
+Pad one already selected raw expression-prelude target path.
+-/
+theorem sourceExprRawPreludeOpenResultPathRel_runRaw_mono
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel fuel' : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {source :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {compiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace}
+    (hLe : fuel ≤ fuel')
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace)
+    (hPath :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        trace source
+        (SourceExprPreludeOpen.runRaw prim program ctx fuel pre lower
+          compiler)) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      trace source
+      (SourceExprPreludeOpen.runRaw prim program ctx fuel' pre lower
+        compiler) := by
+  rcases hPath.resolves with
+    ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
+  cases targetDone with
+  | error targetErr =>
+      cases sourceDone <;>
+        simp [SourceExprRawPreludeOpenDoneRel] at hDone
+  | ok targetResult =>
+      exact
+        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+          hSource
+          (SourceExprPreludeOpen.runRaw_resolves_mono hLe hTarget)
+          hResponses hDone
+
 theorem sourceArgTerminalRawPreludeOpenDoneRel_of_raw
     {cfg : StateRelConfig} {layout : List Name}
     {terminalRel :
@@ -36393,6 +36484,39 @@ theorem sourceArgTerminalRawPreludeOpenDoneRel_of_raw
               cases mode <;>
                 simpa [SourceArgRawPreludeOpenDoneRel,
                   SourceArgTerminalRawPreludeOpenDoneRel] using hDone
+
+/--
+Terminal argument-prefix outcomes are independent of the lowered replay list.
+
+Only regular completions inspect `lowerArgs`; once argument evaluation halts or
+reverts, an enclosing generated prefix can retain the same stopped outcome
+while changing the pending replay suffix.
+-/
+theorem sourceArgTerminalRawPreludeOpenDoneRel_error_replace_lowerArgs
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {lowerArgs lowerArgs' : List (Locals.Expr 1)}
+    {err : Exception}
+    {targetDone :
+      Except Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.error err) targetDone) :
+    SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+      prim lowerArgs' (.error err) targetDone := by
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+  | ok targetResult =>
+      rcases targetResult with ⟨targetOutcome, targetCtx⟩
+      cases targetOutcome with
+      | mk targetState mode =>
+          cases err <;> cases mode <;>
+            simpa [SourceArgTerminalRawPreludeOpenDoneRel] using hDone
 
 theorem sourceArgRawPreludeOpenDoneRel_of_terminal_ok
     {cfg : StateRelConfig} {layout : List Name}
@@ -37948,6 +38072,25 @@ def sourceArgAppendHeadValues
     (.done (EvmYul.Yul.head' (.ok headResult)))
     (fun headValue =>
       .done (.ok (headValue.1, tailValues ++ [headValue.2])))
+
+/-- Generated head-value replay performs no external interaction. -/
+theorem sourceArgAppendHeadValues_resolves_trace_eq_nil
+    {tailValues : List Word} {headResult : State × List Word}
+    {trace : OpenExternal.OpenTrace}
+    {result : Except Exception (State × List Word)}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (sourceArgAppendHeadValues tailValues headResult) trace result) :
+    trace = [] := by
+  unfold sourceArgAppendHeadValues at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hError | hOk
+  · rcases hError with ⟨err, hDone, _hResult⟩
+    cases hDone
+  · rcases hOk with ⟨left, right, value, hTrace, hDone, hNext⟩
+    cases hDone
+    cases hNext
+    simpa using hTrace
 
 /--
 Terminal-aware scheduled reverse-cons source equation.

@@ -2227,6 +2227,83 @@ theorem bind
           hSite (hCallResponse hResponse) hTail)
 
 /--
+Compose one selected successful prefix path with the continuation reached at
+its concrete endpoint.
+
+Unlike `bind`, this theorem does not ask for continuation proofs at hypothetical
+done endpoints that do not occur on the selected path.  The supplied prefix
+resolutions identify the actual successful values.
+-/
+theorem bind_selected_ok
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {trace prefixTail : OpenTrace}
+    {source : OpenResult ε₁ α} {target : OpenResult ε₂ β}
+    {sourceValue : α} {targetValue : β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel : OpenResultPathRel callResponseRel doneRel trace source target)
+    (hSource :
+      OpenResultResolves source trace (.ok sourceValue))
+    (hTarget :
+      OpenResultResolves target trace (.ok targetValue))
+    (hNext :
+      OpenResultPathRel callResponseRel' doneRel' prefixTail
+        (sourceNext sourceValue) (targetNext targetValue))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response) :
+    OpenResultPathRel callResponseRel' doneRel' (trace ++ prefixTail)
+      (OpenResult.bind source sourceNext)
+      (OpenResult.bind target targetNext) := by
+  induction hRel generalizing sourceValue targetValue with
+  | @done sourceDone targetDone hDone =>
+      cases hSource
+      cases hTarget
+      simpa [OpenResult.bind] using hNext
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      rcases OpenResultResolves.call_inv hSource with
+        ⟨sourceResponse, hSourceEvent, hSourceTail⟩
+      have hSourceResponse : response = sourceResponse :=
+        congrArg OpenEvent.response hSourceEvent
+      subst sourceResponse
+      rcases OpenResultResolves.call_inv hTarget with
+        ⟨targetResponse, hTargetEvent, hTargetTail⟩
+      have hTargetResponse : response = targetResponse :=
+        congrArg OpenEvent.response hTargetEvent
+      subst targetResponse
+      simpa [OpenResult.bind] using
+        (OpenResultPathRel.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response)
+                  sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response)
+                  targetNext })
+          hSite (hCallResponse hResponse)
+          (ih hSourceTail hTargetTail hNext))
+
+/--
 Compose one related finite path through continuations that add no new
 interaction events.
 
