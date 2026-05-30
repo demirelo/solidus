@@ -65163,6 +65163,288 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     hTail
 
 /--
+Checked selected-path sequence successor for `break` under compositional
+outcome-layout support.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_break_succ_of_supported
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel (.Break :: rest) codeOverride
+        allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+    (head := .Break) (targetHead := Functions.Stmt.brk)
+    (hLowerHead := by
+      intro fuel freshState
+      simp [Stmt.toFunctionsListFuel?])
+    (hSeq := by
+      intro lowerTail hTailRaw
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ_of_supported
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
+    hTail
+
+/--
+Checked selected-path sequence successor for `continue` under compositional
+outcome-layout support.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_continue_succ_of_supported
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel (.Continue :: rest) codeOverride
+        allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+    (head := .Continue) (targetHead := Functions.Stmt.cont)
+    (hLowerHead := by
+      intro fuel freshState
+      simp [Stmt.toFunctionsListFuel?])
+    (hSeq := by
+      intro lowerTail hTailRaw
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ_of_supported
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
+    hTail
+
+/--
+Checked selected-path sequence successor for `leave` under compositional
+outcome-layout support.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_leave_succ_of_supported
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter sourceFuel.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        sourceFuel.succ.succ compileFuel (.Leave :: rest) codeOverride
+        allowed :=
+  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+    (head := .Leave) (targetHead := Functions.Stmt.leave)
+    (hLowerHead := by
+      intro fuel freshState
+      simp [Stmt.toFunctionsListFuel?])
+    (hSeq := by
+      intro lowerTail hTailRaw
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ_of_supported
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hSupported hTailRaw)
+    hTail
+
+/--
+Fuel-dispatched checked selected-path constructor for `break :: rest`.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_break_succ_of_supported_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Break :: rest) codeOverride allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .Break)
+          (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed
+  | succ sourceFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_break_succ_of_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
+          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (compileFuel := compileFuel)
+
+/--
+Fuel-dispatched checked selected-path constructor for `continue :: rest`.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_continue_succ_of_supported_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Continue :: rest) codeOverride allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .Continue)
+          (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed
+  | succ sourceFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_continue_succ_of_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
+          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (compileFuel := compileFuel)
+
+/--
+Fuel-dispatched checked selected-path constructor for `leave :: rest`.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_leave_succ_of_supported_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Leave :: rest) codeOverride allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .Leave)
+          (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed
+  | succ sourceFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_leave_succ_of_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
+          (codeOverride := codeOverride) (allowed := allowed) hSupported hTail
+          (compileFuel := compileFuel)
+
+/--
 Open hidden-context sequence soundness for impossible source out-of-fuel
 branches.
 
