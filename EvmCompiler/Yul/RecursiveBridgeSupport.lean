@@ -23383,6 +23383,114 @@ theorem bind_state
 
 end YulOpenPairStateDoneInv
 
+theorem yulOpenExec_if_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_top_eval
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {cond : AstExpr} {body : List AstStmt}
+    {codeOverride : Option AstContract} {state : State}
+    (hEval :
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv
+          (StateCheckpointStoreContains layout false false false))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.eval fuel cond codeOverride state)))
+    (hBodyOk :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore},
+        StoreDomainContains layout store →
+          OpenResultDoneInvariant
+            (YulOpenStateDoneInv
+              (StateCheckpointStoreContains layout canBreak canContinue
+                canLeave))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec fuel (.Block body) codeOverride
+                (.Ok shared store))))
+    (hBodyOutOfFuel :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel (.Block body) codeOverride
+            .OutOfFuel))) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.If cond body) codeOverride
+          state)) := by
+  simpa [OpenExternal.YulOpen.exec] using
+    YulOpenPairStateDoneInv.bind_state hEval (by
+      intro stateAfter value hStateAfter
+      by_cases hNonzero : value ≠ EvmYul.UInt256.ofNat 0
+      · simpa [hNonzero] using
+          openResultDoneInvariant_checkpointStoreContains_of_top_input
+            (run := fun selectedState =>
+              OpenExternal.YulOpen.exec fuel (.Block body) codeOverride
+                selectedState)
+            hStateAfter
+            (by
+              intro shared store _hEq hContains
+              exact hBodyOk hContains)
+            hBodyOutOfFuel
+      · have hZero : value = EvmYul.UInt256.ofNat 0 :=
+          not_ne_iff.mp hNonzero
+        simp [hZero, OpenExternal.YulOpenResult.ok]
+        exact
+          OpenResultDoneInvariant.done
+            (StateCheckpointStoreContains.of_top hStateAfter))
+
+theorem yulOpenExec_switch_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_top_eval
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {cond : AstExpr} {cases : List (Word × List AstStmt)}
+    {defaultBody : List AstStmt} {codeOverride : Option AstContract}
+    {state : State}
+    (hEval :
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv
+          (StateCheckpointStoreContains layout false false false))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.eval fuel cond codeOverride state)))
+    (hSelectedOk :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore} {value : Word},
+        StoreDomainContains layout store →
+          OpenResultDoneInvariant
+            (YulOpenStateDoneInv
+              (StateCheckpointStoreContains layout canBreak canContinue
+                canLeave))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec fuel
+                (.Block
+                  (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+                codeOverride (.Ok shared store))))
+    (hSelectedOutOfFuel :
+      ∀ {value : Word},
+        OpenResultDoneInvariant
+          (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec fuel
+              (.Block
+                (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+              codeOverride .OutOfFuel))) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ
+          (.Switch cond cases defaultBody) codeOverride state)) := by
+  simpa [OpenExternal.YulOpen.exec] using
+    YulOpenPairStateDoneInv.bind_state hEval (by
+      intro stateAfter value hStateAfter
+      exact
+        openResultDoneInvariant_checkpointStoreContains_of_top_input
+          (run := fun selectedState =>
+            OpenExternal.YulOpen.exec fuel
+              (.Block (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+              codeOverride selectedState)
+          hStateAfter
+          (by
+            intro shared store _hEq hContains
+            exact hSelectedOk hContains)
+          hSelectedOutOfFuel)
+
 theorem sourcePairResult_toOpenResult_doneInvariant_checkpointStoreContains
     {layout : List Name} {canBreak canContinue canLeave : Bool} {α : Type}
     {result : Except Exception (State × α)}
