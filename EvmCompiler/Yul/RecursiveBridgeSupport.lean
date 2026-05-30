@@ -55464,6 +55464,107 @@ theorem sourceUserCallBodyOpenResultRel_of_seq_checkpoint_contains
       hReturns
 
 /--
+Strengthen a recursively related open callee body from the compact combined
+checkpoint/store invariant used by the source interpreter proof.
+-/
+theorem sourceUserCallBodyOpenResultRel_of_seq_checkpointStoreContains
+    {cfg : StateRelConfig} {bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {fn : Functions.FunDef}
+    {sourceBody : OpenExternal.OpenResult Exception State}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hBody :
+      OpenExternal.OpenResultRel bodyCallResponseRel
+        (SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        sourceBody targetBody)
+    (hSource :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains bodyLayout false false true))
+        sourceBody)
+    (hReturns :
+      ∀ name, name ∈ fn.returns → name ∈ bodyLayout) :
+    OpenExternal.OpenResultRel bodyCallResponseRel
+      (SourceUserCallBodyDoneRel cfg bodyLayout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true) fn)
+      sourceBody targetBody := by
+  exact
+    sourceUserCallBodyOpenResultRel_of_seq_checkpoint_contains hBody
+      (openResultDoneInvariant_sourceResultCheckpointAllowed_stateStoreContains_of_checkpointStoreContains
+        hSource)
+      hReturns
+
+/--
+Selected CALL-safe callee bodies acquire the richer pre-replay relation from
+ordinary recursive open sequence preservation.
+
+The recursive body theorem supplies the source/target relation.  Program
+lookup, control scoping, and the checked argument length construct the
+source-local invariant needed to strengthen it before caller replay.
+-/
+theorem sourceUserCallBodyOpenResultRel_of_seq_callSafe_scoped_function
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {yulProgram : Program} {functionName : Name}
+    {params returns : List EvmYul.Identifier} {body : List AstStmt}
+    {lowerFn : Functions.FunDef}
+    {sharedArgs : EvmYul.SharedState .Yul}
+    {storeArgs : EvmYul.Yul.VarStore} {argValues : List Word}
+    {bodyFuel : Nat}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSafe : Safe.CallSafe.program yulProgram)
+    (hScoped : ControlFlow.ProgramScoped yulProgram)
+    (hLookup :
+      yulProgram.contract.functions.lookup functionName =
+        some (.Def params returns body))
+    (hArgsLength : (identNames params).length ≤ argValues.length)
+    (hLowerParams : lowerFn.params = identNames params)
+    (hLowerReturns : lowerFn.returns = identNames returns)
+    (hBody :
+      OpenExternal.OpenResultRel bodyCallResponseRel
+        (SourceOpenResultSeqDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+            (some yulProgram.contract)
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall params returns argValues
+                (.Ok sharedArgs storeArgs)))))
+        targetBody) :
+    OpenExternal.OpenResultRel bodyCallResponseRel
+      (SourceUserCallBodyDoneRel cfg
+        (lowerFn.returns ++ lowerFn.params) terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true) lowerFn)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec bodyFuel (.Block body)
+          (some yulProgram.contract)
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall params returns argValues
+              (.Ok sharedArgs storeArgs)))))
+      targetBody := by
+  exact
+    sourceUserCallBodyOpenResultRel_of_seq_checkpointStoreContains hBody
+      (by
+        simpa [hLowerParams, hLowerReturns] using
+          (yulOpenExec_function_body_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+            hSafe hScoped hLookup hArgsLength))
+      (by
+        intro name hMem
+        exact List.mem_append_left lowerFn.params hMem)
+
+/--
 Recursively related open callee bodies compose into related internal-user-call
 results before any caller-specific replay.
 

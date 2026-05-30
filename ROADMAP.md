@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 21:03 PDT.
+Last updated: 2026-05-29 21:05 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -510,6 +510,9 @@ Remaining work:
      scoping and initialized local-store exactness: after every shared external
      response, completed source bodies must satisfy function checkpoint
      admission and retain the visible return/parameter store domain.
+   - [x] Feed the selected-callee source invariant into the ordinary recursive
+     body relation: strengthening follows every existing suspension and enriches
+     only completed body branches before caller restoration/replay.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using
