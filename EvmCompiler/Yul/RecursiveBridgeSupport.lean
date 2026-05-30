@@ -56046,6 +56046,169 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ
     hTail
 
 /--
+Selected `break` successor under compositional outcome-layout support.
+
+The concrete admitted source path determines that the surrounding sequence
+finished at the break checkpoint. Its support certificate then supplies the
+handler scope needed by the strong abrupt-head constructor.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ_of_supported
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Break :: rest) codeOverride
+      { stmts := [Functions.Stmt.brk] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hResolveDone :
+          OpenExternal.OpenResultResolves
+            (.done (.ok (.Checkpoint (.Break shared store)))) trace
+            sourceDone := by
+        simpa [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+          OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+          OpenExternal.YulOpenResult.toOpenResult] using hResolve
+      cases hResolveDone
+      have hSupport := hSupported hAllowed
+      rcases
+          (by
+            simpa [SourceResultOutcomeLayoutSupported] using hSupport) with
+        ⟨hBreak, hSubset⟩
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hBreak hSubset hTail
+          (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
+          hResponses minimumTargetFuel
+
+/--
+Selected `continue` successor under compositional outcome-layout support.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ_of_supported
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Continue :: rest) codeOverride
+      { stmts := [Functions.Stmt.cont] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hResolveDone :
+          OpenExternal.OpenResultResolves
+            (.done (.ok (.Checkpoint (.Continue shared store)))) trace
+            sourceDone := by
+        simpa [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+          OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+          OpenExternal.YulOpenResult.toOpenResult] using hResolve
+      cases hResolveDone
+      have hSupport := hSupported hAllowed
+      rcases
+          (by
+            simpa [SourceResultOutcomeLayoutSupported] using hSupport) with
+        ⟨hContinue, hSubset⟩
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hContinue hSubset hTail
+          (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
+          hResponses minimumTargetFuel
+
+/--
+Selected `leave` successor under compositional outcome-layout support.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ_of_supported
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Leave :: rest) codeOverride
+      { stmts := [Functions.Stmt.leave] ++ lowerTail.stmts } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hResolveDone :
+          OpenExternal.OpenResultResolves
+            (.done (.ok (.Checkpoint (.Leave shared store)))) trace
+            sourceDone := by
+        simpa [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+          OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.ok,
+          OpenExternal.YulOpenResult.toOpenResult] using hResolve
+      cases hResolveDone
+      have hSupport := hSupported hAllowed
+      rcases
+          (by
+            simpa [SourceResultOutcomeLayoutSupported] using hSupport) with
+        ⟨hLeave, hSubset⟩
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerTail := lowerTail) (allowed := allowed) hLeave hSubset hTail
+          (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
+          hResponses minimumTargetFuel
+
+/--
 Open append law for terminal-aware generated-expression preludes.
 
 Unlike the strict expression runner, the raw runner propagates a nonregular
