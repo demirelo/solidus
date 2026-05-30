@@ -551,6 +551,10 @@ Remaining work:
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
+   - [x] Compose regular terminal-aware argument completion with an open
+     restored internal-call relation: the callee consumes the replayed stack
+     order, arbitrary external suspensions remain visible, and hidden-slot
+     replay preserves terminal stops.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

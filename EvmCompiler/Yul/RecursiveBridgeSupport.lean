@@ -56960,6 +56960,121 @@ theorem sourceUserCallResultOpenResultRel_replay_hidden_temp_raw
   simpa [openResult_bind_ok_eq] using hLift
 
 /--
+Compose a regular terminal-aware argument prefix with an already-related open
+internal user call.
+
+The source prefix records values in evaluation order.  After the checked fresh
+result-slot insertion, the target argument list replays those values in the
+reversed stack order consumed by both call semantics.  The supplied restored
+callee relation is then lifted through the raw hidden-slot replay endpoint, so
+every external suspension remains visible and terminal callee exits remain
+stopped raw expressions.
+-/
+theorem sourceExprRawPreludeOpenResultRel_user_call_regular_of_arg_terminal
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {lowerFn : Functions.FunDef}
+    {args : List AstExpr} {freshState stateArgs freshState' : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {tmp : Name} {sourceAfter : State} {values : List Word}
+    {targetState : Objects.Source.State} {ctxAfter : Functions.Source.Ctx}
+    {sourceFuel targetBodyFuel : Nat}
+    {functionName : EvmYul.Yul.Ast.YulFunctionName}
+    {contract : AstContract}
+    {callResponseRel :
+      OpenExternal.OpenCall
+          (OpenExternal.OpenResult Exception (State × List Word)) →
+        OpenExternal.OpenCall
+          (OpenExternal.OpenResult Functions.EVMException
+            Functions.Source.CallResult) →
+        OpenExternal.CallResponse → Prop}
+    {rawCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hFresh : Fresh.fresh? stateArgs = some (tmp, freshState'))
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerArgs (.ok (sourceAfter, values))
+        (.ok (Functions.Source.Outcome.regular targetState, ctxAfter)))
+    (hCall :
+      OpenExternal.OpenResultRel callResponseRel
+        (SourceUserCallResultDoneRel cfg layout
+          (targetState.insert tmp Expr.zero) terminalRel revertRel)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.call sourceFuel values.reverse functionName
+            (some contract) sourceAfter))
+        (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+          values.reverse targetBodyFuel
+          (targetState.insert tmp Expr.zero).shared))
+    (hExprOk :
+      UserCallArity.ExprOk contract (.Call (.inr functionName) args))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        rawCallResponseRel sourceCall
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+                  { ctxAfter with scope := tmp :: ctxAfter.scope }
+                  (targetState.insert tmp Expr.zero)) }
+          response →
+        callResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel rawCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel values.reverse functionName
+          (some contract) sourceAfter))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+          (targetState.insert tmp Expr.zero))
+        (fun argResult =>
+          OpenExternal.OpenResult.bind
+            (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+              argResult.2 targetBodyFuel argResult.1.shared)
+            (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+              { ctxAfter with scope := tmp :: ctxAfter.scope }
+              argResult.1))) := by
+  rcases
+      sourceArgTerminalRawPreludeOpenDoneRel_targetArgEval_insert
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (args := args)
+        (freshState := freshState) (stateArgs := stateArgs)
+        (freshState' := freshState') (preArgs := preArgs)
+        (lowerArgs := lowerArgs) (tmp := tmp) (sourceAfter := sourceAfter)
+        (values := values) (targetState := targetState)
+        (ctxAfter := ctxAfter) hArgs hFresh hTmpFreshLayout hDone with
+    ⟨hArgEval, _hRelInserted⟩
+  rw [hArgEval]
+  simp only [OpenExternal.OpenResult.bind]
+  exact
+    sourceUserCallResultOpenResultRel_replay_hidden_temp_raw
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (tmp := tmp)
+      (ctx := { ctxAfter with scope := tmp :: ctxAfter.scope })
+      (callerCompiler := targetState.insert tmp Expr.zero)
+      (callResponseRel := callResponseRel)
+      (rawCallResponseRel := rawCallResponseRel)
+      hTmpFreshLayout
+      (by
+        simp [Locals.Source.State.insert, Locals.Source.Store.contains,
+          Locals.Source.Store.insert_self])
+      hCall
+      (yulOpenCall_doneInvariant_single_of_exprOk
+        (fuel := sourceFuel) (state := sourceAfter)
+        (argValues := values.reverse) (functionName := functionName)
+        (args := args) (contract := contract) hExprOk)
+      hCallResponse
+
+/--
 Target-side open shape of an internal function-call statement after the callee
 has been resolved.
 
