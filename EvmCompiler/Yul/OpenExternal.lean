@@ -1416,7 +1416,11 @@ Open analogue of imported `Yul.call` for internal user functions.
 
 This runs the selected callee body through `YulOpen.exec`, so CALL-family
 primitive operations inside the callee body remain visible as open external
-interactions.
+interactions. When an executing-contract override is present, internal function
+resolution uses that fixed code image directly. The account map is consulted
+only for executions without an override: reentrant external responses may
+mutate account state, but they do not replace the code image of the already
+executing frame.
 -/
 def call (fuel : Nat) (args : List Word)
     (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
@@ -1425,11 +1429,18 @@ def call (fuel : Nat) (args : List Word)
   match fuel with
   | 0 => .error .OutOfFuel
   | .succ fuel' =>
-      match state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      let code? : Option Contract :=
+        match codeOverride with
+        | some code => some code
+        | none =>
+            match state.sharedState.accountMap.find?
+                state.executionEnv.codeOwner with
+            | none => none
+            | some yulContract => some yulContract.code
+      match code? with
       | none =>
           .error (.MissingContract (s!"{state.executionEnv.codeOwner}"))
-      | some yulContract =>
-          let code : Contract := codeOverride.getD yulContract.code
+      | some code =>
           match callFunction? functionName? code with
           | none =>
               .error (.MissingContractFunction (functionName?.getD ".none"))
@@ -1448,6 +1459,35 @@ def call (fuel : Nat) (args : List Word)
                   .ok (state₃, List.map state₂.lookup! f.rets)
 
 end
+
+/--
+An executing-contract override resolves an internal user call without
+consulting mutable account state.
+
+This is the decomposition used by compiler preservation after arbitrary
+related external responses: the fixed source contract and lowered target
+program remain aligned even if reentrant execution changed the caller account.
+-/
+theorem call_succ_eq_bind_body_of_override_function
+    (fuel : Nat) (args : List Word)
+    (functionName? : Option EvmYul.Yul.Ast.YulFunctionName)
+    (contract : Contract) (state : State)
+    {f : EvmYul.Yul.Ast.FunctionDefinition}
+    (hFunction :
+      callFunction? functionName? contract = some f) :
+    call fuel.succ args functionName? (some contract) state =
+      YulOpenResult.bind
+        (exec fuel (.Block f.body) (some contract)
+          (EvmYul.Yul.State.mkOk
+            (EvmYul.Yul.State.initcall f.params f.rets args state)))
+        fun state₂ =>
+          let state₃ :=
+            EvmYul.Yul.State.setStore
+              (EvmYul.Yul.State.overwrite?
+                (EvmYul.Yul.State.reviveJump state₂) state)
+              state
+          .ok (state₃, List.map state₂.lookup! f.rets) := by
+  simp [call, hFunction]
 
 theorem call_succ_eq_bind_body_of_find_function
     (fuel : Nat) (args : List Word)
@@ -1472,7 +1512,17 @@ theorem call_succ_eq_bind_body_of_find_function
                 (EvmYul.Yul.State.reviveJump state₂) state)
               state
           .ok (state₃, List.map state₂.lookup! f.rets) := by
-  simp [call, hFind, hFunction]
+  cases codeOverride with
+  | none =>
+      have hFunction' :
+          callFunction? functionName? yulContract.code = some f := by
+        simpa using hFunction
+      simp [call, hFind, hFunction']
+  | some code =>
+      have hFunction' :
+          callFunction? functionName? code = some f := by
+        simpa using hFunction
+      simp [call, hFunction']
 
 theorem evalValues_prim_call_suspends_of_evalArgs_done
     {fuel : Nat} {prim : EvmYul.Operation .Yul} {args : List Expr}
@@ -1562,7 +1612,8 @@ mutual
       {state : State}
       {result : Except Exception (State × List Word)}
       (hOpen :
-        evalArgs fuel args codeOverride state = .done result) :
+        evalArgs fuel args codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.evalArgs fuel args codeOverride state = result := by
     cases fuel with
     | zero =>
@@ -1582,7 +1633,7 @@ mutual
                 have hHeadClosed :
                     EvmYul.Yul.eval fuel' head codeOverride state =
                       headResult :=
-                  eval_done_eq_closed hHead
+                  eval_done_eq_closed hHead hNoOverride
                 have hTailClosed :
                     EvmYul.Yul.evalTail fuel' tail codeOverride
                         headResult =
@@ -1590,7 +1641,7 @@ mutual
                   evalTail_done_eq_closed
                     (fuel := fuel') (args := tail)
                     (codeOverride := codeOverride)
-                    (headResult := headResult) hOpenTail
+                    (headResult := headResult) hOpenTail hNoOverride
                 simpa [EvmYul.Yul.evalArgs, hHeadClosed] using hTailClosed
             | call call =>
                 simp [evalArgs, evalTail, YulOpenResult.bind, hHead] at hOpen
@@ -1600,7 +1651,8 @@ mutual
       {headResult : Except Exception (State × Word)}
       {result : Except Exception (State × List Word)}
       (hOpen :
-        evalTail fuel args codeOverride (.done headResult) = .done result) :
+        evalTail fuel args codeOverride (.done headResult) = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.evalTail fuel args codeOverride headResult = result := by
     cases headResult with
     | error err =>
@@ -1621,7 +1673,7 @@ mutual
                     EvmYul.Yul.evalArgs fuel' args codeOverride
                         stateAfterHead =
                       argsResult :=
-                  evalArgs_done_eq_closed hArgs
+                  evalArgs_done_eq_closed hArgs hNoOverride
                 cases argsResult with
                 | error err =>
                     simp [hArgs, hArgsClosed, YulOpenResult.bind,
@@ -1640,7 +1692,8 @@ mutual
       {state : State}
       {result : Except Exception (State × List Word)}
       (hOpen :
-        evalValues fuel expr codeOverride state = .done result) :
+        evalValues fuel expr codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.evalValues fuel expr codeOverride state = result := by
     cases fuel with
     | zero =>
@@ -1671,7 +1724,7 @@ mutual
                         EvmYul.Yul.evalArgs fuel' args.reverse codeOverride
                             state =
                           argsResult :=
-                      evalArgs_done_eq_closed hArgs
+                      evalArgs_done_eq_closed hArgs hNoOverride
                     cases argsResult with
                     | error err =>
                         simp [hArgs, hArgsClosed, YulOpenResult.bind,
@@ -1703,7 +1756,7 @@ mutual
                         EvmYul.Yul.evalArgs fuel' args.reverse codeOverride
                             state =
                           argsResult :=
-                      evalArgs_done_eq_closed hArgs
+                      evalArgs_done_eq_closed hArgs hNoOverride
                     cases argsResult with
                     | error err =>
                         simp [hArgs, hArgsClosed, YulOpenResult.bind,
@@ -1720,7 +1773,7 @@ mutual
                                     (some functionName) codeOverride
                                     stateAfterArgs =
                                   callResult :=
-                              call_done_eq_closed hCall
+                              call_done_eq_closed hCall hNoOverride
                             simp [hArgs, hArgsClosed, hCall, hCallClosed,
                               YulOpenResult.bind, YulOpenResult.ok,
                               EvmYul.Yul.reverse'] at hOpen ⊢
@@ -1736,7 +1789,8 @@ mutual
       {state : State}
       {result : Except Exception (State × Word)}
       (hOpen :
-        eval fuel expr codeOverride state = .done result) :
+        eval fuel expr codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.eval fuel expr codeOverride state = result := by
     simp [eval, EvmYul.Yul.eval, headResult] at hOpen ⊢
     cases hValues : evalValues fuel expr codeOverride state with
@@ -1744,7 +1798,7 @@ mutual
         have hValuesClosed :
             EvmYul.Yul.evalValues fuel expr codeOverride state =
               valuesResult :=
-          evalValues_done_eq_closed hValues
+          evalValues_done_eq_closed hValues hNoOverride
         cases valuesResult with
         | error err =>
             simp [hValues, hValuesClosed, YulOpenResult.bind,
@@ -1767,7 +1821,8 @@ mutual
       (hArgs : argsResult = .done closedArgs)
       (hOpen :
         execCall fuel functionName vars codeOverride argsResult =
-          .done result) :
+          .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.execCall fuel functionName vars codeOverride closedArgs =
         result := by
     subst argsResult
@@ -1789,7 +1844,7 @@ mutual
                     EvmYul.Yul.call fuel' values (some functionName)
                         codeOverride stateAfterArgs =
                       callResult :=
-                  call_done_eq_closed hCall
+                  call_done_eq_closed hCall hNoOverride
                 cases callResult with
                 | error err =>
                     simp [execCall, EvmYul.Yul.execCall, hCall, hCallClosed,
@@ -1806,7 +1861,8 @@ mutual
       {fuel : Nat} {stmts : List Stmt} {codeOverride : Option Contract}
       {state : State} {result : Except Exception State}
       (hOpen :
-        execSeq fuel stmts codeOverride state = .done result) :
+        execSeq fuel stmts codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.execSeq fuel stmts codeOverride state = result := by
     cases fuel with
     | zero =>
@@ -1821,7 +1877,7 @@ mutual
                 have hHeadClosed :
                     EvmYul.Yul.exec fuel' stmt codeOverride state =
                       headResult :=
-                  exec_done_eq_closed hHead
+                  exec_done_eq_closed hHead hNoOverride
                 cases headResult with
                 | error err =>
                     simp [execSeq, EvmYul.Yul.execSeq, hHead, hHeadClosed,
@@ -1839,7 +1895,7 @@ mutual
                             EvmYul.Yul.execSeq fuel' rest codeOverride
                                 (.Ok shared store) =
                               result :=
-                          execSeq_done_eq_closed hTailOpen
+                          execSeq_done_eq_closed hTailOpen hNoOverride
                         simpa [EvmYul.Yul.execSeq, hHeadClosed]
                           using hTailClosed
                     | OutOfFuel =>
@@ -1857,7 +1913,8 @@ mutual
       {fuel : Nat} {stmt : Stmt} {codeOverride : Option Contract}
       {state : State} {result : Except Exception State}
       (hOpen :
-        exec fuel stmt codeOverride state = .done result) :
+        exec fuel stmt codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.exec fuel stmt codeOverride state = result := by
     cases fuel with
     | zero =>
@@ -1870,7 +1927,7 @@ mutual
                 have hSeqClosed :
                     EvmYul.Yul.execSeq fuel' stmts codeOverride state =
                       seqResult :=
-                  execSeq_done_eq_closed hSeq
+                  execSeq_done_eq_closed hSeq hNoOverride
                 cases seqResult with
                 | error err =>
                     simp [exec, EvmYul.Yul.exec, hSeq, hSeqClosed,
@@ -1924,7 +1981,7 @@ mutual
                         have hValuesClosed :
                             EvmYul.Yul.evalValues fuel' expr codeOverride state =
                               valuesResult :=
-                          evalValues_done_eq_closed hValues
+                          evalValues_done_eq_closed hValues hNoOverride
                         cases valuesResult with
                         | error err =>
                             simp [exec, EvmYul.Yul.exec, hCheck, hValues,
@@ -1956,7 +2013,7 @@ mutual
                     have hValuesClosed :
                         EvmYul.Yul.evalValues fuel' expr codeOverride state =
                           valuesResult :=
-                      evalValues_done_eq_closed hValues
+                      evalValues_done_eq_closed hValues hNoOverride
                     cases valuesResult with
                     | error err =>
                         simp [exec, EvmYul.Yul.exec, hCheck, hValues,
@@ -1999,6 +2056,7 @@ mutual
                                         codeOverride state =
                                       argsResult :=
                                   evalArgs_done_eq_closed hEvalArgs
+                                    hNoOverride
                                 cases argsResult with
                                 | error err =>
                                     simp [hEvalArgs, hEvalArgsClosed,
@@ -2048,6 +2106,7 @@ mutual
                                         codeOverride state =
                                       argsResult :=
                                   evalArgs_done_eq_closed hEvalArgs
+                                    hNoOverride
                                 cases argsResult with
                                 | error err =>
                                     simp [hEvalArgs, hEvalArgsClosed,
@@ -2071,6 +2130,7 @@ mutual
                             (hArgs := hArgs)
                             (hOpen := by
                               simpa [exec, hArgs] using hOpen)
+                            hNoOverride
                         simpa [exec, EvmYul.Yul.exec, hArgsClosed]
                           using hExecCall
                     | call call =>
@@ -2082,7 +2142,7 @@ mutual
                 have hCondClosed :
                     EvmYul.Yul.eval fuel' cond codeOverride state =
                       condResult :=
-                  eval_done_eq_closed hCond
+                  eval_done_eq_closed hCond hNoOverride
                 cases condResult with
                 | error err =>
                     simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
@@ -2104,7 +2164,7 @@ mutual
                                   cases))
                               codeOverride stateAfterCond =
                               bodyResult :=
-                          exec_done_eq_closed hBody
+                          exec_done_eq_closed hBody hNoOverride
                         simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
                           hBody, hBodyClosed, YulOpenResult.bind] at hOpen ⊢
                         exact hOpen
@@ -2119,7 +2179,7 @@ mutual
               loop_done_eq_closed
                 (fuel := fuel') (cond := cond) (post := post) (body := body)
                 (codeOverride := codeOverride) (state := state)
-                (by simpa [exec] using hOpen)
+                (by simpa [exec] using hOpen) hNoOverride
             rw [EvmYul.Yul.exec.eq_def]
             exact hLoopClosed
         | If cond body =>
@@ -2128,7 +2188,7 @@ mutual
                 have hCondClosed :
                     EvmYul.Yul.eval fuel' cond codeOverride state =
                       condResult :=
-                  eval_done_eq_closed hCond
+                  eval_done_eq_closed hCond hNoOverride
                 cases condResult with
                 | error err =>
                     simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
@@ -2154,6 +2214,7 @@ mutual
                                   stateAfterCond =
                                 bodyResult :=
                             exec_done_eq_closed hBody
+                              hNoOverride
                           simp [exec, EvmYul.Yul.exec, hCond, hCondClosed,
                             hZero, hNonzero, hZeroStruct, hBody, hBodyClosed,
                             YulOpenResult.bind] at hOpen ⊢
@@ -2176,7 +2237,8 @@ mutual
       {codeOverride : Option Contract} {state : State}
       {result : Except Exception State}
       (hOpen :
-        loop fuel cond post body codeOverride state = .done result) :
+        loop fuel cond post body codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.loop fuel cond post body codeOverride state = result := by
     cases fuel with
     | zero =>
@@ -2195,6 +2257,7 @@ mutual
                         (EvmYul.Yul.State.mkOk state) =
                       condResult :=
                   eval_done_eq_closed hCond
+                    hNoOverride
                 cases condResult with
                 | error err =>
                     simp [loop, EvmYul.Yul.loop, hCond, hCondClosed,
@@ -2218,6 +2281,7 @@ mutual
                                   stateAfterCond =
                                 bodyResult :=
                             exec_done_eq_closed hBody
+                              hNoOverride
                           cases bodyResult with
                           | error err =>
                               simp [loop, EvmYul.Yul.loop, hCond, hCondClosed,
@@ -2269,7 +2333,7 @@ mutual
                                                   (.Checkpoint
                                                     (.Continue shared store)))
                                               (result := postResult)
-                                              hPost
+                                              hPost hNoOverride
                                           cases postResult with
                                           | error err =>
                                               simp [loop, EvmYul.Yul.loop,
@@ -2322,6 +2386,7 @@ mutual
                                                                   stateAfterPost =
                                                                 loopResult :=
                                                             exec_done_eq_closed hLoop
+                                                              hNoOverride
                                                           simp [loop,
                                                             EvmYul.Yul.loop,
                                                             hCond, hCondClosed,
@@ -2359,6 +2424,7 @@ mutual
                                                                   stateAfterPost =
                                                                 loopResult :=
                                                             exec_done_eq_closed hLoop
+                                                              hNoOverride
                                                           simp [loop,
                                                             EvmYul.Yul.loop,
                                                             hCond, hCondClosed,
@@ -2396,6 +2462,7 @@ mutual
                                                               stateAfterPost =
                                                             loopResult :=
                                                         exec_done_eq_closed hLoop
+                                                          hNoOverride
                                                       simp [loop,
                                                         EvmYul.Yul.loop,
                                                         hCond, hCondClosed,
@@ -2436,6 +2503,7 @@ mutual
                                                 (.Ok shared store)) =
                                             postResult :=
                                         exec_done_eq_closed hPost
+                                          hNoOverride
                                       cases postResult with
                                       | error err =>
                                           simp [loop, EvmYul.Yul.loop, hCond,
@@ -2484,6 +2552,7 @@ mutual
                                                               stateAfterPost =
                                                             loopResult :=
                                                         exec_done_eq_closed hLoop
+                                                          hNoOverride
                                                       simp [loop,
                                                         EvmYul.Yul.loop,
                                                         hCond, hCondClosed,
@@ -2521,6 +2590,7 @@ mutual
                                                               stateAfterPost =
                                                             loopResult :=
                                                         exec_done_eq_closed hLoop
+                                                          hNoOverride
                                                       simp [loop,
                                                         EvmYul.Yul.loop,
                                                         hCond, hCondClosed,
@@ -2558,6 +2628,7 @@ mutual
                                                           stateAfterPost =
                                                         loopResult :=
                                                     exec_done_eq_closed hLoop
+                                                      hNoOverride
                                                   simp [loop, EvmYul.Yul.loop,
                                                     hCond, hCondClosed, hZero,
                                                     hZeroStruct, hBody,
@@ -2594,8 +2665,10 @@ mutual
       {codeOverride : Option Contract} {state : State}
       {result : Except Exception (State × List Word)}
       (hOpen :
-        call fuel args functionName? codeOverride state = .done result) :
+        call fuel args functionName? codeOverride state = .done result)
+      (hNoOverride : codeOverride = none) :
       EvmYul.Yul.call fuel args functionName? codeOverride state = result := by
+    subst codeOverride
     cases fuel with
     | zero =>
         simpa [call, EvmYul.Yul.call, YulOpenResult.error] using hOpen
@@ -2610,19 +2683,19 @@ mutual
             | none =>
                 let f : EvmYul.Yul.Ast.FunctionDefinition :=
                   EvmYul.Yul.Ast.FunctionDefinition.Def [] []
-                    [(codeOverride.getD yulContract.code).dispatcher]
+                    [yulContract.code.dispatcher]
                 cases hBody :
-                    exec fuel' (.Block f.body) codeOverride
+                    exec fuel' (.Block f.body) none
                       (EvmYul.Yul.State.mkOk
                         (EvmYul.Yul.State.initcall f.params f.rets args state)) with
                 | done bodyResult =>
                     have hBodyClosed :
-                        EvmYul.Yul.exec fuel' (.Block f.body) codeOverride
+                        EvmYul.Yul.exec fuel' (.Block f.body) none
                             (EvmYul.Yul.State.mkOk
                               (EvmYul.Yul.State.initcall f.params f.rets args
                                 state)) =
                           bodyResult :=
-                      exec_done_eq_closed hBody
+                      exec_done_eq_closed hBody rfl
                     cases bodyResult with
                     | error err =>
                         simp [call, EvmYul.Yul.call, callFunction?, hFind, f,
@@ -2638,25 +2711,25 @@ mutual
                       YulOpenResult.bind] at hOpen
             | some functionName =>
                 cases hFunction :
-                    (codeOverride.getD yulContract.code).functions.lookup
+                    yulContract.code.functions.lookup
                       functionName with
                 | none =>
                     simpa [call, EvmYul.Yul.call, callFunction?, hFind,
                       hFunction, YulOpenResult.error] using hOpen
                 | some f =>
                     cases hBody :
-                        exec fuel' (.Block f.body) codeOverride
+                        exec fuel' (.Block f.body) none
                           (EvmYul.Yul.State.mkOk
                             (EvmYul.Yul.State.initcall f.params f.rets args
                               state)) with
                     | done bodyResult =>
                         have hBodyClosed :
-                            EvmYul.Yul.exec fuel' (.Block f.body) codeOverride
+                            EvmYul.Yul.exec fuel' (.Block f.body) none
                                 (EvmYul.Yul.State.mkOk
                                   (EvmYul.Yul.State.initcall f.params f.rets
                                     args state)) =
                               bodyResult :=
-                          exec_done_eq_closed hBody
+                          exec_done_eq_closed hBody rfl
                         cases bodyResult with
                         | error err =>
                             simp [call, EvmYul.Yul.call, callFunction?, hFind,
@@ -2680,7 +2753,8 @@ theorem reverseResult_evalArgs_done_eq_closed
     {result : Except Exception (State × List Word)}
     (hOpen :
       reverseResult (evalArgs fuel args codeOverride state) =
-        .done result) :
+        .done result)
+    (hNoOverride : codeOverride = none) :
     EvmYul.Yul.reverse'
         (EvmYul.Yul.evalArgs fuel args codeOverride state) =
       result := by
@@ -2689,7 +2763,7 @@ theorem reverseResult_evalArgs_done_eq_closed
   | done argsResult =>
       have hArgsClosed :
           EvmYul.Yul.evalArgs fuel args codeOverride state = argsResult :=
-        evalArgs_done_eq_closed hArgs
+        evalArgs_done_eq_closed hArgs hNoOverride
       cases argsResult with
       | error err =>
           simp [hArgs, hArgsClosed, YulOpenResult.bind,
