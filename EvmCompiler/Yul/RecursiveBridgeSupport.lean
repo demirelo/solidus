@@ -113508,6 +113508,7 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
     (hHead :
       ∀ {stateTail preHead lowerHead stateHead}
         {ctxHead : Functions.Source.Ctx},
+        FreshCoversLayout coverLayout stateTail →
         Expr.lower1? stateTail head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
@@ -113550,7 +113551,9 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
       (lowerHead := lowerHead) (tmp := tmp) (base := base)
       (head := head) (tail := tail) (codeOverride := codeOverride)
       (allowed := allowed) hLayoutSubset hCovers hTailLower hHeadLower hFresh
-      hTailSafe (hTail hTailLower hHeadLower) (hHead hHeadLower)
+      hTailSafe (hTail hTailLower hHeadLower)
+      (hHead (freshCoversLayout_lowerBound1?_of_some hCovers hTailLower)
+        hHeadLower)
       (by
         intro sourceTailResult targetTailResult hTailDone
         have hTailRaw :
@@ -113574,6 +113577,176 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBoun
       (source := source) (compiler := compiler) (trace := trace)
       (sourceDone := sourceDone) hInitial hContains hResolve hAllowed hResponses
       minimumTargetFuel)
+
+/--
+Compiler-output nil adapter for selected terminal-aware argument replay.
+
+The exact empty-prefix theorem already has no external interaction, so its
+local tree proof can be exposed through the finite-path interface directly.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_nil_of_lowerBound1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLower :
+      Expr.List.lowerBound1? freshState ([] : List AstExpr) =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx sourceFuel.succ ([] : List AstExpr)
+      codeOverride pre lowerArgs allowed :=
+  SourceArgTerminalRawPreludeOpenPathSoundWhen.of_atExact
+    (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (freshState := freshState) (stateFresh := stateFresh)
+      (pre := pre) (lowerArgs := lowerArgs) (sourceFuel := sourceFuel)
+      (targetTailFuel := 0) (codeOverride := codeOverride)
+      (callResponseRel := RelationallyAdmissibleOpenCallResponseRel cfg)
+      hLower)
+
+/--
+Structural compiler-output dispatcher for selected terminal-aware arguments.
+
+Each cons step recursively replays the selected tail trace, then replays the
+selected head trace at expression level.  The reverse scheduler contributes
+two source-fuel ticks per appended head; target cutoffs remain path-local.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_lowerBound1?_head_expr_mem
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {base : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hHead :
+      ∀ {base : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx},
+        head ∈ args →
+        FreshCoversLayout coverLayout stateHeadStart →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+          prim program ctxHead base.succ.succ.succ.succ head codeOverride
+          preHead lowerHead (fun _sourceDone => True))
+    (hHeadSingle :
+      ∀ {base : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {sourceTailResult : State × List Word}
+        {targetState : Objects.Source.State},
+        head ∈ args →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceStateRel cfg layout sourceTailResult.1 targetState →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ.succ.succ head
+              codeOverride sourceTailResult.1)))
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
+    (hLower :
+      Expr.List.lowerBound1? freshState args =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx (yulOpenEvalArgsAppendFuel base args.reverse)
+      args codeOverride pre lowerArgs allowed := by
+  induction args generalizing base freshState stateFresh pre lowerArgs ctx
+      allowed with
+  | nil =>
+      intro source compiler trace sourceDone hInitial hContains hResolve
+        hAllowed hResponses minimumTargetFuel
+      simpa [yulOpenEvalArgsAppendFuel] using
+        ((sourceArgTerminalRawPreludeOpenPathSoundWhen_nil_of_lowerBound1?
+            (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim) (program := program)
+            (ctx := ctx) (freshState := freshState) (stateFresh := stateFresh)
+            (pre := pre) (lowerArgs := lowerArgs)
+            (sourceFuel := base.succ.succ)
+            (codeOverride := codeOverride) (allowed := allowed) hLower)
+          hInitial hContains (by simpa using hResolve) hAllowed hResponses
+          minimumTargetFuel)
+  | cons head tail ih =>
+      have hCons :
+          SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+            revertRel prim program ctx
+            (yulOpenEvalArgsAppendFuel base.succ.succ tail.reverse)
+            (head :: tail) codeOverride pre lowerArgs allowed :=
+        sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBound1?_head_expr
+          (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (prim := prim) (program := program) (ctx := ctx)
+          (freshState := freshState) (stateFresh := stateFresh)
+          (pre := pre) (lowerArgs := lowerArgs) (base := base.succ.succ)
+          (head := head) (tail := tail) (codeOverride := codeOverride)
+          (allowed := allowed) hLayoutSubset hCovers hLower hSafe.2
+          (by
+            intro preTail lowerTail stateTail preHead lowerHead stateHead
+              hTailLower hHeadLower
+            exact
+              ih
+                (hHead := by
+                  intro base' head' stateHeadStart' preHead' lowerHead'
+                    stateHead' ctxHead' hHeadMem hHeadCovers hHeadLower'
+                  exact
+                    hHead (List.mem_cons_of_mem head hHeadMem) hHeadCovers
+                      hHeadLower')
+                (hHeadSingle := by
+                  intro base' head' stateHeadStart' preHead' lowerHead'
+                    stateHead' sourceTailResult' targetState' hHeadMem
+                    hHeadLower' hInitial'
+                  exact
+                    hHeadSingle (List.mem_cons_of_mem head hHeadMem)
+                      hHeadLower' hInitial')
+                (base := base.succ.succ) (freshState := freshState)
+                (stateFresh := stateTail) (pre := preTail)
+                (lowerArgs := lowerTail) (ctx := ctx)
+                (allowed := fun _sourceDone => True) hCovers hSafe.2
+                hTailLower)
+          (by
+            intro stateTail preHead lowerHead stateHead ctxHead hHeadCovers
+              hHeadLower
+            exact
+              hHead (base := base) (head := head) (by simp)
+                hHeadCovers hHeadLower)
+          (by
+            intro stateTail preHead lowerHead stateHead sourceTailResult
+              targetState hHeadLower hInitial
+            exact
+              hHeadSingle (base := base) (head := head) (by simp) hHeadLower
+                hInitial)
+      intro source compiler trace sourceDone hInitial hContains hResolve
+        hAllowed hResponses minimumTargetFuel
+      have hResolveCons :
+          OpenExternal.OpenResultResolves
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalArgs
+                (yulOpenEvalArgsAppendFuel base.succ.succ tail.reverse)
+                (head :: tail).reverse codeOverride source))
+            trace sourceDone := by
+        simpa [List.reverse_cons,
+          yulOpenEvalArgsAppendFuel_append_singleton] using hResolve
+      simpa [List.reverse_cons,
+        yulOpenEvalArgsAppendFuel_append_singleton] using
+        (hCons (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone) hInitial hContains hResolveCons hAllowed
+          hResponses minimumTargetFuel)
 
 /--
 Terminal-aware raw reverse-cons argument composition.
