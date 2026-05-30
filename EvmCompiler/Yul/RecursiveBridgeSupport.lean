@@ -109023,6 +109023,169 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
                   | halt kind =>
                       cases hTailRaw
 
+/--
+Terminal-aware raw reverse-cons argument composition.
+
+Imported Yul evaluates the tail arguments first and then the head expression in
+`evalValues` form.  The lowered target executes the tail prelude first and then
+the raw head prelude followed by its generated temporary binding.  Terminal
+tails and heads propagate without entering the remaining generated prefix.
+-/
+theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {preTail preHead : List Functions.Stmt}
+    {lowerTail : List (Locals.Expr 1)} {lowerNames : List Name}
+    {lowerHead : Locals.Expr 1} {tmp : Name}
+    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract} {source : State}
+    {compiler : Objects.Source.State}
+    {tailCallResponseRel finalCallResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLowerTailVars :
+      lowerTail = lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+    (hHeadWrites : SourceWritesDisjoint lowerNames preHead)
+    (hTmpFreshLower : tmp ∉ lowerNames)
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTail :
+      OpenExternal.OpenResultRel tailCallResponseRel
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          (preTail.length + (preHead.length + 2)) { stmts := preTail }
+          compiler))
+    (hHead :
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        OpenExternal.OpenResultRel headCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
+              sourceTailResult.1))
+          (SourceExprPreludeOpen.runRaw prim program targetTailResult.2
+            (preHead.length + 2) preHead lowerHead
+            targetTailResult.1.state))
+    (hHeadSingle :
+      ∀ {sourceTailResult : State × List Word},
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
+              sourceTailResult.1)))
+    (hTailResponse :
+      ∀ {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.evalValues base.succ.succ head
+                        codeOverride sourceTailResult.1))
+                    (sourceArgAppendHeadValues sourceTailResult.2)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  match targetTailResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetTailResult.2 (preHead.length + 2)
+                        { stmts :=
+                            preHead ++
+                              [Functions.Stmt.let_ tmp lowerHead] }
+                        targetTailResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok targetTailResult) }
+          response →
+        tailCallResponseRel sourceCall targetCall response)
+    (hHeadResponse :
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx}
+        {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (sourceArgAppendHeadValues sourceTailResult.2) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
+                  prim program tmp [] 1) }
+          response →
+        headCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel finalCallResponseRel
+      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim (.var tmp :: lowerTail))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs
+          (yulOpenEvalArgsAppendFuel base tail.reverse)
+          (head :: tail).reverse codeOverride source))
+      (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+        (preTail.length + (preHead.length + 2))
+        { stmts :=
+            preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]) }
+        compiler) := by
+  rw [yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_evalValues]
+  rw [compilerOpen_block_runOpen_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := preTail)
+    (suffix := preHead ++ [Functions.Stmt.let_ tmp lowerHead])
+    (state := compiler) (suffixFuel := preHead.length + 2)]
+  exact
+    sourceArgTerminalRawPreludeOpenResultRel_bind_tail
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim)
+      (lowerTail := lowerTail) (lowerArgs := .var tmp :: lowerTail)
+      (tailCallResponseRel := tailCallResponseRel)
+      (finalCallResponseRel := finalCallResponseRel)
+      hTail
+      (by
+        intro sourceTailResult targetTailResult hTailDone
+        rw [SourceExprSeqPreludeOpen.compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
+          (prim := prim) (program := program)
+          (ctx := targetTailResult.2) (pre := preHead) (name := tmp)
+          (lowerExpr := lowerHead) (state := targetTailResult.1.state)]
+        exact
+          sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
+            (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim) (program := program)
+            (lowerTail := lowerTail) (lowerNames := lowerNames) (tmp := tmp)
+            (sourceTailResult := sourceTailResult)
+            (targetTailResult := targetTailResult)
+            hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
+            (hHead hTailDone) hHeadSingle
+            (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
+              (names := lowerNames) (prim := prim) (program := program)
+              (ctx := targetTailResult.2) (targetFuel := preHead.length + 2)
+              (pre := preHead) (lower := lowerHead)
+              (compiler := targetTailResult.1.state) hHeadWrites)
+            (by
+              intro sourceCall targetCall response hResponse
+              exact
+                hHeadResponse
+                  (sourceTailResult := sourceTailResult)
+                  (targetTailResult := targetTailResult) hResponse))
+      hTailResponse
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

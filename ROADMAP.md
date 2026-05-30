@@ -570,6 +570,9 @@ Remaining work:
    - [x] Factor the terminal-aware raw argument-tail binder: regular tails
      enter the remaining generated prefix, while halt/revert tails skip it and
      propagate unchanged across arbitrary suspended requests.
+   - [x] Compose terminal-aware raw reverse-cons argument lowering: imported
+     Yul evaluates the recursive tail and raw head in semantic order, while the
+     target executes the matching tail prefix and generated head temporary.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
