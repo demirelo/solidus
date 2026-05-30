@@ -55947,6 +55947,105 @@ theorem sourceOpenStmtHeadPathSoundWhen_leave_succ
         (OpenExternal.OpenResultPathRel.done hDone)
 
 /--
+Attach a selected `break` head to an arbitrary compiled sequence tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_break_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hBreak : ctx.breakScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Break :: rest) codeOverride
+      { stmts := [Functions.Stmt.brk] ++ lowerTail.stmts } allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    (hHead :=
+      sourceOpenStmtHeadPathSoundWhen_break_succ
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (codeOverride := codeOverride) (allowed := allowed) hBreak hSubset)
+    hTail
+
+/--
+Attach a selected `continue` head to an arbitrary compiled sequence tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_continue_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hContinue : ctx.continueScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Continue :: rest) codeOverride
+      { stmts := [Functions.Stmt.cont] ++ lowerTail.stmts } allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    (hHead :=
+      sourceOpenStmtHeadPathSoundWhen_continue_succ
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (codeOverride := codeOverride) (allowed := allowed) hContinue hSubset)
+    hTail
+
+/--
+Attach a selected `leave` head to an arbitrary compiled sequence tail.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_leave_succ
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hLeave : ctx.leaveScope? = some outcomeLayout)
+    (hSubset : ∀ name, name ∈ outcomeLayout → name ∈ layout)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          sourceFuel.succ rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ.succ
+      (.Leave :: rest) codeOverride
+      { stmts := [Functions.Stmt.leave] ++ lowerTail.stmts } allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    (hHead :=
+      sourceOpenStmtHeadPathSoundWhen_leave_succ
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+        (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+        (codeOverride := codeOverride) (allowed := allowed) hLeave hSubset)
+    hTail
+
+/--
 Open append law for terminal-aware generated-expression preludes.
 
 Unlike the strict expression runner, the raw runner propagates a nonregular
