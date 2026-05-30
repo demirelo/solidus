@@ -555,6 +555,10 @@ Remaining work:
      restored internal-call relation: the callee consumes the replayed stack
      order, arbitrary external suspensions remain visible, and hidden-slot
      replay preserves terminal stops.
+   - [x] Instantiate the regular raw composition with the checked selected
+     CALL-safe/scoped function-body bridge: completed argument prefixes now
+     enter the actual recursively related callee body before restoration and
+     hidden-slot replay.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
