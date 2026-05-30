@@ -64011,6 +64011,148 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
                       hDone)
 
 /--
+Assemble checked finite-path sequence preservation from a one-head
+constructor. The recursive tail receives the predecessor source-fuel bound;
+each concrete admitted trace still chooses its own target cutoff.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_cons_frontier_callSafe_reserved_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {bound : Nat}
+    (hCons :
+      ∀ {tailFuel : Nat} {reserved layout outcomeLayout : List Name}
+        {ctx : Functions.Source.Ctx}
+        {head : AstStmt} {rest : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        tailFuel ≤ bound →
+        Safe.CallSafe.stmt head →
+        ControlFlow.ScopedStmt canBreak canContinue canLeave head →
+        UserCallArity.StmtOk yulProgram.contract head →
+        SourceLexical.StmtScoped layout head →
+        SourceLexical.StmtsScoped (SourceLexical.StmtOutLayout layout head)
+          rest →
+        SourceNamesReserved reserved (Stmt.names head) →
+        SourceNamesReserved reserved (Stmt.List.names rest) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+            sourceResult) →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        (∀ {layoutTail : List Name} {ctxTail : Functions.Source.Ctx}
+          {compileFuel : Nat},
+          SourceLexical.StmtsScoped layoutTail rest →
+          SourceNamesReserved reserved (Stmt.List.names rest) →
+          (∀ name : Name, name ∈ layoutTail → name ∈ ctxTail.scope) →
+          (∀ {sourceResult}, allowed sourceResult →
+            SourceResultOutcomeLayoutSupported ctxTail layoutTail outcomeLayout
+              sourceResult) →
+          CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+            cfg reserved layoutTail outcomeLayout terminalRel revertRel prim
+            program ctxTail tailFuel compileFuel rest
+            (some yulProgram.contract) allowed) →
+        ∀ {compileFuel : Nat},
+          CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+            cfg reserved layout outcomeLayout terminalRel revertRel prim
+            program ctx tailFuel.succ compileFuel (head :: rest)
+            (some yulProgram.contract) allowed) :
+    ∀ {reserved layout outcomeLayout : List Name}
+      {ctx : Functions.Source.Ctx}
+      {compileFuel : Nat} {sourceStmts : List AstStmt}
+      {allowed : Except Exception State → Prop}
+      {canBreak canContinue canLeave : Bool},
+      Safe.CallSafe.stmts sourceStmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+      UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+      SourceLexical.StmtsScoped layout sourceStmts →
+      SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) →
+      (∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult) →
+      (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        bound compileFuel sourceStmts (some yulProgram.contract) allowed := by
+  induction bound with
+  | zero =>
+      intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+        canBreak canContinue canLeave _hSafe _hScoped _hStmtsOk
+        _hSourceScoped _hReserved hAllowed _hSupported _hScopeContains
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel)
+          (sourceStmts := sourceStmts)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed
+  | succ tailFuel ih =>
+      intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+        canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+        hReserved hAllowed hSupported hScopeContains
+      cases sourceStmts with
+      | nil =>
+          exact
+            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (sourceFuel := tailFuel.succ)
+              (compileFuel := compileFuel)
+              (codeOverride := some yulProgram.contract)
+              (allowed := allowed) hAllowed hSupported
+      | cons head rest =>
+          exact
+            hCons (tailFuel := tailFuel) (reserved := reserved)
+              (layout := layout) (outcomeLayout := outcomeLayout)
+              (ctx := ctx) (head := head) (rest := rest)
+              (allowed := allowed) (canBreak := canBreak)
+              (canContinue := canContinue) (canLeave := canLeave)
+              (Nat.le_succ tailFuel)
+              (by simpa [Safe.CallSafe.stmts] using hSafe.1)
+              (by simpa [ControlFlow.ScopedStmts] using hScoped.1)
+              (by simpa [UserCallArity.StmtsOk] using hStmtsOk.1)
+              hSourceScoped.1 hSourceScoped.2
+              (SourceNamesReserved.stmt_of_cons hReserved)
+              (SourceNamesReserved.tail_of_cons hReserved)
+              hAllowed hSupported hScopeContains
+              (by
+                intro layoutTail ctxTail compileFuelTail hTailScoped
+                  hTailReserved hTailScope hTailSupported
+                exact
+                  ih
+                    (by
+                      intro innerTailFuel reserved' layout' outcomeLayout'
+                        ctx' head' rest' allowed' canBreak' canContinue'
+                        canLeave' hFuelInner
+                      exact
+                        hCons
+                          (tailFuel := innerTailFuel)
+                          (reserved := reserved') (layout := layout')
+                          (outcomeLayout := outcomeLayout') (ctx := ctx')
+                          (head := head') (rest := rest')
+                          (allowed := allowed') (canBreak := canBreak')
+                          (canContinue := canContinue')
+                          (canLeave := canLeave')
+                          (Nat.le_trans hFuelInner (Nat.le_succ tailFuel)))
+                    (reserved := reserved) (layout := layoutTail)
+                    (outcomeLayout := outcomeLayout) (ctx := ctxTail)
+                    (compileFuel := compileFuelTail) (sourceStmts := rest)
+                    (allowed := allowed) (canBreak := canBreak)
+                    (canContinue := canContinue) (canLeave := canLeave)
+                    hSafe.2 hScoped.2 hStmtsOk.2 hTailScoped
+                    hTailReserved hAllowed hTailSupported hTailScope)
+              (compileFuel := compileFuel)
+
+/--
 Open hidden-context sequence soundness for impossible source out-of-fuel
 branches.
 
