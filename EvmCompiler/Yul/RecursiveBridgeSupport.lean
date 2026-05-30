@@ -55820,6 +55820,160 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
                 simp [SourceOpenStmtHeadDoneRel] at hHeadDone
 
 /--
+Selected-path statement-head bridge for a regular call-free endpoint.
+
+The caller proves the open source and compiler endpoints directly.  This
+adapter pads only the already-selected successful target execution, then
+packages the exact post-state relation expected by the generic sequence
+composer.
+-/
+theorem sourceOpenStmtHeadPathSoundWhen_of_regular_done
+    {cfg : StateRelConfig} {layout layoutAfter outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmt : AstStmt}
+    {codeOverride : Option AstContract} {lowerHead : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hHead :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          ∃ sourceAfter compilerAfter ctxAfter targetFuel,
+            OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride
+                source =
+              .ok sourceAfter ∧
+            CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                targetFuel lowerHead compiler =
+              .ok (Functions.Source.Outcome.regular compilerAfter, ctxAfter) ∧
+            SourceStateExactRel cfg layoutAfter sourceAfter compilerAfter) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout layoutAfter outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmt
+      codeOverride lowerHead allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hResponses
+    minimumTargetFuel
+  rcases hHead hInitial with
+    ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel, hSource, hTarget,
+      hAfter⟩
+  have hSourceResolve :
+      OpenExternal.OpenResultResolves
+        (.done (.ok sourceAfter)) trace sourceDone := by
+    simpa [hSource, OpenExternal.YulOpenResult.toOpenResult,
+      OpenExternal.YulOpenResult.ok]
+      using hResolve
+  cases hSourceResolve
+  let paddedFuel := max minimumTargetFuel targetFuel
+  have hTargetResolve :
+      OpenExternal.OpenResultResolves
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx paddedFuel
+          lowerHead compiler)
+        []
+        (.ok (Functions.Source.Outcome.regular compilerAfter, ctxAfter)) :=
+    CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+      (Nat.le_max_right minimumTargetFuel targetFuel)
+      (by
+        rw [hTarget]
+        exact OpenExternal.OpenResultResolves.done)
+  refine ⟨paddedFuel, Nat.le_max_left _ _, ?_⟩
+  exact
+    OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+      hResolve hTargetResolve hResponses
+      (by
+        cases hAfter with
+        | @ok shared store compilerAfter hShared hVars hDomain =>
+            exact SourceStateExactRel.ok hShared hVars hDomain)
+
+/--
+Selected-path regular statement-head bridge for `x := literal`.
+-/
+theorem sourceOpenStmtHeadPathSoundWhen_assign_lit_single
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (name : EvmYul.Identifier) (value : Word)
+    (hTargetMem : identName name ∈ layout) :
+    SourceOpenStmtHeadPathSoundWhen cfg layout layout outcomeLayout terminalRel
+      revertRel prim program ctx sourceFuel.succ.succ
+      (.Assign [name] (.Lit value)) codeOverride
+      { stmts := [Functions.Stmt.assign (identName name) (.lit value)] }
+      allowed := by
+  apply sourceOpenStmtHeadPathSoundWhen_of_regular_done
+  intro source compiler hInitial
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      have hStoreSome : (store.lookup (identName name)).isSome = true :=
+        StoreDomainExact.contains_of_mem hDomain hTargetMem
+      cases hLookupTarget : store.lookup (identName name) with
+      | none =>
+          simp [hLookupTarget] at hStoreSome
+      | some oldValue =>
+          have hCompilerTarget :
+              compiler.vars (identName name) = some oldValue := by
+            simpa [hLookupTarget] using hVars (identName name) hTargetMem
+          have hContains :
+              compiler.vars.contains (identName name) = true := by
+            simp [Locals.Source.Store.contains, hCompilerTarget]
+          rcases
+              sourceRegularStmtRunHiddenExact_assign_lit_single
+                (prim := prim) (program := program) (ctx := ctx)
+                (sourceFuel := sourceFuel) name value codeOverride
+                (SourceStateExactRel.ok hShared hVars hDomain) hTargetMem with
+            ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel, hSource, hTarget,
+              _hSubset, hAfter⟩
+          refine
+            ⟨sourceAfter, compilerAfter, ctxAfter, targetFuel, ?_, ?_, hAfter⟩
+          · rw [OpenExternal.YulOpen.exec]
+            cases hCheck :
+                EvmYul.Yul.checkAssignment (.Ok shared store) [name] with
+            | error err =>
+                simp [hCheck, EvmYul.Yul.exec] at hSource
+            | ok unit =>
+                cases unit
+                simpa [hCheck, EvmYul.Yul.exec, EvmYul.Yul.evalValues,
+                  EvmYul.Yul.evalArgs, EvmYul.Yul.evalTail,
+                  OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpen.evalArgs,
+                  OpenExternal.YulOpen.reverseResult,
+                  OpenExternal.YulOpenResult.bind,
+                  OpenExternal.YulOpenResult.map,
+                  OpenExternal.YulOpenResult.ok] using
+                  congrArg OpenExternal.YulOpenResult.done hSource
+          · cases targetFuel with
+            | zero =>
+                simp [Functions.Source.Block.runOpen, Functions.Source.invalid,
+                  Structured.invalid] at hTarget
+            | succ targetFuel =>
+                cases targetFuel with
+                | zero =>
+                    simp [Functions.Source.Block.runOpen,
+                      Functions.Source.Stmt.run, Functions.Source.invalid,
+                      Structured.invalid, Functions.Source.Expr.evalOne,
+                      Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
+                      Functions.Source.Outcome.regular,
+                      Locals.Source.Outcome.regular, hContains] at hTarget
+                | succ targetFuel =>
+                    simpa [CompilerOpen.FunctionsOpen.Block.runOpen,
+                      CompilerOpen.FunctionsOpen.Stmt.run,
+                      CompilerOpen.LocalsExpr.evalOne,
+                      CompilerOpen.LocalsExpr.eval,
+                      Functions.Source.Block.runOpen,
+                      Functions.Source.Stmt.run,
+                      Functions.Source.Expr.evalOne,
+                      Locals.Source.Expr.evalOne, Locals.Source.Expr.eval,
+                      OpenExternal.OpenResult.bind,
+                      OpenExternal.OpenResult.ok, CompilerOpen.invalid,
+                      Functions.Source.invalid, Structured.invalid,
+                      Functions.Source.Outcome.regular,
+                      Locals.Source.Outcome.regular, hContains] using
+                      congrArg OpenExternal.OpenResult.done hTarget
+
+/--
 Selected-path statement-head bridge for `break`.
 -/
 theorem sourceOpenStmtHeadPathSoundWhen_break_succ
