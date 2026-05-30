@@ -113612,6 +113612,57 @@ theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_nil_of_lowerBound1?
       hLower)
 
 /--
+Checked direct/generated dispatcher for selected terminal-aware arguments.
+
+Internal user-call lowering keeps the direct empty-argument fast path.  Its
+closed proof is exposed through the finite-path interface; generated prefixes
+delegate to the structural path-native scheduler.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateArgs : Fresh.State}
+    {preArgs : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hSourceFuel : 0 < sourceFuel)
+    (hArgs :
+      (Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs)))
+    (hGenerated :
+      Expr.List.lowerBound1? freshState args =
+          some (preArgs, lowerArgs, stateArgs) →
+        SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+          revertRel prim program ctx sourceFuel args codeOverride preArgs
+          lowerArgs allowed) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride preArgs
+      lowerArgs allowed := by
+  rcases hArgs with hDirect | hGeneratedArgs
+  · rcases hDirect with ⟨hDirect, hToLocals, hPre, _hState⟩
+    subst preArgs
+    exact
+      SourceArgTerminalRawPreludeOpenPathSoundWhen.of_atExact
+        (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_directCallArgsSafe
+          (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (args := args) (lowerArgs := lowerArgs)
+          (sourceFuel := sourceFuel) (targetFuel := 1)
+          (codeOverride := codeOverride)
+          (callResponseRel := RelationallyAdmissibleOpenCallResponseRel cfg)
+          hSourceFuel (by omega) hDirect hToLocals)
+  · exact hGenerated hGeneratedArgs.2
+
+/--
 Structural compiler-output dispatcher for selected terminal-aware arguments.
 
 Each cons step recursively replays the selected tail trace, then replays the
@@ -116027,6 +116078,223 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal_canonica
     (by
       intro sourceCall targetCall response hResponse
       exact hResponse)
+
+/--
+Finite-path primitive-expression composition from a selected argument prefix.
+
+The generated argument scheduler chooses a cutoff only for the admitted
+concrete trace.  Regular completion then follows the primitive continuation;
+terminal argument completion skips it and preserves the stopped target.
+-/
+theorem sourceExprRawPreludeOpenPathSoundWhen_prim_of_arg_terminal_canonical
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp}
+    {args : List AstExpr} {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {argExprs : List (Locals.Expr 1)}
+    {results : Nat}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results)
+    (hArgs :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx sourceFuel args codeOverride pre argExprs
+        (fun _sourceDone => True))
+    (hRegular :
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim argExprs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel
+          (RelationallyAdmissibleOpenCallResponseRel cfg)
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+            sourceArgsResult)
+          (OpenExternal.OpenResult.map
+            (fun primResult =>
+              .values
+                { state := primResult.1
+                  ctx := targetArgsResult.2
+                  values := primResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim
+              (Expr.cast hOutputs (.prim op lowerArgs))
+              targetArgsResult.1.state))) :
+    SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel prim
+      program ctx sourceFuel.succ (.Call (.inl yulPrim) args) codeOverride pre
+      (Expr.cast hOutputs (.prim op lowerArgs)) allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolveFull
+    _hAllowed hResponses minimumTargetFuel
+  have hResolve := hResolveFull
+  rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hArgsError | hArgsOk
+  · rcases hArgsError with ⟨err, hResolveArgs, hSourceDone⟩
+    subst sourceDone
+    rcases
+        hArgs hInitial hContains hResolveArgs True.intro hResponses
+          minimumTargetFuel with
+      ⟨targetFuel, hMinimumTargetFuel, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .error err :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        have hTargetSuffix :
+            OpenExternal.OpenResultResolves
+              (match targetArgsResult.1.mode with
+              | .regular =>
+                  OpenExternal.OpenResult.map
+                    (fun primResult =>
+                      SourceExprPreludeOpen.RawTarget.values
+                        { state := primResult.1
+                          ctx := targetArgsResult.2
+                          values := primResult.2 })
+                    (CompilerOpen.LocalsExpr.eval prim
+                      (Expr.cast hOutputs (.prim op lowerArgs))
+                      targetArgsResult.1.state)
+              | .brk | .cont | .leave | .halt _ =>
+                  OpenExternal.OpenResult.ok
+                    (SourceExprPreludeOpen.RawTarget.stopped targetArgsResult))
+              []
+              (.ok
+                (SourceExprPreludeOpen.RawTarget.stopped targetArgsResult)) := by
+          rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+          cases targetArgsOutcome with
+          | mk targetArgsState mode =>
+              cases mode with
+              | regular =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+              | brk =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+              | cont =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+              | leave =>
+                  cases err <;>
+                    simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+              | halt kind =>
+                  exact OpenExternal.OpenResultResolves.done
+        have hTargetFull :
+            OpenExternal.OpenResultResolves
+              (SourceExprPreludeOpen.runRaw prim program ctx targetFuel pre
+                (Expr.cast hOutputs (.prim op lowerArgs)) compiler)
+              trace (.ok (.stopped targetArgsResult)) := by
+          unfold SourceExprPreludeOpen.runRaw
+          simpa only [List.append_nil] using
+            OpenExternal.OpenResultResolves.bind_ok
+              (next := fun targetArgsResult =>
+                match targetArgsResult.1.mode with
+                | .regular =>
+                    OpenExternal.OpenResult.map
+                      (fun primResult =>
+                        SourceExprPreludeOpen.RawTarget.values
+                          { state := primResult.1
+                            ctx := targetArgsResult.2
+                            values := primResult.2 })
+                      (CompilerOpen.LocalsExpr.eval prim
+                        (Expr.cast hOutputs (.prim op lowerArgs))
+                        targetArgsResult.1.state)
+                | .brk | .cont | .leave | .halt _ =>
+                    OpenExternal.OpenResult.ok
+                      (SourceExprPreludeOpen.RawTarget.stopped
+                        targetArgsResult))
+              hTargetArgs hTargetSuffix
+        refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+        exact
+          OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+            hResolveFull hTargetFull hResponses
+              (sourceExprRawPreludeOpenDoneRel_stopped_of_arg_terminal_error
+                hArgsDone)
+  · rcases hArgsOk with
+      ⟨argsTrace, primTrace, sourceArgsResult, hTrace, hResolveArgs,
+        hResolvePrim⟩
+    subst trace
+    have hResponsesArgs : SourceOpenTraceResponsesAdmissible cfg argsTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hResponsesPrim : SourceOpenTraceResponsesAdmissible cfg primTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    rcases
+        hArgs hInitial hContains hResolveArgs True.intro hResponsesArgs
+          minimumTargetFuel with
+      ⟨targetFuel, hMinimumTargetFuel, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .ok sourceArgsResult :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+        cases targetArgsOutcome with
+        | mk targetArgsState mode =>
+            cases mode with
+            | regular =>
+                have hPrimPath :=
+                  OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+                    (hRegular hArgsDone) hResolvePrim hResponsesPrim
+                have hCombined :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel
+                        revertRel)
+                      (argsTrace ++ primTrace)
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+                            codeOverride source))
+                        (fun sourceArgsResult =>
+                          yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+                            sourceArgsResult))
+                      (OpenExternal.OpenResult.bind
+                        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                          ctx targetFuel { stmts := pre } compiler)
+                        (fun targetArgsResult =>
+                          match targetArgsResult.1.mode with
+                          | .regular =>
+                              OpenExternal.OpenResult.map
+                                (fun primResult =>
+                                  SourceExprPreludeOpen.RawTarget.values
+                                    { state := primResult.1
+                                      ctx := targetArgsResult.2
+                                      values := primResult.2 })
+                                (CompilerOpen.LocalsExpr.eval prim
+                                  (Expr.cast hOutputs (.prim op lowerArgs))
+                                  targetArgsResult.1.state)
+                          | .brk | .cont | .leave | .halt _ =>
+                              OpenExternal.OpenResult.ok
+                                (SourceExprPreludeOpen.RawTarget.stopped
+                                  targetArgsResult))) :=
+                  OpenExternal.OpenResultPathRel.bind_selected_ok hArgsPath
+                    hResolveArgs hTargetArgs hPrimPath (by
+                      intro sourceCall targetCall response hResponse
+                      exact hResponse)
+                refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+                rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args]
+                unfold SourceExprPreludeOpen.runRaw
+                simpa using hCombined
+            | brk =>
+                cases hArgsDone
+            | cont =>
+                cases hArgsDone
+            | leave =>
+                cases hArgsDone
+            | halt kind =>
+                cases hArgsDone
 
 /--
 CALL-safe terminal-aware raw primitive dispatcher.
