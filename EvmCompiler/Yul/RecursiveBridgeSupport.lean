@@ -35969,6 +35969,45 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
     exact hInitial)
 
 /--
+Compiler-output base case for terminal-aware raw argument preludes.
+
+The successful empty-list lowering result determines the empty generated
+prefix and lowered argument list.  Recursive callers therefore use the same
+checked `lowerBound1?` interface in both the nil and cons branches.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateFresh : Fresh.State}
+    {pre : List Functions.Stmt}
+    {lowerArgs : List (Locals.Expr 1)}
+    {sourceFuel : Nat} {codeOverride : Option AstContract}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel}
+    (hLower :
+      Expr.List.lowerBound1? freshState ([] : List AstExpr) =
+        some (pre, lowerArgs, stateFresh)) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel.succ ([] : List AstExpr)
+      codeOverride pre lowerArgs pre.length.succ callResponseRel := by
+  rcases lowerBound1?_nil_some_components hLower with
+    ⟨hPre, hArgs, hState⟩
+  subst pre
+  subst lowerArgs
+  subst stateFresh
+  intro source compiler hInitial
+  simpa using
+    (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := 0)
+      (codeOverride := codeOverride) (callResponseRel := callResponseRel)
+      (source := source) (compiler := compiler) hInitial)
+
+/--
 Compose a terminal-aware generated argument prefix with a raw expression
 continuation.
 

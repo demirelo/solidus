@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 22:48 PDT.
+Last updated: 2026-05-29 22:53 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -554,6 +554,9 @@ Remaining work:
    - [x] Add the terminal-aware raw empty-argument constructor: empty imported
      evaluation and empty generated target prefixes finish regularly with
      empty lowered replay and no hidden external interaction.
+   - [x] Hide the terminal-aware raw empty-argument constructor behind the
+     checked compiler-output interface, so nil and cons recursion both consume
+     successful whole-list `lowerBound1?` results.
    - [x] Factor one generated argument head on the target through the raw
      expression runner: successful singleton values populate the fresh
      temporary, while stopped nested-call preludes skip that binding unchanged.
