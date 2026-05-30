@@ -1,5 +1,5 @@
 import EvmCompiler.Yul.RecursiveBridge
-import EvmCompiler.Yul.CompilerOpen
+import EvmCompiler.Yul.OpenTargetFuel
 
 /-!
 Support lemmas for the Nethermind-Yul source-tower recursive bridge.
@@ -35701,6 +35701,31 @@ def runRaw
       | .brk | .cont | .leave | .halt _ =>
           OpenExternal.OpenResult.ok (.stopped preResult)
 
+/--
+Pad the executable cutoff of one already-completed raw expression-prelude
+path.  Only the selected finite response trace is preserved.
+-/
+theorem runRaw_resolves_mono
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {fuel fuel' : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace} {result : RawTarget}
+    (hLe : fuel ≤ fuel')
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runRaw prim program ctx fuel pre lower compiler) trace (.ok result)) :
+    OpenExternal.OpenResultResolves
+      (runRaw prim program ctx fuel' pre lower compiler) trace (.ok result) := by
+  unfold runRaw at hResolve ⊢
+  exact
+    OpenExternal.OpenResultResolves.bind_ok_mono hResolve
+      (fun hPre =>
+        CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+          hLe hPre)
+      (fun hNext => hNext)
+
 theorem run_done_regular
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
@@ -35942,6 +35967,63 @@ def SourceExprRawPreludeOpenPathSoundWhen
               source))
           (SourceExprPreludeOpen.runRaw prim program ctx targetFuel pre lower
             compiler)
+
+/--
+Expose one local tree-shaped raw-expression proof through the finite-path
+interface.  A requested cutoff floor is met by padding only the already
+selected successful compiler path.
+-/
+theorem SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {results : Nat}
+    {lower : Locals.Expr results} {targetFuel : Nat}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hExact :
+      SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx sourceFuel expr codeOverride pre lower
+        targetFuel (RelationallyAdmissibleOpenCallResponseRel cfg)) :
+    SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+      prim program ctx sourceFuel expr codeOverride pre lower allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolve
+    _hAllowed hResponses minimumTargetFuel
+  have hPath :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues sourceFuel expr codeOverride
+            source))
+        (SourceExprPreludeOpen.runRaw prim program ctx targetFuel pre lower
+          compiler) :=
+    OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+      (hExact hInitial hContains) hResolve hResponses
+  rcases hPath.resolves with
+    ⟨sourceDone', targetDone, hSource, hTarget, hDone⟩
+  cases targetDone with
+  | error targetErr =>
+      cases sourceDone' <;>
+        simp [SourceExprRawPreludeOpenDoneRel] at hDone
+  | ok targetResult =>
+      let paddedFuel := max minimumTargetFuel targetFuel
+      have hTargetPadded :
+          OpenExternal.OpenResultResolves
+            (SourceExprPreludeOpen.runRaw prim program ctx paddedFuel pre lower
+              compiler)
+            trace (.ok targetResult) :=
+        SourceExprPreludeOpen.runRaw_resolves_mono
+          (Nat.le_max_right minimumTargetFuel targetFuel) hTarget
+      refine ⟨paddedFuel, Nat.le_max_left _ _, ?_⟩
+      exact
+        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+          hSource hTargetPadded hResponses hDone
 
 def SourceArgRawPreludeOpenDoneRel
     (cfg : StateRelConfig) (layout : List Name)

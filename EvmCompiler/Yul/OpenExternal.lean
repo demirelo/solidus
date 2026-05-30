@@ -2009,6 +2009,20 @@ theorem deterministic
       | @call _ _ _ _ hTail' =>
           exact ih hTail'
 
+/-- Invert one recorded request from a suspended open computation. -/
+theorem call_inv
+    {ε : Type u} {α : Type v}
+    {call : OpenCall (OpenResult ε α)}
+    {event : OpenEvent} {trace : OpenTrace} {result : Except ε α}
+    (hResolve :
+      OpenResultResolves (.call call) (event :: trace) result) :
+    ∃ response,
+      event = { site := call.site, response := response } ∧
+        OpenResultResolves (call.resume response) trace result := by
+  cases hResolve with
+  | call hTail =>
+      exact ⟨_, rfl, hTail⟩
+
 end OpenResultResolves
 
 /--
@@ -2068,6 +2082,53 @@ theorem resolves
       rcases ih with ⟨sourceDone, targetDone, hSource, hTarget, hDone⟩
       refine ⟨sourceDone, targetDone, OpenResultResolves.call hSource, ?_, hDone⟩
       simpa [hSite] using (OpenResultResolves.call hTarget)
+
+/--
+Rebuild a paired path from two resolutions over the same recorded events.
+
+This is useful after padding one side's executable cutoff along an already
+completed selected path.  The trace supplies request-site equality and the
+response-only certificate supplies the continuation-independent response
+relation.
+-/
+theorem of_resolves_of_responsesSatisfy
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {responseRel : CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceDone : Except ε₁ α} {targetDone : Except ε₂ β}
+    (hSource : OpenResultResolves source trace sourceDone)
+    (hTarget : OpenResultResolves target trace targetDone)
+    (hResponses : OpenTrace.ResponsesSatisfy responseRel trace)
+    (hDone : doneRel sourceDone targetDone) :
+    OpenResultPathRel
+      (fun _sourceCall _targetCall response => responseRel response)
+      doneRel trace source target := by
+  induction hSource generalizing target with
+  | done =>
+      cases hTarget
+      exact OpenResultPathRel.done hDone
+  | @call sourceCall response trace sourceDone hSource ih =>
+      cases target with
+      | done targetDone =>
+          cases hTarget
+      | call targetCall =>
+          rcases OpenResultResolves.call_inv hTarget with
+            ⟨targetResponse, hEvent, hTargetTail⟩
+          have hSite : sourceCall.site = targetCall.site :=
+            congrArg OpenEvent.site hEvent
+          have hResponse : response = targetResponse :=
+            congrArg OpenEvent.response hEvent
+          subst targetResponse
+          apply OpenResultPathRel.call (sourceCall := sourceCall)
+            (targetCall := targetCall) hSite
+          · exact
+              hResponses
+                { site := sourceCall.site, response := response } (by simp)
+          · exact ih hTargetTail (by
+              intro event hMem
+              exact hResponses event (List.mem_cons_of_mem _ hMem)) hDone
 
 /--
 Compose one related finite path through a pair of continuations.
