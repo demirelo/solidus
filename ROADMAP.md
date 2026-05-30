@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 23:04 PDT.
+Last updated: 2026-05-30 00:30 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -717,6 +717,9 @@ Remaining work:
    - [x] Carry syntax-reserve adequacy through canonical generated-argument
      recursion and expose `sourceExprRawPreludeBaseReserve head ≤ residualBase`
      at every nested expression callback.
+   - [x] Thread reserved-layout coverage into each canonical generated
+     argument head callback from the checked tail lowering, and expose both
+     whole-list and selected-head reserve adequacy from the CALL reserve split.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

@@ -37126,7 +37126,7 @@ theorem sourceExprRawPreludeBaseReserve_le_sourceExprs_of_mem
 
 /--
 Split an adequate raw call-expression reserve into the exact reversed-argument
-scheduler base and an adequacy fact for every selected nested head.
+scheduler base plus whole-list and selected-head adequacy facts.
 -/
 theorem exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le
     {callee : Sum (EvmYul.Operation .Yul) Name} {args : List AstExpr}
@@ -37135,13 +37135,17 @@ theorem exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le
       sourceExprRawPreludeBaseReserve (.Call callee args) ≤ base) :
     ∃ argsBase,
       yulOpenEvalArgsAppendFuel argsBase args.reverse = base + 3 ∧
+        sourceExprsRawPreludeBaseReserve args ≤ argsBase ∧
         ∀ {head}, head ∈ args →
           sourceExprRawPreludeBaseReserve head ≤ argsBase := by
   let argsBase := base - 2 * args.length
-  refine ⟨argsBase, ?_, ?_⟩
+  refine ⟨argsBase, ?_, ?_, ?_⟩
   · rw [yulOpenEvalArgsAppendFuel_eq_add_length]
     simp only [List.length_reverse]
     simp only [sourceExprRawPreludeBaseReserve] at hReserve
+    dsimp [argsBase]
+    omega
+  · simp only [sourceExprRawPreludeBaseReserve] at hReserve
     dsimp [argsBase]
     omega
   · intro head hMem
@@ -110797,6 +110801,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
+        FreshCoversLayout coverLayout stateHeadStart →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -110881,11 +110886,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (hHead := by
                     intro base' targetTailFuel' head' stateHeadStart' preHead'
                       lowerHead' stateHead' ctxHead' headCallResponseRel
-                      hHeadMem hHeadReserve hHeadLower
+                      hHeadMem hHeadReserve hHeadCovers hHeadLower
                     exact
                       hHead headCallResponseRel
                         (List.mem_cons_of_mem head hHeadMem) hHeadReserve
-                        hHeadLower)
+                        hHeadCovers hHeadLower)
                   (hHeadSingle := by
                     intro base' head' stateHeadStart' preHead' lowerHead'
                       stateHead' sourceTailResult' targetState' hHeadMem
@@ -110912,7 +110917,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                   (SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedHead
                     prim program tmp targetTailFuel sourceTailResult.2
                     finalCallResponseRel)
-                  (by simp) hReserveHead hHeadLower)
+                  (by simp) hReserveHead
+                  (freshCoversLayout_lowerBound1?_of_some hCovers hTailLower)
+                  hHeadLower)
             (by
               intro stateTail preHead lowerHead stateHead sourceTailResult
                 targetState hHeadLower hInitial
@@ -110953,6 +110960,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         (headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel),
         head ∈ args →
         sourceExprRawPreludeBaseReserve head ≤ base →
+        FreshCoversLayout coverLayout stateHeadStart →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
