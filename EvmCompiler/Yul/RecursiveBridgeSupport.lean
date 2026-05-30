@@ -118746,9 +118746,8 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
 /--
 Finite-path recursive declaration head.
 
-Expression recursion is established once at the canonical minimum exact
-cutoff, then projected to a selected finite path and padded only as required by
-the selected sequence continuation.
+Expression recursion follows the admitted finite path directly.  Each nested
+call chooses its compiler cutoff only after its concrete source trace is known.
 -/
 theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     {cfg : StateRelConfig} {coverLayout layout outcomeLayout : List Name}
@@ -118757,7 +118756,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {minimumTargetTailFuel base : Nat}
+    {base : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {freshState freshState' : Fresh.State}
@@ -118777,22 +118776,19 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
           ∃ fn,
             Functions.FunList.find? functionName program.functions = some fn)
     (hUserRegular :
-      ∀ {base targetTailFuel : Nat} {functionName : Name}
+      ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
-        {fn : Functions.FunDef}
-        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        {fn : Functions.FunDef},
         sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
             base →
-        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
         UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
-        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
         Functions.FunList.find? functionName program.functions = some fn →
-          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
-            revertRel prim program base targetTailFuel functionName args
-            contract freshState freshState' fn exprCallResponseRel)
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
     (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hFresh : identName name ∉ layout)
@@ -118825,12 +118821,10 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
     (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hFresh
-    (SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
       (ctx := ctx) (allowed := fun _sourceDone => True)
-      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
-        hLayoutSubset hPrim hFindUser hUserRegular hReserve (by rfl) hCovers
-        hSafe hScoped hOk hLower
-        (rawOpenCallResponseAdmissible_relationallyAdmissible cfg)))
+      hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
+      hOk hLower)
     (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
       (cfg := cfg) (layout := layout)
       (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
@@ -118849,7 +118843,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {minimumTargetTailFuel base : Nat}
+    {base : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {freshState freshState' : Fresh.State}
@@ -118869,22 +118863,19 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
           ∃ fn,
             Functions.FunList.find? functionName program.functions = some fn)
     (hUserRegular :
-      ∀ {base targetTailFuel : Nat} {functionName : Name}
+      ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
-        {fn : Functions.FunDef}
-        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        {fn : Functions.FunDef},
         sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
             base →
-        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
         UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
-        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
         Functions.FunList.find? functionName program.functions = some fn →
-          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
-            revertRel prim program base targetTailFuel functionName args
-            contract freshState freshState' fn exprCallResponseRel)
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
     (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
     (hTargetMem : identName name ∈ layout)
@@ -118916,12 +118907,10 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recurs
     (sourceExpr := sourceExpr) (rest := rest) (codeOverride := some contract)
     (pre := pre) (lowerExpr := lowerExpr) (lowerTail := lowerTail)
     (allowed := allowed) hTargetMem hPreWrites
-    (SourceExprRawPreludeOpenPathSoundWhen.of_atExact
+    (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_recursive
       (ctx := ctx) (allowed := fun _sourceDone => True)
-      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
-        hLayoutSubset hPrim hFindUser hUserRegular hReserve (by rfl) hCovers
-        hSafe hScoped hOk hLower
-        (rawOpenCallResponseAdmissible_relationallyAdmissible cfg)))
+      hLayoutSubset hPrim hFindUser hUserRegular hReserve hCovers hSafe hScoped
+      hOk hLower)
     (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
       (cfg := cfg) (layout := layout)
       (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
@@ -118943,7 +118932,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {minimumTargetTailFuel base : Nat}
+    {base : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {allowed : Except Exception State → Prop}
@@ -118962,22 +118951,19 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           ∃ fn,
             Functions.FunList.find? functionName program.functions = some fn)
     (hUserRegular :
-      ∀ {base targetTailFuel : Nat} {functionName : Name}
+      ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
-        {fn : Functions.FunDef}
-        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        {fn : Functions.FunDef},
         sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
             base →
-        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout (reserved ++ layout) freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
         UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
-        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
         Functions.FunList.find? functionName program.functions = some fn →
-          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
-            revertRel prim program base targetTailFuel functionName args
-            contract freshState freshState' fn exprCallResponseRel)
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
     (hSafe : Safe.CallSafe.expr sourceExpr)
     (hOk : UserCallArity.ExprOk contract sourceExpr)
     (hTail :
@@ -118999,7 +118985,6 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
         intro freshState stateHead pre lowerExpr lowerTailStmts hCovers hLower
         exact
           sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_let_expr_recursive
-            (minimumTargetTailFuel := minimumTargetTailFuel)
             (lowerTail := { stmts := lowerTailStmts })
             (by
               intro other hMem
@@ -119019,7 +119004,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     {revertRel : State → Objects.Source.State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
-    {minimumTargetTailFuel base : Nat}
+    {base : Nat}
     {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
     {sourceExpr : AstExpr} {rest : List AstStmt}
     {allowed : Except Exception State → Prop}
@@ -119038,22 +119023,19 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           ∃ fn,
             Functions.FunList.find? functionName program.functions = some fn)
     (hUserRegular :
-      ∀ {base targetTailFuel : Nat} {functionName : Name}
+      ∀ {base : Nat} {functionName : Name}
         {args : List AstExpr} {freshState freshState' : Fresh.State}
-        {fn : Functions.FunDef}
-        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        {fn : Functions.FunDef},
         sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
             base →
-        minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout (reserved ++ layout) freshState →
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
         UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
-        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
         Functions.FunList.find? functionName program.functions = some fn →
-          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
-            revertRel prim program base targetTailFuel functionName args
-            contract freshState freshState' fn exprCallResponseRel)
+          SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout
+            terminalRel revertRel prim program base functionName args contract
+            freshState freshState' fn)
     (hSafe : Safe.CallSafe.expr sourceExpr)
     (hOk : UserCallArity.ExprOk contract sourceExpr)
     (hTail :
@@ -119087,7 +119069,6 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
         intro source compiler trace sourceDone
         exact
           sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_assign_expr_recursive
-            (minimumTargetTailFuel := minimumTargetTailFuel)
             (ctx := ctx)
             (lowerTail := { stmts := lowerTailStmts })
             (by
