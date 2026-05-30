@@ -23569,6 +23569,113 @@ theorem yulOpenLoop_post_toOpenResult_doneInvariant_checkpointStoreContains_of_o
               intro loopResult hLoopState
               exact OpenResultDoneInvariant.done hLoopState))
 
+theorem yulOpenLoop_body_toOpenResult_doneInvariant_checkpointStoreContains_of_ok_parts
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedBodyInput : EvmYul.SharedState .Yul}
+    {store storeBodyInput : EvmYul.Yul.VarStore}
+    (hContains : StoreDomainContains layout store)
+    (hBody :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains layout true true canLeave))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel (.Block body) codeOverride
+            (.Ok sharedBodyInput storeBodyInput))))
+    (hPostThenRecur :
+      ∀ {sharedPostInput : EvmYul.SharedState .Yul}
+        {storePostInput : EvmYul.Yul.VarStore},
+        StoreDomainContains layout storePostInput →
+          OpenResultDoneInvariant
+            (YulOpenStateDoneInv
+              (StateCheckpointStoreContains layout canBreak canContinue
+                canLeave))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpenResult.bind
+                (OpenExternal.YulOpen.exec fuel (.Block post) codeOverride
+                  (.Ok sharedPostInput storePostInput))
+                fun postResult =>
+                  let stateAfterPost :=
+                    EvmYul.Yul.State.overwrite? postResult (.Ok shared store)
+                  match postResult with
+                  | .OutOfFuel => .ok stateAfterPost
+                  | .Checkpoint (.Leave _ _) => .ok stateAfterPost
+                  | _ =>
+                      OpenExternal.YulOpenResult.bind
+                        (OpenExternal.YulOpen.exec fuel
+                          (.For cond post body) codeOverride stateAfterPost)
+                        fun loopResult =>
+                          .ok
+                            (EvmYul.Yul.State.overwrite? loopResult
+                              (.Ok shared store))))) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpenResult.bind
+          (OpenExternal.YulOpen.exec fuel (.Block body) codeOverride
+            (.Ok sharedBodyInput storeBodyInput))
+          fun bodyResult =>
+            match bodyResult with
+            | .OutOfFuel =>
+                .ok (EvmYul.Yul.State.overwrite? bodyResult (.Ok shared store))
+            | .Checkpoint (.Break _ _) =>
+                .ok
+                  (EvmYul.Yul.State.overwrite?
+                    (EvmYul.Yul.State.reviveJump bodyResult)
+                    (.Ok shared store))
+            | .Checkpoint (.Leave _ _) =>
+                .ok (EvmYul.Yul.State.overwrite? bodyResult (.Ok shared store))
+            | .Checkpoint (.Continue _ _) | _ =>
+                OpenExternal.YulOpenResult.bind
+                  (OpenExternal.YulOpen.exec fuel (.Block post) codeOverride
+                    (EvmYul.Yul.State.reviveJump bodyResult))
+                  fun postResult =>
+                    let stateAfterPost :=
+                      EvmYul.Yul.State.overwrite? postResult (.Ok shared store)
+                    match postResult with
+                    | .OutOfFuel => .ok stateAfterPost
+                    | .Checkpoint (.Leave _ _) => .ok stateAfterPost
+                    | _ =>
+                        OpenExternal.YulOpenResult.bind
+                          (OpenExternal.YulOpen.exec fuel
+                            (.For cond post body) codeOverride stateAfterPost)
+                          fun loopResult =>
+                            .ok
+                              (EvmYul.Yul.State.overwrite? loopResult
+                                (.Ok shared store)))) := by
+  exact YulOpenStateDoneInv.bind hBody (by
+    intro bodyResult hBodyState
+    cases bodyResult with
+    | OutOfFuel =>
+        simp [EvmYul.Yul.State.overwrite?]
+        exact
+          OpenResultDoneInvariant.done
+            StateCheckpointStoreContains.outOfFuel
+    | Checkpoint jump =>
+        cases jump with
+        | Continue sharedContinue storeContinue =>
+            simpa [EvmYul.Yul.State.reviveJump, EvmYul.Yul.State.revive] using
+              hPostThenRecur hBodyState.2
+        | Break sharedBreak storeBreak =>
+            simp [EvmYul.Yul.State.reviveJump, EvmYul.Yul.State.revive,
+              EvmYul.Yul.State.overwrite?]
+            exact
+              OpenResultDoneInvariant.done
+                (StateCheckpointStoreContains.of_ok hBodyState.2)
+        | Leave sharedLeave storeLeave =>
+            simp [EvmYul.Yul.State.overwrite?]
+            exact
+              OpenResultDoneInvariant.done
+                (by
+                  simpa [StateCheckpointStoreContains,
+                    StateCheckpointAllowed, StateStoreContains] using
+                      hBodyState)
+    | Ok sharedBody storeBody =>
+        simpa [EvmYul.Yul.State.reviveJump] using
+          hPostThenRecur hBodyState.2)
+
 theorem sourcePairResult_toOpenResult_doneInvariant_checkpointStoreContains
     {layout : List Name} {canBreak canContinue canLeave : Bool} {α : Type}
     {result : Except Exception (State × α)}
