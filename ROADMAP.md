@@ -702,6 +702,9 @@ Remaining work:
    - [x] Define canonical generated-argument tail and head response pullbacks
      and prove reverse-cons terminal-aware raw composition without caller
      supplied response-conversion premises.
+   - [x] Lift canonical generated-argument response composition through
+     compiler-derived freshness, generated-variable disjointness, and hidden
+     temporary safety bookkeeping.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
