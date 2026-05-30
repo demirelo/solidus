@@ -708,6 +708,9 @@ Remaining work:
    - [x] Hide generated reverse-cons `lowerBound1?` decomposition behind a
      checked canonical wrapper, so recursive callers consume the whole-list
      lowering result and the induced tail/head relations only.
+   - [x] Recurse structurally over generated argument lists with canonical
+     pulled-back response relations. Nested heads are proved at the expression
+     interface under the exact continuation that remains around each head.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
