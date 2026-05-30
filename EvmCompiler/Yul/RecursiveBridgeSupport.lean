@@ -112471,6 +112471,7 @@ theorem lower1?_prim_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of
       Safe.primitive yulPrim →
       ∀ {op},
         Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
           SourcePrimitiveCallNoErrorAt sourceFuel yulPrim op)
     (hPrimitiveResponse :
       ∀ {sourceShared : EvmYul.SharedState .Yul}
@@ -112514,7 +112515,7 @@ theorem lower1?_prim_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of
       hOutputs hLowerVars hSeq
       (hArgPrelude hSafe.2 hBasic hLowerArgs hSeq hLowerEq)
       (fun hSafePrim => hPrim hSafePrim hBasic)
-      (fun hSafePrim => hNoError hSafePrim hBasic)
+      (fun hSafePrim => hNoError hSafePrim hBasic hOutputs)
       hPrimitiveResponse (source := source) (compiler := compiler) hInitial
   simpa [hLowerEq] using hRel
 
@@ -112581,6 +112582,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         Safe.primitive yulPrim →
       ∀ {op},
         Prim.toBasicOp? yulPrim = some op →
+        Expressions.Structured.BasicOp.outputs op = 1 →
           SourcePrimitiveCallNoErrorAt sourceFuel yulPrim op)
     (hPrimitiveResponse :
       ∀ {yulPrim : EvmYul.Operation .Yul} {args : List AstExpr},
@@ -112671,6 +112673,148 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
                 exact hPrimitiveResponse rfl hRel hResponse)
       | inr functionName =>
           exact hUserCall rfl hSafe hScoped hLower
+
+/--
+Reserve-aware raw expression dispatcher for the recursive CALL route.
+
+For a primitive head, an adequate expression reserve is split into the exact
+reversed-argument scheduler fuel. Canonical generated-argument recursion then
+constructs each nested head's residual reserve, reserved-layout coverage, and
+actual-prestate response admissibility proof. Internal user calls remain the
+single explicit callback until the selected-callee recursion is connected.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_reserve_cases
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {base targetTailFuel : Nat}
+    {expr : AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lower : Locals.Expr 1}
+    {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hReserve : sourceExprRawPreludeBaseReserve expr ≤ base)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.expr expr)
+    (hScoped : SourceExprScoped layout expr)
+    (hOk : UserCallArity.ExprOk contract expr)
+    (hStoreContains :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore}
+        {compiler : Objects.Source.State},
+        SourceStateRel cfg layout (.Ok shared store) compiler →
+          StoreDomainContains layout store)
+    (hLower :
+      Expr.lower1? freshState expr = some (pre, lower, freshState'))
+    (hHead :
+      ∀ {headBase headTargetTailFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx}
+        {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve head ≤ headBase →
+        FreshCoversLayout coverLayout stateHeadStart →
+        Safe.CallSafe.expr head →
+        SourceExprScoped layout head →
+        UserCallArity.ExprOk contract head →
+        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead
+          headBase.succ.succ.succ.succ head (some contract) preHead lowerHead
+          (preHead.length + headTargetTailFuel.succ.succ)
+          headCallResponseRel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hUserCall :
+      ∀ {functionName : Name} {args : List AstExpr},
+        expr = .Call (.inr functionName) args →
+          SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+            revertRel prim program ctx base.succ.succ.succ.succ
+            (.Call (.inr functionName) args) (some contract) pre lower
+            (pre.length + targetTailFuel.succ.succ) callResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx base.succ.succ.succ.succ expr (some contract) pre lower
+      (pre.length + targetTailFuel.succ.succ) callResponseRel := by
+  apply
+    lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_cases
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := base.succ.succ.succ)
+      (targetFuel := pre.length + targetTailFuel.succ.succ)
+      (expr := expr) (codeOverride := some contract) (freshState := freshState)
+      (freshState' := freshState') (pre := pre) (lower := lower)
+      (callResponseRel := callResponseRel) (by omega) hSafe hScoped
+      hStoreContains hLower
+  · intro yulPrim args hExprEq hArgsSafe op argExprs seq hOutputs hBasic
+      hLowerArgs hSeq hLowerEq
+    have hReserveCall :
+        sourceExprRawPreludeBaseReserve (.Call (.inl yulPrim) args) ≤ base := by
+      simpa [hExprEq] using hReserve
+    rcases
+        exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le hReserveCall with
+      ⟨argsBase, hArgsFuel, hArgsReserve, _hHeadReserve⟩
+    have hScopedCall :
+        SourceExprScoped layout (.Call (.inl yulPrim) args) := by
+      simpa [hExprEq] using hScoped
+    have hArgsScoped : SourceExprsScoped layout args := by
+      simpa [SourceExprScoped] using hScopedCall
+    have hOkCall :
+        UserCallArity.ExprOk contract (.Call (.inl yulPrim) args) := by
+      simpa [hExprEq] using hOk
+    have hArgsOk : UserCallArity.ExprsOk contract args := by
+      simpa [UserCallArity.ExprOk] using hOkCall
+    have hArgAdmissible :
+        RawOpenCallResponseAdmissible cfg layout
+          (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
+            base.succ.succ.succ yulPrim op hOutputs seq callResponseRel) :=
+      RawOpenCallResponseAdmissible.comapBind hAdmissible
+    intro source compiler hInitial
+    simpa [hArgsFuel, Nat.add_assoc] using
+      (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical
+        (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+        (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+        (program := program) (ctx := ctx) (freshState := freshState)
+        (stateFresh := freshState') (pre := pre) (lowerArgs := argExprs)
+        (base := argsBase) (targetTailFuel := targetTailFuel.succ)
+        (args := args) (contract := contract)
+        (finalCallResponseRel :=
+          SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
+            base.succ.succ.succ yulPrim op hOutputs seq callResponseRel)
+        hLayoutSubset hArgAdmissible
+        (by
+          intro headBase headTargetTailFuel head stateHeadStart preHead
+            lowerHead stateHead ctxHead headCallResponseRel hMem hHeadReserve
+            hHeadCovers hHeadAdmissible hHeadLower
+          exact
+            hHead hHeadReserve hHeadCovers
+              (callSafe_exprs_mem hArgsSafe hMem)
+              (SourceExprsScoped.mem hArgsScoped hMem)
+              (UserCallArity.ExprsOk.mem hArgsOk hMem) hHeadAdmissible
+              hHeadLower)
+        hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
+        (source := source) (compiler := compiler) hInitial)
+  · intro yulPrim args _hExprEq hSafePrim op hBasic
+    exact hPrim hSafePrim hBasic
+  · intro yulPrim args _hExprEq hSafePrim op hBasic hOutputs
+    exact
+      SourcePrimitiveCallNoErrorAt.of_safe_one_output_positive_fuel
+        (sourceFuel := base.succ.succ.succ) (yulPrim := yulPrim) (op := op)
+        (by omega) hSafePrim hBasic hOutputs
+  · intro yulPrim args _hExprEq sourceShared sourceStore compilerAfter
+      sourceCall targetCall response hRel hResponse
+    exact hAdmissible hRel hResponse
+  · intro functionName args hExprEq _hSafeUser _hScopedUser _hLowerUser
+    exact hUserCall hExprEq
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
