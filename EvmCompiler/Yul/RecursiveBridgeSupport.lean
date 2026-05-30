@@ -37063,6 +37063,25 @@ theorem yulOpenEvalArgsAppendFuel_append_singleton
   | cons arg rest ih =>
       simp [yulOpenEvalArgsAppendFuel, ih]
 
+theorem yulOpenEvalArgsAppendFuel_eq_add_length
+    (base : Nat) (args : List AstExpr) :
+    yulOpenEvalArgsAppendFuel base args =
+      base + (2 * args.length + 3) := by
+  induction args with
+  | nil =>
+      simp [yulOpenEvalArgsAppendFuel]
+  | cons head tail ih =>
+      simp [yulOpenEvalArgsAppendFuel, ih]
+      omega
+
+theorem exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le
+    {fuel : Nat} (args : List AstExpr)
+    (hFuel : 2 * args.length + 3 ≤ fuel) :
+    ∃ base, yulOpenEvalArgsAppendFuel base args = fuel := by
+  refine ⟨fuel - (2 * args.length + 3), ?_⟩
+  rw [yulOpenEvalArgsAppendFuel_eq_add_length]
+  omega
+
 /--
 Compiler-output base case for generated open argument preludes.
 

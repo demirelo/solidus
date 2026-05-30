@@ -681,6 +681,10 @@ Remaining work:
      raw internal-user-call expression wrapper. Callers now provide only
      positive source fuel, generated-prefix preservation when selected, and
      the regular selected-callee continuation.
+   - [x] Expose the raw reversed-argument scheduler as residual base fuel plus
+     fixed list overhead, and recover a residual base from any sufficient-fuel
+     inequality. This is the checked algebra needed before widening recursive
+     nested-expression adequacy.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
