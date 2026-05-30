@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 20:21 PDT.
+Last updated: 2026-05-29 20:24 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -449,6 +449,13 @@ Remaining work:
      locals after internal user calls. The open response adapter quantifies
      over every shared abstract response and does not inspect a concrete
      external world.
+   - [x] Prove the recursive open expression-local invariant:
+     `yulOpenEvalValues_evalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies`
+     threads checkpoint legality and visible-local containment through
+     literals, variables, nested argument lists, safe primitives, ordinary
+     external `CALL`, and internal user calls. Named `evalValues`, scalar
+     `eval`, and reversed-argument corollaries now expose this layer to
+     statement proofs.
    - [ ] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.

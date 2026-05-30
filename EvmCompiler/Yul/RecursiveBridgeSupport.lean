@@ -24510,6 +24510,283 @@ theorem yulPrimitiveEvalValuesOpenCall?_toOpenResult_doneInvariant_checkpointSto
     simp [OpenExternal.YulOpenResult.liftExceptCall, hResume]
     exact OpenResultDoneInvariant.done ⟨hAllowedAfter, hContainsAfter⟩)
 
+theorem yulOpenCall_toOpenResult_doneInvariant_checkpointStoreContains
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {args : List Word}
+    {functionName? : Option EvmYul.Yul.Ast.YulFunctionName}
+    {codeOverride : Option AstContract} {state : State}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call fuel args functionName? codeOverride
+          state)) := by
+  exact
+    OpenResultDoneInvariant.imp
+      (yulOpenCall_toOpenResult_doneInvariant_checkpoint_contains
+        hAllowed hContains)
+      (by
+        intro doneResult hDone
+        cases doneResult with
+        | error err =>
+            trivial
+        | ok pair =>
+            rcases pair with ⟨stateAfter, values⟩
+            exact hDone rfl)
+
+theorem yulOpenEvalValues_evalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    (fuel : Nat) :
+    (∀ {layout : List Name} {canBreak canContinue canLeave : Bool}
+      {expr : AstExpr} {codeOverride : Option AstContract} {state : State},
+      Safe.CallSafe.expr expr →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      StateStoreContains layout state →
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv
+          (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues fuel expr codeOverride state))) ∧
+    (∀ {layout : List Name} {canBreak canContinue canLeave : Bool}
+      {args : List AstExpr} {codeOverride : Option AstContract} {state : State},
+      Safe.CallSafe.exprs args →
+      StateCheckpointAllowed canBreak canContinue canLeave state →
+      StateStoreContains layout state →
+      OpenResultDoneInvariant
+        (YulOpenPairStateDoneInv
+          (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs fuel args codeOverride state))) := by
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro layout canBreak canContinue canLeave expr codeOverride state
+          _hSafe _hAllowed _hContains
+        simp [OpenExternal.YulOpen.evalValues,
+          OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+      · intro layout canBreak canContinue canLeave args codeOverride state
+          _hSafe _hAllowed _hContains
+        simp [OpenExternal.YulOpen.evalArgs,
+          OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+  | succ fuel' =>
+      have ihFuel := ih fuel' (Nat.lt_succ_self fuel')
+      constructor
+      · intro layout canBreak canContinue canLeave expr codeOverride state
+          hSafe hAllowed hContains
+        cases expr with
+        | Lit value =>
+            simp [OpenExternal.YulOpen.evalValues,
+              OpenExternal.YulOpenResult.ok]
+            exact OpenResultDoneInvariant.done ⟨hAllowed, hContains⟩
+        | Var name =>
+            cases hLookup : EvmYul.Yul.State.lookup? name state with
+            | none =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.error, hLookup]
+                exact OpenResultDoneInvariant.done True.intro
+            | some value =>
+                simp [OpenExternal.YulOpen.evalValues,
+                  OpenExternal.YulOpenResult.ok, hLookup]
+                exact OpenResultDoneInvariant.done ⟨hAllowed, hContains⟩
+        | Call callee args =>
+            cases callee with
+            | inl prim =>
+                have hSafePrim : Safe.CallSafe.primitive prim := hSafe.1
+                have hSafeArgs : Safe.CallSafe.exprs args := hSafe.2
+                have hArgs :
+                    OpenResultDoneInvariant
+                      (YulOpenPairStateDoneInv
+                        (StateCheckpointStoreContains layout canBreak
+                          canContinue canLeave))
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (callSafe_exprs_reverse hSafeArgs) hAllowed hContains
+                have hArgsReverse :
+                    OpenResultDoneInvariant
+                      (YulOpenPairStateDoneInv
+                        (StateCheckpointStoreContains layout canBreak
+                          canContinue canLeave))
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.reverseResult
+                          (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                            codeOverride state))) :=
+                  YulOpenPairStateDoneInv.reverseResult hArgs
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenPairStateDoneInv.bind hArgsReverse
+                    (by
+                      intro stateArgs argValues hArgsState
+                      rcases hArgsState with
+                        ⟨hArgsAllowed, hArgsContains⟩
+                      have hSplit :
+                          Safe.primitive prim ∨ prim = .System .CALL :=
+                        (Safe.CallSafe.primitive_iff_safe_or_call prim).mp
+                          hSafePrim
+                      cases hSplit with
+                      | inl hSafePrimOld =>
+                          have hNoOpen :
+                              OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                                  stateArgs prim argValues =
+                                none :=
+                            yulPrimitiveEvalValuesOpenCall?_none_of_safe_primitive
+                              hSafePrimOld
+                          simp [hNoOpen]
+                          exact
+                            primCall_safe_toOpenResult_doneInvariant_checkpointStoreContains
+                              hSafePrimOld hArgsAllowed hArgsContains
+                      | inr hCallPrim =>
+                          subst prim
+                          cases hOpen :
+                              OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+                                  stateArgs (.System .CALL) argValues with
+                          | none =>
+                              simp [hOpen]
+                              exact
+                                primCall_yul_call_toOpenResult_doneInvariant_checkpointStoreContains_of_no_open
+                                  hArgsAllowed hArgsContains hOpen
+                          | some call =>
+                              simp [hOpen]
+                              exact
+                                yulPrimitiveEvalValuesOpenCall?_toOpenResult_doneInvariant_checkpointStoreContains_status
+                                  hArgsAllowed hArgsContains hOpen)
+            | inr functionName =>
+                have hSafeArgs : Safe.CallSafe.exprs args := hSafe.2
+                have hArgs :
+                    OpenResultDoneInvariant
+                      (YulOpenPairStateDoneInv
+                        (StateCheckpointStoreContains layout canBreak
+                          canContinue canLeave))
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                          codeOverride state)) :=
+                  ihFuel.2 (layout := layout) (args := args.reverse)
+                    (codeOverride := codeOverride) (state := state)
+                    (callSafe_exprs_reverse hSafeArgs) hAllowed hContains
+                have hArgsReverse :
+                    OpenResultDoneInvariant
+                      (YulOpenPairStateDoneInv
+                        (StateCheckpointStoreContains layout canBreak
+                          canContinue canLeave))
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.reverseResult
+                          (OpenExternal.YulOpen.evalArgs fuel' args.reverse
+                            codeOverride state))) :=
+                  YulOpenPairStateDoneInv.reverseResult hArgs
+                simpa [OpenExternal.YulOpen.evalValues] using
+                  YulOpenPairStateDoneInv.bind hArgsReverse
+                    (by
+                      intro stateArgs argValues hArgsState
+                      exact
+                        yulOpenCall_toOpenResult_doneInvariant_checkpointStoreContains
+                          hArgsState.1 hArgsState.2)
+      · intro layout canBreak canContinue canLeave args codeOverride state
+          hSafe hAllowed hContains
+        cases args with
+        | nil =>
+            simp [OpenExternal.YulOpen.evalArgs,
+              OpenExternal.YulOpenResult.ok]
+            exact OpenResultDoneInvariant.done ⟨hAllowed, hContains⟩
+        | cons head tail =>
+            have hHeadSafe : Safe.CallSafe.expr head := hSafe.1
+            have hTailSafe : Safe.CallSafe.exprs tail := hSafe.2
+            have hHead :
+                OpenResultDoneInvariant
+                  (YulOpenPairStateDoneInv
+                    (StateCheckpointStoreContains layout canBreak
+                      canContinue canLeave))
+                  (OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.eval fuel' head codeOverride
+                      state)) := by
+              simpa [OpenExternal.YulOpen.eval] using
+                YulOpenPairStateDoneInv.headResult
+                  (ihFuel.1 (layout := layout) (expr := head)
+                    (codeOverride := codeOverride) (state := state)
+                    hHeadSafe hAllowed hContains)
+            simp [OpenExternal.YulOpen.evalArgs]
+            exact
+              YulOpenPairStateDoneInv.evalTail_of_head
+                (fuel := fuel') (args := tail) (codeOverride := codeOverride)
+                (head :=
+                  OpenExternal.YulOpen.eval fuel' head codeOverride state)
+                hHead
+                (by
+                  intro fuelTail stateTail hFuel hTailState
+                  cases hFuel
+                  exact
+                    (ih fuelTail (by omega)).2
+                      (layout := layout) (args := tail)
+                      (codeOverride := codeOverride) (state := stateTail)
+                      hTailSafe hTailState.1 hTailState.2)
+
+theorem yulOpenEvalValues_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalValues fuel expr codeOverride state)) :=
+  (yulOpenEvalValues_evalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    fuel).1 hSafe hAllowed hContains
+
+theorem yulOpenEval_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {expr : AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.expr expr)
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.eval fuel expr codeOverride state)) := by
+  simpa [OpenExternal.YulOpen.eval] using
+    YulOpenPairStateDoneInv.headResult
+      (yulOpenEvalValues_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+        hSafe hAllowed hContains)
+
+theorem yulOpenEvalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.exprs args)
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args codeOverride state)) :=
+  (yulOpenEvalValues_evalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    fuel).2 hSafe hAllowed hContains
+
+theorem yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hSafe : Safe.CallSafe.exprs args)
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state)) :=
+  yulOpenEvalArgs_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+    (callSafe_exprs_reverse hSafe) hAllowed hContains
+
 theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
     (fuel : Nat) :
     (∀ {layout : List Name} {expr : AstExpr}
