@@ -54582,6 +54582,66 @@ theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
   intro source compiler hInitial
   exact ⟨targetFuel, hExact hInitial⟩
 
+/--
+Expose one local tree-shaped sequence proof through the selected finite-path
+interface. A requested cutoff floor is met by padding only the already
+selected successful compiler path.
+-/
+theorem SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx.of_atExact
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {targetFuel : Nat} {allowed : Except Exception State → Prop}
+    (hExact :
+      SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel sourceStmts
+        codeOverride lowerBlock targetFuel allowed
+        (SourceOpenTraceCallResponseRel cfg)) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  have hPath :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+          allowed)
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+            source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          lowerBlock compiler) :=
+    OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+      (hExact hInitial) hResolve hResponses
+  rcases hPath.resolves with
+    ⟨sourceDone', targetDone, hSource, hTarget, hDone⟩
+  have hSourceDoneEq : sourceDone = sourceDone' :=
+    OpenExternal.OpenResultResolves.deterministic hResolve hSource
+  subst sourceDone'
+  cases targetDone with
+  | error targetErr =>
+      exact False.elim (hDone hAllowed)
+  | ok targetResult =>
+      let paddedFuel := max minimumTargetFuel targetFuel
+      have hTargetPadded :
+          OpenExternal.OpenResultResolves
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              paddedFuel lowerBlock compiler)
+            trace (.ok targetResult) :=
+        CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+          (Nat.le_max_right minimumTargetFuel targetFuel) hTarget
+      refine ⟨paddedFuel, Nat.le_max_left _ _, ?_⟩
+      exact
+        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+          hResolve hTargetPadded hResponses hDone
+
 /-- Associativity for the generic open-result bind. -/
 theorem openResult_bind_assoc
     {ε α β γ : Type*}
@@ -63569,6 +63629,33 @@ def CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
     SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
       terminalRel revertRel prim program ctx sourceFuel sourceStmts
       codeOverride lowerBlock allowed
+
+/--
+Expose one checked local tree-shaped sequence proof through the selected
+finite-path interface.
+-/
+theorem CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_atExactTarget
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {targetFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    (hExact :
+      CheckedOpenSeqLoweringSoundAtExactTargetWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx sourceFuel compileFuel sourceStmts codeOverride targetFuel allowed
+        (SourceOpenTraceCallResponseRel cfg)) :
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel sourceStmts codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  exact
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx.of_atExact
+      (hExact hCovers hLower)
 
 /--
 Finite-path hidden-context sequence soundness for impossible source
