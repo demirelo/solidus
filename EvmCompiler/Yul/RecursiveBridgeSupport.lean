@@ -64815,6 +64815,65 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                       hInitial hResolves hAllowed hResponses minimumTargetFuel
 
 /--
+Checked path-native lift for one source head that lowers to a single target
+statement without changing fresh-name state.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_singleton
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {head : AstStmt} {targetHead : Functions.Stmt}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hLowerHead :
+      ∀ (fuel : Nat) freshState,
+        Stmt.toFunctionsListFuel? fuel.succ freshState head =
+          some ([targetHead], freshState))
+    (hSeq :
+      ∀ {lowerTail : Functions.Block},
+        (∀ {ctxAfter : Functions.Source.Ctx},
+          SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+            outcomeLayout terminalRel revertRel prim program ctxAfter tailFuel
+            rest codeOverride lowerTail allowed) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctx tailFuel.succ
+          (head :: rest) codeOverride
+          { stmts := [targetHead] ++ lowerTail.stmts } allowed)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (head :: rest) codeOverride allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState'
+    hCovers hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ lowerFuel =>
+      have hPair :
+          ([targetHead], freshState) = (lowerHead, stateHead) := by
+        simpa [hLowerHead] using hLower
+      cases hPair
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+        hInitial hResolves hAllowed hResponses minimumTargetFuel
+      exact
+        (hSeq (by
+            intro ctxAfter
+            exact hTail hCovers hLowerTail))
+          hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
 Open hidden-context sequence soundness for impossible source out-of-fuel
 branches.
 
