@@ -567,6 +567,10 @@ Remaining work:
      regular generated argument completion enters lowered argument replay,
      selected body execution, and hidden-slot replay; stopped prefixes remain
      stopped without duplicating the bind tree in recursive callbacks.
+   - [x] Add the whole lowered internal-call raw expression wrapper: checked
+     expression lowering, terminal-aware recursive argument preservation, and
+     the regular selected-callee continuation now compose without direct
+     declaration-CALL or assignment-CALL statement shapes.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
