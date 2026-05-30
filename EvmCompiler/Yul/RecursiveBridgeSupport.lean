@@ -1,5 +1,6 @@
 import EvmCompiler.Yul.RecursiveBridge
 import EvmCompiler.Yul.CompilerOpen
+import EvmCompiler.Yul.OpenFuelAdequacy
 
 /-!
 Support lemmas for the Nethermind-Yul source-tower recursive bridge.
@@ -60,30 +61,35 @@ mutual
               cases target with
               | inl prim =>
                   cases names with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_6]
+                  | nil => rfl
                   | cons name rest =>
                       cases rest with
-                      | nil => simp only [Stmt.toFunctionsListFuel?.eq_5]
+                      | nil => rfl
                       | cons name₂ rest₂ =>
-                          simp only [Stmt.toFunctionsListFuel?.eq_6]
+                          rfl
               | inr functionName =>
-                  simp only [Stmt.toFunctionsListFuel?.eq_4]
+                  cases names with
+                  | nil => rfl
+                  | cons name rest =>
+                      cases rest with
+                      | nil => rfl
+                      | cons name₂ rest₂ => rfl
           | Var name =>
               cases names with
-              | nil => simp only [Stmt.toFunctionsListFuel?.eq_6]
+              | nil => rfl
               | cons name₁ rest =>
                   cases rest with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_5]
+                  | nil => rfl
                   | cons name₂ rest₂ =>
-                      simp only [Stmt.toFunctionsListFuel?.eq_6]
+                      rfl
           | Lit value =>
               cases names with
-              | nil => simp only [Stmt.toFunctionsListFuel?.eq_6]
+              | nil => rfl
               | cons name rest =>
                   cases rest with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_5]
+                  | nil => rfl
                   | cons name₂ rest₂ =>
-                      simp only [Stmt.toFunctionsListFuel?.eq_6]
+                      rfl
     | .Assign names value, fuel₁, fuel₂, state, h₁, h₂ => by
         cases fuel₁ <;> cases fuel₂ <;>
           simp [Stmt.fuel] at h₁ h₂
@@ -92,40 +98,45 @@ mutual
               cases target with
               | inl prim =>
                   cases names with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_9]
+                  | nil => rfl
                   | cons name rest =>
                       cases rest with
-                      | nil => simp only [Stmt.toFunctionsListFuel?.eq_8]
+                      | nil => rfl
                       | cons name₂ rest₂ =>
-                          simp only [Stmt.toFunctionsListFuel?.eq_9]
+                          rfl
               | inr functionName =>
-                  simp only [Stmt.toFunctionsListFuel?.eq_7]
+                  cases names with
+                  | nil => rfl
+                  | cons name rest =>
+                      cases rest with
+                      | nil => rfl
+                      | cons name₂ rest₂ => rfl
           | Var name =>
               cases names with
-              | nil => simp only [Stmt.toFunctionsListFuel?.eq_9]
+              | nil => rfl
               | cons name₁ rest =>
                   cases rest with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_8]
+                  | nil => rfl
                   | cons name₂ rest₂ =>
-                      simp only [Stmt.toFunctionsListFuel?.eq_9]
+                      rfl
           | Lit value =>
               cases names with
-              | nil => simp only [Stmt.toFunctionsListFuel?.eq_9]
+              | nil => rfl
               | cons name rest =>
                   cases rest with
-                  | nil => simp only [Stmt.toFunctionsListFuel?.eq_8]
+                  | nil => rfl
                   | cons name₂ rest₂ =>
-                      simp only [Stmt.toFunctionsListFuel?.eq_9]
+                      rfl
     | .ExprStmtCall expr, fuel₁, fuel₂, state, h₁, h₂ => by
         cases fuel₁ <;> cases fuel₂ <;>
           simp [Stmt.fuel] at h₁ h₂
         · cases expr with
           | Call target args =>
               cases target with
-              | inl prim => simp only [Stmt.toFunctionsListFuel?.eq_11]
-              | inr functionName => simp only [Stmt.toFunctionsListFuel?.eq_10]
-          | Var name => simp only [Stmt.toFunctionsListFuel?.eq_12]
-          | Lit value => simp only [Stmt.toFunctionsListFuel?.eq_12]
+              | inl prim => rfl
+              | inr functionName => rfl
+          | Var name => rfl
+          | Lit value => rfl
     | .Switch scrutinee cases defaultBody, fuel₁, fuel₂, state, h₁, h₂ => by
         cases fuel₁ with
         | zero =>
@@ -279,7 +290,7 @@ mutual
             | zero =>
                 simp [Stmt.fuel] at h₂
             | succ fuel₂' =>
-                simpa only [Stmt.toFunctionsListFuel?.eq_16]
+                rfl
     | .Break, fuel₁, fuel₂, state, h₁, h₂ => by
         cases fuel₁ with
         | zero =>
@@ -289,7 +300,7 @@ mutual
             | zero =>
                 simp [Stmt.fuel] at h₂
             | succ fuel₂' =>
-                simpa only [Stmt.toFunctionsListFuel?.eq_17]
+                rfl
     | .Leave, fuel₁, fuel₂, state, h₁, h₂ => by
         cases fuel₁ with
         | zero =>
@@ -299,7 +310,7 @@ mutual
             | zero =>
                 simp [Stmt.fuel] at h₂
             | succ fuel₂' =>
-                simpa only [Stmt.toFunctionsListFuel?.eq_18]
+                rfl
 
   theorem list_toFunctionsFuel?_stable_pair :
       ∀ (stmts : List AstStmt) {fuel₁ fuel₂ : Nat}
@@ -526,8 +537,15 @@ mutual
                                 simpa only [Stmt.toFunctionsListFuel?.eq_6]
                                   using hLower
                     | inr functionName =>
-                        simpa only [Stmt.toFunctionsListFuel?.eq_4]
-                          using hLower
+                        cases names with
+                        | nil =>
+                            simpa [Stmt.toFunctionsListFuel?] using hLower
+                        | cons name rest =>
+                            cases rest with
+                            | nil =>
+                                simpa [Stmt.toFunctionsListFuel?] using hLower
+                            | cons name₂ rest₂ =>
+                                simpa [Stmt.toFunctionsListFuel?] using hLower
                 | Var name =>
                     cases names with
                     | nil =>
@@ -581,8 +599,15 @@ mutual
                                 simpa only [Stmt.toFunctionsListFuel?.eq_9]
                                   using hLower
                     | inr functionName =>
-                        simpa only [Stmt.toFunctionsListFuel?.eq_7]
-                          using hLower
+                        cases names with
+                        | nil =>
+                            simpa [Stmt.toFunctionsListFuel?] using hLower
+                        | cons name rest =>
+                            cases rest with
+                            | nil =>
+                                simpa [Stmt.toFunctionsListFuel?] using hLower
+                            | cons name₂ rest₂ =>
+                                simpa [Stmt.toFunctionsListFuel?] using hLower
                 | Var name =>
                     cases names with
                     | nil =>
@@ -2488,21 +2513,41 @@ theorem toFunctionsListFuel?_let_user_call_eq_succ
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? fuel.succ state
         (.Let names (some (.Call (.inr functionName) args))) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
-          some
-            (Stmt.initNames lowerNames ++ preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some
+              (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+                state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
+          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
+            state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (Stmt.initNames lowerNames ++ preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -2518,21 +2563,40 @@ theorem toFunctionsListFuel?_assign_user_call_eq_succ
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? fuel.succ state
         (.Assign names (.Call (.inr functionName) args)) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+              state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
           some
-            (preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
+              state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -2614,6 +2678,8 @@ theorem toFunctionsListFuel?_assign_user_call_components_succ
     {names : List EvmYul.Identifier}
     {functionName : Name} {args : List AstExpr}
     {lowerHead : List Functions.Stmt}
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hLower :
       Stmt.toFunctionsListFuel? fuel.succ state
@@ -2630,37 +2696,41 @@ theorem toFunctionsListFuel?_assign_user_call_components_succ
       lowerHead =
         pre ++
           [Functions.Stmt.call (identNames names) functionName lowerArgs] := by
-  rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
-  simp [hName] at hLower
-  cases hDirect : Expr.List.directCallArgsSafe? args with
-  | false =>
-      cases hArgs : Expr.List.lowerBound1? state args with
-      | none =>
-          simp [hDirect, hArgs] at hLower
-      | some lowered =>
-          rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
-          simp [hDirect, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨pre, lowerArgs, ?_, ?_⟩
-          · exact Or.inr ⟨rfl, rfl⟩
-          · simpa [List.append_assoc] using hHead.symm
-  | true =>
-      cases hArgs : Expr.List.toLocals1? args with
-      | none =>
-          simp [hDirect, hArgs] at hLower
-      | some lowerArgs =>
-          simp [hDirect, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨[], lowerArgs, ?_, hHead.symm⟩
-          exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
+  rcases hNames with hNil | ⟨name, next, rest, hCons⟩ <;> subst names
+  all_goals
+    rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
+    simp [hName] at hLower
+    cases hDirect : Expr.List.directCallArgsSafe? args with
+    | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+            simp [hDirect, hArgs] at hLower
+        | some lowered =>
+            rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨pre, lowerArgs, ?_, ?_⟩
+            · exact Or.inr ⟨rfl, rfl⟩
+            · simpa [List.append_assoc] using hHead.symm
+    | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+            simp [hDirect, hArgs] at hLower
+        | some lowerArgs =>
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨[], lowerArgs, ?_, hHead.symm⟩
+            exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
 
 theorem toFunctionsListFuel?_let_user_call_components_succ
     {fuel : Nat} {state state' : Fresh.State}
     {names : List EvmYul.Identifier}
     {functionName : Name} {args : List AstExpr}
     {lowerHead : List Functions.Stmt}
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hLower :
       Stmt.toFunctionsListFuel? fuel.succ state
@@ -2677,32 +2747,34 @@ theorem toFunctionsListFuel?_let_user_call_components_succ
       lowerHead =
         Stmt.initNames (identNames names) ++ pre ++
           [Functions.Stmt.call (identNames names) functionName lowerArgs] := by
-  rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
-  simp [hName] at hLower
-  cases hDirect : Expr.List.directCallArgsSafe? args with
-  | false =>
-      cases hArgs : Expr.List.lowerBound1? state args with
-      | none =>
-          simp [hDirect, hArgs] at hLower
-      | some lowered =>
-          rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
-          simp [hDirect, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨pre, lowerArgs, ?_, ?_⟩
-          · exact Or.inr ⟨rfl, rfl⟩
-          · simpa [List.append_assoc] using hHead.symm
-  | true =>
-      cases hArgs : Expr.List.toLocals1? args with
-      | none =>
-          simp [hDirect, hArgs] at hLower
-      | some lowerArgs =>
-          simp [hDirect, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨[], lowerArgs, ?_, ?_⟩
-          · exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
-          · simpa [List.append_assoc] using hHead.symm
+  rcases hNames with hNil | ⟨name, next, rest, hCons⟩ <;> subst names
+  all_goals
+    rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
+    simp [hName] at hLower
+    cases hDirect : Expr.List.directCallArgsSafe? args with
+    | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+            simp [hDirect, hArgs] at hLower
+        | some lowered =>
+            rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨pre, lowerArgs, ?_, ?_⟩
+            · exact Or.inr ⟨rfl, rfl⟩
+            · simpa [List.append_assoc] using hHead.symm
+    | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+            simp [hDirect, hArgs] at hLower
+        | some lowerArgs =>
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨[], lowerArgs, ?_, ?_⟩
+            · exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
+            · simpa [List.append_assoc] using hHead.symm
 
 theorem freshCoversLayout_toFunctionsListFuel?_let_user_call_of_some
     {coverLayout : List Name} {fuel : Nat}
@@ -2715,32 +2787,75 @@ theorem freshCoversLayout_toFunctionsListFuel?_let_user_call_of_some
           (.Let names (some (.Call (.inr functionName) args))) =
         some (lowerStmts, state')) :
     FreshCoversLayout coverLayout state' := by
-  rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
-  cases hUnsupported : ObjectBuiltin.unsupported? functionName with
-  | true =>
+  cases names with
+  | nil =>
+    rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
+    cases hUnsupported : ObjectBuiltin.unsupported? functionName with
+    | true =>
       simp [hUnsupported] at hLower
-  | false =>
+    | false =>
       simp [hUnsupported] at hLower
       cases hDirect : Expr.List.directCallArgsSafe? args with
       | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+          simp [hDirect, hArgs] at hLower
+        | some argResult =>
+          rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
+          simp [hDirect, hArgs] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
+      | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+          simp [hDirect, hArgs] at hLower
+        | some lowerArgs =>
+          simp [hDirect, hArgs] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact hCovers
+  | cons name rest =>
+    cases rest with
+    | nil =>
+      rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
+      cases hExpr :
+          Expr.lower1? state (.Call (.inr functionName) args) with
+      | none =>
+          simp [hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨preValue, lowerValue, stateAfterExpr⟩
+          simp [hExpr] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact freshCoversLayout_lower1?_of_some hCovers hExpr
+    | cons next rest =>
+      rw [toFunctionsListFuel?_let_user_call_eq_succ] at hLower
+      cases hUnsupported : ObjectBuiltin.unsupported? functionName with
+      | true =>
+        simp [hUnsupported] at hLower
+      | false =>
+        simp [hUnsupported] at hLower
+        cases hDirect : Expr.List.directCallArgsSafe? args with
+        | false =>
           cases hArgs : Expr.List.lowerBound1? state args with
           | none =>
-              simp [hDirect, hArgs] at hLower
+            simp [hDirect, hArgs] at hLower
           | some argResult =>
-              rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
-              simp [hDirect, hArgs] at hLower
-              rcases hLower with ⟨_hLower, hState⟩
-              cases hState
-              exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
-      | true =>
+            rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
+            exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
+        | true =>
           cases hArgs : Expr.List.toLocals1? args with
           | none =>
-              simp [hDirect, hArgs] at hLower
+            simp [hDirect, hArgs] at hLower
           | some lowerArgs =>
-              simp [hDirect, hArgs] at hLower
-              rcases hLower with ⟨_hLower, hState⟩
-              cases hState
-              exact hCovers
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
+            exact hCovers
 
 theorem freshCoversLayout_toFunctionsListFuel?_assign_user_call_of_some
     {coverLayout : List Name} {fuel : Nat}
@@ -2753,32 +2868,75 @@ theorem freshCoversLayout_toFunctionsListFuel?_assign_user_call_of_some
           (.Assign names (.Call (.inr functionName) args)) =
         some (lowerStmts, state')) :
     FreshCoversLayout coverLayout state' := by
-  rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
-  cases hUnsupported : ObjectBuiltin.unsupported? functionName with
-  | true =>
+  cases names with
+  | nil =>
+    rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
+    cases hUnsupported : ObjectBuiltin.unsupported? functionName with
+    | true =>
       simp [hUnsupported] at hLower
-  | false =>
+    | false =>
       simp [hUnsupported] at hLower
       cases hDirect : Expr.List.directCallArgsSafe? args with
       | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+          simp [hDirect, hArgs] at hLower
+        | some argResult =>
+          rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
+          simp [hDirect, hArgs] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
+      | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+          simp [hDirect, hArgs] at hLower
+        | some lowerArgs =>
+          simp [hDirect, hArgs] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact hCovers
+  | cons name rest =>
+    cases rest with
+    | nil =>
+      rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
+      cases hExpr :
+          Expr.lower1? state (.Call (.inr functionName) args) with
+      | none =>
+          simp [hExpr] at hLower
+      | some exprResult =>
+          rcases exprResult with ⟨preValue, lowerValue, stateAfterExpr⟩
+          simp [hExpr] at hLower
+          rcases hLower with ⟨_hLower, hState⟩
+          cases hState
+          exact freshCoversLayout_lower1?_of_some hCovers hExpr
+    | cons next rest =>
+      rw [toFunctionsListFuel?_assign_user_call_eq_succ] at hLower
+      cases hUnsupported : ObjectBuiltin.unsupported? functionName with
+      | true =>
+        simp [hUnsupported] at hLower
+      | false =>
+        simp [hUnsupported] at hLower
+        cases hDirect : Expr.List.directCallArgsSafe? args with
+        | false =>
           cases hArgs : Expr.List.lowerBound1? state args with
           | none =>
-              simp [hDirect, hArgs] at hLower
+            simp [hDirect, hArgs] at hLower
           | some argResult =>
-              rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
-              simp [hDirect, hArgs] at hLower
-              rcases hLower with ⟨_hLower, hState⟩
-              cases hState
-              exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
-      | true =>
+            rcases argResult with ⟨preArgs, lowerArgs, stateAfterArgs⟩
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
+            exact freshCoversLayout_lowerBound1?_of_some hCovers hArgs
+        | true =>
           cases hArgs : Expr.List.toLocals1? args with
           | none =>
-              simp [hDirect, hArgs] at hLower
+            simp [hDirect, hArgs] at hLower
           | some lowerArgs =>
-              simp [hDirect, hArgs] at hLower
-              rcases hLower with ⟨_hLower, hState⟩
-              cases hState
-              exact hCovers
+            simp [hDirect, hArgs] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
+            exact hCovers
 
 theorem freshCoversLayout_toFunctionsListFuel?_expr_user_call_of_some
     {coverLayout : List Name} {fuel : Nat}
@@ -3182,16 +3340,19 @@ mutual
                       freshCoversLayout_toBlockFuel?_of_some hCoversCond
                         hBody
         | Continue =>
-            rw [Stmt.toFunctionsListFuel?.eq_16] at hLower
-            cases hLower
+            simp [Stmt.toFunctionsListFuel?] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
             exact hCovers
         | Break =>
-            rw [Stmt.toFunctionsListFuel?.eq_17] at hLower
-            cases hLower
+            simp [Stmt.toFunctionsListFuel?] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
             exact hCovers
         | Leave =>
-            rw [Stmt.toFunctionsListFuel?.eq_18] at hLower
-            cases hLower
+            simp [Stmt.toFunctionsListFuel?] at hLower
+            rcases hLower with ⟨_hLower, hState⟩
+            cases hState
             exact hCovers
 
   theorem freshCoversLayout_listToFunctionsFuel?_of_some
@@ -35727,22 +35888,23 @@ Any response admitted by a continuation-shaped local relation is admissible at
 the actual related pre-call shared states.
 
 Internal bind pullbacks may change the suspended continuations, but they must
-not weaken this semantic boundary.
+not weaken this semantic boundary. Local-variable layouts are deliberately
+absent: an external response mutates shared/account state, not caller-frame
+bookkeeping.
 -/
 def RawOpenCallResponseAdmissible
     {SourceResult TargetResult : Type _}
-    (cfg : StateRelConfig) (layout : List Name)
+    (cfg : StateRelConfig)
     (callResponseRel :
       OpenExternal.OpenCall SourceResult →
         OpenExternal.OpenCall TargetResult →
           OpenExternal.CallResponse → Prop) : Prop :=
   ∀ {sourceShared : EvmYul.SharedState .Yul}
-    {sourceStore : EvmYul.Yul.VarStore}
     {compilerAfter : Objects.Source.State}
     {sourceCall : OpenExternal.OpenCall SourceResult}
     {targetCall : OpenExternal.OpenCall TargetResult}
     {response : OpenExternal.CallResponse},
-    SourceStateRel cfg layout (.Ok sourceShared sourceStore) compilerAfter →
+    Reference.SharedStateRel cfg sourceShared compilerAfter.shared →
       callResponseRel sourceCall targetCall response →
         Reference.SharedStateRel.ExternalResponseRelAt cfg sourceShared
           compilerAfter.shared response
@@ -35751,7 +35913,7 @@ namespace RawOpenCallResponseAdmissible
 
 theorem comapBind
     {ε₁ ε₂ α β γ δ : Type _}
-    {cfg : StateRelConfig} {layout : List Name}
+    {cfg : StateRelConfig}
     {callResponseRel :
       OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ γ) →
         OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ δ) →
@@ -35759,30 +35921,30 @@ theorem comapBind
     {sourceNext : α → OpenExternal.OpenResult ε₁ γ}
     {targetNext : β → OpenExternal.OpenResult ε₂ δ}
     (hAdmissible :
-      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
-    RawOpenCallResponseAdmissible cfg layout
+      RawOpenCallResponseAdmissible cfg callResponseRel) :
+    RawOpenCallResponseAdmissible cfg
       (OpenExternal.OpenCallResponseRel.comapBind callResponseRel sourceNext
         targetNext) := by
-  intro sourceShared sourceStore compilerAfter sourceCall targetCall response
-    hRel hResponse
-  exact hAdmissible hRel hResponse
+  intro sourceShared compilerAfter sourceCall targetCall response hShared
+    hResponse
+  exact hAdmissible hShared hResponse
 
 theorem comapRightBind
     {ε₁ ε₂ α β δ : Type _}
-    {cfg : StateRelConfig} {layout : List Name}
+    {cfg : StateRelConfig}
     {callResponseRel :
       OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ α) →
         OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ δ) →
           OpenExternal.CallResponse → Prop}
     {targetNext : β → OpenExternal.OpenResult ε₂ δ}
     (hAdmissible :
-      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
-    RawOpenCallResponseAdmissible cfg layout
+      RawOpenCallResponseAdmissible cfg callResponseRel) :
+    RawOpenCallResponseAdmissible cfg
       (OpenExternal.OpenCallResponseRel.comapRightBind callResponseRel
         targetNext) := by
-  intro sourceShared sourceStore compilerAfter sourceCall targetCall response
-    hRel hResponse
-  exact hAdmissible hRel hResponse
+  intro sourceShared compilerAfter sourceCall targetCall response hShared
+    hResponse
+  exact hAdmissible hShared hResponse
 
 end RawOpenCallResponseAdmissible
 
@@ -55523,6 +55685,63 @@ def runAssignTargetAfterRaw
   | .stopped target =>
       OpenExternal.OpenResult.ok target
 
+namespace SourceExprRawPreludeOpenCallResponseRel
+
+/--
+Canonical response pullback while a declaration expression is still running.
+
+After the suspended expression resumes, both sides populate the declared local
+and continue through the remaining source and target sequences.
+-/
+def beforeLetTail
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (exprFuel : Nat)
+    (name : EvmYul.Identifier) (rest : List AstStmt)
+    (codeOverride : Option AstContract) (lowerTail : Functions.Block)
+    (tailFuel : Nat) (callResponseRel : SourceOpenSeqCallResponseRel) :
+    SourceExprRawPreludeOpenCallResponseRel :=
+  OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+    (fun sourceResult =>
+      let sourceAfter :=
+        EvmYul.Yul.State.multifill [name] sourceResult.2 sourceResult.1
+      match sourceAfter with
+      | .Ok _ _ =>
+          OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.execSeq exprFuel.succ rest codeOverride
+              sourceAfter)
+      | .OutOfFuel => .done (.ok sourceAfter)
+      | .Checkpoint _ => .done (.ok sourceAfter))
+    (runLetTargetAfterRaw prim program (identName name) lowerTail.stmts tailFuel)
+
+/--
+Canonical response pullback while an assignment expression is still running.
+
+After the suspended expression resumes, both sides update the visible local and
+continue through the remaining source and target sequences.
+-/
+def beforeAssignTail
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (exprFuel : Nat)
+    (name : EvmYul.Identifier) (rest : List AstStmt)
+    (codeOverride : Option AstContract) (lowerTail : Functions.Block)
+    (tailFuel : Nat) (callResponseRel : SourceOpenSeqCallResponseRel) :
+    SourceExprRawPreludeOpenCallResponseRel :=
+  OpenExternal.OpenCallResponseRel.comapBind callResponseRel
+    (fun sourceResult =>
+      let sourceAfter :=
+        EvmYul.Yul.State.multifill [name] sourceResult.2 sourceResult.1
+      match sourceAfter with
+      | .Ok _ _ =>
+          OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.execSeq exprFuel.succ rest codeOverride
+              sourceAfter)
+      | .OutOfFuel => .done (.ok sourceAfter)
+      | .Checkpoint _ => .done (.ok sourceAfter))
+    (runAssignTargetAfterRaw prim program (identName name) lowerTail.stmts
+      tailFuel)
+
+end SourceExprRawPreludeOpenCallResponseRel
+
 /--
 Declarations consume terminal-aware expression preludes generically.
 
@@ -59561,6 +59780,106 @@ theorem assignSoundAtExactHiddenCtx_of_expr_raw
   · intro sourceCall targetCall response hResponse
     exact hCallResponse hResponse
 
+/--
+Declaration composition using the canonical sequence-tail response pullback.
+-/
+theorem letSoundAtExactHiddenCtx_of_expr_raw_beforeTail
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hFresh : identName name ∉ layout)
+    (hExpr :
+      SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx exprFuel sourceExpr codeOverride pre
+        lowerExpr (pre.length + tailFuel.succ)
+        (SourceExprRawPreludeOpenCallResponseRel.beforeLetTail prim program
+          exprFuel name rest codeOverride lowerTail tailFuel seqCallResponseRel))
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          exprFuel.succ rest codeOverride lowerTail tailFuel allowed
+          seqCallResponseRel) :
+    LetSoundAtExactHiddenCtx cfg layout outcomeLayout terminalRel revertRel
+      prim program ctx exprFuel name sourceExpr rest codeOverride pre
+      lowerExpr lowerTail tailFuel allowed seqCallResponseRel :=
+  letSoundAtExactHiddenCtx_of_expr_raw hFresh hExpr hExprDone hTail (by
+    intro sourceCall targetCall response hResponse
+    simpa [SourceExprRawPreludeOpenCallResponseRel.beforeLetTail,
+      OpenExternal.OpenCallResponseRel.comapBind] using hResponse)
+
+/--
+Assignment composition using the canonical sequence-tail response pullback.
+-/
+theorem assignSoundAtExactHiddenCtx_of_expr_raw_beforeTail
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hTargetMem : identName name ∈ layout)
+    (hExpr :
+      SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx exprFuel sourceExpr codeOverride pre
+        lowerExpr (pre.length + tailFuel.succ)
+        (SourceExprRawPreludeOpenCallResponseRel.beforeAssignTail prim program
+          exprFuel name rest codeOverride lowerTail tailFuel seqCallResponseRel))
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter exprFuel.succ rest
+          codeOverride lowerTail tailFuel allowed seqCallResponseRel) :
+    AssignSoundAtExactHiddenCtx cfg layout outcomeLayout terminalRel revertRel
+      prim program ctx exprFuel name sourceExpr rest codeOverride pre
+      lowerExpr lowerTail tailFuel allowed seqCallResponseRel :=
+  assignSoundAtExactHiddenCtx_of_expr_raw hTargetMem hExpr hExprDone hTail (by
+    intro sourceCall targetCall response hResponse
+    simpa [SourceExprRawPreludeOpenCallResponseRel.beforeAssignTail,
+      OpenExternal.OpenCallResponseRel.comapBind] using hResponse)
+
 theorem runLetTarget_eq_exprPrelude_run_of_generated
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
@@ -61195,12 +61514,10 @@ theorem exprNoUserCalls_lower1?_generatedPrelude
   exprNoUserCalls_lower?_generatedPrelude hNoUser
     (by simpa [Expr.lower1?] using hLower)
 
-theorem toFunctionsListFuel?_let_expr_single_components_of_not_user_call
+theorem toFunctionsListFuel?_let_expr_single_components
     {fuel : Nat} {state state' : Fresh.State}
     {name : EvmYul.Identifier} {value : AstExpr}
     {lowerHead : List Functions.Stmt}
-    (hNotUserCall :
-      ∀ functionName args, value ≠ .Call (.inr functionName) args)
     (hLower :
       Stmt.toFunctionsListFuel? fuel.succ state
           (.Let [name] (some value)) =
@@ -61208,48 +61525,20 @@ theorem toFunctionsListFuel?_let_expr_single_components_of_not_user_call
     ∃ pre : List Functions.Stmt, ∃ lowerValue : Locals.Expr 1,
       Expr.lower1? state value = some (pre, lowerValue, state') ∧
       lowerHead = pre ++ [Functions.Stmt.let_ (identName name) lowerValue] := by
-  cases value with
-  | Lit value =>
-      cases hExpr : Expr.lower1? state (.Lit value) with
-      | none =>
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-  | Var name =>
-      cases hExpr : Expr.lower1? state (.Var name) with
-      | none =>
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-  | Call callee args =>
-      cases callee with
-      | inl yulPrim =>
-          cases hExpr : Expr.lower1? state (.Call (.inl yulPrim) args) with
-          | none =>
-              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          | some exprResult =>
-              rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-              rcases hLower with ⟨hHead, hState⟩
-              cases hState
-              exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-      | inr functionName =>
-          exact False.elim (hNotUserCall functionName args rfl)
+  cases hExpr : Expr.lower1? state value with
+  | none =>
+      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+  | some exprResult =>
+      rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      rcases hLower with ⟨hHead, hState⟩
+      cases hState
+      exact ⟨pre, lowerValue, rfl, hHead.symm⟩
 
-theorem toFunctionsListFuel?_assign_expr_single_components_of_not_user_call
+theorem toFunctionsListFuel?_assign_expr_single_components
     {fuel : Nat} {state state' : Fresh.State}
     {name : EvmYul.Identifier} {value : AstExpr}
     {lowerHead : List Functions.Stmt}
-    (hNotUserCall :
-      ∀ functionName args, value ≠ .Call (.inr functionName) args)
     (hLower :
       Stmt.toFunctionsListFuel? fuel.succ state
           (.Assign [name] value) =
@@ -61257,41 +61546,15 @@ theorem toFunctionsListFuel?_assign_expr_single_components_of_not_user_call
     ∃ pre : List Functions.Stmt, ∃ lowerValue : Locals.Expr 1,
       Expr.lower1? state value = some (pre, lowerValue, state') ∧
       lowerHead = pre ++ [Functions.Stmt.assign (identName name) lowerValue] := by
-  cases value with
-  | Lit value =>
-      cases hExpr : Expr.lower1? state (.Lit value) with
-      | none =>
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-  | Var name =>
-      cases hExpr : Expr.lower1? state (.Var name) with
-      | none =>
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-      | some exprResult =>
-          rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-          simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-  | Call callee args =>
-      cases callee with
-      | inl yulPrim =>
-          cases hExpr : Expr.lower1? state (.Call (.inl yulPrim) args) with
-          | none =>
-              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-          | some exprResult =>
-              rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
-              simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
-              rcases hLower with ⟨hHead, hState⟩
-              cases hState
-              exact ⟨pre, lowerValue, rfl, hHead.symm⟩
-      | inr functionName =>
-          exact False.elim (hNotUserCall functionName args rfl)
+  cases hExpr : Expr.lower1? state value with
+  | none =>
+      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+  | some exprResult =>
+      rcases exprResult with ⟨pre, lowerValue, stateExpr⟩
+      simp [Stmt.toFunctionsListFuel?, hExpr] at hLower
+      rcases hLower with ⟨hHead, hState⟩
+      cases hState
+      exact ⟨pre, lowerValue, rfl, hHead.symm⟩
 
 /-- Open compiler expression shape for an output-one primitive cast. -/
 theorem compilerOpen_localsExpr_evalOne_cast_prim_outputs_one
@@ -61880,11 +62143,11 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let
               simp [Stmt.toFunctionsListFuel?] at hHeadLower
           | succ headFuel =>
               rcases
-                  toFunctionsListFuel?_let_expr_single_components_of_not_user_call
+                  toFunctionsListFuel?_let_expr_single_components
                     (fuel := headFuel) (state := freshState)
                     (state' := stateHead) (name := name)
                     (value := sourceExpr) (lowerHead := lowerHead)
-                    (exprNoUserCalls_not_user_call hNoUser) hHeadLower with
+                    hHeadLower with
                 ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
               have hTailBlock :
                   Stmt.List.toBlockFuel? headFuel.succ.succ stateHead rest =
@@ -62097,11 +62360,11 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
               simp [Stmt.toFunctionsListFuel?] at hHeadLower
           | succ headFuel =>
               rcases
-                  toFunctionsListFuel?_assign_expr_single_components_of_not_user_call
+                  toFunctionsListFuel?_assign_expr_single_components
                     (fuel := headFuel) (state := freshState)
                     (state' := stateHead) (name := name)
                     (value := sourceExpr) (lowerHead := lowerHead)
-                    (exprNoUserCalls_not_user_call hNoUser) hHeadLower with
+                    hHeadLower with
                 ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
               have hTailBlock :
                   Stmt.List.toBlockFuel? headFuel.succ.succ stateHead rest =
@@ -99288,6 +99551,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeArgs : Safe.exprs args)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -99346,7 +99611,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -99432,6 +99697,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeArgs : Safe.exprs args)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -99494,7 +99761,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -99635,6 +99902,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeArgs : Safe.exprs args)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -99683,7 +99952,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -99819,6 +100088,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
           sourceResult)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -99909,7 +100180,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
         simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
       rcases
           BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-            hName hLowerFuel with
+            hNames hName hLowerFuel with
         ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
       cases hRel with
       | @ok shared store compiler hShared hVars =>
@@ -100018,6 +100289,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_b
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hTargetContains :
       ∀ {sourceAfterArgs : State}
@@ -100115,7 +100388,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_b
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hArgsDirect hArgsLower
+    hScope hCompat hNames hName hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -100199,6 +100472,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_r
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hTargetContains :
       ∀ {sourceAfterArgs : State}
@@ -100281,7 +100556,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_r
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hArgsDirect hArgsLower
+    hScope hCompat hNames hName hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -100360,6 +100635,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hTargetContains :
       ∀ {sourceAfterArgs : State}
@@ -100441,7 +100718,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hArgsDirect hArgsLower
+    hScope hCompat hNames hName hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -100526,6 +100803,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hTargetContains :
       ∀ {sourceAfterArgs : State}
@@ -100596,7 +100875,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hScope hCompat hToObjects hNoShadowing hStmtOk
-    hTargetsNoDup hTargetContains hName hArgsDirect hArgsLower hExec
+    hNames hTargetsNoDup hTargetContains hName hArgsDirect hArgsLower hExec
     hBodyFresh
     (fun {sharedArgs} {storeArgs} {argValues} {params} {returns} {body}
         {bodyFuel} {bodyState} hLookup hBodyExec =>
@@ -100624,6 +100903,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     (hScope : ctx.scope = layout)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -100690,7 +100971,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -100757,6 +101038,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     (hScope : ctx.scope = layout)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -100824,7 +101107,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_assign_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -100896,6 +101179,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -100966,7 +101251,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hArgsDirect hArgsLower
+    hScope hNames hName hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -101054,6 +101339,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -101121,7 +101408,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hArgsDirect hArgsLower
+    hScope hNames hName hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -101219,6 +101506,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -101278,7 +101567,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (blockFuel := argFuel.succ.succ.succ.succ)
     (names := names) (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hArgsDirect hArgsLower
+    hScope hNames hName hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -101397,6 +101686,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hArgsDirect :
       ∀ {freshState lowerArgs},
@@ -101456,7 +101747,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_term
     (blockFuel := argFuel.succ.succ.succ.succ)
     (names := names) (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hArgsDirect hArgsLower
+    hScope hNames hName hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -109237,7 +109528,100 @@ theorem sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of
               (pre := pre) (state := compiler) hPreWrites hContains)
     hHead
 
-theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_non_user_expr_rawHead
+/--
+Uniform target-fuel declaration composition for a raw generated expression
+prefix.
+
+The caller supplies the recursive expression/tail relation at every residual
+clock above one floor.  Every larger enclosing clock is split after the
+generated prefix and the following declaration statement.
+-/
+theorem sourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx_cons_let_expr_prelude_raw
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {minimumTailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hFresh : identName name ∉ layout)
+    (hHead :
+      ∀ {tailFuel : Nat},
+        minimumTailFuel ≤ tailFuel →
+          SourceExprSeqPreludeOpen.LetSoundAtExactHiddenCtx cfg layout
+            outcomeLayout terminalRel revertRel prim program ctx exprFuel
+            name sourceExpr rest codeOverride pre lowerExpr lowerTail
+            tailFuel.succ allowed seqCallResponseRel) :
+    SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx exprFuel.succ.succ
+      (.Let [name] (some sourceExpr) :: rest) codeOverride
+      { stmts :=
+        pre ++ [Functions.Stmt.let_ (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      (pre.length + minimumTailFuel.succ.succ) allowed
+      seqCallResponseRel := by
+  intro targetFuel hTargetFuel
+  rcases
+      EvmCompiler.Yul.OpenFuelAdequacy.exists_residual_of_add_succ_succ_le
+        hTargetFuel with
+    ⟨tailFuel, hMinimumTailFuel, hTargetFuelEq⟩
+  subst targetFuel
+  exact
+    sourceOpenResultSeqSoundAtExactHiddenCtx_cons_let_expr_prelude_raw
+      hFresh (hHead hMinimumTailFuel)
+
+/--
+Uniform target-fuel assignment composition for a raw generated expression
+prefix.
+-/
+theorem sourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {minimumTailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hTargetMem : identName name ∈ layout)
+    (hPreWrites : SourceWritesDisjoint [identName name] pre)
+    (hHead :
+      ∀ {tailFuel : Nat},
+        minimumTailFuel ≤ tailFuel →
+          SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
+            outcomeLayout terminalRel revertRel prim program ctx exprFuel
+            name sourceExpr rest codeOverride pre lowerExpr lowerTail
+            tailFuel.succ allowed seqCallResponseRel) :
+    SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx exprFuel.succ.succ
+      (.Assign [name] sourceExpr :: rest) codeOverride
+      { stmts :=
+        pre ++ [Functions.Stmt.assign (identName name) lowerExpr] ++
+          lowerTail.stmts }
+      (pre.length + minimumTailFuel.succ.succ) allowed
+      seqCallResponseRel := by
+  intro targetFuel hTargetFuel
+  rcases
+      EvmCompiler.Yul.OpenFuelAdequacy.exists_residual_of_add_succ_succ_le
+        hTargetFuel with
+    ⟨tailFuel, hMinimumTailFuel, hTargetFuelEq⟩
+  subst targetFuel
+  exact
+    sourceOpenResultSeqSoundAtExactHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+      hTargetMem hPreWrites (hHead hMinimumTailFuel)
+
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -109249,14 +109633,13 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let
     {rest : List AstStmt} {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     {seqCallResponseRel : SourceOpenSeqCallResponseRel}
-    (hNotUserCall :
-      ∀ functionName args, sourceExpr ≠ .Call (.inr functionName) args)
     (hSourceScoped :
       SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
     (hHeadSound :
       ∀ {freshState stateHead : Fresh.State}
         {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
         {lowerTail : Functions.Block},
+        FreshCoversLayout (reserved ++ layout) freshState →
         Expr.lower1? freshState sourceExpr =
           some (pre, lowerExpr, stateHead) →
         SourceExprSeqPreludeOpen.LetSoundAtExactHiddenCtx cfg layout
@@ -109292,11 +109675,11 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let
               simp [Stmt.toFunctionsListFuel?] at hHeadLower
           | succ headFuel =>
               rcases
-                  toFunctionsListFuel?_let_expr_single_components_of_not_user_call
+                  toFunctionsListFuel?_let_expr_single_components
                     (fuel := headFuel) (state := freshState)
                     (state' := stateHead) (name := name)
                     (value := sourceExpr) (lowerHead := lowerHead)
-                    hNotUserCall hHeadLower with
+                    hHeadLower with
                 ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
               have hBlockEq' :
                   lowerBlock = { stmts := lowerHead ++ lowerRest } := by
@@ -109324,10 +109707,10 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let
                     (hHeadSound (freshState := freshState)
                       (stateHead := stateHead) (pre := pre)
                       (lowerExpr := lowerExpr)
-                      (lowerTail := { stmts := lowerRest }) hExprLower)
+                      (lowerTail := { stmts := lowerRest }) hCovers hExprLower)
                     hInitial⟩
 
-theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_non_user_expr_rawHead
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
     {terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
@@ -109339,14 +109722,13 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
     {rest : List AstStmt} {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     {seqCallResponseRel : SourceOpenSeqCallResponseRel}
-    (hNotUserCall :
-      ∀ functionName args, sourceExpr ≠ .Call (.inr functionName) args)
     (hSourceScoped :
       SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
     (hHeadSound :
       ∀ {freshState stateHead : Fresh.State}
         {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
         {lowerTail : Functions.Block},
+        FreshCoversLayout (reserved ++ layout) freshState →
         Expr.lower1? freshState sourceExpr =
           some (pre, lowerExpr, stateHead) →
         SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
@@ -109382,11 +109764,11 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
               simp [Stmt.toFunctionsListFuel?] at hHeadLower
           | succ headFuel =>
               rcases
-                  toFunctionsListFuel?_assign_expr_single_components_of_not_user_call
+                  toFunctionsListFuel?_assign_expr_single_components
                     (fuel := headFuel) (state := freshState)
                     (state' := stateHead) (name := name)
                     (value := sourceExpr) (lowerHead := lowerHead)
-                    hNotUserCall hHeadLower with
+                    hHeadLower with
                 ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
               have hBlockEq' :
                   lowerBlock = { stmts := lowerHead ++ lowerRest } := by
@@ -109425,8 +109807,212 @@ theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_ass
                     (hHeadSound (freshState := freshState)
                       (stateHead := stateHead) (pre := pre)
                       (lowerExpr := lowerExpr)
-                      (lowerTail := { stmts := lowerRest }) hExprLower)
+                      (lowerTail := { stmts := lowerRest }) hCovers hExprLower)
                     hInitial⟩
+
+/--
+Checked declaration head with a compiler-derived uniform target-fuel floor.
+
+Fresh-name choices may change the emitted identifiers, but successful
+expression lowering has the source-syntax-derived prefix length recorded by
+`OpenFuelAdequacy.exprPreludeLength`.
+-/
+theorem checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel minimumTailFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTail : Functions.Block},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        ∀ {tailFuel : Nat},
+          minimumTailFuel ≤ tailFuel →
+            SourceExprSeqPreludeOpen.LetSoundAtExactHiddenCtx cfg layout
+              outcomeLayout terminalRel revertRel prim program ctx
+              sourceFuel.succ name sourceExpr rest codeOverride pre lowerExpr
+              lowerTail tailFuel.succ allowed seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx sourceFuel.succ.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) codeOverride
+        (EvmCompiler.Yul.OpenFuelAdequacy.exprPreludeLength sourceExpr +
+          minimumTailFuel.succ.succ)
+        allowed seqCallResponseRel := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_let_expr_single_components
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              have hFresh : identName name ∉ layout := by
+                exact hSourceScoped.1.2 (identName name)
+                  (by simp [identNames])
+              simpa [hHeadEq, List.append_assoc,
+                EvmCompiler.Yul.OpenFuelAdequacy.lower1?_pre_length_eq
+                  hExprLower] using
+                (sourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx_cons_let_expr_prelude_raw
+                  (cfg := cfg) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (program := program) (ctx := ctx)
+                  (exprFuel := sourceFuel.succ) (name := name)
+                  (sourceExpr := sourceExpr) (rest := rest)
+                  (codeOverride := codeOverride) (pre := pre)
+                  (lowerExpr := lowerExpr)
+                  (lowerTail := { stmts := lowerRest })
+                  (minimumTailFuel := minimumTailFuel) (allowed := allowed)
+                  (seqCallResponseRel := seqCallResponseRel) hFresh
+                  (by
+                    intro tailFuel hMinimumTailFuel
+                    exact
+                      hHeadSound hCovers hExprLower hMinimumTailFuel))
+
+/--
+Checked assignment head with a compiler-derived uniform target-fuel floor.
+-/
+theorem checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel minimumTailFuel : Nat}
+    {name : EvmYul.Identifier} {sourceExpr : AstExpr}
+    {rest : List AstStmt} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hHeadSound :
+      ∀ {freshState stateHead : Fresh.State}
+        {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+        {lowerTail : Functions.Block},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Expr.lower1? freshState sourceExpr =
+          some (pre, lowerExpr, stateHead) →
+        ∀ {tailFuel : Nat},
+          minimumTailFuel ≤ tailFuel →
+            SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
+              outcomeLayout terminalRel revertRel prim program ctx
+              sourceFuel.succ name sourceExpr rest codeOverride pre lowerExpr
+              lowerTail tailFuel.succ allowed seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx sourceFuel.succ.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) codeOverride
+        (EvmCompiler.Yul.OpenFuelAdequacy.exprPreludeLength sourceExpr +
+          minimumTailFuel.succ.succ)
+        allowed seqCallResponseRel := by
+  intro compileFuel freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          rcases
+              BridgeFacts.listToBlockFuel?_components
+                (fuel := lowerFuel.succ) hLower with
+            ⟨lower, hFuncs, hBlockEq⟩
+          rcases
+              BridgeFacts.listToFunctionsFuel?_cons_components
+                (fuel := lowerFuel) hFuncs with
+            ⟨lowerHead, stateHead, lowerRest, hHeadLower, hTailLower,
+              hLowerEq⟩
+          cases lowerFuel with
+          | zero =>
+              simp [Stmt.toFunctionsListFuel?] at hHeadLower
+          | succ headFuel =>
+              rcases
+                  toFunctionsListFuel?_assign_expr_single_components
+                    (fuel := headFuel) (state := freshState)
+                    (state' := stateHead) (name := name)
+                    (value := sourceExpr) (lowerHead := lowerHead)
+                    hHeadLower with
+                ⟨pre, lowerExpr, hExprLower, hHeadEq⟩
+              have hBlockEq' :
+                  lowerBlock = { stmts := lowerHead ++ lowerRest } := by
+                rw [hBlockEq, hLowerEq]
+              cases hBlockEq'
+              have hTargetMem : identName name ∈ layout := by
+                exact hSourceScoped.1.2 (identName name)
+                  (by simp [identNames])
+              have hCoversTarget :
+                  FreshCoversLayout [identName name] freshState := by
+                intro target hTarget
+                have hEq : target = identName name := by
+                  simpa using hTarget
+                subst target
+                exact hCovers (identName name)
+                  (by simp [hTargetMem])
+              have hPreWrites :
+                  SourceWritesDisjoint [identName name] pre :=
+                lower1?_sourceWritesDisjoint hCoversTarget hExprLower
+              simpa [hHeadEq, List.append_assoc,
+                EvmCompiler.Yul.OpenFuelAdequacy.lower1?_pre_length_eq
+                  hExprLower] using
+                (sourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx_cons_assign_expr_prelude_raw_of_writes
+                  (cfg := cfg) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (terminalRel := terminalRel) (revertRel := revertRel)
+                  (prim := prim) (program := program) (ctx := ctx)
+                  (exprFuel := sourceFuel.succ) (name := name)
+                  (sourceExpr := sourceExpr) (rest := rest)
+                  (codeOverride := codeOverride) (pre := pre)
+                  (lowerExpr := lowerExpr)
+                  (lowerTail := { stmts := lowerRest })
+                  (minimumTailFuel := minimumTailFuel) (allowed := allowed)
+                  (seqCallResponseRel := seqCallResponseRel) hTargetMem
+                  hPreWrites
+                  (by
+                    intro tailFuel hMinimumTailFuel
+                    exact
+                      hHeadSound hCovers hExprLower hMinimumTailFuel))
 
 theorem sourceExprPreludeOpen_run_doneInvariant_varsAgree_of_writes
     {names : List Name}
@@ -111007,7 +111593,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
     (hFinalAdmissible :
-      RawOpenCallResponseAdmissible cfg layout finalCallResponseRel)
+      RawOpenCallResponseAdmissible cfg finalCallResponseRel)
     (hHead :
       ∀ {base targetTailFuel : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
@@ -111017,7 +111603,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         sourceExprRawPreludeBaseReserve head ≤ base →
         minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
-        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        RawOpenCallResponseAdmissible cfg headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -111176,7 +111762,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     {finalCallResponseRel : SourceArgRawPreludeOpenCallResponseRel}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
     (hFinalAdmissible :
-      RawOpenCallResponseAdmissible cfg layout finalCallResponseRel)
+      RawOpenCallResponseAdmissible cfg finalCallResponseRel)
     (hHead :
       ∀ {base targetTailFuel : Nat} {head : AstExpr}
         {stateHeadStart preHead lowerHead stateHead}
@@ -111186,7 +111772,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
         sourceExprRawPreludeBaseReserve head ≤ base →
         minimumTargetTailFuel ≤ targetTailFuel →
         FreshCoversLayout coverLayout stateHeadStart →
-        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        RawOpenCallResponseAdmissible cfg headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -112852,7 +113438,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         Safe.CallSafe.expr head →
         SourceExprScoped layout head →
         UserCallArity.ExprOk contract head →
-        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        RawOpenCallResponseAdmissible cfg headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -112874,7 +113460,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
             (.Call (.inr functionName) args) (some contract) pre lower
             (pre.length + targetTailFuel.succ.succ) callResponseRel)
     (hAdmissible :
-      RawOpenCallResponseAdmissible cfg layout callResponseRel) :
+      RawOpenCallResponseAdmissible cfg callResponseRel) :
     SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
       prim program ctx base.succ.succ.succ.succ expr (some contract) pre lower
       (pre.length + targetTailFuel.succ.succ) callResponseRel := by
@@ -112907,7 +113493,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     have hArgsOk : UserCallArity.ExprsOk contract args := by
       simpa [UserCallArity.ExprOk] using hOkCall
     have hArgAdmissible :
-        RawOpenCallResponseAdmissible cfg layout
+        RawOpenCallResponseAdmissible cfg
           (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
             base.succ.succ.succ yulPrim op hOutputs seq callResponseRel) :=
       RawOpenCallResponseAdmissible.comapBind hAdmissible
@@ -112952,7 +113538,9 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         (by omega) hSafePrim hBasic hOutputs
   · intro yulPrim args _hExprEq sourceShared sourceStore compilerAfter
       sourceCall targetCall response hRel hResponse
-    exact hAdmissible hRel hResponse
+    cases hRel with
+    | ok hShared _hVars =>
+        exact hAdmissible hShared hResponse
   · intro functionName args hExprEq _hSafeUser _hScopedUser _hLowerUser
     exact hUserCall hExprEq
 
@@ -113003,7 +113591,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
         Safe.CallSafe.expr head →
         SourceExprScoped layout head →
         UserCallArity.ExprOk contract head →
-        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        RawOpenCallResponseAdmissible cfg headCallResponseRel →
         Expr.lower1? stateHeadStart head =
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
@@ -113036,7 +113624,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
           (SourceExprSeqPreludeOpen.compilerOpenUserCallRawAfterRegularArgs prim
             program fn lowerArgs tmp targetTailFuel.succ targetArgsResult))
     (hAdmissible :
-      RawOpenCallResponseAdmissible cfg layout exprCallResponseRel) :
+      RawOpenCallResponseAdmissible cfg exprCallResponseRel) :
     SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
       prim program ctx base.succ.succ.succ.succ
       (.Call (.inr functionName) args) (some contract) pre lowerExpr
@@ -113063,7 +113651,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
       (by
         intro preArgs lowerArgs stateArgs tmp hLowerArgs _hFresh
         have hArgAdmissible :
-            RawOpenCallResponseAdmissible cfg layout
+            RawOpenCallResponseAdmissible cfg
               (SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeUserCall
                 prim program fn base.succ.succ.succ functionName contract
                 lowerArgs tmp targetTailFuel.succ exprCallResponseRel) :=
@@ -113397,7 +113985,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
         Safe.CallSafe.expr (.Call (.inr functionName) args) →
         SourceExprScoped layout (.Call (.inr functionName) args) →
         UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
-        RawOpenCallResponseAdmissible cfg layout exprCallResponseRel →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
         Functions.FunList.find? functionName program.functions = some fn →
           SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
             revertRel prim program base targetTailFuel functionName args
@@ -113414,7 +114002,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
       SourceExprScoped layout expr →
       UserCallArity.ExprOk contract expr →
       Expr.lower1? freshState expr = some (pre, lower, freshState') →
-      RawOpenCallResponseAdmissible cfg layout callResponseRel →
+      RawOpenCallResponseAdmissible cfg callResponseRel →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
           revertRel prim program ctx base.succ.succ.succ.succ expr
           (some contract) pre lower (pre.length + targetTailFuel.succ.succ)
@@ -113503,6 +114091,548 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
                 hAdmissible (source := source) (compiler := compiler) hInitial
                 hContains)
       hAdmissible
+
+/--
+Recursive open declaration head over the canonical sequence-tail pullback.
+
+The enclosing sequence relation is the only response boundary exposed to the
+caller. Expression recursion receives its admissible pullback internally.
+-/
+theorem SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_lower1?_recursive
+    {cfg : StateRelConfig} {coverLayout layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base targetTailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout coverLayout freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hFresh : identName name ∉ layout)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          targetTailFuel.succ allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    SourceExprSeqPreludeOpen.LetSoundAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx base.succ.succ.succ.succ name
+      sourceExpr rest (some contract) pre lowerExpr lowerTail
+      targetTailFuel.succ allowed seqCallResponseRel := by
+  have hExprAdmissible :
+      RawOpenCallResponseAdmissible cfg
+        (SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeLetTail
+          prim program base.succ.succ.succ.succ name rest (some contract)
+          lowerTail targetTailFuel.succ seqCallResponseRel) :=
+    RawOpenCallResponseAdmissible.comapBind hAdmissible
+  intro source compiler hInitial
+  exact
+    SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_expr_raw_beforeTail
+      hFresh
+      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
+        hLayoutSubset hPrim hFindUser hUserRegular hReserve
+        hMinimumTargetTailFuel hCovers hSafe hScoped hOk hLower
+        hExprAdmissible)
+      (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+        (cfg := cfg) (layout := layout)
+        (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+        (contract := contract) (freshState := freshState)
+        (freshState' := freshState') (pre := pre) (lower := lowerExpr)
+        hSafe hScoped hLower (by
+          intro functionName args hEq
+          simpa [hEq] using hOk))
+      hTail hInitial
+
+/--
+Recursive open assignment head over the canonical sequence-tail pullback.
+-/
+theorem SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_lower1?_recursive
+    {cfg : StateRelConfig} {coverLayout layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base targetTailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout coverLayout freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hTargetMem : identName name ∈ layout)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hScoped : SourceExprScoped layout sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hLower :
+      Expr.lower1? freshState sourceExpr =
+        some (pre, lowerExpr, freshState'))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          targetTailFuel.succ allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    SourceExprSeqPreludeOpen.AssignSoundAtExactHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx
+      base.succ.succ.succ.succ name sourceExpr rest (some contract) pre
+      lowerExpr lowerTail targetTailFuel.succ allowed seqCallResponseRel := by
+  have hExprAdmissible :
+      RawOpenCallResponseAdmissible cfg
+        (SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeAssignTail
+          prim program base.succ.succ.succ.succ name rest (some contract)
+          lowerTail targetTailFuel.succ seqCallResponseRel) :=
+    RawOpenCallResponseAdmissible.comapBind hAdmissible
+  intro source compiler hInitial
+  exact
+    SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_expr_raw_beforeTail
+      hTargetMem
+      (lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lower1?_recursive
+        hLayoutSubset hPrim hFindUser hUserRegular hReserve
+        hMinimumTargetTailFuel hCovers hSafe hScoped hOk hLower
+        hExprAdmissible)
+      (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases_userArity
+        (cfg := cfg) (layout := layout)
+        (sourceFuel := base.succ.succ.succ) (expr := sourceExpr)
+        (contract := contract) (freshState := freshState)
+        (freshState' := freshState') (pre := pre) (lower := lowerExpr)
+        hSafe hScoped hLower (by
+          intro functionName args hEq
+          simpa [hEq] using hOk))
+      hTail hInitial
+
+/--
+Checked compiler-output declaration head backed by recursive raw expression
+preservation.
+-/
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base targetTailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          targetTailFuel.succ allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) (some contract) allowed
+        seqCallResponseRel := by
+  exact
+    checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
+      (sourceFuel := base.succ.succ.succ)
+      (tailTargetFuel := targetTailFuel.succ) hSourceScoped (by
+        intro freshState stateHead pre lowerExpr lowerTail hCovers hLower
+        exact
+          SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_lower1?_recursive
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve hMinimumTargetTailFuel hCovers
+            (hSourceScoped.1.2 (identName name) (by simp [identNames]))
+            hSafe hSourceScoped.2 hOk hLower hTail hAdmissible)
+
+/--
+Checked compiler-output assignment head backed by recursive raw expression
+preservation.
+-/
+theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumTargetTailFuel base targetTailFuel : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          targetTailFuel.succ allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) (some contract) allowed
+        seqCallResponseRel := by
+  exact
+    checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
+      (sourceFuel := base.succ.succ.succ)
+      (tailTargetFuel := targetTailFuel.succ) hSourceScoped (by
+        intro freshState stateHead pre lowerExpr lowerTail hCovers hLower
+        exact
+          SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_lower1?_recursive
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve hMinimumTargetTailFuel hCovers
+            (hSourceScoped.1.2 (identName name) (by simp [identNames]))
+            hSafe hSourceScoped.2 hOk hLower hTail hAdmissible)
+
+/--
+Uniform-target-fuel recursive declaration head.
+
+The shared residual floor covers both selected internal callees and the
+remaining sequence.  Its compiler prefix contribution is source-syntax
+derived, so it is independent of fresh-name choices and external responses.
+-/
+theorem checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumCalleeTargetTailFuel minimumTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Let [name] (some sourceExpr)))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumCalleeTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg
+          (identName name :: layout) outcomeLayout terminalRel revertRel prim
+          program { ctxAfter with scope := identName name :: ctxAfter.scope }
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          minimumTailFuel allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Let [name] (some sourceExpr) :: rest) (some contract)
+        (EvmCompiler.Yul.OpenFuelAdequacy.exprPreludeLength sourceExpr +
+          (max minimumCalleeTargetTailFuel minimumTailFuel).succ.succ)
+        allowed seqCallResponseRel := by
+  exact
+    checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_expr_rawHead
+      (sourceFuel := base.succ.succ.succ)
+      (minimumTailFuel :=
+        max minimumCalleeTargetTailFuel minimumTailFuel)
+      hSourceScoped (by
+        intro freshState stateHead pre lowerExpr lowerTail hCovers hLower
+          tailFuel hMinimumTailFuel
+        exact
+          SourceExprSeqPreludeOpen.letSoundAtExactHiddenCtx_of_lower1?_recursive
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve
+            (Nat.le_trans (Nat.le_max_left _ _) hMinimumTailFuel) hCovers
+            (hSourceScoped.1.2 (identName name) (by simp [identNames]))
+            hSafe hSourceScoped.2 hOk hLower
+            (by
+              intro ctxAfter
+              exact
+                hTail (targetFuel := tailFuel.succ)
+                  (by
+                    exact
+                      Nat.le_trans
+                        (Nat.le_trans
+                          (Nat.le_max_right minimumCalleeTargetTailFuel
+                            minimumTailFuel)
+                          hMinimumTailFuel)
+                        (Nat.le_succ tailFuel)))
+            hAdmissible)
+
+/--
+Uniform-target-fuel recursive assignment head.
+-/
+theorem checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_recursive
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {contract : AstContract}
+    {minimumCalleeTargetTailFuel minimumTailFuel base : Nat}
+    {ctx : Functions.Source.Ctx} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout (.Assign [name] sourceExpr))
+    (hReserve : sourceExprRawPreludeBaseReserve sourceExpr ≤ base)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hFindUser :
+      ∀ {functionName : Name} {args : List AstExpr},
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+          ∃ fn,
+            Functions.FunList.find? functionName program.functions = some fn)
+    (hUserRegular :
+      ∀ {base targetTailFuel : Nat} {functionName : Name}
+        {args : List AstExpr} {freshState freshState' : Fresh.State}
+        {fn : Functions.FunDef}
+        {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤
+            base →
+        minimumCalleeTargetTailFuel ≤ targetTailFuel →
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        UserCallArity.ExprOk contract (.Call (.inr functionName) args) →
+        RawOpenCallResponseAdmissible cfg exprCallResponseRel →
+        Functions.FunList.find? functionName program.functions = some fn →
+          SourceExprRawPreludeOpenUserCallRegularAt cfg layout terminalRel
+            revertRel prim program base targetTailFuel functionName args
+            contract freshState freshState' fn exprCallResponseRel)
+    (hSafe : Safe.CallSafe.expr sourceExpr)
+    (hOk : UserCallArity.ExprOk contract sourceExpr)
+    (hTail :
+      ∀ {lowerTail : Functions.Block} {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter
+          base.succ.succ.succ.succ.succ rest (some contract) lowerTail
+          minimumTailFuel allowed seqCallResponseRel)
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg seqCallResponseRel) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx base.succ.succ.succ.succ.succ.succ compileFuel
+        (.Assign [name] sourceExpr :: rest) (some contract)
+        (EvmCompiler.Yul.OpenFuelAdequacy.exprPreludeLength sourceExpr +
+          (max minimumCalleeTargetTailFuel minimumTailFuel).succ.succ)
+        allowed seqCallResponseRel := by
+  exact
+    checkedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_expr_rawHead
+      (sourceFuel := base.succ.succ.succ)
+      (minimumTailFuel :=
+        max minimumCalleeTargetTailFuel minimumTailFuel)
+      hSourceScoped (by
+        intro freshState stateHead pre lowerExpr lowerTail hCovers hLower
+          tailFuel hMinimumTailFuel
+        exact
+          SourceExprSeqPreludeOpen.assignSoundAtExactHiddenCtx_of_lower1?_recursive
+            (by
+              intro other hMem
+              simp [hMem])
+            hPrim hFindUser hUserRegular hReserve
+            (Nat.le_trans (Nat.le_max_left _ _) hMinimumTailFuel) hCovers
+            (hSourceScoped.1.2 (identName name) (by simp [identNames]))
+            hSafe hSourceScoped.2 hOk hLower
+            (by
+              intro ctxAfter
+              exact
+                hTail (targetFuel := tailFuel.succ)
+                  (by
+                    exact
+                      Nat.le_trans
+                        (Nat.le_trans
+                          (Nat.le_max_right minimumCalleeTargetTailFuel
+                            minimumTailFuel)
+                          hMinimumTailFuel)
+                        (Nat.le_succ tailFuel)))
+            hAdmissible)
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
@@ -119716,6 +120846,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prel
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutCompatible ctx layout outcomeLayout
           sourceResult)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
@@ -119815,7 +120947,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prel
         simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
       rcases
           BridgeFacts.toFunctionsListFuel?_let_user_call_components
-            hName hLowerFuel with
+            hNames hName hLowerFuel with
         ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
       cases hRel with
       | @ok shared store compiler hShared hVars =>
@@ -119935,6 +121067,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_body
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hTargetContains :
@@ -120054,7 +121188,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_body
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hCompat hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -120139,6 +121273,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_recu
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hTargetContains :
@@ -120243,7 +121379,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_recu
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hCompat hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -120323,6 +121459,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hTargetContains :
@@ -120426,7 +121564,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hCompat hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hCompat hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro shared store compiler hInitial
       rcases hExec hInitial with
@@ -120513,6 +121651,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hTargetContains :
@@ -120605,7 +121745,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hScope hCompat hToObjects hNoShadowing hStmtOk
-    hTargetsNoDup hFresh hTargetContains hName hArgsDirect hArgsLower hExec
+    hNames hTargetsNoDup hFresh hTargetContains hName hArgsDirect hArgsLower
+    hExec
     hBodyFresh
     (fun {sharedArgs} {storeArgs} {argValues} {params} {returns} {body}
         {bodyFuel} {bodyState} hLookup hBodyExec =>
@@ -120633,6 +121774,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     (hScope : ctx.scope = layout)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
@@ -120709,7 +121852,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_let_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -120779,6 +121922,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     {codeOverride : Option AstContract}
     {allowed : Except Exception State → Prop}
     (hScope : ctx.scope = layout)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
@@ -120856,7 +122001,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_let_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -120931,6 +122076,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hArgsDirect :
@@ -121004,7 +122151,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -121092,6 +122239,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hArgsDirect :
@@ -121162,7 +122311,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -121256,6 +122405,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hArgsDirect :
@@ -121318,7 +122469,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (blockFuel := argFuel.succ.succ.succ.succ)
     (names := names) (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -121438,6 +122589,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hArgsDirect :
@@ -121500,7 +122653,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_termina
     (blockFuel := argFuel.succ.succ.succ.succ)
     (names := names) (functionName := functionName) (args := args)
     (codeOverride := some yulProgram.contract) (allowed := allowed)
-    hScope hName hTargetsNoDup hFresh hArgsDirect hArgsLower
+    hScope hNames hName hTargetsNoDup hFresh hArgsDirect hArgsLower
     (by
       intro source compiler sourceResult pre lowerArgs hInitial hArgsSound
         hAllow hSource
@@ -122195,6 +123348,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -122255,7 +123410,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_let_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -122782,6 +123937,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -122848,7 +124005,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_let_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -123063,6 +124220,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hName : ObjectBuiltin.unsupported? functionName = false)
@@ -123115,7 +124274,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     simpa [Stmt.toFunctionsList?, Stmt.fuel] using hLower
   rcases
       BridgeFacts.toFunctionsListFuel?_let_user_call_components
-        hName hLowerFuel with
+        hNames hName hLowerFuel with
     ⟨pre, lowerArgs, hArgShape, hLowerStmts⟩
   cases hArgShape with
   | inl hDirect =>
@@ -124171,6 +125330,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124229,7 +125390,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive (by omega) hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup
     (safe_exprs_of_safe_assign_user_call hSafeStmt)
     (unsupported_false_of_safe_assign_user_call hSafeStmt)
     hArgsDirect hArgsLower hArgEval hBodyFresh
@@ -124272,6 +125433,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124326,7 +125489,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive (by omega) hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup
     (safe_exprs_of_safe_assign_user_call hSafeStmt)
     (unsupported_false_of_safe_assign_user_call hSafeStmt)
     hArgsDirect
@@ -124373,6 +125536,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124432,7 +125597,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup hSafeStmt
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup hSafeStmt
     hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -124490,6 +125655,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124529,7 +125696,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive (by omega) hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive (by omega) hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     (safe_exprs_of_safe_assign_user_call hSafeStmt)
     (unsupported_false_of_safe_assign_user_call hSafeStmt)
     hArgsDirect
@@ -124569,6 +125737,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124613,7 +125783,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -124670,6 +125841,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124715,7 +125888,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -124777,6 +125951,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124826,7 +126002,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -124893,6 +126070,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -124930,7 +126109,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hSafeStmt
     (hArgsDirect := by
       intro freshState lowerArgs hCovers hDirect hToLocals
@@ -125000,6 +126180,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -125040,7 +126222,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hSafeStmt hArgsScoped
     (hArgsDirect := by
       intro freshState lowerArgs hCovers hDirect hToLocals
@@ -125121,6 +126304,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125182,7 +126367,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive (by omega) hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup hFresh
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup hFresh
     (unsupported_false_of_safe_let_user_call hSafeStmt) hArgsDirect
     hArgsLower hArgEval hBodyFresh
 
@@ -125224,6 +126409,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125282,7 +126469,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive (by omega) hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup hFresh
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup hFresh
     (unsupported_false_of_safe_let_user_call hSafeStmt) hArgsDirect
     (by
       intro freshState lowerArgs _hCovers hDirect hToLocals
@@ -125327,6 +126514,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125389,7 +126578,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hCheckpoint hSafe
-    hScoped hToObjects hNoShadowing hStmtOk hTargetsNoDup hFresh hSafeStmt
+    hScoped hToObjects hNoShadowing hStmtOk hNames hTargetsNoDup hFresh
+    hSafeStmt
     hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -125448,6 +126638,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125491,7 +126683,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive (by omega) hAllowedRel hScope hCompat hStmtOk
+    hRecursive (by omega) hAllowedRel hScope hCompat hStmtOk hNames
     hTargetsNoDup hFresh
     (unsupported_false_of_safe_let_user_call hSafeStmt) hArgsDirect
     (by
@@ -125530,6 +126722,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125577,7 +126771,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -125635,6 +126830,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125683,7 +126880,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -125746,6 +126944,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125784,7 +126984,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt
     (hArgsDirect := by
       intro freshState lowerArgs hCovers hDirect hToLocals
@@ -125864,6 +127065,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -125916,7 +127119,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt hArgsDirect
     (by
       intro freshState freshState' pre lowerArgs hCovers _hDirect hLower
@@ -125984,6 +127188,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -126025,7 +127231,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt hArgsScoped
     (hArgsDirect := by
       intro freshState lowerArgs hCovers hDirect hToLocals
@@ -126384,6 +127591,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -126403,7 +127612,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk
-    hTargetsNoDup hSafeStmt
+    hNames hTargetsNoDup hSafeStmt
     (hArgsDirectAt := by
       intro argFuel ctxArg freshState argList lowerArgs hFuel hCovers hDirect
         hToLocals
@@ -126444,6 +127653,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -126464,7 +127675,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk
-    hTargetsNoDup hSafeStmt hArgsScoped
+    hNames hTargetsNoDup hSafeStmt hArgsScoped
     (hArgsDirectAt := by
       intro argFuel ctxArg freshState argList lowerArgs hFuel hCovers hDirect
         hToLocals
@@ -126505,6 +127716,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
@@ -126524,7 +127737,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk
-    hTargetsNoDup hSafeStmt
+    hNames hTargetsNoDup hSafeStmt
     (SourceLexical.assign_user_call_args hSourceScoped)
     (hRecursive.args (by omega))
 
@@ -126559,6 +127772,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSafeStmt :
       Safe.stmt (.Assign names (.Call (.inr functionName) args)))
     (hSourceScoped :
@@ -126577,7 +127792,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk
-    (SourceLexical.assign_names_nodup hSourceScoped) hSafeStmt
+    hNames (SourceLexical.assign_names_nodup hSourceScoped) hSafeStmt
     hSourceScoped
 
 /--
@@ -126611,6 +127826,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -126630,7 +127847,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt
     (hArgsDirectAt := by
       intro argFuel ctxArg freshState argList lowerArgs hFuel hCovers hDirect
@@ -126672,6 +127890,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -126692,7 +127912,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt hArgsScoped
     (hArgsDirectAt := by
       intro argFuel ctxArg freshState argList lowerArgs hFuel hCovers hDirect
@@ -126734,6 +127955,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hTargetsNoDup : (identNames names).Nodup)
     (hFresh : ∀ name, name ∈ identNames names → name ∉ layout)
     (hSafeStmt :
@@ -126753,7 +127976,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (program := program) (context := context) (bound := bound) (ctx := ctx)
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
-    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hTargetsNoDup
+    hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk hNames
+    hTargetsNoDup
     hFresh hSafeStmt
     (SourceLexical.let_user_call_args hSourceScoped)
     (hRecursive.args (by omega))
@@ -126789,6 +128013,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSafeStmt :
       Safe.stmt (.Let names (some (.Call (.inr functionName) args))))
     (hSourceScoped :
@@ -126807,7 +128033,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (sourceFuel := sourceFuel) (names := names)
     (functionName := functionName) (args := args) (allowed := allowed)
     hRecursive hSuccFuel hAllowedRel hScope hCompat hStmtOk
-    (SourceLexical.let_some_names_nodup hSourceScoped)
+    hNames (SourceLexical.let_some_names_nodup hSourceScoped)
     (SourceLexical.let_some_names_fresh hSourceScoped)
     hSafeStmt hSourceScoped
 
@@ -126932,6 +128158,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -127021,7 +128249,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_assign_user_call_of_p
                   (sourceFuel := argFuel) (names := names)
                   (functionName := functionName) (args := args)
                   (allowed := allowed) hRecursive (by omega) hAllowedRel
-                  hScope hCompat hStmtOk hSafeStmt hSourceScoped
+                  hScope hCompat hStmtOk hNames hSafeStmt hSourceScoped
 
 /--
 Exact-frontier generated-temporary `let` user-call adapter.
@@ -127053,6 +128281,8 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -127144,7 +128374,7 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_let_user_call_of_prog
                   (sourceFuel := argFuel) (names := names)
                   (functionName := functionName) (args := args)
                   (allowed := allowed) hRecursive (by omega) hAllowedRel
-                  hScope hCompat hStmtOk hSafeStmt hSourceScoped
+                  hScope hCompat hStmtOk hNames hSafeStmt hSourceScoped
 
 /--
 Clean singleton-`let` block execution fact.  The main bridge file already
@@ -166508,8 +167738,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_programAccepted_fr
                       (functionName := functionName) (args := args)
                       (allowed := allowed) (canBreak := canBreak)
                       (canContinue := canContinue) (canLeave := canLeave)
-                      hRecursive hSafe hScoped hStmtOk hSourceScoped hAllowed
-                      hCompat hScope
+                      hRecursive hSafe hScoped hStmtOk
+                      (by cases names <;> simp) hSourceScoped hAllowed hCompat
+                      hScope
   | Assign names value =>
       cases value with
       | Lit value =>
@@ -166660,8 +167891,9 @@ theorem checkedStmtBlockLoweringSoundWhenFreshNamesAtExact_of_programAccepted_fr
                   (functionName := functionName) (args := args)
                   (allowed := allowed) (canBreak := canBreak)
                   (canContinue := canContinue) (canLeave := canLeave)
-                  hRecursive hSafe hScoped hStmtOk hSourceScoped hAllowed
-                  hCompat hScope
+                  hRecursive hSafe hScoped hStmtOk
+                  (by cases names <;> simp) hSourceScoped hAllowed hCompat
+                  hScope
   | ExprStmtCall value =>
       cases value with
       | Lit value =>
@@ -171718,6 +172950,7 @@ def CALLOpenSeqLoweringFrontierAt
       SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
         sourceResult) →
     (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+    RawOpenCallResponseAdmissible cfg callResponseRel →
     CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
       reserved layout outcomeLayout terminalRel revertRel prim program ctx
       bound compileFuel sourceStmts (some yulProgram.contract) allowed
@@ -171741,7 +172974,7 @@ theorem callOpenSeqLoweringFrontierAt_zero
       program 0 := by
   intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
     canBreak canContinue canLeave callResponseRel _hSafe _hScoped _hStmtOk
-    _hSourceScoped _hReserved hAllowed _hSupported _hScopeContains
+    _hSourceScoped _hReserved hAllowed _hSupported _hScopeContains _hAdmissible
   exact
     checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
       (cfg := cfg) (reserved := reserved) (layout := layout)
@@ -171769,7 +173002,7 @@ theorem callOpenSeqLoweringFrontierAt_one
       program 1 := by
   intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
     canBreak canContinue canLeave callResponseRel _hSafe _hScoped _hStmtOk
-    _hSourceScoped _hReserved hAllowed hSupported _hScopeContains
+    _hSourceScoped _hReserved hAllowed hSupported _hScopeContains _hAdmissible
   cases sourceStmts with
   | nil =>
       exact
@@ -186665,6 +187898,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -186788,7 +188023,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -187152,6 +188387,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -187282,7 +188519,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -187566,6 +188803,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -187607,7 +188846,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_
         ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.of_unreserved
           hRecursive)
       (hFuel := hFuel) (hSafeStmt := hSafeStmt)
-      (_hScopedStmt := _hScopedStmt) (hStmtOk := hStmtOk)
+      (_hScopedStmt := _hScopedStmt) (hStmtOk := hStmtOk) (hNames := hNames)
       (hSourceScoped := hSourceScoped) (hAllowedRel := hAllowedRel)
       (hSupported := hSupported) (hScopeContains := hScopeContains)
       (hTail := hTail)
@@ -187646,6 +188885,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -187783,7 +189024,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     simp only [List.mem_append, List.mem_reverse] at hMem
@@ -187830,7 +189071,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -188224,6 +189465,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -188369,7 +189612,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     simp only [List.mem_append, List.mem_reverse] at hMem
@@ -188416,7 +189659,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -188799,6 +190042,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -188846,7 +190091,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_use
         ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved.of_unreserved
           hRecursive)
       (hFuel := hFuel) (hSafeStmt := hSafeStmt)
-      (_hScopedStmt := _hScopedStmt) (hStmtOk := hStmtOk)
+      (_hScopedStmt := _hScopedStmt) (hStmtOk := hStmtOk) (hNames := hNames)
       (hSourceScoped := hSourceScoped) (hReservedHead := hReservedHead)
       (hAllowedRel := hAllowedRel) (hSupported := hSupported)
       (hScopeContains := hScopeContains) (hTail := hTail)
@@ -193151,6 +194396,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -193195,7 +194442,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
       (functionName := functionName) (args := args) (rest := rest)
       (allowed := allowed) (canBreak := canBreak)
       (canContinue := canContinue) (canLeave := canLeave)
-      hRecursive hFuel hSafeStmt hScopedStmt hStmtOk hSourceScoped
+      hRecursive hFuel hSafeStmt hScopedStmt hStmtOk hNames hSourceScoped
       hAllowed hSupported hScopeContains
       (by
         intro compileFuel ctxMid hScopeMid hSupportedMid
@@ -193231,6 +194478,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -193278,7 +194527,7 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
       (functionName := functionName) (args := args) (rest := rest)
       (allowed := allowed) (canBreak := canBreak)
       (canContinue := canContinue) (canLeave := canLeave)
-      hRecursive hFuel hSafeStmt hScopedStmt hStmtOk hSourceScoped
+      hRecursive hFuel hSafeStmt hScopedStmt hStmtOk hNames hSourceScoped
       hReservedHead hAllowed hSupported hScopeContains
       (by
         intro compileFuel ctxMid hScopeMid hSupportedMid
@@ -194294,8 +195543,9 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
                       (args := args) (rest := rest) (allowed := allowed)
                       (canBreak := canBreak) (canContinue := canContinue)
                       (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                      hStmtOk hSourceScoped hTailScoped hReservedHead
-                      hAllowed hSupported hScopeContains hReservedTail hTail
+                      hStmtOk (by cases names <;> simp) hSourceScoped
+                      hTailScoped hReservedHead hAllowed hSupported
+                      hScopeContains hReservedTail hTail
                       (compileFuel := compileFuel)
               | inl yulPrim =>
                   cases names with
@@ -194514,8 +195764,8 @@ theorem checkedSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontie
                   (rest := rest) (allowed := allowed)
                   (canBreak := canBreak) (canContinue := canContinue)
                   (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                  hStmtOk hSourceScoped hTailScoped hAllowed hSupported
-                  hScopeContains hReservedTail hTail
+                  hStmtOk (by cases names <;> simp) hSourceScoped hTailScoped
+                  hAllowed hSupported hScopeContains hReservedTail hTail
                   (compileFuel := compileFuel)
           | inl yulPrim =>
               cases names with
@@ -197997,6 +199247,8 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_as
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Assign names (.Call (.inr functionName) args)))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Assign names (.Call (.inr functionName) args)))
@@ -198123,7 +199375,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_as
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -198405,6 +199657,8 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_le
     (hStmtOk :
       UserCallArity.StmtOk yulProgram.contract
         (.Let names (some (.Call (.inr functionName) args))))
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hSourceScoped :
       SourceLexical.StmtScoped layout
         (.Let names (some (.Call (.inr functionName) args))))
@@ -198548,7 +199802,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_le
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     simp only [List.mem_append, List.mem_reverse] at hMem
@@ -198595,7 +199849,7 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_le
                           (state' := stateHead)
                           (names := names) (functionName := functionName)
                           (args := args) (lowerHead := lowerHead)
-                          hNameOk hLower with
+                          hNames hNameOk hLower with
                       ⟨pre, lowerArgs, hArgLower, hLowerHead⟩
                     subst lowerHead
                     have hArgBundle :
@@ -199248,8 +200502,8 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
                       (args := args) (rest := rest) (allowed := allowed)
                       (canBreak := canBreak) (canContinue := canContinue)
                       (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                      hStmtOk hSourceScoped hReservedHead hAllowed
-                      hSupported hScopeContains
+                      hStmtOk (by cases names <;> simp) hSourceScoped
+                      hReservedHead hAllowed hSupported hScopeContains
                       (by
                         intro compileFuel ctxMid hScopeMid hSupportedMid
                         exact
@@ -199494,7 +200748,8 @@ theorem checkedSeqKontSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_of
                   (rest := rest) (allowed := allowed)
                   (canBreak := canBreak) (canContinue := canContinue)
                   (canLeave := canLeave) hRecursive hFuel hSafe hScoped
-                  hStmtOk hSourceScoped hAllowed hSupported hScopeContains
+                  hStmtOk (by cases names <;> simp) hSourceScoped hAllowed
+                  hSupported hScopeContains
                   (by
                     intro compileFuel ctxMid hScopeMid hSupportedMid
                     exact

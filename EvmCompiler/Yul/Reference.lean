@@ -2505,21 +2505,41 @@ theorem objectBuiltin_toFunctionsListFuel?_let_user_call_eq
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? fuel.succ state
         (.Let names (some (.Call (.inr functionName) args))) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
-          some
-            (Stmt.initNames lowerNames ++ preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some
+              (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+                state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
+          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
+            state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (Stmt.initNames lowerNames ++ preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -2535,21 +2555,41 @@ theorem objectBuiltin_toFunctionsListFuel?_assign_user_call_eq
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? fuel.succ state
         (.Assign names (.Call (.inr functionName) args)) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+              state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
           some
-            (preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
+              state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -2665,40 +2705,88 @@ mutual
                             | cons next rest =>
                                 simp [Stmt.toFunctionsListFuel?] at hLower
                     | inr functionName =>
-                        rw [objectBuiltin_toFunctionsListFuel?_let_user_call_eq]
-                          at hLower
-                        cases hUnsupported :
-                            ObjectBuiltin.unsupported? functionName with
-                        | true =>
-                            simp [hUnsupported] at hLower
-                        | false =>
-                            cases hDirect :
-                                Expr.List.directCallArgsSafe? args with
-                            | false =>
-                                cases hArgs :
-                                    Expr.List.lowerBound1? state args with
-                                | none =>
-                                    simp [hUnsupported, hDirect, hArgs]
-                                      at hLower
-                                | some argResult =>
-                                    exact
-                                      ⟨by
-                                          simpa [objectBuiltinUserCall]
-                                            using hUnsupported,
-                                        objectBuiltinExprs_of_lowerBound1?_some
-                                          hArgs⟩
+                        cases names with
+                        | nil =>
+                            rw [objectBuiltin_toFunctionsListFuel?_let_user_call_eq]
+                              at hLower
+                            cases hUnsupported :
+                                ObjectBuiltin.unsupported? functionName with
                             | true =>
-                                cases hArgs : Expr.List.toLocals1? args with
+                                simp [hUnsupported] at hLower
+                            | false =>
+                                cases hDirect :
+                                    Expr.List.directCallArgsSafe? args with
+                                | false =>
+                                    cases hArgs :
+                                        Expr.List.lowerBound1? state args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some argResult =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_lowerBound1?_some
+                                              hArgs⟩
+                                | true =>
+                                    cases hArgs : Expr.List.toLocals1? args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some lowerArgs =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_toLocals1?_some
+                                              hArgs⟩
+                        | cons name rest =>
+                            cases rest with
+                            | nil =>
+                                cases hValue :
+                                    Expr.lower1? state
+                                      (.Call (.inr functionName) args) with
                                 | none =>
-                                    simp [hUnsupported, hDirect, hArgs]
+                                    simp [Stmt.toFunctionsListFuel?, hValue]
                                       at hLower
-                                | some lowerArgs =>
-                                    exact
-                                      ⟨by
-                                          simpa [objectBuiltinUserCall]
-                                            using hUnsupported,
-                                        objectBuiltinExprs_of_toLocals1?_some
-                                          hArgs⟩
+                                | some valueResult =>
+                                    exact objectBuiltinExpr_of_lower1?_some hValue
+                            | cons next rest =>
+                                rw [objectBuiltin_toFunctionsListFuel?_let_user_call_eq]
+                                  at hLower
+                                cases hUnsupported :
+                                    ObjectBuiltin.unsupported? functionName with
+                                | true =>
+                                    simp [hUnsupported] at hLower
+                                | false =>
+                                    cases hDirect :
+                                        Expr.List.directCallArgsSafe? args with
+                                    | false =>
+                                        cases hArgs :
+                                            Expr.List.lowerBound1? state args with
+                                        | none =>
+                                            simp [hUnsupported, hDirect, hArgs]
+                                              at hLower
+                                        | some argResult =>
+                                            exact
+                                              ⟨by
+                                                  simpa [objectBuiltinUserCall]
+                                                    using hUnsupported,
+                                                objectBuiltinExprs_of_lowerBound1?_some
+                                                  hArgs⟩
+                                    | true =>
+                                        cases hArgs : Expr.List.toLocals1? args with
+                                        | none =>
+                                            simp [hUnsupported, hDirect, hArgs]
+                                              at hLower
+                                        | some lowerArgs =>
+                                            exact
+                                              ⟨by
+                                                  simpa [objectBuiltinUserCall]
+                                                    using hUnsupported,
+                                                objectBuiltinExprs_of_toLocals1?_some
+                                                  hArgs⟩
         | Assign names value =>
             cases value with
             | Lit value =>
@@ -2748,37 +2836,84 @@ mutual
                         | cons next rest =>
                             simp [Stmt.toFunctionsListFuel?] at hLower
                 | inr functionName =>
-                    rw [objectBuiltin_toFunctionsListFuel?_assign_user_call_eq]
-                      at hLower
-                    cases hUnsupported :
-                        ObjectBuiltin.unsupported? functionName with
-                    | true =>
-                        simp [hUnsupported] at hLower
-                    | false =>
-                        cases hDirect : Expr.List.directCallArgsSafe? args with
-                        | false =>
-                            cases hArgs :
-                                Expr.List.lowerBound1? state args with
-                            | none =>
-                                simp [hUnsupported, hDirect, hArgs] at hLower
-                            | some argResult =>
-                                exact
-                                  ⟨by
-                                      simpa [objectBuiltinUserCall]
-                                        using hUnsupported,
-                                    objectBuiltinExprs_of_lowerBound1?_some
-                                      hArgs⟩
+                    cases names with
+                    | nil =>
+                        rw [objectBuiltin_toFunctionsListFuel?_assign_user_call_eq]
+                          at hLower
+                        cases hUnsupported :
+                            ObjectBuiltin.unsupported? functionName with
                         | true =>
-                            cases hArgs : Expr.List.toLocals1? args with
+                            simp [hUnsupported] at hLower
+                        | false =>
+                            cases hDirect : Expr.List.directCallArgsSafe? args with
+                            | false =>
+                                cases hArgs :
+                                    Expr.List.lowerBound1? state args with
+                                | none =>
+                                    simp [hUnsupported, hDirect, hArgs] at hLower
+                                | some argResult =>
+                                    exact
+                                      ⟨by
+                                          simpa [objectBuiltinUserCall]
+                                            using hUnsupported,
+                                        objectBuiltinExprs_of_lowerBound1?_some
+                                          hArgs⟩
+                            | true =>
+                                cases hArgs : Expr.List.toLocals1? args with
+                                | none =>
+                                    simp [hUnsupported, hDirect, hArgs] at hLower
+                                | some lowerArgs =>
+                                    exact
+                                      ⟨by
+                                          simpa [objectBuiltinUserCall]
+                                            using hUnsupported,
+                                        objectBuiltinExprs_of_toLocals1?_some
+                                          hArgs⟩
+                    | cons name rest =>
+                        cases rest with
+                        | nil =>
+                            cases hValue :
+                                Expr.lower1? state
+                                  (.Call (.inr functionName) args) with
                             | none =>
-                                simp [hUnsupported, hDirect, hArgs] at hLower
-                            | some lowerArgs =>
-                                exact
-                                  ⟨by
-                                      simpa [objectBuiltinUserCall]
-                                        using hUnsupported,
-                                    objectBuiltinExprs_of_toLocals1?_some
-                                      hArgs⟩
+                                simp [Stmt.toFunctionsListFuel?, hValue] at hLower
+                            | some valueResult =>
+                                exact objectBuiltinExpr_of_lower1?_some hValue
+                        | cons next rest =>
+                            rw [objectBuiltin_toFunctionsListFuel?_assign_user_call_eq]
+                              at hLower
+                            cases hUnsupported :
+                                ObjectBuiltin.unsupported? functionName with
+                            | true =>
+                                simp [hUnsupported] at hLower
+                            | false =>
+                                cases hDirect :
+                                    Expr.List.directCallArgsSafe? args with
+                                | false =>
+                                    cases hArgs :
+                                        Expr.List.lowerBound1? state args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some argResult =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_lowerBound1?_some
+                                              hArgs⟩
+                                | true =>
+                                    cases hArgs : Expr.List.toLocals1? args with
+                                    | none =>
+                                        simp [hUnsupported, hDirect, hArgs]
+                                          at hLower
+                                    | some lowerArgs =>
+                                        exact
+                                          ⟨by
+                                              simpa [objectBuiltinUserCall]
+                                                using hUnsupported,
+                                            objectBuiltinExprs_of_toLocals1?_some
+                                              hArgs⟩
         | ExprStmtCall value =>
             cases value with
             | Lit value =>
@@ -26820,21 +26955,41 @@ theorem toFunctionsListFuel?_let_user_call_eq
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? 2 state
         (.Let names (some (.Call (.inr functionName) args))) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
-          some
-            (Stmt.initNames lowerNames ++ preArgs ++
-              [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some
+              (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+                state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
+          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
+            state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (Stmt.initNames lowerNames ++ preArgs ++
+                  [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -26850,6 +27005,8 @@ theorem toFunctionsListFuel?_let_user_call_components
     {names : List EvmYul.Identifier} {functionName : Name}
     {args : List AstExpr}
     {lowerHead : List Functions.Stmt}
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hLower :
       Stmt.toFunctionsListFuel? 2 state
@@ -26866,32 +27023,34 @@ theorem toFunctionsListFuel?_let_user_call_components
       lowerHead =
         Stmt.initNames (identNames names) ++ pre ++
           [Functions.Stmt.call (identNames names) functionName lowerArgs] := by
-  rw [toFunctionsListFuel?_let_user_call_eq] at hLower
-  simp [hName] at hLower
-  cases hSafe : Expr.List.directCallArgsSafe? args with
-  | false =>
-      cases hArgs : Expr.List.lowerBound1? state args with
-      | none =>
-          simp [hSafe, hArgs] at hLower
-      | some lowered =>
-          rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
-          simp [hSafe, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨pre, lowerArgs, ?_, ?_⟩
-          · exact Or.inr ⟨rfl, rfl⟩
-          · simpa [List.append_assoc] using hHead.symm
-  | true =>
-      cases hArgs : Expr.List.toLocals1? args with
-      | none =>
-          simp [hSafe, hArgs] at hLower
-      | some lowerArgs =>
-          simp [hSafe, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨[], lowerArgs, ?_, ?_⟩
-          · exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
-          · simpa only [List.append_nil, List.append_assoc] using hHead.symm
+  rcases hNames with hNil | ⟨name, next, rest, hCons⟩ <;> subst names
+  all_goals
+    rw [toFunctionsListFuel?_let_user_call_eq] at hLower
+    simp [hName] at hLower
+    cases hSafe : Expr.List.directCallArgsSafe? args with
+    | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+            simp [hSafe, hArgs] at hLower
+        | some lowered =>
+            rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
+            simp [hSafe, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨pre, lowerArgs, ?_, ?_⟩
+            · exact Or.inr ⟨rfl, rfl⟩
+            · simpa [List.append_assoc] using hHead.symm
+    | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+            simp [hSafe, hArgs] at hLower
+        | some lowerArgs =>
+            simp [hSafe, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨[], lowerArgs, ?_, ?_⟩
+            · exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
+            · simpa only [List.append_nil, List.append_assoc] using hHead.symm
 
 theorem toFunctionsListFuel?_let_none_single
     (fuel : Nat) (state : Fresh.State) (name : EvmYul.Identifier) :
@@ -27048,20 +27207,40 @@ theorem toFunctionsListFuel?_assign_user_call_eq
     (functionName : Name) (args : List AstExpr) :
     Stmt.toFunctionsListFuel? 2 state
         (.Assign names (.Call (.inr functionName) args)) =
-      (if ObjectBuiltin.unsupported? functionName then
-        none
-      else
-        let lowerNames := identNames names
-        (do
-          let (preArgs, lowerArgs, state') ←
-            if Expr.List.directCallArgsSafe? args then do
-              let lowerArgs ← Expr.List.toLocals1? args
-              some ([], lowerArgs, state)
-            else
-              Expr.List.lowerBound1? state args
+      match names with
+      | [] =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else do
+            let (preArgs, lowerArgs, state') ←
+              if Expr.List.directCallArgsSafe? args then do
+                let lowerArgs ← Expr.List.toLocals1? args
+                some ([], lowerArgs, state)
+              else
+                Expr.List.lowerBound1? state args
+            some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
+              state')
+      | [name] => do
+          let (preValue, lowerValue, state') ←
+            Expr.lower1? state (.Call (.inr functionName) args)
           some
-            (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
-              state'))) := by
+            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
+              state')
+      | name :: next :: rest =>
+          if ObjectBuiltin.unsupported? functionName then
+            none
+          else
+            let lowerNames := identNames (name :: next :: rest)
+            (do
+              let (preArgs, lowerArgs, state') ←
+                if Expr.List.directCallArgsSafe? args then do
+                  let lowerArgs ← Expr.List.toLocals1? args
+                  some ([], lowerArgs, state)
+                else
+                  Expr.List.lowerBound1? state args
+              some
+                (preArgs ++ [Functions.Stmt.call lowerNames functionName lowerArgs],
+                  state')) := by
   cases names with
   | nil =>
       simp [Stmt.toFunctionsListFuel?]
@@ -27077,6 +27256,8 @@ theorem toFunctionsListFuel?_assign_user_call_components
     {names : List EvmYul.Identifier} {functionName : Name}
     {args : List AstExpr}
     {lowerHead : List Functions.Stmt}
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
     (hName : ObjectBuiltin.unsupported? functionName = false)
     (hLower :
       Stmt.toFunctionsListFuel? 2 state
@@ -27092,30 +27273,32 @@ theorem toFunctionsListFuel?_assign_user_call_components
             some (pre, lowerArgs, state'))) ∧
       lowerHead =
         pre ++ [Functions.Stmt.call (identNames names) functionName lowerArgs] := by
-  rw [toFunctionsListFuel?_assign_user_call_eq] at hLower
-  simp [hName] at hLower
-  cases hSafe : Expr.List.directCallArgsSafe? args with
-  | false =>
-      cases hArgs : Expr.List.lowerBound1? state args with
-      | none =>
-          simp [hSafe, hArgs] at hLower
-      | some lowered =>
-          rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
-          simp [hSafe, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨pre, lowerArgs, ?_, hHead.symm⟩
-          exact Or.inr ⟨rfl, rfl⟩
-  | true =>
-      cases hArgs : Expr.List.toLocals1? args with
-      | none =>
-          simp [hSafe, hArgs] at hLower
-      | some lowerArgs =>
-          simp [hSafe, hArgs] at hLower
-          rcases hLower with ⟨hHead, hState⟩
-          cases hState
-          refine ⟨[], lowerArgs, ?_, hHead.symm⟩
-          exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
+  rcases hNames with hNil | ⟨name, next, rest, hCons⟩ <;> subst names
+  all_goals
+    rw [toFunctionsListFuel?_assign_user_call_eq] at hLower
+    simp [hName] at hLower
+    cases hSafe : Expr.List.directCallArgsSafe? args with
+    | false =>
+        cases hArgs : Expr.List.lowerBound1? state args with
+        | none =>
+            simp [hSafe, hArgs] at hLower
+        | some lowered =>
+            rcases lowered with ⟨pre, lowerArgs, stateAfterArgs⟩
+            simp [hSafe, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨pre, lowerArgs, ?_, hHead.symm⟩
+            exact Or.inr ⟨rfl, rfl⟩
+    | true =>
+        cases hArgs : Expr.List.toLocals1? args with
+        | none =>
+            simp [hSafe, hArgs] at hLower
+        | some lowerArgs =>
+            simp [hSafe, hArgs] at hLower
+            rcases hLower with ⟨hHead, hState⟩
+            cases hState
+            refine ⟨[], lowerArgs, ?_, hHead.symm⟩
+            exact Or.inl ⟨rfl, rfl, rfl, rfl⟩
 
 theorem toFunctionsListFuel?_expr_prim_components
     {fuel : Nat} {state state' : Fresh.State}
