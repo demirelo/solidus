@@ -52783,6 +52783,50 @@ def SourceOpenResultSeqDoneRel (cfg : StateRelConfig)
               sourceResult sourceOutcome
         | .error _ => False
 
+/--
+A stopped raw generated expression closes the enclosing sequence relation.
+
+Raw expression soundness already rules out leaked `break`, `continue`, and
+`leave`.  The remaining stopped branches are the two honest source terminal
+errors, translated into the existing sequence-level outcome relation without
+collapsing `Revert` into generic halt.
+-/
+theorem sourceOpenResultSeqDoneRel_of_exprRaw_stopped
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {sourceDone : Except Exception (State × List Word)}
+    {target : Objects.Source.Outcome × Functions.Source.Ctx}
+    (hDone :
+      SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        sourceDone (.ok (.stopped target))) :
+    SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel allowed
+      (match sourceDone with
+      | .ok sourceResult => .ok sourceResult.1
+      | .error err => .error err)
+      (.ok target) := by
+  intro hAllowed
+  rcases target with ⟨targetOutcome, targetCtx⟩
+  cases sourceDone with
+  | ok sourceResult =>
+      cases hDone
+  | error err =>
+      cases err <;> try { cases hDone }
+      · rename_i source
+        cases targetOutcome with
+        | mk targetState mode =>
+            cases mode <;> try { cases hDone }
+            rename_i kind
+            cases kind <;> try { cases hDone }
+            exact SourceResultOutcomeRel.revert hDone
+      · rename_i source value
+        cases targetOutcome with
+        | mk targetState mode =>
+            cases mode <;> try { cases hDone }
+            exact SourceResultOutcomeRel.yulHalt hDone
+
 abbrev SourceOpenSeqCallResponseRel : Type :=
   OpenExternal.OpenCall (OpenExternal.OpenResult Exception State) →
     OpenExternal.OpenCall
@@ -56766,6 +56810,313 @@ def AssignSoundAtExactHiddenCtx
         (runAssignSource exprFuel name sourceExpr rest codeOverride source)
         (runAssignTarget prim program ctx pre (identName name) lowerExpr
           lowerTail.stmts tailFuel compiler)
+
+/--
+Terminal-aware declaration composition for arbitrary generated expressions.
+
+The raw expression theorem is the compositional boundary: successful singleton
+values populate the declared local and enter the tail, while stopped generated
+preludes close the sequence relation immediately through their preserved
+terminal outcome.
+-/
+theorem letSoundAtExactHiddenCtx_of_expr_raw
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hFresh : identName name ∉ layout)
+    (hExpr :
+      SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx exprFuel sourceExpr codeOverride pre
+        lowerExpr (pre.length + tailFuel.succ) exprCallResponseRel)
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg (identName name :: layout)
+          outcomeLayout terminalRel revertRel prim program
+          { ctxAfter with scope := identName name :: ctxAfter.scope }
+          exprFuel.succ rest codeOverride lowerTail tailFuel allowed
+          seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq exprFuel.succ rest
+                          codeOverride sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (runLetTargetAfterRaw prim program (identName name)
+                  lowerTail.stmts tailFuel) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    LetSoundAtExactHiddenCtx cfg layout outcomeLayout terminalRel revertRel
+      prim program ctx exprFuel name sourceExpr rest codeOverride pre
+      lowerExpr lowerTail tailFuel allowed seqCallResponseRel := by
+  intro source compiler hInitial
+  unfold runLetSource
+  rw [runLetTarget_eq_bind_runRaw
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := lowerTail.stmts) (name := identName name)
+    (lowerExpr := lowerExpr) (tailFuel := tailFuel) (compiler := compiler)]
+  have hExprRel :=
+    hExpr (source := source) (compiler := compiler)
+      (SourceStateExactRel.toRel hInitial)
+  have hInv :=
+    hExprDone (source := source) (compiler := compiler) hInitial
+  refine
+    OpenResultDoneInvariant.bind_left
+      (callResponseRel := exprCallResponseRel)
+      (doneRel :=
+        SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (callResponseRel' := seqCallResponseRel)
+      (doneRel' :=
+        SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+          allowed)
+      hExprRel hInv ?_ ?_
+  · intro sourceDone targetDone hDone hDoneInv
+    cases targetDone with
+    | error targetErr =>
+        cases sourceDone <;>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDone
+    | ok rawTarget =>
+        cases sourceDone with
+        | error sourceErr =>
+            cases rawTarget with
+            | values target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hDone
+            | stopped target =>
+                exact
+                  OpenExternal.OpenResultRel.done (by
+                    simpa [runLetTargetAfterRaw,
+                      OpenExternal.OpenResult.bind] using
+                      (sourceOpenResultSeqDoneRel_of_exprRaw_stopped
+                        (cfg := cfg) (layout := layout)
+                        (outcomeLayout := outcomeLayout)
+                        (terminalRel := terminalRel) (revertRel := revertRel)
+                        (allowed := allowed) hDone))
+        | ok sourceResult =>
+            rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+            cases rawTarget with
+            | stopped target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hDone
+            | values target =>
+                rcases hDoneInv rfl with
+                  ⟨hDomainAfterState, value, hValues⟩
+                subst sourceValues
+                rcases hDone with ⟨hRelAfter, hTargetValues⟩
+                cases hRelAfter with
+                | @ok sharedAfter storeAfter targetState hSharedAfter
+                    hVarsAfter =>
+                    have hDomainAfter :
+                        StoreDomainExact layout storeAfter := by
+                      simpa [StateStoreDomainExact] using hDomainAfterState
+                    have hTargetValuesEq : target.values = [value] := by
+                      simpa using hTargetValues.symm
+                    have hFilledExact :
+                        SourceStateExactRel cfg (identName name :: layout)
+                          (EvmYul.Yul.State.multifill [name] [value]
+                            (.Ok sharedAfter storeAfter : State))
+                          (target.state.insert (identName name) value) := by
+                      simp [EvmYul.Yul.State.multifill,
+                        EvmYul.Yul.State.insert, identName]
+                      exact
+                        SourceStateExactRel.ok hSharedAfter
+                          (sourceStoreRel_cons_insert hVarsAfter hFresh)
+                          (StoreDomainExact.insert hDomainAfter)
+                    cases lowerTail with
+                    | mk lowerTailStmts =>
+                        have hTailRel :=
+                          hTail (ctxAfter := target.ctx) hFilledExact
+                        simpa [EvmYul.Yul.State.multifill, identName,
+                          hTargetValuesEq, runLetTargetAfterRaw,
+                          OpenExternal.OpenResult.bind] using hTailRel
+  · intro sourceCall targetCall response hResponse
+    exact hCallResponse hResponse
+
+/--
+Terminal-aware assignment composition for arbitrary generated expressions.
+
+The raw expression theorem handles suspending and stopped generated preludes.
+Only successful singleton values update the existing visible local and enter
+the tail.
+-/
+theorem assignSoundAtExactHiddenCtx_of_expr_raw
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {exprFuel : Nat} {name : EvmYul.Identifier}
+    {sourceExpr : AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {lowerTail : Functions.Block} {tailFuel : Nat}
+    {allowed : Except Exception State → Prop}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    {seqCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hTargetMem : identName name ∈ layout)
+    (hExpr :
+      SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx exprFuel sourceExpr codeOverride pre
+        lowerExpr (pre.length + tailFuel.succ) exprCallResponseRel)
+    (hExprDone :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  StateStoreDomainExact layout sourceAfter ∧
+                    ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues exprFuel sourceExpr
+                codeOverride source)))
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter exprFuel.succ rest
+          codeOverride lowerTail tailFuel allowed seqCallResponseRel)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        seqCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceResult =>
+                  let sourceAfter :=
+                    EvmYul.Yul.State.multifill [name] sourceResult.2
+                      sourceResult.1
+                  match sourceAfter with
+                  | .Ok _ _ =>
+                      OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.execSeq exprFuel.succ rest
+                          codeOverride sourceAfter)
+                  | .OutOfFuel => .done (.ok sourceAfter)
+                  | .Checkpoint _ => .done (.ok sourceAfter)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (runAssignTargetAfterRaw prim program (identName name)
+                  lowerTail.stmts tailFuel) }
+          response →
+        exprCallResponseRel sourceCall targetCall response) :
+    AssignSoundAtExactHiddenCtx cfg layout outcomeLayout terminalRel revertRel
+      prim program ctx exprFuel name sourceExpr rest codeOverride pre
+      lowerExpr lowerTail tailFuel allowed seqCallResponseRel := by
+  intro source compiler hInitial
+  unfold runAssignSource
+  rw [runAssignTarget_eq_bind_runRaw
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := pre) (tail := lowerTail.stmts) (name := identName name)
+    (lowerExpr := lowerExpr) (tailFuel := tailFuel) (compiler := compiler)]
+  have hExprRel :=
+    hExpr (source := source) (compiler := compiler)
+      (SourceStateExactRel.toRel hInitial)
+  have hInv :=
+    hExprDone (source := source) (compiler := compiler) hInitial
+  refine
+    OpenResultDoneInvariant.bind_left
+      (callResponseRel := exprCallResponseRel)
+      (doneRel :=
+        SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (callResponseRel' := seqCallResponseRel)
+      (doneRel' :=
+        SourceOpenResultSeqDoneRel cfg outcomeLayout terminalRel revertRel
+          allowed)
+      hExprRel hInv ?_ ?_
+  · intro sourceDone targetDone hDone hDoneInv
+    cases targetDone with
+    | error targetErr =>
+        cases sourceDone <;>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDone
+    | ok rawTarget =>
+        cases sourceDone with
+        | error sourceErr =>
+            cases rawTarget with
+            | values target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hDone
+            | stopped target =>
+                exact
+                  OpenExternal.OpenResultRel.done (by
+                    simpa [runAssignTargetAfterRaw,
+                      OpenExternal.OpenResult.bind] using
+                      (sourceOpenResultSeqDoneRel_of_exprRaw_stopped
+                        (cfg := cfg) (layout := layout)
+                        (outcomeLayout := outcomeLayout)
+                        (terminalRel := terminalRel) (revertRel := revertRel)
+                        (allowed := allowed) hDone))
+        | ok sourceResult =>
+            rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+            cases rawTarget with
+            | stopped target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hDone
+            | values target =>
+                rcases hDoneInv rfl with
+                  ⟨hDomainAfterState, value, hValues⟩
+                subst sourceValues
+                rcases hDone with ⟨hRelAfter, hTargetValues⟩
+                cases hRelAfter with
+                | @ok sharedAfter storeAfter targetState hSharedAfter
+                    hVarsAfter =>
+                    have hDomainAfter :
+                        StoreDomainExact layout storeAfter := by
+                      simpa [StateStoreDomainExact] using hDomainAfterState
+                    have hTargetValuesEq : target.values = [value] := by
+                      simpa using hTargetValues.symm
+                    have hFilledExact :
+                        SourceStateExactRel cfg layout
+                          (EvmYul.Yul.State.multifill [name] [value]
+                            (.Ok sharedAfter storeAfter : State))
+                          (target.state.insert (identName name) value) := by
+                      simp [EvmYul.Yul.State.multifill,
+                        EvmYul.Yul.State.insert, identName]
+                      exact
+                        SourceStateExactRel.ok hSharedAfter
+                          (sourceStoreRel_insert_visible hVarsAfter)
+                          (StoreDomainExact.insert_mem hDomainAfter hTargetMem)
+                    cases lowerTail with
+                    | mk lowerTailStmts =>
+                        have hTailRel :=
+                          hTail (ctxAfter := target.ctx) hFilledExact
+                        simpa [EvmYul.Yul.State.multifill, identName,
+                          hTargetValuesEq, runAssignTargetAfterRaw,
+                          OpenExternal.OpenResult.bind] using hTailRel
+  · intro sourceCall targetCall response hResponse
+    exact hCallResponse hResponse
 
 theorem runLetTarget_eq_exprPrelude_run_of_generated
     {prim : Objects.Source.PrimitiveSemantics}

@@ -530,6 +530,10 @@ Remaining work:
      stopped preludes retain their full target outcome/context, append
      propagation is explicit, and generic let/assign consumers continue only
      from successful singleton values.
+   - [x] Feed terminal-aware raw generated expressions into generic
+     declaration and assignment sequence consumers: successful singleton
+     values enter the tail, while preserved halt/revert outcomes close the
+     enclosing sequence without direct let-CALL or assign-CALL cases.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using
