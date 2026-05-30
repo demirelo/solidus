@@ -112405,6 +112405,203 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
                       cases hTailRaw
 
 /--
+Compose one selected terminal-aware generated argument head after an already
+completed regular tail prefix.
+
+The generated temporary insertion and replay are local postprocessing, so this
+finite-path sibling preserves the head trace exactly.
+-/
+theorem sourceArgTerminalRawPreludeOpenResultPathRel_bind_generated_head
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program}
+    {lowerTail : List (Locals.Expr 1)} {lowerNames : List Name}
+    {tmp : Name} {tailFuel : Nat}
+    {sourceTailResult : State × List Word}
+    {targetTailResult :
+      Functions.Source.Outcome × Functions.Source.Ctx}
+    {sourceHead :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {targetHead : SourceExprPreludeOpen.RawResult}
+    {trace : OpenExternal.OpenTrace}
+    (hLowerTailVars :
+      lowerTail = lowerNames.map (fun name => (.var name : Locals.Expr 1)))
+    (hTmpFreshLower : tmp ∉ lowerNames)
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTailDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim lowerTail (.ok sourceTailResult) (.ok targetTailResult))
+    (hHead :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+        trace sourceHead targetHead)
+    (hHeadSingle :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter values},
+            sourceDone = .ok (sourceAfter, values) →
+              ∃ value, values = [value])
+        sourceHead)
+    (hHeadAgree :
+      OpenResultDoneInvariant
+        (fun targetDone =>
+          ∀ {target : SourceArgPreludeOpenTarget},
+            targetDone = .ok (.values target) →
+              SourceVarsAgree lowerNames targetTailResult.1.state.vars
+                target.state.vars)
+        targetHead) :
+    OpenExternal.OpenResultPathRel
+      (RelationallyAdmissibleOpenCallResponseRel cfg)
+      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim (.var tmp :: lowerTail))
+      trace
+      (OpenExternal.OpenResult.bind sourceHead
+        (sourceArgAppendHeadValues sourceTailResult.2))
+      (OpenExternal.OpenResult.bind targetHead
+        (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
+          prim program tmp [] tailFuel.succ)) := by
+  have hHeadStrong :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (fun sourceDone targetDone =>
+          SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+              sourceDone targetDone ∧
+            (∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value]) ∧
+            (∀ {target : SourceArgPreludeOpenTarget},
+              targetDone = .ok (.values target) →
+                SourceVarsAgree lowerNames targetTailResult.1.state.vars
+                  target.state.vars))
+        trace sourceHead targetHead :=
+    OpenResultDoneInvariant.strengthen_path_rel hHead hHeadSingle hHeadAgree
+      (by
+        intro sourceDone targetDone hDone hSingle hAgree
+        exact ⟨hDone, hSingle, hAgree⟩)
+  refine OpenExternal.OpenResultPathRel.bind_nil hHeadStrong ?_ ?_
+  · intro sourceDone targetDone hDone
+    rcases hDone with ⟨hRawDone, hSingleDone, hAgreeDone⟩
+    cases sourceDone with
+    | error err =>
+        cases targetDone with
+        | error targetErr =>
+            simp [SourceExprRawPreludeOpenDoneRel] at hRawDone
+        | ok target =>
+            cases target with
+            | values target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hRawDone
+            | stopped target =>
+                exact OpenExternal.OpenResultPathRel.done
+                  (sourceArgTerminalRawPreludeOpenDoneRel_of_expr_raw_stopped
+                    (prim := prim) (lowerArgs := .var tmp :: lowerTail)
+                    hRawDone)
+    | ok sourceHeadResult =>
+        cases targetDone with
+        | error targetErr =>
+            simp [SourceExprRawPreludeOpenDoneRel] at hRawDone
+        | ok target =>
+            cases target with
+            | stopped target =>
+                simp [SourceExprRawPreludeOpenDoneRel] at hRawDone
+            | values targetHeadResult =>
+                rcases sourceHeadResult with ⟨sourceAfterHead, headValues⟩
+                rcases hSingleDone rfl with ⟨headValue, hHeadValues⟩
+                subst headValues
+                rcases hRawDone with ⟨hRelHead, hTargetValues⟩
+                have hTargetValues' :
+                    targetHeadResult.values = [headValue] := by
+                  simpa using hTargetValues.symm
+                have hAgree :
+                    SourceVarsAgree lowerNames targetTailResult.1.state.vars
+                      targetHeadResult.state.vars :=
+                  hAgreeDone rfl
+                have hTailRaw :
+                    SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+                      (.ok sourceTailResult) (.ok targetTailResult) :=
+                  sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+                rcases targetTailResult with
+                  ⟨targetTailOutcome, targetTailCtx⟩
+                cases targetTailOutcome with
+                | mk targetTailState mode =>
+                    cases mode with
+                    | regular =>
+                        rcases hTailRaw with ⟨hRelTail, hTailEval⟩
+                        have hReplay :
+                            Functions.Source.ArgList.eval prim
+                                (.var tmp :: lowerTail)
+                                (targetHeadResult.state.insert tmp headValue) =
+                              .ok
+                                (targetHeadResult.state.insert tmp headValue,
+                                  headValue :: sourceTailResult.2.reverse) :=
+                          sourceArgList_eval_of_tail_varMap_head_insert
+                            (prim := prim) (lowerTail := lowerTail)
+                            (lowerNames := lowerNames) (tmp := tmp)
+                            (headValue := headValue)
+                            (state := targetTailState)
+                            (stateAfterHead := targetHeadResult.state)
+                            (tailValues := sourceTailResult.2.reverse)
+                            hLowerTailVars hTailEval
+                            (by simpa using hAgree) hTmpFreshLower
+                        have hDoneFinal :
+                            SourceArgTerminalRawPreludeOpenDoneRel cfg layout
+                              terminalRel revertRel prim
+                              (.var tmp :: lowerTail)
+                              (.ok
+                                (sourceAfterHead,
+                                  sourceTailResult.2 ++ [headValue]))
+                              (.ok
+                                (Functions.Source.Outcome.regular
+                                  (targetHeadResult.state.insert tmp headValue),
+                                  { targetHeadResult.ctx with
+                                    scope :=
+                                      tmp :: targetHeadResult.ctx.scope })) := by
+                          refine
+                            ⟨SourceStateRel.insert_hidden hRelHead
+                                hTmpFreshLayout,
+                              ?_⟩
+                          simpa [List.reverse_append] using hReplay
+                        simpa [sourceArgAppendHeadValues, EvmYul.Yul.head',
+                          SourceExprSeqPreludeOpen.runLetTargetAfterRaw,
+                          hTargetValues',
+                          compilerOpen_block_runOpen_nil_succ,
+                          OpenExternal.OpenResult.bind,
+                          OpenExternal.OpenResult.ok] using
+                          (OpenExternal.OpenResultPathRel.done hDoneFinal :
+                            OpenExternal.OpenResultPathRel
+                              (RelationallyAdmissibleOpenCallResponseRel cfg)
+                              (SourceArgTerminalRawPreludeOpenDoneRel cfg
+                                layout terminalRel revertRel prim
+                                (.var tmp :: lowerTail))
+                              []
+                              (.done
+                                (.ok
+                                  (sourceAfterHead,
+                                    sourceTailResult.2 ++ [headValue])))
+                              (.done
+                                (.ok
+                                  (Functions.Source.Outcome.regular
+                                    (targetHeadResult.state.insert tmp
+                                      headValue),
+                                    { targetHeadResult.ctx with
+                                      scope :=
+                                        tmp ::
+                                          targetHeadResult.ctx.scope }))))
+                    | brk =>
+                        cases hTailRaw
+                    | cont =>
+                        cases hTailRaw
+                    | leave =>
+                        cases hTailRaw
+                    | halt kind =>
+                        cases hTailRaw
+  · intro sourceCall targetCall response hResponse
+    exact hResponse
+
+/--
 Terminal-aware raw reverse-cons argument composition.
 
 Imported Yul evaluates the tail arguments first and then the head expression in
