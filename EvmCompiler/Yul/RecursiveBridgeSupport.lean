@@ -13710,6 +13710,15 @@ def StateStoreContains (layout : List Name) : State → Prop
   | .Checkpoint (.Leave _shared store) => StoreDomainContains layout store
   | .OutOfFuel => True
 
+theorem SourceStateExactRel.stateStoreContains
+    {cfg : StateRelConfig} {layout : List Name}
+    {source : State} {compiler : Objects.Source.State}
+    (hRel : SourceStateExactRel cfg layout source compiler) :
+    StateStoreContains layout source := by
+  cases hRel with
+  | ok _hShared _hVars hDomain =>
+      simpa [StateStoreContains] using StoreDomainContains.of_exact hDomain
+
 theorem StateStoreDomainExact.insert_mem
     {layout : List Name} {state : State}
     {name : EvmYul.Identifier} {value : Word}
@@ -35680,6 +35689,7 @@ def SourceExprRawPreludeOpenSoundAtExactTarget
     (callResponseRel : SourceExprRawPreludeOpenCallResponseRel) : Prop :=
   ∀ {source compiler},
     SourceStateRel cfg layout source compiler →
+      StateStoreContains layout source →
       OpenExternal.OpenResultRel callResponseRel
         (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
         (OpenExternal.YulOpenResult.toOpenResult
@@ -35825,6 +35835,7 @@ def SourceArgRawPreludeOpenSoundAtExactTarget
     (callResponseRel : SourceArgRawPreludeOpenCallResponseRel) : Prop :=
   ∀ {source compiler},
     SourceStateRel cfg layout source compiler →
+      StateStoreContains layout source →
       OpenExternal.OpenResultRel callResponseRel
         (SourceArgRawPreludeOpenDoneRel cfg layout prim lowerArgs)
         (OpenExternal.YulOpenResult.toOpenResult
@@ -35847,6 +35858,7 @@ def SourceArgTerminalRawPreludeOpenSoundAtExactTarget
     (callResponseRel : SourceArgRawPreludeOpenCallResponseRel) : Prop :=
   ∀ {source compiler},
     SourceStateRel cfg layout source compiler →
+      StateStoreContains layout source →
       OpenExternal.OpenResultRel callResponseRel
         (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
           prim lowerArgs)
@@ -36005,8 +36017,10 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_raw
     SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
       revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
       targetFuel callResponseRel := by
-  intro source compiler hInitial
-  exact sourceArgTerminalRawPreludeOpenResultRel_of_raw (hRaw hInitial)
+  intro source compiler hInitial hContains
+  exact
+    sourceArgTerminalRawPreludeOpenResultRel_of_raw
+      (hRaw hInitial hContains)
 
 /--
 Terminal-aware raw base case for recursive generated argument lowering.
@@ -36028,7 +36042,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
     SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
       revertRel prim program ctx sourceFuel.succ ([] : List AstExpr)
       codeOverride [] [] targetFuel.succ callResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial _hContains
   have hSource :
       OpenExternal.YulOpenResult.toOpenResult
           (OpenExternal.YulOpen.evalArgs sourceFuel.succ
@@ -36079,14 +36093,14 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
   subst pre
   subst lowerArgs
   subst stateFresh
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   simpa using
     (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
       (revertRel := revertRel) (prim := prim) (program := program)
       (ctx := ctx) (sourceFuel := sourceFuel) (targetFuel := targetTailFuel)
       (codeOverride := codeOverride) (callResponseRel := callResponseRel)
-      (source := source) (compiler := compiler) hInitial)
+      (source := source) (compiler := compiler) hInitial hContains)
 
 /--
 Checked direct-fast-path base case for terminal-aware raw argument preludes.
@@ -58543,6 +58557,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
         Fresh.fresh? stateArgs = some (tmp, freshState') →
       ∀ {source compiler},
         SourceStateRel cfg layout source compiler →
+          StateStoreContains layout source →
           OpenExternal.OpenResultRel argCallResponseRel
             (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
               revertRel prim lowerArgs)
@@ -58611,7 +58626,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
       prim program ctx sourceFuel.succ (.Call (.inr functionName) args)
       (some contract) pre lowerExpr (pre.length + tailFuel.succ)
       exprCallResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   rcases
       sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
         (prim := prim) (program := program) (ctx := ctx)
@@ -58640,7 +58655,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
       (targetRegular :=
         compilerOpenUserCallRawAfterRegularArgs prim program fn lowerArgs tmp
           tailFuel)
-      (hArgs hArgsLower hFresh hInitial)
+      (hArgs hArgsLower hFresh hInitial hContains)
       (by
         intro sourceArgsResult targetArgsResult hDone
         exact hRegular hArgsLower hFresh hDone)
@@ -58687,6 +58702,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
         Fresh.fresh? stateArgs = some (tmp, freshState') →
       ∀ {source compiler},
         SourceStateRel cfg layout source compiler →
+          StateStoreContains layout source →
           OpenExternal.OpenResultRel
             (SourceExprRawPreludeOpenCallResponseRel.beforeUserCall prim
               program fn sourceFuel functionName contract lowerArgs tmp
@@ -58730,7 +58746,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
       prim program ctx sourceFuel.succ (.Call (.inr functionName) args)
       (some contract) pre lowerExpr (pre.length + tailFuel.succ)
       exprCallResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   rcases
       sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
         (prim := prim) (program := program) (ctx := ctx)
@@ -58762,7 +58778,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_arg_term
       (targetRegular :=
         compilerOpenUserCallRawAfterRegularArgs prim program fn lowerArgs tmp
           tailFuel)
-      (hArgs hArgsLower hFresh hInitial)
+      (hArgs hArgsLower hFresh hInitial hContains)
       (by
         intro sourceArgsResult targetArgsResult hDone
         exact hRegular hArgsLower hFresh hDone)
@@ -59319,6 +59335,7 @@ theorem letSoundAtExactHiddenCtx_of_expr_raw
   have hExprRel :=
     hExpr (source := source) (compiler := compiler)
       (SourceStateExactRel.toRel hInitial)
+      (SourceStateExactRel.stateStoreContains hInitial)
   have hInv :=
     hExprDone (source := source) (compiler := compiler) hInitial
   refine
@@ -59471,6 +59488,7 @@ theorem assignSoundAtExactHiddenCtx_of_expr_raw
   have hExprRel :=
     hExpr (source := source) (compiler := compiler)
       (SourceStateExactRel.toRel hInitial)
+      (SourceStateExactRel.stateStoreContains hInitial)
   have hInv :=
     hExprDone (source := source) (compiler := compiler) hInitial
   refine
@@ -109639,12 +109657,20 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_tail
         (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
           prim lowerTail)
         sourceTail targetTail)
+    (hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        sourceTail)
     (hRegular :
       ∀ {sourceTailResult : State × List Word}
         {targetTailResult :
           Functions.Source.Outcome × Functions.Source.Ctx},
         SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
           prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        StateStoreContains layout sourceTailResult.1 →
         OpenExternal.OpenResultRel finalCallResponseRel
           (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
             revertRel prim lowerArgs)
@@ -109676,8 +109702,23 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_tail
           | .regular => targetRegular targetTailResult
           | .brk | .cont | .leave | .halt _ =>
               OpenExternal.OpenResult.ok targetTailResult)) := by
-  refine OpenExternal.OpenResultRel.bind hTail ?_ hTailResponse
+  have hTailStrong :
+      OpenExternal.OpenResultRel tailCallResponseRel
+        (fun sourceDone targetDone =>
+          SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+              revertRel prim lowerTail sourceDone targetDone ∧
+            (∀ {sourceTailResult : State × List Word},
+              sourceDone = .ok sourceTailResult →
+                StateStoreContains layout sourceTailResult.1))
+        sourceTail targetTail :=
+    OpenResultDoneInvariant.strengthen_rel hTail hTailContains
+      (OpenResultDoneInvariant.any (fun _targetDone => True.intro) targetTail)
+      (by
+        intro sourceDone targetDone hDone hContains _hTarget
+        exact ⟨hDone, hContains⟩)
+  refine OpenExternal.OpenResultRel.bind hTailStrong ?_ hTailResponse
   intro sourceTailDone targetTailDone hDone
+  rcases hDone with ⟨hDone, hContainsDone⟩
   cases sourceTailDone with
   | error err =>
       cases targetTailDone with
@@ -109732,7 +109773,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_tail
           | mk targetTailState mode =>
               cases mode with
               | regular =>
-                  simpa using hRegular hDone
+                  simpa using hRegular hDone (hContainsDone rfl)
               | brk =>
                   cases hDone
               | cont =>
@@ -109982,12 +110023,23 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
         (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
           (preTail.length + (preHead.length + tailFuel.succ.succ))
           { stmts := preTail } compiler))
+    (hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source)))
     (hHead :
       ∀ {sourceTailResult : State × List Word}
         {targetTailResult :
           Functions.Source.Outcome × Functions.Source.Ctx},
         SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
           prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        StateStoreContains layout sourceTailResult.1 →
         OpenExternal.OpenResultRel headCallResponseRel
           (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
           (OpenExternal.YulOpenResult.toOpenResult
@@ -110082,9 +110134,9 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
       (lowerTail := lowerTail) (lowerArgs := .var tmp :: lowerTail)
       (tailCallResponseRel := tailCallResponseRel)
       (finalCallResponseRel := finalCallResponseRel)
-      hTail
+      hTail hTailContains
       (by
-        intro sourceTailResult targetTailResult hTailDone
+        intro sourceTailResult targetTailResult hTailDone hTailContains
         rw [SourceExprSeqPreludeOpen.compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
           (prim := prim) (program := program)
           (ctx := targetTailResult.2) (pre := preHead) (name := tmp)
@@ -110099,7 +110151,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult)
             hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
-            (hHead hTailDone) (hHeadSingle hTailDone)
+            (hHead hTailDone hTailContains) (hHeadSingle hTailDone)
             (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
               (names := lowerNames) (prim := prim) (program := program)
               (ctx := targetTailResult.2)
@@ -110155,12 +110207,23 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
         (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
           (preTail.length + (preHead.length + tailFuel.succ.succ))
           { stmts := preTail } compiler))
+    (hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source)))
     (hHead :
       ∀ {sourceTailResult : State × List Word}
         {targetTailResult :
           Functions.Source.Outcome × Functions.Source.Ctx},
         SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
           prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        StateStoreContains layout sourceTailResult.1 →
         OpenExternal.OpenResultRel
           (SourceArgRawPreludeOpenCallResponseRel.beforeGeneratedHead prim
             program tmp tailFuel sourceTailResult.2 finalCallResponseRel)
@@ -110214,9 +110277,9 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
           head codeOverride preHead lowerHead tmp base tailFuel
           finalCallResponseRel)
       (finalCallResponseRel := finalCallResponseRel)
-      hTail
+      hTail hTailContains
       (by
-        intro sourceTailResult targetTailResult hTailDone
+        intro sourceTailResult targetTailResult hTailDone hTailContains
         rw [SourceExprSeqPreludeOpen.compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
           (prim := prim) (program := program)
           (ctx := targetTailResult.2) (pre := preHead) (name := tmp)
@@ -110231,7 +110294,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult)
             hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
-            (hHead hTailDone) (hHeadSingle hTailDone)
+            (hHead hTailDone hTailContains) (hHeadSingle hTailDone)
             (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
               (names := lowerNames) (prim := prim) (program := program)
               (ctx := targetTailResult.2)
@@ -110281,6 +110344,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     (hHeadLower :
       Expr.lower1? stateTail head = some (preHead, lowerHead, stateHead))
     (hFresh : Fresh.fresh? stateHead = some (tmp, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
     (hTail :
       SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
         revertRel prim program ctx
@@ -110380,7 +110444,36 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     intro hMem
     exact fresh?_name_not_mem_used hFresh
       (hCoversHead tmp (hLayoutSubset tmp hMem))
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
+  have hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source)) := by
+    refine
+      OpenResultDoneInvariant.imp
+        (yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+          (layout := layout) (canBreak := false) (canContinue := false)
+          (canLeave := false)
+          (fuel := yulOpenEvalArgsAppendFuel base tail.reverse)
+          (args := tail) (codeOverride := codeOverride) (state := source)
+          hTailSafe ?_ hContains)
+        ?_
+    · cases hInitial with
+      | ok =>
+          simp [StateCheckpointAllowed]
+    · intro sourceDone hDone sourceTailResult hEq
+      cases sourceDone with
+      | error err =>
+          cases hEq
+      | ok pair =>
+          cases hEq
+          exact hDone.2
   exact
     sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -110394,9 +110487,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (finalCallResponseRel := finalCallResponseRel)
       (headCallResponseRel := headCallResponseRel)
       hLowerTailVars hHeadWrites hTmpFreshLower hTmpFreshLayout
-      (hTail hInitial)
+      (hTail hInitial hContains) hTailContains
       (by
-        intro sourceTailResult targetTailResult hTailDone
+        intro sourceTailResult targetTailResult hTailDone hTailContains
         have hTailRaw :
             SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
               (.ok sourceTailResult) (.ok targetTailResult) :=
@@ -110408,7 +110501,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
             | regular =>
                 exact
                   (hHead (ctxHead := targetTailCtx))
-                    hTailRaw.1
+                    hTailRaw.1 hTailContains
             | brk =>
                 cases hTailRaw
             | cont =>
@@ -110456,6 +110549,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     (hHeadLower :
       Expr.lower1? stateTail head = some (preHead, lowerHead, stateHead))
     (hFresh : Fresh.fresh? stateHead = some (tmp, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
     (hTail :
       SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
         revertRel prim program ctx
@@ -110517,7 +110611,36 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     intro hMem
     exact fresh?_name_not_mem_used hFresh
       (hCoversHead tmp (hLayoutSubset tmp hMem))
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
+  have hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source)) := by
+    refine
+      OpenResultDoneInvariant.imp
+        (yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+          (layout := layout) (canBreak := false) (canContinue := false)
+          (canLeave := false)
+          (fuel := yulOpenEvalArgsAppendFuel base tail.reverse)
+          (args := tail) (codeOverride := codeOverride) (state := source)
+          hTailSafe ?_ hContains)
+        ?_
+    · cases hInitial with
+      | ok =>
+          simp [StateCheckpointAllowed]
+    · intro sourceDone hDone sourceTailResult hEq
+      cases sourceDone with
+      | error err =>
+          cases hEq
+      | ok pair =>
+          cases hEq
+          exact hDone.2
   exact
     sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled_canonical
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -110529,9 +110652,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (codeOverride := codeOverride) (source := source)
       (compiler := compiler) (finalCallResponseRel := finalCallResponseRel)
       hLowerTailVars hHeadWrites hTmpFreshLower hTmpFreshLayout
-      (hTail hInitial)
+      (hTail hInitial hContains) hTailContains
       (by
-        intro sourceTailResult targetTailResult hTailDone
+        intro sourceTailResult targetTailResult hTailDone hTailContains
         have hTailRaw :
             SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
               (.ok sourceTailResult) (.ok targetTailResult) :=
@@ -110543,7 +110666,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
             | regular =>
                 exact
                   (hHead (ctxHead := targetTailCtx) hTailDone)
-                    hTailRaw.1
+                    hTailRaw.1 hTailContains
             | brk =>
                 cases hTailRaw
             | cont =>
@@ -110581,6 +110704,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     (hLower :
       Expr.List.lowerBound1? freshState (head :: tail) =
         some (pre, lowerArgs, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
     (hTail :
       ∀ {preTail lowerTail stateTail preHead lowerHead stateHead},
         Expr.List.lowerBound1? freshState tail =
@@ -110685,7 +110809,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       hTailLower, hHeadLower, hFresh, hPre, hArgs⟩
   subst pre
   subst lowerArgs
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   simpa [List.reverse_cons, List.length_append, Nat.add_assoc, Nat.add_comm,
     Nat.add_left_comm] using
     (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_components_head_expr
@@ -110701,7 +110825,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (tailCallResponseRel := tailCallResponseRel)
       (finalCallResponseRel := finalCallResponseRel)
       (headCallResponseRel := headCallResponseRel)
-      hLayoutSubset hCovers hTailLower hHeadLower hFresh
+      hLayoutSubset hCovers hTailLower hHeadLower hFresh hTailSafe
       (hTail hTailLower hHeadLower)
       (hHead hHeadLower)
       (by
@@ -110732,7 +110856,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
           hHeadResponse hTailLower hHeadLower hFresh
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult) hResponse)
-      hInitial)
+      hInitial hContains)
 
 /--
 Compiler-output wrapper for canonical terminal-aware raw reverse-cons argument
@@ -110759,6 +110883,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     (hLower :
       Expr.List.lowerBound1? freshState (head :: tail) =
         some (pre, lowerArgs, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
     (hTail :
       ∀ {preTail lowerTail stateTail preHead lowerHead stateHead tmp},
         Expr.List.lowerBound1? freshState tail =
@@ -110817,7 +110942,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       hTailLower, hHeadLower, hFresh, hPre, hArgs⟩
   subst pre
   subst lowerArgs
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   simpa [List.reverse_cons, List.length_append, Nat.add_assoc, Nat.add_comm,
     Nat.add_left_comm] using
     (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_components_head_expr_canonical
@@ -110831,7 +110956,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (tailFuel := tailFuel) (head := head) (tail := tail)
       (codeOverride := codeOverride)
       (finalCallResponseRel := finalCallResponseRel)
-      hLayoutSubset hCovers hTailLower hHeadLower hFresh
+      hLayoutSubset hCovers hTailLower hHeadLower hFresh hTailSafe
       (hTail hTailLower hHeadLower hFresh)
       (by
         intro ctxHead sourceTailResult targetTailResult hTailDone
@@ -110856,7 +110981,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
                 cases hTailRaw
             | halt kind =>
                 cases hTailRaw)
-      hInitial)
+      hInitial hContains)
 
 /--
 Structural compiler-output dispatcher for terminal-aware raw arguments with
@@ -110920,6 +111045,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
     (hMinimumTargetTailFuel : minimumTargetTailFuel ≤ targetTailFuel)
     (hReserve : sourceExprsRawPreludeBaseReserve args ≤ base)
     (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
     (hLower :
       Expr.List.lowerBound1? freshState args =
         some (pre, lowerArgs, stateFresh)) :
@@ -110930,7 +111056,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
   induction args generalizing base targetTailFuel freshState stateFresh pre
       lowerArgs ctx finalCallResponseRel with
   | nil =>
-      intro source compiler hInitial
+      intro source compiler hInitial hContains
       simpa [yulOpenEvalArgsAppendFuel] using
         (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
           (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -110941,7 +111067,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (targetTailFuel := targetTailFuel)
           (codeOverride := codeOverride)
           (callResponseRel := finalCallResponseRel) hLower
-          (source := source) (compiler := compiler) hInitial)
+          (source := source) (compiler := compiler) hInitial hContains)
   | cons head tail ih =>
       have hReserveHead :
           sourceExprRawPreludeBaseReserve head ≤ base := by
@@ -110957,7 +111083,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
             (yulOpenEvalArgsAppendFuel base.succ.succ tail.reverse)
             (head :: tail) codeOverride pre lowerArgs
             (pre.length + targetTailFuel.succ) finalCallResponseRel := by
-        intro source compiler hInitial
+        intro source compiler hInitial hContains
         exact
           sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_head_expr_canonical
             (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
@@ -110968,11 +111094,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
             (tailFuel := targetTailFuel) (head := head) (tail := tail)
             (codeOverride := codeOverride)
             (finalCallResponseRel := finalCallResponseRel)
-            hLayoutSubset hCovers hLower
+            hLayoutSubset hCovers hLower hSafe.2
             (by
               intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
                 hTailLower hHeadLower hFresh
-              intro source compiler hInitial
+              intro source compiler hInitial hContains
               simpa [Nat.add_assoc] using
                 (ih
                   (hHead := by
@@ -111001,8 +111127,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                       base.succ.succ targetTailFuel finalCallResponseRel)
                   (hFinalAdmissible :=
                     RawOpenCallResponseAdmissible.comapBind hFinalAdmissible)
-                  (by omega) hReserveTail hCovers hTailLower (source := source)
-                  (compiler := compiler) hInitial))
+                  (by omega) hReserveTail hCovers hSafe.2 hTailLower
+                  (source := source) (compiler := compiler) hInitial hContains))
             (by
               intro preTail lowerTail stateTail preHead lowerHead stateHead tmp
                 ctxHead sourceTailResult targetTailResult hTailLower hHeadLower
@@ -111022,11 +111148,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
               exact
                 hHeadSingle (base := base) (head := head) (by simp) hHeadLower
                   hInitial)
-            (source := source) (compiler := compiler) hInitial
-      intro source compiler hInitial
+            (source := source) (compiler := compiler) hInitial hContains
+      intro source compiler hInitial hContains
       simpa [List.reverse_cons,
         yulOpenEvalArgsAppendFuel_append_singleton] using
-        (hCons (source := source) (compiler := compiler) hInitial)
+        (hCons (source := source) (compiler := compiler) hInitial hContains)
 
 /--
 Checked structural compiler-output dispatcher for terminal-aware raw arguments
@@ -111100,7 +111226,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (contract := contract) (freshState := stateHeadStart)
           (freshState' := stateHead) (pre := preHead) (lower := lowerHead)
           hSafe hScoped hOk hMem hHeadLower hInitial)
-    hMinimumTargetTailFuel hReserve hCovers hLower
+    hMinimumTargetTailFuel hReserve hCovers hSafe hLower
 
 /--
 Structural compiler-output dispatcher for terminal-aware raw arguments.
@@ -111217,6 +111343,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           response →
         headCallResponseRel sourceCall targetCall response)
     (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.exprs args)
     (hLower :
       Expr.List.lowerBound1? freshState args =
         some (pre, lowerArgs, stateFresh)) :
@@ -111227,7 +111354,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
   induction args generalizing base targetTailFuel freshState stateFresh pre
       lowerArgs ctx with
   | nil =>
-      intro source compiler hInitial
+      intro source compiler hInitial hContains
       simpa [yulOpenEvalArgsAppendFuel] using
         (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil_of_lowerBound1?
           (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -111238,7 +111365,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (targetTailFuel := targetTailFuel)
           (codeOverride := codeOverride)
           (callResponseRel := argCallResponseRel) hLower
-          (source := source) (compiler := compiler) hInitial)
+          (source := source) (compiler := compiler) hInitial hContains)
   | cons head tail ih =>
       have hCons :
           SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
@@ -111246,7 +111373,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
             (yulOpenEvalArgsAppendFuel base.succ.succ tail.reverse)
             (head :: tail) codeOverride pre lowerArgs
             (pre.length + targetTailFuel.succ) argCallResponseRel := by
-        intro source compiler hInitial
+        intro source compiler hInitial hContains
         exact
           sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_head_expr
           (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
@@ -111259,11 +111386,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (tailCallResponseRel := argCallResponseRel)
           (finalCallResponseRel := argCallResponseRel)
           (headCallResponseRel := headCallResponseRel)
-          hLayoutSubset hCovers hLower
+          hLayoutSubset hCovers hLower hSafe.2
           (by
             intro preTail lowerTail stateTail preHead lowerHead stateHead
               hTailLower hHeadLower
-            intro source compiler hInitial
+            intro source compiler hInitial hContains
             simpa [Nat.add_assoc] using
               (ih
                 (hHead := by
@@ -111282,8 +111409,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                 (targetTailFuel := preHead.length + targetTailFuel.succ)
                 (freshState := freshState) (stateFresh := stateTail)
                 (pre := preTail) (lowerArgs := lowerTail) (ctx := ctx)
-                hCovers hTailLower (source := source)
-                (compiler := compiler) hInitial))
+                hCovers hSafe.2 hTailLower (source := source)
+                (compiler := compiler) hInitial hContains))
           (by
             intro stateTail preHead lowerHead stateHead ctxHead hHeadLower
             exact
@@ -111319,11 +111446,11 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
                 (stateFresh := stateFresh) hTailLower hHeadLower hFresh
                 (sourceTailResult := sourceTailResult)
                 (targetTailResult := targetTailResult) hResponse)
-            (source := source) (compiler := compiler) hInitial
-      intro source compiler hInitial
+            (source := source) (compiler := compiler) hInitial hContains
+      intro source compiler hInitial hContains
       simpa [List.reverse_cons,
         yulOpenEvalArgsAppendFuel_append_singleton] using
-        (hCons (source := source) (compiler := compiler) hInitial)
+        (hCons (source := source) (compiler := compiler) hInitial hContains)
 
 /--
 Checked structural compiler-output dispatcher for terminal-aware raw arguments.
@@ -111462,7 +111589,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_e
           (stateFresh := stateFresh') hTailLower hHeadLower hFresh
           (sourceTailResult := sourceTailResult)
           (targetTailResult := targetTailResult) hResponse)
-    hCovers hLower
+    hCovers hSafe hLower
 
 /--
 Widen a terminal-aware raw argument proof from every residual scheduler base to
@@ -111582,7 +111709,7 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal
       prim program ctx sourceFuel.succ (.Call (.inl yulPrim) args)
       codeOverride pre (Expr.cast hOutputs (.prim op lowerArgs)) targetFuel
       exprCallResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   rw [yulOpen_toOpenResult_evalValues_prim_eq_bind_args]
   unfold SourceExprPreludeOpen.runRaw
   exact
@@ -111611,7 +111738,7 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_prim_of_arg_terminal
           (CompilerOpen.LocalsExpr.eval prim
             (Expr.cast hOutputs (.prim op lowerArgs))
             targetArgsResult.1.state))
-      (hArgs hInitial) hRegular hArgResponse
+      (hArgs hInitial hContains) hRegular hArgResponse
 
 /--
 Lift an ordinary successful expression-value relation into the terminal-aware
@@ -112255,7 +112382,7 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_lit
     SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
       prim program ctx sourceFuel.succ (.Lit value) codeOverride [] (.lit value)
       targetFuel.succ callResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial _hContains
   cases hInitial with
   | ok hShared hVars =>
       rename_i shared store
@@ -112313,10 +112440,10 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_lit_of_lower1?
   rw [hLowerEq]
   cases targetFuel with
   | zero =>
-      intro source compiler hInitial
+      intro source compiler hInitial _hContains
       exact False.elim (Nat.not_lt_zero _ hTargetFuel)
   | succ targetFuelPred =>
-      intro source compiler hInitial
+      intro source compiler hInitial hContains
       simpa [Nat.succ_eq_add_one] using
         (sourceExprRawPreludeOpenSoundAtExactTarget_lit
           (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -112324,7 +112451,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_lit_of_lower1?
           (ctx := ctx) (sourceFuel := sourceFuel)
           (targetFuel := targetFuelPred) (value := value)
           (codeOverride := codeOverride) (callResponseRel := callResponseRel)
-          (source := source) (compiler := compiler) hInitial)
+          (source := source) (compiler := compiler) hInitial hContains)
 
 /--
 Terminal-aware raw expression preservation for scoped variables.
@@ -112339,23 +112466,17 @@ theorem sourceExprRawPreludeOpenSoundAtExactTarget_var_of_storeDomainContains
     {sourceFuel targetFuel : Nat}
     {name : EvmYul.Identifier} {codeOverride : Option AstContract}
     {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
-    (hMem : identName name ∈ layout)
-    (hStoreContains :
-      ∀ {shared : EvmYul.SharedState .Yul}
-        {store : EvmYul.Yul.VarStore}
-        {compiler : Objects.Source.State},
-        SourceStateRel cfg layout (.Ok shared store) compiler →
-          StoreDomainContains layout store) :
+    (hMem : identName name ∈ layout) :
     SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
       prim program ctx sourceFuel.succ (.Var name) codeOverride []
       (.var (identName name)) targetFuel.succ callResponseRel := by
-  intro source compiler hInitial
+  intro source compiler hInitial hStateContains
   cases hInitial with
   | ok hShared hVars =>
       rename_i shared store
       have hContains :
           StoreDomainContains layout store :=
-        hStoreContains (SourceStateRel.ok hShared hVars)
+        by simpa [StateStoreContains] using hStateContains
       have hLookupSome :
           (store.lookup (identName name)).isSome = true :=
         hContains (identName name) hMem
@@ -112413,12 +112534,6 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
     {callResponseRel : SourceExprRawPreludeOpenCallResponseRel}
     (hTargetFuel : 0 < targetFuel)
     (hMem : identName name ∈ layout)
-    (hStoreContains :
-      ∀ {shared : EvmYul.SharedState .Yul}
-        {store : EvmYul.Yul.VarStore}
-        {compiler : Objects.Source.State},
-        SourceStateRel cfg layout (.Ok shared store) compiler →
-          StoreDomainContains layout store)
     (hLower :
       Expr.lower1? freshState (.Var name) =
         some (pre, lower, freshState')) :
@@ -112434,10 +112549,10 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
   rw [hLowerEq]
   cases targetFuel with
   | zero =>
-      intro source compiler hInitial
+      intro source compiler hInitial _hContains
       exact False.elim (Nat.not_lt_zero _ hTargetFuel)
   | succ targetFuelPred =>
-      intro source compiler hInitial
+      intro source compiler hInitial hContains
       simpa [Nat.succ_eq_add_one] using
         (sourceExprRawPreludeOpenSoundAtExactTarget_var_of_storeDomainContains
           (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -112445,8 +112560,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_var_of_lower1?
           (ctx := ctx) (sourceFuel := sourceFuel)
           (targetFuel := targetFuelPred) (name := name)
           (codeOverride := codeOverride) (callResponseRel := callResponseRel)
-          hMem hStoreContains (source := source) (compiler := compiler)
-          hInitial)
+          hMem (source := source) (compiler := compiler) hInitial hContains)
 
 /--
 Checked-lowering wrapper for CALL-safe terminal-aware raw primitive
@@ -112570,12 +112684,6 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     (hTargetFuel : 0 < targetFuel)
     (hSafe : Safe.CallSafe.expr expr)
     (hScoped : SourceExprScoped layout expr)
-    (hStoreContains :
-      ∀ {shared : EvmYul.SharedState .Yul}
-        {store : EvmYul.Yul.VarStore}
-        {compiler : Objects.Source.State},
-        SourceStateRel cfg layout (.Ok shared store) compiler →
-          StoreDomainContains layout store)
     (hLower :
       Expr.lower1? freshState expr = some (pre, lower, freshState'))
     (hArgPrelude :
@@ -112671,7 +112779,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
           (name := name) (codeOverride := codeOverride)
           (freshState := freshState) (freshState' := freshState') (pre := pre)
           (lower := lower) (callResponseRel := callResponseRel) hTargetFuel
-          hScoped hStoreContains hLower
+          hScoped hLower
   | Call callee args =>
       cases callee with
       | inl yulPrim =>
@@ -112730,12 +112838,6 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     (hSafe : Safe.CallSafe.expr expr)
     (hScoped : SourceExprScoped layout expr)
     (hOk : UserCallArity.ExprOk contract expr)
-    (hStoreContains :
-      ∀ {shared : EvmYul.SharedState .Yul}
-        {store : EvmYul.Yul.VarStore}
-        {compiler : Objects.Source.State},
-        SourceStateRel cfg layout (.Ok shared store) compiler →
-          StoreDomainContains layout store)
     (hLower :
       Expr.lower1? freshState expr = some (pre, lower, freshState'))
     (hHead :
@@ -112785,7 +112887,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
       (expr := expr) (codeOverride := some contract) (freshState := freshState)
       (freshState' := freshState') (pre := pre) (lower := lower)
       (callResponseRel := callResponseRel) (by omega) hSafe hScoped
-      hStoreContains hLower
+      hLower
   · intro yulPrim args hExprEq hArgsSafe op argExprs seq hOutputs hBasic
       hLowerArgs hSeq hLowerEq
     have hReserveCall :
@@ -112809,7 +112911,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
           (SourceExprRawPreludeOpenCallResponseRel.beforePrimitive prim
             base.succ.succ.succ yulPrim op hOutputs seq callResponseRel) :=
       RawOpenCallResponseAdmissible.comapBind hAdmissible
-    intro source compiler hInitial
+    intro source compiler hInitial hContains
     simpa [hArgsFuel, Nat.add_assoc] using
       (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical
         (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
@@ -112840,7 +112942,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
               (UserCallArity.ExprsOk.mem hArgsOk hMem) hHeadAdmissible
               hHeadLower)
         (by omega) hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
-        (source := source) (compiler := compiler) hInitial)
+        (source := source) (compiler := compiler) hInitial hContains)
   · intro yulPrim args _hExprEq hSafePrim op hBasic
     exact hPrim hSafePrim hBasic
   · intro yulPrim args _hExprEq hSafePrim op hBasic hOutputs
@@ -112948,7 +113050,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
   rcases
       exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le hReserve with
     ⟨argsBase, hArgsFuel, hArgsReserve, _hHeadReserve⟩
-  intro source compiler hInitial
+  intro source compiler hInitial hContains
   exact
     SourceExprSeqPreludeOpen.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_canonical
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -112966,7 +113068,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
                 prim program fn base.succ.succ.succ functionName contract
                 lowerArgs tmp targetTailFuel.succ exprCallResponseRel) :=
           RawOpenCallResponseAdmissible.comapBind hAdmissible
-        intro source compiler hInitial
+        intro source compiler hInitial hContains
         simpa [hArgsFuel, Nat.add_assoc] using
           (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical
             (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
@@ -113000,8 +113102,8 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generate
                   hHeadLower)
             (by omega) hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk
             hLowerArgs
-            (source := source) (compiler := compiler) hInitial))
-      hRegular (source := source) (compiler := compiler) hInitial
+            (source := source) (compiler := compiler) hInitial hContains))
+      hRegular (source := source) (compiler := compiler) hInitial hContains
 
 /--
 Regular selected-callee obligation consumed by reserve-aware internal-user-call
@@ -113272,12 +113374,6 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
     {program : Functions.Program} {contract : AstContract}
     {minimumTargetTailFuel : Nat}
     (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
-    (hStoreContains :
-      ∀ {shared : EvmYul.SharedState .Yul}
-        {store : EvmYul.Yul.VarStore}
-        {compiler : Objects.Source.State},
-        SourceStateRel cfg layout (.Ok shared store) compiler →
-          StoreDomainContains layout store)
     (hPrim :
       ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
         {op : Structured.BasicOp},
@@ -113338,20 +113434,19 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
           (contract := contract) (freshState := freshState)
           (freshState' := freshState') (pre := pre) (lower := lower)
           (callResponseRel := callResponseRel) hLayoutSubset hReserve
-          hMinimumTargetTailFuel hCovers hSafe hScoped hOk hStoreContains
-          hLower
+          hMinimumTargetTailFuel hCovers hSafe hScoped hOk hLower
           (by
             intro headBase headTargetTailFuel head stateHeadStart preHead
               lowerHead stateHead ctxHead headCallResponseRel hHeadReserve
               hHeadSize hHeadMinimumTargetTailFuel hHeadCovers hHeadSafe
               hHeadScoped hHeadOk
               hHeadAdmissible hHeadLower
-            intro source compiler hInitial
+            intro source compiler hInitial hContains
             exact
               ih head hHeadSize hHeadReserve hHeadMinimumTargetTailFuel
                 hHeadCovers hHeadSafe hHeadScoped hHeadOk hHeadLower
                 hHeadAdmissible (source := source)
-                (compiler := compiler) hInitial)
+                (compiler := compiler) hInitial hContains)
           hPrim
           (by
             intro functionName args hExprEq
@@ -113370,7 +113465,7 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
                   (.Call (.inr functionName) args) := by
               simpa [hExprEq] using hOk
             rcases hFindUser hOkUser with ⟨fn, hFind⟩
-            intro source compiler hInitial
+            intro source compiler hInitial hContains
             exact
               lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_reserve
                 (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
@@ -113396,15 +113491,17 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
                   have hHeadSize' : sizeOf head < sizeOf expr := by
                     rw [hExprEq]
                     exact hHeadSize
-                  intro source compiler hInitial
+                  intro source compiler hInitial hContains
                   exact
                     ih head hHeadSize' hHeadReserve
                       hHeadMinimumTargetTailFuel hHeadCovers hHeadSafe
                       hHeadScoped hHeadOk hHeadLower hHeadAdmissible
-                      (source := source) (compiler := compiler) hInitial)
+                      (source := source) (compiler := compiler) hInitial
+                      hContains)
                 (hUserRegular hReserveUser hMinimumTargetTailFuel hCovers
                   hSafeUser hScopedUser hOkUser hAdmissible hFind)
-                hAdmissible (source := source) (compiler := compiler) hInitial)
+                hAdmissible (source := source) (compiler := compiler) hInitial
+                hContains)
       hAdmissible
 
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
