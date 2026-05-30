@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 19:46 PDT.
+Last updated: 2026-05-29 19:57 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -313,9 +313,7 @@ Checked base we can rely on:
 - [x] Added callee-entry/body-return bricks:
   `sourceStateExactRel_initcall_of_lowerFun_insertMany` packages the exact
   source/target callee body-start relation from the caller argument relation,
-  lowered parameter insertion, and AST/lowered function metadata; and
-  `compilerOpen_eval_var_of_assignMany_single` names the target singleton
-  return-slot assignment followed by hidden-temp read.
+  lowered parameter insertion, and AST/lowered function metadata.
 - [x] Added callee-body completed-branch adapters:
   `sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!` transports return
   value lookup equality out of an open body sequence done relation, while
@@ -346,6 +344,14 @@ Checked base we can rely on:
   target `FunDef.runBody` executions, preserving every suspended external
   request and related abstract response while keeping terminal exits available
   for statement-level propagation.
+- [x] Added the checked recursive-body relation constructor:
+  `OpenResultDoneInvariant.strengthen_rel`,
+  `sourceUserCallBodyDoneRel_of_seq_checkpoint_contains`, and
+  `sourceUserCallBodyOpenResultRel_of_seq_checkpoint_contains` strengthen
+  ordinary recursive open-sequence preservation with an explicit source-side
+  function-body invariant. The source checkpoint predicate rules out leaked
+  `break`/`continue`, and visible-store containment plus `SourceStateRel`
+  constructs the compiler return lookup without a target-side oracle.
 - [x] Removed the temporary returned-singleton hidden-slot replay recursion
   scaffold instead of retaining compatibility wrappers. The live bridge no
   longer forces terminal callee exits through an expression-value read.
@@ -443,6 +449,10 @@ Remaining work:
    - [ ] Adapt internal user-call expression preservation when arguments may
      suspend, then connect completed argument states to the recursive
      function-body bridge.
+   - [ ] Construct the selected-callee open body invariant from CALL-safe body
+     scoping and initialized local-store exactness: after every shared external
+     response, completed source bodies must satisfy function checkpoint
+     admission and retain the visible return/parameter store domain.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using

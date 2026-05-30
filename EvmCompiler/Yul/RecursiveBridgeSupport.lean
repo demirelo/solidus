@@ -22580,6 +22580,55 @@ theorem and
             intro response
             exact ih response (hResumeRight response))
 
+/--
+Strengthen a related pair of open executions using invariants that follow every
+shared external response on both sides.
+
+This is the open analogue of adding facts to an ordinary completed-result
+relation: no suspended request is hidden or discharged.  The caller supplies
+the stronger done relation only after the original done relation and both
+execution-local invariants have reached the same completed branch.
+-/
+theorem strengthen_rel
+    {ε₁ ε₂ α : Type*} {β : Type}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ α) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ β) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel doneRel' : Except ε₁ α → Except ε₂ β → Prop}
+    {source : OpenExternal.OpenResult ε₁ α}
+    {target : OpenExternal.OpenResult ε₂ β}
+    {sourceDoneInv : Except ε₁ α → Prop}
+    {targetDoneInv : Except ε₂ β → Prop}
+    (hRel :
+      OpenExternal.OpenResultRel callResponseRel doneRel source target)
+    (hSourceInv : OpenResultDoneInvariant sourceDoneInv source)
+    (hTargetInv : OpenResultDoneInvariant targetDoneInv target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          sourceDoneInv sourceDone →
+          targetDoneInv targetDone →
+          doneRel' sourceDone targetDone) :
+    OpenExternal.OpenResultRel callResponseRel doneRel' source target := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases hSourceInv with
+      | done hSourceDone =>
+          cases hTargetInv with
+          | done hTargetDone =>
+              exact OpenExternal.OpenResultRel.done
+                (hDone hDoneRel hSourceDone hTargetDone)
+  | call hSite _hResume ih =>
+      cases hSourceInv with
+      | call hSourceResume =>
+          cases hTargetInv with
+          | call hTargetResume =>
+              exact OpenExternal.OpenResultRel.call hSite (by
+                intro response hResponse
+                exact ih response hResponse (hSourceResume response)
+                  (hTargetResume response))
+
 theorem bind
     {ε α β : Type*}
     {doneInv : Except ε α → Prop}
@@ -52279,6 +52328,148 @@ def SourceUserCallBodyDoneRel
                   some values
         | .error _, .ok _ => True
         | _, _ => False
+
+/--
+Completed recursively related function bodies satisfy the richer pre-replay
+callee-body relation once the source body is checkpoint-admitted and still
+contains its visible locals.
+
+For a regular or `leave` body, the ordinary state relation turns source-store
+containment into a checked compiler-side `lookupMany`.  The checkpoint predicate
+rules out raw `break` and `continue`; terminal source errors remain visible for
+the caller-level terminal adapter.
+-/
+theorem sourceUserCallBodyDoneRel_of_seq_checkpoint_contains
+    {cfg : StateRelConfig} {bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {fn : Functions.FunDef}
+    {sourceDone : Except Exception State}
+    {targetDone :
+      Except Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    (hSource :
+      SourceResultCheckpointAllowed false false true sourceDone ∧
+        (match sourceDone with
+        | .ok source => StateStoreContains bodyLayout source
+        | .error _ => True))
+    (hDone :
+      SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true) sourceDone targetDone)
+    (hReturns :
+      ∀ name, name ∈ fn.returns → name ∈ bodyLayout) :
+    SourceUserCallBodyDoneRel cfg bodyLayout terminalRel revertRel
+      (SourceResultCheckpointAllowed false false true) fn sourceDone targetDone := by
+  refine ⟨hDone, hSource.1, ?_⟩
+  cases sourceDone with
+  | error err =>
+      cases targetDone with
+      | error targetErr =>
+          exact False.elim (hDone hSource.1)
+      | ok targetResult =>
+          trivial
+  | ok source =>
+      cases targetDone with
+      | error targetErr =>
+          exact False.elim (hDone hSource.1)
+      | ok targetResult =>
+          rcases targetResult with ⟨⟨compiler, mode⟩, bodyCtx⟩
+          have hOutcome :
+              SourceResultOutcomeRel cfg bodyLayout terminalRel revertRel
+                (.ok source) ⟨compiler, mode⟩ :=
+            hDone hSource.1
+          cases hOutcome with
+          | ok hOk =>
+              cases hOk with
+              | regular hStateRel =>
+                  cases hStateRel with
+                  | ok hShared hVars =>
+                      have hCompilerContains :
+                          SourceVarsContains bodyLayout compiler.vars := by
+                        intro name hMem
+                        exact
+                          SourceStateRel.contains_of_store_contains
+                            (SourceStateRel.ok hShared hVars)
+                            (by simpa [StateStoreContains] using hSource.2)
+                            hMem
+                      rcases
+                          SourceVarsContains.lookupMany_exists
+                            (names := fn.returns) hCompilerContains hReturns with
+                        ⟨values, hLookup⟩
+                      exact ⟨values, Or.inl rfl, hLookup⟩
+              | brk hStateRel =>
+                  have hFalse : False := by
+                    simpa [SourceResultCheckpointAllowed,
+                      StateCheckpointAllowed] using hSource.1
+                  exact False.elim hFalse
+              | cont hStateRel =>
+                  have hFalse : False := by
+                    simpa [SourceResultCheckpointAllowed,
+                      StateCheckpointAllowed] using hSource.1
+                  exact False.elim hFalse
+              | leave hStateRel =>
+                  cases hStateRel with
+                  | ok hShared hVars =>
+                      have hCompilerContains :
+                          SourceVarsContains bodyLayout compiler.vars := by
+                        intro name hMem
+                        exact
+                          SourceStateRel.contains_of_store_contains
+                            (SourceStateRel.ok hShared hVars)
+                            (by simpa [StateStoreContains] using hSource.2)
+                            hMem
+                      rcases
+                          SourceVarsContains.lookupMany_exists
+                            (names := fn.returns) hCompilerContains hReturns with
+                        ⟨values, hLookup⟩
+                      exact ⟨values, Or.inr rfl, hLookup⟩
+
+/--
+Construct the richer pre-replay callee-body relation from ordinary recursive
+open sequence preservation and the source-side function-body invariant.
+
+The source invariant follows every external response.  Strengthening therefore
+keeps each suspended request visible while discharging the completed body
+branches with `sourceUserCallBodyDoneRel_of_seq_checkpoint_contains`.
+-/
+theorem sourceUserCallBodyOpenResultRel_of_seq_checkpoint_contains
+    {cfg : StateRelConfig} {bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {fn : Functions.FunDef}
+    {sourceBody : OpenExternal.OpenResult Exception State}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
+    (hBody :
+      OpenExternal.OpenResultRel bodyCallResponseRel
+        (SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel
+          (SourceResultCheckpointAllowed false false true))
+        sourceBody targetBody)
+    (hSource :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          SourceResultCheckpointAllowed false false true sourceDone ∧
+            (match sourceDone with
+            | .ok source => StateStoreContains bodyLayout source
+            | .error _ => True))
+        sourceBody)
+    (hReturns :
+      ∀ name, name ∈ fn.returns → name ∈ bodyLayout) :
+    OpenExternal.OpenResultRel bodyCallResponseRel
+      (SourceUserCallBodyDoneRel cfg bodyLayout terminalRel revertRel
+        (SourceResultCheckpointAllowed false false true) fn)
+      sourceBody targetBody := by
+  refine
+    OpenResultDoneInvariant.strengthen_rel hBody hSource
+      (OpenResultDoneInvariant.any (fun _targetDone => True.intro) targetBody) ?_
+  intro sourceDone targetDone hDone hSourceDone _hTargetDone
+  exact
+    sourceUserCallBodyDoneRel_of_seq_checkpoint_contains hSourceDone hDone
+      hReturns
 
 /--
 Recursively related open callee bodies compose into related internal-user-call
