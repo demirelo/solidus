@@ -109186,6 +109186,175 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
                   (targetTailResult := targetTailResult) hResponse))
       hTailResponse
 
+/--
+Lowering-component constructor for terminal-aware raw reverse-cons arguments.
+
+The compiler-derived bookkeeping is the same as in the older strict stack
+wrapper: lowered tail arguments are generated variables, the head prelude
+cannot overwrite them, and the fresh head temporary is hidden from both the
+tail variables and visible source layout.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowerBound1?_components_head_expr
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateTail stateHead stateFresh : Fresh.State}
+    {preTail preHead : List Functions.Stmt}
+    {lowerTail : List (Locals.Expr 1)}
+    {lowerHead : Locals.Expr 1} {tmp : Name}
+    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {tailCallResponseRel finalCallResponseRel :
+      SourceArgRawPreludeOpenCallResponseRel}
+    {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hTailLower :
+      Expr.List.lowerBound1? freshState tail =
+        some (preTail, lowerTail, stateTail))
+    (hHeadLower :
+      Expr.lower1? stateTail head = some (preHead, lowerHead, stateHead))
+    (hFresh : Fresh.fresh? stateHead = some (tmp, stateFresh))
+    (hTail :
+      SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx
+        (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride preTail
+        lowerTail (preTail.length + (preHead.length + 2))
+        tailCallResponseRel)
+    (hHead :
+      ∀ {ctxHead : Functions.Source.Ctx},
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead base.succ.succ head codeOverride
+          preHead lowerHead (preHead.length + 2) headCallResponseRel)
+    (hHeadSingle :
+      ∀ {sourceTailResult : State × List Word},
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
+              sourceTailResult.1)))
+    (hTailResponse :
+      ∀ {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (fun sourceTailResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.evalValues base.succ.succ head
+                        codeOverride sourceTailResult.1))
+                    (sourceArgAppendHeadValues sourceTailResult.2)) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun targetTailResult =>
+                  match targetTailResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetTailResult.2 (preHead.length + 2)
+                        { stmts :=
+                            preHead ++
+                              [Functions.Stmt.let_ tmp lowerHead] }
+                        targetTailResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok targetTailResult) }
+          response →
+        tailCallResponseRel sourceCall targetCall response)
+    (hHeadResponse :
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx}
+        {sourceCall targetCall response},
+        finalCallResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (sourceArgAppendHeadValues sourceTailResult.2) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
+                  prim program tmp [] 1) }
+          response →
+        headCallResponseRel sourceCall targetCall response) :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx
+      (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail) codeOverride
+      (preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]))
+      (.var tmp :: lowerTail) (preTail.length + (preHead.length + 2))
+      finalCallResponseRel := by
+  rcases Expr.List.lowerBound1?_lowerArgs_vars hTailLower with
+    ⟨lowerNames, hLowerTailVars⟩
+  have hCoversTail : FreshCoversLayout coverLayout stateTail :=
+    freshCoversLayout_lowerBound1?_of_some hCovers hTailLower
+  have hTailNamesCover : FreshCoversLayout lowerNames stateTail :=
+    lowerBound1?_lowerArg_names_mem_final_used hTailLower hLowerTailVars
+  have hHeadWrites : SourceWritesDisjoint lowerNames preHead :=
+    lower1?_sourceWritesDisjoint hTailNamesCover hHeadLower
+  have hTailNamesCoverHead : FreshCoversLayout lowerNames stateHead :=
+    freshCoversLayout_lower1?_of_some hTailNamesCover hHeadLower
+  have hTmpFreshLower : tmp ∉ lowerNames := by
+    intro hMem
+    exact fresh?_name_not_mem_used hFresh
+      (hTailNamesCoverHead tmp hMem)
+  have hCoversHead : FreshCoversLayout coverLayout stateHead :=
+    freshCoversLayout_lower1?_of_some hCoversTail hHeadLower
+  have hTmpFreshLayout : tmp ∉ layout := by
+    intro hMem
+    exact fresh?_name_not_mem_used hFresh
+      (hCoversHead tmp (hLayoutSubset tmp hMem))
+  intro source compiler hInitial
+  exact
+    sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (preTail := preTail) (preHead := preHead)
+      (lowerTail := lowerTail) (lowerNames := lowerNames)
+      (lowerHead := lowerHead) (tmp := tmp) (base := base) (head := head)
+      (tail := tail) (codeOverride := codeOverride) (source := source)
+      (compiler := compiler) (tailCallResponseRel := tailCallResponseRel)
+      (finalCallResponseRel := finalCallResponseRel)
+      (headCallResponseRel := headCallResponseRel)
+      hLowerTailVars hHeadWrites hTmpFreshLower hTmpFreshLayout
+      (hTail hInitial)
+      (by
+        intro sourceTailResult targetTailResult hTailDone
+        have hTailRaw :
+            SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+              (.ok sourceTailResult) (.ok targetTailResult) :=
+          sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+        rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+        cases targetTailOutcome with
+        | mk targetTailState mode =>
+            cases mode with
+            | regular =>
+                exact
+                  (hHead (ctxHead := targetTailCtx))
+                    hTailRaw.1
+            | brk =>
+                cases hTailRaw
+            | cont =>
+                cases hTailRaw
+            | leave =>
+                cases hTailRaw
+            | halt kind =>
+                cases hTailRaw)
+      hHeadSingle hTailResponse
+      (by
+        intro sourceTailResult targetTailResult sourceCall targetCall response
+          hResponse
+        exact
+          hHeadResponse
+            (sourceTailResult := sourceTailResult)
+            (targetTailResult := targetTailResult) hResponse)
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

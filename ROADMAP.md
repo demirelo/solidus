@@ -573,6 +573,9 @@ Remaining work:
    - [x] Compose terminal-aware raw reverse-cons argument lowering: imported
      Yul evaluates the recursive tail and raw head in semantic order, while the
      target executes the matching tail prefix and generated head temporary.
+   - [x] Derive raw reverse-cons freshness and write-disjointness obligations
+     from checked lowering components, so recursive callers do not provide
+     generated-variable bookkeeping as semantic assumptions.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
