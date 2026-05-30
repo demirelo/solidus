@@ -109980,6 +109980,57 @@ theorem sourceExprRawPreludeOpenResultRel_values_of_stack
         intro response hResponse
         exact ih response hResponse)
 
+/--
+Recover the compiler stack-sequence replay from regular terminal-aware raw
+argument completion.
+
+The generated lowered arguments are variable reads.  Their closed forward
+replay is carried by the raw done relation; reversing that replay gives the
+stack order consumed by the compiler's open expression evaluator.
+-/
+theorem sourceArgTerminalRawPreludeOpenDoneRel_toStackSeq_generated
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {argExprs : List (Locals.Expr 1)} {names : List Name}
+    {results : Nat} {seq : Locals.ExprSeq results}
+    {sourceArgsResult : State × List Word}
+    {targetArgsResult :
+      Functions.Source.Outcome × Functions.Source.Ctx}
+    (hLowerVars :
+      argExprs = names.map (fun name => (.var name : Locals.Expr 1)))
+    (hSeq : Expr.List.toStackSeq? argExprs results = some seq)
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim argExprs (.ok sourceArgsResult) (.ok targetArgsResult)) :
+    CompilerOpen.LocalsExpr.evalSeq prim seq targetArgsResult.1.state =
+        .done (.ok (targetArgsResult.1.state, sourceArgsResult.2)) ∧
+      SourceArgStackPreludeOpenDoneRel cfg layout (.ok sourceArgsResult)
+        (.ok
+          { state := targetArgsResult.1.state
+            ctx := targetArgsResult.2
+            values := sourceArgsResult.2 }) := by
+  subst argExprs
+  rcases targetArgsResult with ⟨targetOutcome, targetCtx⟩
+  cases targetOutcome with
+  | mk targetState mode =>
+      cases mode <;>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+      rcases hDone with ⟨hRel, hEval⟩
+      have hEvalReverse :
+          Functions.Source.ArgList.eval prim
+              ((names.map
+                (fun name => (.var name : Locals.Expr 1))).reverse)
+              targetState =
+            .ok (targetState, sourceArgsResult.2) := by
+        simpa using sourceArgList_eval_var_map_reverse hEval
+      exact
+        ⟨compilerOpen_exprSeq_eval_of_toStackSeq?_argList_eval_var_map
+            hSeq hEvalReverse,
+          ⟨hRel, rfl⟩⟩
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}

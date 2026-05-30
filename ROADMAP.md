@@ -602,6 +602,9 @@ Remaining work:
      expression continuations map into `RawTarget.values` without inventing a
      stopped branch, keeping terminal propagation confined to honest raw
      boundaries.
+   - [x] Recover compiler stack-sequence replay from regular terminal-aware raw
+     generated arguments: the proof reverses the recorded source-order closed
+     variable replay and derives the compiler-open stack evaluator result.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
