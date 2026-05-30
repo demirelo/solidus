@@ -112816,6 +112816,146 @@ theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_callSafe_expr_of_lowe
   · intro functionName args hExprEq _hSafeUser _hScopedUser _hLowerUser
     exact hUserCall hExprEq
 
+/--
+Reserve-aware internal-user-call expression wrapper.
+
+The direct empty-argument path remains constructed by the checked canonical
+user-call wrapper. When lowering emits a generated argument prefix, this theorem
+splits the call reserve and recursively preserves every nested argument
+expression before entering the supplied selected-callee continuation.
+-/
+theorem lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_reserve
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {base targetTailFuel : Nat}
+    {functionName : Name} {args : List AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {fn : Functions.FunDef}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hReserve :
+      sourceExprRawPreludeBaseReserve (.Call (.inr functionName) args) ≤ base)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hSafe : Safe.CallSafe.expr (.Call (.inr functionName) args))
+    (hScoped : SourceExprScoped layout (.Call (.inr functionName) args))
+    (hOk : UserCallArity.ExprOk contract (.Call (.inr functionName) args))
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hHead :
+      ∀ {headBase headTargetTailFuel : Nat} {head : AstExpr}
+        {stateHeadStart preHead lowerHead stateHead}
+        {ctxHead : Functions.Source.Ctx}
+        {headCallResponseRel : SourceExprRawPreludeOpenCallResponseRel},
+        sourceExprRawPreludeBaseReserve head ≤ headBase →
+        FreshCoversLayout coverLayout stateHeadStart →
+        Safe.CallSafe.expr head →
+        SourceExprScoped layout head →
+        UserCallArity.ExprOk contract head →
+        RawOpenCallResponseAdmissible cfg layout headCallResponseRel →
+        Expr.lower1? stateHeadStart head =
+          some (preHead, lowerHead, stateHead) →
+        SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+          revertRel prim program ctxHead
+          headBase.succ.succ.succ.succ head (some contract) preHead lowerHead
+          (preHead.length + headTargetTailFuel.succ.succ)
+          headCallResponseRel)
+    (hRegular :
+      ∀ {preArgs : List Functions.Stmt}
+        {lowerArgs : List (Locals.Expr 1)} {stateArgs : Fresh.State}
+        {tmp : Name},
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        Fresh.fresh? stateArgs = some (tmp, freshState') →
+      ∀ {sourceArgsResult : State × List Word}
+        {targetArgsResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerArgs (.ok sourceArgsResult) (.ok targetArgsResult) →
+        OpenExternal.OpenResultRel exprCallResponseRel
+          (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.call base.succ.succ.succ
+              sourceArgsResult.2.reverse functionName (some contract)
+              sourceArgsResult.1))
+          (SourceExprSeqPreludeOpen.compilerOpenUserCallRawAfterRegularArgs prim
+            program fn lowerArgs tmp targetTailFuel.succ targetArgsResult))
+    (hAdmissible :
+      RawOpenCallResponseAdmissible cfg layout exprCallResponseRel) :
+    SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel revertRel
+      prim program ctx base.succ.succ.succ.succ
+      (.Call (.inr functionName) args) (some contract) pre lowerExpr
+      (pre.length + targetTailFuel.succ.succ) exprCallResponseRel := by
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafe
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.expr_user_call_args hScoped
+  have hArgsOk : UserCallArity.ExprsOk contract args := by
+    simpa [UserCallArity.ExprOk] using hOk.2
+  rcases
+      exists_yulOpenEvalArgsAppendFuel_base_of_call_reserve_le hReserve with
+    ⟨argsBase, hArgsFuel, hArgsReserve, _hHeadReserve⟩
+  intro source compiler hInitial
+  exact
+    SourceExprSeqPreludeOpen.lower1?_sourceExprRawPreludeOpenSoundAtExactTarget_user_call_of_generated_arg_terminal_canonical
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := base.succ.succ.succ) (tailFuel := targetTailFuel.succ)
+      (functionName := functionName) (args := args) (contract := contract)
+      (freshState := freshState) (freshState' := freshState') (pre := pre)
+      (lowerExpr := lowerExpr) (fn := fn)
+      (exprCallResponseRel := exprCallResponseRel) (by omega) hLower hFind
+      (by
+        intro preArgs lowerArgs stateArgs tmp hLowerArgs _hFresh
+        have hArgAdmissible :
+            RawOpenCallResponseAdmissible cfg layout
+              (SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeUserCall
+                prim program fn base.succ.succ.succ functionName contract
+                lowerArgs tmp targetTailFuel.succ exprCallResponseRel) :=
+          RawOpenCallResponseAdmissible.comapBind hAdmissible
+        intro source compiler hInitial
+        simpa [hArgsFuel, Nat.add_assoc] using
+          (sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_lowerBound1?_head_expr_mem_checked_canonical
+            (cfg := cfg) (coverLayout := coverLayout) (layout := layout)
+            (terminalRel := terminalRel) (revertRel := revertRel)
+            (prim := prim) (program := program) (ctx := ctx)
+            (freshState := freshState) (stateFresh := stateArgs)
+            (pre := preArgs) (lowerArgs := lowerArgs) (base := argsBase)
+            (targetTailFuel :=
+              [Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  targetTailFuel.succ)
+            (args := args) (contract := contract)
+            (finalCallResponseRel :=
+              SourceExprSeqPreludeOpen.SourceExprRawPreludeOpenCallResponseRel.beforeUserCall
+                prim program fn base.succ.succ.succ functionName contract
+                lowerArgs tmp targetTailFuel.succ exprCallResponseRel)
+            hLayoutSubset hArgAdmissible
+            (by
+              intro headBase headTargetTailFuel head stateHeadStart preHead
+                lowerHead stateHead ctxHead headCallResponseRel hMem
+                hHeadReserve hHeadCovers hHeadAdmissible hHeadLower
+              exact
+                hHead hHeadReserve hHeadCovers
+                  (callSafe_exprs_mem hArgsSafe hMem)
+                  (SourceExprsScoped.mem hArgsScoped hMem)
+                  (UserCallArity.ExprsOk.mem hArgsOk hMem) hHeadAdmissible
+                  hHeadLower)
+            hArgsReserve hCovers hArgsSafe hArgsScoped hArgsOk hLowerArgs
+            (source := source) (compiler := compiler) hInitial))
+      hRegular (source := source) (compiler := compiler) hInitial
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
