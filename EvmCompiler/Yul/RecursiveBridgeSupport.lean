@@ -23130,6 +23130,58 @@ def StateCheckpointStoreContains
 
 namespace StateCheckpointStoreContains
 
+theorem of_ok
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    (hContains : StoreDomainContains layout store) :
+    StateCheckpointStoreContains layout canBreak canContinue canLeave
+      (.Ok shared store) := by
+  exact ⟨by simp [StateCheckpointAllowed],
+    by simpa [StateStoreContains] using hContains⟩
+
+theorem outOfFuel
+    {layout : List Name} {canBreak canContinue canLeave : Bool} :
+    StateCheckpointStoreContains layout canBreak canContinue canLeave
+      .OutOfFuel := by
+  simp [StateCheckpointStoreContains, StateCheckpointAllowed,
+    StateStoreContains]
+
+theorem mono
+    {layout : List Name}
+    {canBreakFrom canContinueFrom canLeaveFrom : Bool}
+    {canBreakTo canContinueTo canLeaveTo : Bool} {state : State}
+    (hBreak : canBreakFrom = true → canBreakTo = true)
+    (hContinue : canContinueFrom = true → canContinueTo = true)
+    (hLeave : canLeaveFrom = true → canLeaveTo = true)
+    (hState :
+      StateCheckpointStoreContains layout canBreakFrom canContinueFrom
+        canLeaveFrom state) :
+    StateCheckpointStoreContains layout canBreakTo canContinueTo canLeaveTo
+      state :=
+  ⟨StateCheckpointAllowed.mono hBreak hContinue hLeave hState.1, hState.2⟩
+
+theorem of_top
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {state : State}
+    (hState : StateCheckpointStoreContains layout false false false state) :
+    StateCheckpointStoreContains layout canBreak canContinue canLeave state :=
+  mono (by intro h; cases h) (by intro h; cases h) (by intro h; cases h)
+    hState
+
+theorem ok_or_outOfFuel_of_top
+    {layout : List Name} {state : State}
+    (hState : StateCheckpointStoreContains layout false false false state) :
+    state = .OutOfFuel ∨
+      ∃ shared store,
+        state = .Ok shared store ∧ StoreDomainContains layout store := by
+  cases state with
+  | Ok shared store =>
+      exact Or.inr ⟨shared, store, rfl, hState.2⟩
+  | OutOfFuel =>
+      exact Or.inl rfl
+  | Checkpoint jump =>
+      exact False.elim (StateCheckpointAllowed.no_checkpoint_of_top hState.1)
+
 theorem restrictStoreTo
     {layout : List Name} {canBreak canContinue canLeave : Bool}
     {scope : EvmYul.Yul.VarStore} {state : State}
@@ -23249,6 +23301,60 @@ theorem bind
     trivial
 
 end YulOpenStateDoneInv
+
+theorem openResultDoneInvariant_checkpointStoreContains_of_outOfFuel
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {result : OpenExternal.OpenResult Exception State}
+    (hResult :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+        result) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      result := by
+  exact OpenResultDoneInvariant.imp hResult (by
+    intro doneResult hDone
+    cases doneResult with
+    | error err =>
+        trivial
+    | ok state =>
+        subst state
+        exact StateCheckpointStoreContains.outOfFuel)
+
+theorem openResultDoneInvariant_checkpointStoreContains_of_top_input
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {state : State} {run : State → OpenExternal.YulOpenResult State}
+    (hState : StateCheckpointStoreContains layout false false false state)
+    (hOk :
+      ∀ {shared : EvmYul.SharedState .Yul}
+        {store : EvmYul.Yul.VarStore},
+        state = .Ok shared store →
+        StoreDomainContains layout store →
+          OpenResultDoneInvariant
+            (YulOpenStateDoneInv
+              (StateCheckpointStoreContains layout canBreak canContinue
+                canLeave))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (run (.Ok shared store))))
+    (hOutOfFuel :
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv (fun state => state = .OutOfFuel))
+        (OpenExternal.YulOpenResult.toOpenResult (run .OutOfFuel))) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult (run state)) := by
+  cases StateCheckpointStoreContains.ok_or_outOfFuel_of_top hState with
+  | inl hEq =>
+      subst state
+      exact
+        openResultDoneInvariant_checkpointStoreContains_of_outOfFuel
+          hOutOfFuel
+  | inr hOkState =>
+      rcases hOkState with ⟨shared, store, hEq, hContains⟩
+      subst state
+      exact hOk rfl hContains
 
 namespace YulOpenPairStateDoneInv
 

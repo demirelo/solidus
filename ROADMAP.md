@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 20:42 PDT.
+Last updated: 2026-05-29 20:46 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -474,6 +474,11 @@ Remaining work:
    - [x] Lift the exact sticky `.OutOfFuel` invariant through open statements
      and sequences, including statement-form CALL, blocks, conditionals,
      selected switch bodies, and loop exceptional flow.
+   - [x] Add ordinary scoped-recursion bridge facts: construct the combined
+     invariant for real `.Ok` stores, lift strict top-level admission into
+     enclosing contexts, split strict successful states into `.Ok` versus
+     sticky `.OutOfFuel`, convert the sticky proof back into the normal
+     invariant, and run continuations through that honest split.
    - [ ] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
