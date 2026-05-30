@@ -699,6 +699,9 @@ Remaining work:
    - [x] Factor generic open-call response-relation bind comaps and rewrite raw
      primitive, user-call argument, caller-restoration, and hidden-slot replay
      adapters as thin specializations instead of bespoke continuation records.
+   - [x] Define canonical generated-argument tail and head response pullbacks
+     and prove reverse-cons terminal-aware raw composition without caller
+     supplied response-conversion premises.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
