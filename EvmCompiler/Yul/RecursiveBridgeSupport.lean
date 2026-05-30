@@ -116969,6 +116969,274 @@ def SourceExprRawPreludeOpenUserCallRegularPathWhen
             program fn lowerArgs tmp targetTailFuel.succ targetArgsResult)
 
 /--
+Path-native whole internal-user-call expression wrapper.
+
+The admitted source trace is split into argument-prefix and selected-callee
+segments.  Generated argument replay first chooses a compiler cutoff for its
+concrete segment.  A regular callee then chooses a body cutoff at least as
+large as that prefix cutoff, allowing the already-selected argument path to be
+padded into the complete lowered-expression schedule.  A terminal argument
+prefix is padded locally and skips the callee continuation.
+-/
+theorem lower1?_sourceExprRawPreludeOpenPathSoundWhen_user_call_of_arg_terminal
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {base : Nat}
+    {functionName : Name} {args : List AstExpr} {contract : AstContract}
+    {freshState freshState' : Fresh.State}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {fn : Functions.FunDef}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn)
+    (hArgs :
+      ∀ {preArgs : List Functions.Stmt}
+        {lowerArgs : List (Locals.Expr 1)} {stateArgs : Fresh.State}
+        {tmp : Name},
+        ((Expr.List.directCallArgsSafe? args = true ∧
+            Expr.List.toLocals1? args = some lowerArgs ∧
+            preArgs = [] ∧ stateArgs = freshState) ∨
+          (Expr.List.directCallArgsSafe? args = false ∧
+            Expr.List.lowerBound1? freshState args =
+              some (preArgs, lowerArgs, stateArgs))) →
+        Fresh.fresh? stateArgs = some (tmp, freshState') →
+        SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+          revertRel prim program ctx base.succ.succ.succ args
+          (some contract) preArgs lowerArgs (fun _sourceDone => True))
+    (hRegular :
+      SourceExprRawPreludeOpenUserCallRegularPathWhen cfg layout terminalRel
+        revertRel prim program base functionName args contract freshState
+        freshState' fn) :
+    SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel prim
+      program ctx base.succ.succ.succ.succ (.Call (.inr functionName) args)
+      (some contract) pre lowerExpr allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolveFull
+    _hAllowed hResponses minimumTargetFuel
+  rcases
+      SourceExprSeqPreludeOpen.sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
+        (prim := prim) (program := program) (ctx := ctx)
+        (freshState := freshState) (freshState' := freshState')
+        (functionName := functionName) (args := args) (pre := pre)
+        (lowerExpr := lowerExpr) (tailFuel := 0)
+        (compiler := compiler) (fn := fn) hLower hFind with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, _hUnsupported, hArgsLower, hFresh,
+      _hTargetZero⟩
+  have hResolve := hResolveFull
+  rw [yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args] at hResolve
+  rw [yulOpen_toOpenResult_reverseResult_eq_bind] at hResolve
+  rw [openResult_bind_assoc_sourceBridge] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hArgsError | hArgsOk
+  · rcases hArgsError with ⟨err, hResolveArgs, hSourceDone⟩
+    subst sourceDone
+    rcases
+        hArgs hArgsLower hFresh hInitial hContains hResolveArgs True.intro
+          hResponses 0 with
+      ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .error err :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        let tailFuel := max minimumTargetFuel selectedArgsFuel
+        let targetArgsFuel :=
+          preArgs.length +
+            ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+              tailFuel.succ)
+        have hArgsLe : selectedArgsFuel ≤ targetArgsFuel := by
+          dsimp [targetArgsFuel, tailFuel]
+          omega
+        have hTargetArgsPadded :
+            OpenExternal.OpenResultResolves
+              (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                targetArgsFuel { stmts := preArgs } compiler)
+              trace (.ok targetArgsResult) :=
+          CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+            hArgsLe hTargetArgs
+        have hTargetShape :=
+          SourceExprSeqPreludeOpen.sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
+            (prim := prim) (program := program) (ctx := ctx)
+            (freshState := freshState) (freshState' := freshState')
+            (functionName := functionName) (args := args) (pre := pre)
+            (lowerExpr := lowerExpr) (tailFuel := tailFuel)
+            (compiler := compiler) (fn := fn) hLower hFind
+        rcases hTargetShape with
+          ⟨preArgs', lowerArgs', stateArgs', tmp', _hUnsupported',
+            hArgsLower', hFresh', hTarget⟩
+        have hComponents :
+            preArgs' = preArgs ∧ lowerArgs' = lowerArgs ∧ tmp' = tmp := by
+          rcases lower1?_user_call_some_components hLower with
+            ⟨_hUnsupported, argsDirect, argsGenerated, stateArgs0, preArgs0,
+              lowerArgs0, tmp0, hArgs0, hFresh0, hPre, hLowerExpr⟩
+          rcases hArgsLower with hDirect | hGenerated <;>
+            rcases hArgsLower' with hDirect' | hGenerated' <;>
+              simp_all
+        rcases hComponents with ⟨rfl, rfl, rfl⟩
+        have hTargetFull :
+            OpenExternal.OpenResultResolves
+              (SourceExprPreludeOpen.runRaw prim program ctx
+                (pre.length + tailFuel.succ) pre lowerExpr compiler)
+              trace (.ok (.stopped targetArgsResult)) := by
+          rw [hTarget]
+          have hTargetSuffix :
+              OpenExternal.OpenResultResolves
+                (SourceExprSeqPreludeOpen.compilerOpenUserCallRawAfterArgs
+                  prim program fn lowerArgs' tmp' tailFuel targetArgsResult)
+                [] (.ok (.stopped targetArgsResult)) := by
+            rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+            cases targetArgsOutcome with
+            | mk targetArgsState mode =>
+                cases mode with
+                | regular =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+                | brk =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+                | cont =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+                | leave =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+                | halt kind =>
+                    exact OpenExternal.OpenResultResolves.done
+          simpa only [List.append_nil] using
+            OpenExternal.OpenResultResolves.bind_ok
+              (next :=
+                SourceExprSeqPreludeOpen.compilerOpenUserCallRawAfterArgs
+                  prim program fn lowerArgs' tmp' tailFuel)
+              (by simpa [targetArgsFuel] using hTargetArgsPadded)
+              hTargetSuffix
+        refine ⟨pre.length + tailFuel.succ, ?_, ?_⟩
+        · dsimp [tailFuel]
+          omega
+        · exact
+            OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+              hResolveFull hTargetFull hResponses
+                (sourceExprRawPreludeOpenDoneRel_stopped_of_arg_terminal_error
+                  hArgsDone)
+  · rcases hArgsOk with
+      ⟨argsTrace, callTrace, sourceArgsResult, hTrace, hResolveArgs,
+        hResolveCall⟩
+    subst trace
+    have hResponsesArgs : SourceOpenTraceResponsesAdmissible cfg argsTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hResponsesCall : SourceOpenTraceResponsesAdmissible cfg callTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    rcases
+        hArgs hArgsLower hFresh hInitial hContains hResolveArgs True.intro
+          hResponsesArgs 0 with
+      ⟨selectedArgsFuel, _hMinimumArgs, hArgsPath⟩
+    rcases hArgsPath.resolves with
+      ⟨sourceArgsDone, targetArgsDone, hSourceArgs, hTargetArgs, hArgsDone⟩
+    have hSourceArgsDone : sourceArgsDone = .ok sourceArgsResult :=
+      OpenExternal.OpenResultResolves.deterministic hSourceArgs hResolveArgs
+    subst sourceArgsDone
+    cases targetArgsDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hArgsDone
+    | ok targetArgsResult =>
+        rcases targetArgsResult with ⟨targetArgsOutcome, targetArgsCtx⟩
+        cases targetArgsOutcome with
+        | mk targetArgsState mode =>
+            cases mode with
+            | regular =>
+                rcases
+                    hRegular hArgsLower hFresh hArgsDone hResolveCall
+                      hResponsesCall (max minimumTargetFuel selectedArgsFuel)
+                    with
+                  ⟨targetTailFuel, hMinimumTail, hCallPath⟩
+                let targetArgsFuel :=
+                  preArgs.length +
+                    ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                        Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                      targetTailFuel.succ.succ)
+                have hArgsLe : selectedArgsFuel ≤ targetArgsFuel := by
+                  dsimp [targetArgsFuel]
+                  omega
+                have hArgsPathPadded :=
+                  sourceArgTerminalRawPreludeOpenResultPathRel_runOpen_mono
+                    (prim := prim) (program := program) hArgsLe hResponsesArgs
+                    hArgsPath
+                have hTargetArgsPadded :=
+                  CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono
+                    prim program hArgsLe hTargetArgs
+                have hCombinedNormalized :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel
+                        revertRel)
+                      (argsTrace ++ callTrace)
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.evalArgs base.succ.succ.succ
+                            args.reverse (some contract) source))
+                        (fun sourceArgsResult =>
+                          OpenExternal.YulOpenResult.toOpenResult
+                            (OpenExternal.YulOpen.call base.succ.succ.succ
+                              sourceArgsResult.2.reverse functionName
+                              (some contract) sourceArgsResult.1)))
+                      (OpenExternal.OpenResult.bind
+                        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                          ctx targetArgsFuel { stmts := preArgs } compiler)
+                        (SourceExprSeqPreludeOpen.compilerOpenUserCallRawAfterArgs
+                          prim program fn lowerArgs tmp
+                          targetTailFuel.succ)) :=
+                  OpenExternal.OpenResultPathRel.bind_selected_ok
+                    hArgsPathPadded hResolveArgs hTargetArgsPadded hCallPath
+                    (by
+                      intro sourceCall targetCall response hResponse
+                      exact hResponse)
+                have hTargetShape :=
+                  SourceExprSeqPreludeOpen.sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_bind_afterArgs_of_find_function
+                    (prim := prim) (program := program) (ctx := ctx)
+                    (freshState := freshState) (freshState' := freshState')
+                    (functionName := functionName) (args := args) (pre := pre)
+                    (lowerExpr := lowerExpr) (tailFuel := targetTailFuel.succ)
+                    (compiler := compiler) (fn := fn) hLower hFind
+                rcases hTargetShape with
+                  ⟨preArgs', lowerArgs', stateArgs', tmp', _hUnsupported',
+                    hArgsLower', hFresh', hTarget⟩
+                have hComponents :
+                    preArgs' = preArgs ∧ lowerArgs' = lowerArgs ∧ tmp' = tmp := by
+                  rcases lower1?_user_call_some_components hLower with
+                    ⟨_hUnsupported, argsDirect, argsGenerated, stateArgs0,
+                      preArgs0, lowerArgs0, tmp0, hArgs0, hFresh0, hPre,
+                      hLowerExpr⟩
+                  rcases hArgsLower with hDirect | hGenerated <;>
+                    rcases hArgsLower' with hDirect' | hGenerated' <;>
+                      simp_all
+                rcases hComponents with ⟨rfl, rfl, rfl⟩
+                refine ⟨pre.length + targetTailFuel.succ.succ, ?_, ?_⟩
+                · omega
+                · rw [yulOpen_toOpenResult_evalValues_user_call_succ_eq_bind_args]
+                  rw [yulOpen_toOpenResult_reverseResult_eq_bind]
+                  rw [openResult_bind_assoc_sourceBridge]
+                  rw [hTarget]
+                  simpa [targetArgsFuel] using hCombinedNormalized
+            | brk =>
+                cases hArgsDone
+            | cont =>
+                cases hArgsDone
+            | leave =>
+                cases hArgsDone
+            | halt kind =>
+                cases hArgsDone
+
+/--
 Construct a regular selected-callee continuation from recursive open sequence
 preservation.
 
