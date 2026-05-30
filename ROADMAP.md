@@ -525,6 +525,10 @@ Remaining work:
      temp while keeping it hidden from the visible source layout, and callee
      halt/revert results remain terminal target outcomes for enclosing
      generated preludes to propagate.
+   - [x] Replay restored internal-call completion into the terminal-aware raw
+     expression endpoint: successful hidden-slot assignments read back the
+     singleton value, while callee halt/revert outcomes remain stopped target
+     preludes with their terminal state intact.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append

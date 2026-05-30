@@ -56408,6 +56408,132 @@ theorem sourceUserCallHiddenTempOpenResultRel_of_resultDoneRel
           cases hDone
 
 /--
+Raw expression postprocessing after the generated hidden-slot call statement.
+
+A successful call reads the hidden slot back as the expression value.  A
+terminal call remains a stopped statement outcome, so enclosing generated
+preludes can propagate it without pretending that the expression returned.
+-/
+def compilerOpenUserCallReadHiddenTempRawResult
+    (prim : Objects.Source.PrimitiveSemantics)
+    (tmp : Name) (ctx : Functions.Source.Ctx)
+    (callerCompiler : Objects.Source.State)
+    (callResult : Functions.Source.CallResult) :
+    SourceExprPreludeOpen.RawResult :=
+  OpenExternal.OpenResult.bind
+    (compilerOpenUserCallAssignHiddenTempResult tmp ctx callerCompiler
+      callResult)
+    fun target =>
+      match target.1.mode with
+      | .regular =>
+          OpenExternal.OpenResult.map
+            (fun exprResult =>
+              .values
+                { state := exprResult.1
+                  ctx := target.2
+                  values := exprResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim (.var tmp) target.1.state)
+      | .brk | .cont | .leave | .halt _ =>
+          OpenExternal.OpenResult.ok (.stopped target)
+
+/--
+Restored internal-call completion replays through the hidden result slot into
+the terminal-aware raw expression boundary.
+
+The source result is unchanged.  Returned singleton values become ordinary raw
+expression values; `YulHalt` and `Revert` become stopped target outcomes with
+their terminal state intact.
+-/
+theorem sourceUserCallResultDoneRel_replay_hidden_temp_raw
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {sourceDone : Except Exception (State × List Word)}
+    {callResult : Functions.Source.CallResult}
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTmpContains : callerCompiler.vars.contains tmp = true)
+    (hDone :
+      SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+        revertRel sourceDone (.ok callResult))
+    (hSingle :
+      ∀ {sourceAfter sourceValues},
+        sourceDone = .ok (sourceAfter, sourceValues) →
+          ∃ value, sourceValues = [value]) :
+    OpenExternal.OpenResultRel (fun _ _ _ => False)
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (.done sourceDone)
+      (compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx callerCompiler
+        callResult) := by
+  cases sourceDone with
+  | error err =>
+      cases err <;> try { cases hDone }
+      · rename_i source
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            cases kind <;>
+              exact OpenExternal.OpenResultRel.done (by
+                simpa [compilerOpenUserCallReadHiddenTempRawResult,
+                  compilerOpenUserCallAssignHiddenTempResult,
+                  SourceExprRawPreludeOpenDoneRel,
+                  OpenExternal.OpenResult.bind,
+                  OpenExternal.OpenResult.ok] using hDone)
+      · rename_i source value
+        cases callResult with
+        | returned sharedAfterCall returnValues =>
+            cases hDone
+        | halted kind haltedState =>
+            exact OpenExternal.OpenResultRel.done (by
+              simpa [compilerOpenUserCallReadHiddenTempRawResult,
+                compilerOpenUserCallAssignHiddenTempResult,
+                SourceExprRawPreludeOpenDoneRel,
+                OpenExternal.OpenResult.bind,
+                OpenExternal.OpenResult.ok] using hDone)
+  | ok sourceResult =>
+      rcases sourceResult with ⟨sourceAfter, sourceValues⟩
+      rcases hSingle rfl with ⟨value, hValues⟩
+      subst sourceValues
+      cases callResult with
+      | returned sharedAfterCall returnValues =>
+          rcases hDone with ⟨hRel, hReturnValues⟩
+          have hReturnValues' : returnValues = [value] := by
+            simpa using hReturnValues.symm
+          subst returnValues
+          have hReplay :
+              compilerOpenUserCallReadHiddenTempRawResult prim tmp ctx
+                  callerCompiler (.returned sharedAfterCall [value]) =
+                OpenExternal.OpenResult.ok
+                  (.values
+                    { state :=
+                        { shared := sharedAfterCall
+                          vars := callerCompiler.vars.insert tmp value }
+                      ctx := ctx
+                      values := [value] }) := by
+            simp [compilerOpenUserCallReadHiddenTempRawResult,
+              compilerOpenUserCallAssignHiddenTempResult,
+              Functions.Source.Store.assignMany, hTmpContains,
+              CompilerOpen.LocalsExpr.eval, OpenExternal.OpenResult.bind,
+              OpenExternal.OpenResult.map, OpenExternal.OpenResult.ok,
+              Functions.Source.Outcome.regular, Locals.Source.Outcome.regular,
+              Locals.Source.State.insert, Locals.Source.Store.insert_self]
+          rw [hReplay]
+          apply OpenExternal.OpenResultRel.done
+          simp [SourceExprRawPreludeOpenDoneRel]
+          exact
+            ⟨by
+              simpa [Locals.Source.State.withShared,
+                Locals.Source.State.insert] using
+                (SourceStateRel.insert_hidden hRel hTmpFreshLayout),
+              rfl⟩
+      | halted kind haltedState =>
+          cases hDone
+
+/--
 Target-side open shape of an internal function-call statement after the callee
 has been resolved.
 
