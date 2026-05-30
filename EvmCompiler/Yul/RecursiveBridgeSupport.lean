@@ -64153,6 +64153,42 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_c
               (compileFuel := compileFuel)
 
 /--
+Checked finite-path sequence soundness for a nonempty list whose head cannot
+be lowered at any compile fuel.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_no_lowering
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hNoLower :
+      ∀ fuel freshState,
+        Stmt.toFunctionsListFuel? fuel freshState head = none) :
+    CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel (head :: rest) codeOverride allowed := by
+  intro freshState freshState' lowerBlock _hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          have hHeadNone :
+              Stmt.toFunctionsListFuel? lowerFuel freshState head = none :=
+            hNoLower lowerFuel freshState
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+            hHeadNone] at hLower
+
+/--
 Open hidden-context sequence soundness for impossible source out-of-fuel
 branches.
 
