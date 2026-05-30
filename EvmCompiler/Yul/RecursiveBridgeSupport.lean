@@ -54459,6 +54459,362 @@ def SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
           (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
             targetFuel lowerBlock compiler)
 
+/--
+Selected-path result relation for one lowered statement head.
+
+Regular completion exposes the exact source-visible state needed by the
+syntactic tail.  Every other completion stops the surrounding sequence and
+retains only the final outcome relation, guarded by the enclosing sequence's
+allowed-result predicate.
+-/
+inductive SourceOpenStmtHeadPathDoneRel
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (allowed : Except Exception State → Prop) :
+    Except Exception State →
+      Except Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx) → Prop where
+  | regular
+      {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+      {compiler : Objects.Source.State} {ctxAfter : Functions.Source.Ctx} :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler →
+      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
+        revertRel allowed (.ok (.Ok shared store))
+        (.ok (Functions.Source.Outcome.regular compiler, ctxAfter))
+  | stopping
+      {sourceResult : Except Exception State}
+      {outcome : Objects.Source.Outcome} {ctxAfter : Functions.Source.Ctx} :
+      SourceResultNotRegularOk sourceResult →
+      (allowed sourceResult →
+        SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
+          sourceResult outcome) →
+      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
+        revertRel allowed sourceResult (.ok (outcome, ctxAfter))
+
+/--
+Finite-path preservation target for one lowered statement head.
+
+The head chooses one adequate executable target cutoff for the admitted
+finite trace.  This keeps structural statement proofs independent of the
+syntactic tail while preserving exact fallthrough state.
+-/
+def SourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmt : AstStmt)
+    (codeOverride : Option AstContract) (lowerStmt : Functions.Stmt)
+    (allowed : Except Exception State → Prop) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateExactRel cfg layout source compiler →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
+      trace sourceDone →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    ∀ minimumTargetFuel,
+      ∃ targetFuel,
+        minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
+            revertRel allowed)
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride
+              source))
+          (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx targetFuel
+            lowerStmt compiler)
+
+theorem SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {sourceResult : Except Exception State}
+    {outcome : Objects.Source.Outcome}
+    (hNotRegular : SourceResultNotRegularOk sourceResult)
+    (hRel :
+      SourceResultOutcomeRel cfg layout terminalRel revertRel sourceResult
+        outcome) :
+    outcome.mode ≠ .regular := by
+  cases sourceResult with
+  | error err =>
+      exact SourceResultOutcomeRel.mode_ne_regular_of_error hRel
+  | ok source =>
+      cases source with
+      | Ok shared store =>
+          cases hNotRegular
+      | OutOfFuel =>
+          cases hRel with
+          | ok hOk =>
+              cases hOk with
+              | regular hState => cases hState
+      | Checkpoint jump =>
+          exact SourceResultOutcomeRel.mode_ne_regular_of_checkpoint hRel
+
+/--
+Attach one selected-path statement head to its syntactic tail.
+
+Only the concrete admitted source trace is split.  A regular head recursively
+selects a tail cutoff and pads the already-successful compiled head path to
+that cutoff.  A stopping head closes the surrounding sequence immediately.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerHead : Functions.Stmt}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hHead :
+      SourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel head codeOverride
+        lowerHead allowed)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfter sourceFuel
+          rest codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel.succ (head :: rest)
+      codeOverride { stmts := lowerHead :: lowerTail.stmts } allowed := by
+  rcases lowerTail with ⟨lowerTailStmts⟩
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  have hSourceSeqResolve := hResolve
+  rw [yulOpen_toOpenResult_execSeq_cons_succ] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hHeadError | hHeadOk
+  · rcases hHeadError with ⟨err, hSourceHead, rfl⟩
+    rcases hHead hInitial hSourceHead hResponses minimumTargetFuel with
+      ⟨headFuel, hMinimumHead, hHeadPath⟩
+    rcases hHeadPath.resolves with
+      ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
+    have hSourceHeadEq : (.error err : Except Exception State) =
+        headSourceDone :=
+      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
+    subst headSourceDone
+    cases headTargetDone with
+    | error targetErr =>
+        cases hHeadDone
+    | ok targetDone =>
+        rcases targetDone with ⟨targetOutcome, targetCtx⟩
+        cases hHeadDone with
+        | stopping hNotRegular hOutcome =>
+            have hOutcomeRel := hOutcome hAllowed
+            have hMode :
+                targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+              SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                hNotRegular hOutcomeRel
+            have hTargetFull :
+                OpenExternal.OpenResultResolves
+                  (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                    headFuel.succ
+                    { stmts := lowerHead :: lowerTailStmts } compiler)
+                  trace (.ok (targetOutcome, ctx)) := by
+              rw [compilerOpen_block_runOpen_cons_succ]
+              have hStop :
+                  OpenExternal.OpenResultResolves
+                    (match targetOutcome.mode with
+                    | .regular =>
+                        CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                          targetCtx headFuel { stmts := lowerTailStmts }
+                          targetOutcome.state
+                    | .brk | .cont | .leave | .halt _ =>
+                        OpenExternal.OpenResult.ok (targetOutcome, ctx))
+                    [] (.ok (targetOutcome, ctx)) := by
+                cases hTargetMode : targetOutcome.mode <;>
+                  simp_all [OpenExternal.OpenResult.ok] <;>
+                  exact OpenExternal.OpenResultResolves.done
+              simpa using
+                (OpenExternal.OpenResultResolves.bind_ok
+                  (next := fun stmtResult =>
+                    match stmtResult.1.mode with
+                    | .regular =>
+                        CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                          stmtResult.2 headFuel { stmts := lowerTailStmts }
+                          stmtResult.1.state
+                    | .brk | .cont | .leave | .halt _ =>
+                        OpenExternal.OpenResult.ok (stmtResult.1, ctx))
+                  hTargetHead hStop)
+            refine ⟨headFuel.succ, Nat.le_trans hMinimumHead
+              (Nat.le_succ _), ?_⟩
+            exact
+              OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                hSourceSeqResolve hTargetFull hResponses (by
+                  intro _hAllowed
+                  exact hOutcomeRel)
+  · rcases hHeadOk with
+      ⟨headTrace, tailTrace, headDone, hTrace, hSourceHead, hSourceTail⟩
+    subst trace
+    have hHeadResponses : SourceOpenTraceResponsesAdmissible cfg headTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hTailResponses : SourceOpenTraceResponsesAdmissible cfg tailTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    rcases hHead hInitial hSourceHead hHeadResponses minimumTargetFuel with
+      ⟨headFuel, hMinimumHead, hHeadPath⟩
+    rcases hHeadPath.resolves with
+      ⟨headSourceDone, headTargetDone, hSourceHead', hTargetHead, hHeadDone⟩
+    have hSourceHeadEq : (.ok headDone : Except Exception State) =
+        headSourceDone :=
+      OpenExternal.OpenResultResolves.deterministic hSourceHead hSourceHead'
+    subst headSourceDone
+    cases headTargetDone with
+    | error targetErr =>
+        cases hHeadDone
+    | ok targetDone =>
+        rcases targetDone with ⟨targetOutcome, targetCtx⟩
+        cases headDone with
+        | Ok shared store =>
+            cases hHeadDone with
+            | regular hAfter =>
+                rcases
+                    hTail (ctxAfter := targetCtx) hAfter hSourceTail hAllowed
+                      hTailResponses
+                      (max minimumTargetFuel headFuel) with
+                  ⟨tailFuel, hMinimumTail, hTailPath⟩
+                rcases hTailPath.resolves with
+                  ⟨tailSourceDone, tailTargetDone, hSourceTail',
+                    hTargetTail, hTailDone⟩
+                have hSourceTailEq : sourceDone = tailSourceDone :=
+                  OpenExternal.OpenResultResolves.deterministic hSourceTail
+                    hSourceTail'
+                subst tailSourceDone
+                have hHeadFuelLe : headFuel ≤ tailFuel :=
+                  Nat.le_trans (Nat.le_max_right _ _)
+                    hMinimumTail
+                have hTargetHeadPadded :=
+                  CompilerOpen.FunctionsOpen.Stmt.run_resolves_mono
+                    prim program hHeadFuelLe hTargetHead
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        ctx tailFuel.succ
+                        { stmts := lowerHead :: lowerTailStmts } compiler)
+                      (headTrace ++ tailTrace) tailTargetDone := by
+                  rw [compilerOpen_block_runOpen_cons_succ]
+                  apply
+                    OpenExternal.OpenResultResolves.bind_ok hTargetHeadPadded
+                  simpa [Functions.Source.Outcome.regular,
+                    Locals.Source.Outcome.regular] using hTargetTail
+                refine
+                  ⟨tailFuel.succ,
+                    Nat.le_trans (Nat.le_max_left _ _) hMinimumTail |>.trans
+                      (Nat.le_succ _), ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses hTailDone
+            | stopping hNotRegular _hOutcome =>
+                cases hNotRegular
+        | OutOfFuel =>
+            cases hSourceTail
+            simp only [List.append_nil] at hSourceSeqResolve hResponses ⊢
+            cases hHeadDone with
+            | stopping hNotRegular hOutcome =>
+                have hOutcomeRel := hOutcome hAllowed
+                have hMode :
+                    targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+                  SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                    hNotRegular hOutcomeRel
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        ctx headFuel.succ
+                        { stmts := lowerHead :: lowerTailStmts } compiler)
+                      headTrace (.ok (targetOutcome, ctx)) := by
+                  rw [compilerOpen_block_runOpen_cons_succ]
+                  have hStop :
+                      OpenExternal.OpenResultResolves
+                        (match targetOutcome.mode with
+                        | .regular =>
+                            CompilerOpen.FunctionsOpen.Block.runOpen prim
+                              program targetCtx headFuel
+                              { stmts := lowerTailStmts }
+                              targetOutcome.state
+                        | .brk | .cont | .leave | .halt _ =>
+                            OpenExternal.OpenResult.ok (targetOutcome, ctx))
+                        [] (.ok (targetOutcome, ctx)) := by
+                    cases hTargetMode : targetOutcome.mode <;>
+                      simp_all [OpenExternal.OpenResult.ok] <;>
+                      exact OpenExternal.OpenResultResolves.done
+                  simpa using
+                    (OpenExternal.OpenResultResolves.bind_ok
+                      (next := fun stmtResult =>
+                        match stmtResult.1.mode with
+                        | .regular =>
+                            CompilerOpen.FunctionsOpen.Block.runOpen prim
+                              program stmtResult.2 headFuel
+                              { stmts := lowerTailStmts } stmtResult.1.state
+                        | .brk | .cont | .leave | .halt _ =>
+                            OpenExternal.OpenResult.ok (stmtResult.1, ctx))
+                      hTargetHead hStop)
+                refine
+                  ⟨headFuel.succ, Nat.le_succ_of_le hMinimumHead, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses (by
+                      intro _hAllowed
+                      exact hOutcomeRel)
+        | Checkpoint jump =>
+            cases hSourceTail
+            simp only [List.append_nil] at hSourceSeqResolve hResponses ⊢
+            cases hHeadDone with
+            | stopping hNotRegular hOutcome =>
+                have hOutcomeRel := hOutcome hAllowed
+                have hMode :
+                    targetOutcome.mode ≠ Locals.Source.Mode.regular :=
+                  SourceResultOutcomeRel.mode_ne_regular_of_notRegular
+                    hNotRegular hOutcomeRel
+                have hTargetFull :
+                    OpenExternal.OpenResultResolves
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        ctx headFuel.succ
+                        { stmts := lowerHead :: lowerTailStmts } compiler)
+                      headTrace (.ok (targetOutcome, ctx)) := by
+                  rw [compilerOpen_block_runOpen_cons_succ]
+                  have hStop :
+                      OpenExternal.OpenResultResolves
+                        (match targetOutcome.mode with
+                        | .regular =>
+                            CompilerOpen.FunctionsOpen.Block.runOpen prim
+                              program targetCtx headFuel
+                              { stmts := lowerTailStmts }
+                              targetOutcome.state
+                        | .brk | .cont | .leave | .halt _ =>
+                            OpenExternal.OpenResult.ok (targetOutcome, ctx))
+                        [] (.ok (targetOutcome, ctx)) := by
+                    cases hTargetMode : targetOutcome.mode <;>
+                      simp_all [OpenExternal.OpenResult.ok] <;>
+                      exact OpenExternal.OpenResultResolves.done
+                  simpa using
+                    (OpenExternal.OpenResultResolves.bind_ok
+                      (next := fun stmtResult =>
+                        match stmtResult.1.mode with
+                        | .regular =>
+                            CompilerOpen.FunctionsOpen.Block.runOpen prim
+                              program stmtResult.2 headFuel
+                              { stmts := lowerTailStmts } stmtResult.1.state
+                        | .brk | .cont | .leave | .halt _ =>
+                            OpenExternal.OpenResult.ok (stmtResult.1, ctx))
+                      hTargetHead hStop)
+                refine
+                  ⟨headFuel.succ, Nat.le_succ_of_le hMinimumHead, ?_⟩
+                exact
+                  OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                    hSourceSeqResolve hTargetFull hResponses (by
+                      intro _hAllowed
+                      exact hOutcomeRel)
+
 theorem sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
     {cfg : StateRelConfig} {layout returns : List Name}
     {terminalRel :
