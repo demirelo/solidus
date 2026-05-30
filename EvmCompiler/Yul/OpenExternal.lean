@@ -1771,6 +1771,30 @@ def ResponsesSatisfy
     (responseRel : CallResponse → Prop) (trace : OpenTrace) : Prop :=
   ∀ event, event ∈ trace → responseRel event.response
 
+theorem append
+    {responseRel : CallResponse → Prop} {left right : OpenTrace}
+    (hLeft : ResponsesSatisfy responseRel left)
+    (hRight : ResponsesSatisfy responseRel right) :
+    ResponsesSatisfy responseRel (left ++ right) := by
+  intro event hMem
+  rcases List.mem_append.mp hMem with hMem | hMem
+  · exact hLeft event hMem
+  · exact hRight event hMem
+
+theorem left_of_append
+    {responseRel : CallResponse → Prop} {left right : OpenTrace}
+    (hTrace : ResponsesSatisfy responseRel (left ++ right)) :
+    ResponsesSatisfy responseRel left := by
+  intro event hMem
+  exact hTrace event (List.mem_append_left _ hMem)
+
+theorem right_of_append
+    {responseRel : CallResponse → Prop} {left right : OpenTrace}
+    (hTrace : ResponsesSatisfy responseRel (left ++ right)) :
+    ResponsesSatisfy responseRel right := by
+  intro event hMem
+  exact hTrace event (List.mem_append_right _ hMem)
+
 end OpenTrace
 
 /--
@@ -1793,6 +1817,125 @@ inductive OpenResultResolves
       OpenResultResolves (call.resume response) trace result →
       OpenResultResolves (.call call)
         ({ site := call.site, response := response } :: trace) result
+
+namespace OpenResultResolves
+
+theorem bind_ok
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source : OpenResult ε α} {next : α → OpenResult ε β}
+    {left right : OpenTrace} {value : α} {result : Except ε β}
+    (hSource : OpenResultResolves source left (.ok value))
+    (hNext : OpenResultResolves (next value) right result) :
+    OpenResultResolves (OpenResult.bind source next) (left ++ right)
+      result := by
+  generalize hSourceDone : (.ok value : Except ε α) = sourceDone at hSource
+  induction hSource generalizing value right with
+  | done =>
+      cases hSourceDone
+      simpa [OpenResult.bind] using hNext
+  | @call call response trace sourceDone hTail ih =>
+      exact OpenResultResolves.call (ih hNext hSourceDone)
+
+theorem bind_error
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source : OpenResult ε α} {next : α → OpenResult ε β}
+    {trace : OpenTrace} {err : ε}
+    (hSource : OpenResultResolves source trace (.error err)) :
+    OpenResultResolves (OpenResult.bind source next) trace (.error err) := by
+  generalize hSourceDone : (.error err : Except ε α) = sourceDone at hSource
+  induction hSource generalizing err with
+  | done =>
+      cases hSourceDone
+      exact OpenResultResolves.done
+  | @call call response trace sourceDone hTail ih =>
+      exact OpenResultResolves.call (ih hSourceDone)
+
+/--
+Invert resolution through `OpenResult.bind`.
+
+Either the bound prefix itself resolved to an error, or the concrete trace
+splits into a prefix trace ending in one successful value and a suffix trace
+through the selected continuation.
+-/
+theorem bind_inv
+    {ε : Type u} {α : Type v} {β : Type w}
+    {source : OpenResult ε α} {next : α → OpenResult ε β}
+    {trace : OpenTrace} {result : Except ε β}
+    (hResolve :
+      OpenResultResolves (OpenResult.bind source next) trace result) :
+    (∃ err,
+      OpenResultResolves source trace (.error err) ∧
+        result = .error err) ∨
+    (∃ left right value,
+      trace = left ++ right ∧
+        OpenResultResolves source left (.ok value) ∧
+          OpenResultResolves (next value) right result) := by
+  let Split :
+      OpenResult ε α → OpenTrace → Except ε β → Prop :=
+    fun source trace result =>
+      (∃ err,
+        OpenResultResolves source trace (.error err) ∧
+          result = .error err) ∨
+      (∃ left right value,
+        trace = left ++ right ∧
+          OpenResultResolves source left (.ok value) ∧
+            OpenResultResolves (next value) right result)
+  change Split source trace result
+  exact
+    (OpenResult.rec
+      (motive_1 := fun source =>
+        ∀ {trace result},
+          OpenResultResolves (OpenResult.bind source next) trace result →
+            Split source trace result)
+      (motive_2 := fun sourceCall =>
+        ∀ {trace result},
+          OpenResultResolves
+            (OpenResult.bind (.call sourceCall) next) trace result →
+              Split (.call sourceCall) trace result)
+      (done := by
+        intro sourceDone trace result hResolve
+        cases sourceDone with
+        | ok value =>
+            exact
+              Or.inr
+                ⟨[], trace, value, by simp, OpenResultResolves.done,
+                  by simpa [OpenResult.bind] using hResolve⟩
+        | error err =>
+            have hDone :
+                OpenResultResolves (.done (.error err)) trace result := by
+              simpa [OpenResult.bind] using hResolve
+            cases hDone
+            exact Or.inl ⟨err, OpenResultResolves.done, rfl⟩)
+      (call := by
+        intro sourceCall hCall trace result hResolve
+        exact hCall hResolve)
+      (mk := by
+        intro site resume ih trace result hResolve
+        have hCall :
+            OpenResultResolves
+              (.call
+                { site := site
+                  resume := fun response =>
+                    OpenResult.bind (resume response) next })
+              trace result := by
+          simpa [OpenResult.bind] using hResolve
+        cases hCall with
+        | @call _ response tail result hTail =>
+            rcases ih response hTail with hError | hOk
+            · rcases hError with ⟨err, hPrefix, hResult⟩
+              exact
+                Or.inl
+                  ⟨err, OpenResultResolves.call hPrefix, hResult⟩
+            · rcases hOk with
+                ⟨left, right, value, hTrace, hPrefix, hSuffix⟩
+              exact
+                Or.inr
+                  ⟨{ site := site, response := response } :: left,
+                    right, value, by simp [hTrace],
+                    OpenResultResolves.call hPrefix, hSuffix⟩)
+      source) hResolve
+
+end OpenResultResolves
 
 /--
 Pathwise relation between two open computations.
@@ -1852,17 +1995,126 @@ theorem resolves
       refine ⟨sourceDone, targetDone, OpenResultResolves.call hSource, ?_, hDone⟩
       simpa [hSite] using (OpenResultResolves.call hTarget)
 
+/--
+Compose one related finite path through a pair of continuations.
+
+The returned suffix trace is selected by the completed head result.  This is
+the pathwise analogue of `OpenResultRel.bind`: only the concrete admitted path
+is composed, so no fixed executable cutoff is required to cover sibling
+response branches.
+-/
+theorem bind
+    {ε₁ : Type u} {ε₂ : Type v}
+    {α : Type w} {β : Type} {γ : Type} {δ : Type}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {callResponseRel' :
+      OpenCall (OpenResult ε₁ γ) →
+        OpenCall (OpenResult ε₂ δ) → CallResponse → Prop}
+    {doneRel' : Except ε₁ γ → Except ε₂ δ → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β}
+    {sourceNext : α → OpenResult ε₁ γ}
+    {targetNext : β → OpenResult ε₂ δ}
+    (hRel : OpenResultPathRel callResponseRel doneRel trace source target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          ∃ tailTrace,
+            OpenResultPathRel callResponseRel' doneRel' tailTrace
+              (match sourceDone with
+              | .ok value => sourceNext value
+              | .error err => .done (.error err))
+              (match targetDone with
+              | .ok value => targetNext value
+              | .error err => .done (.error err)))
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel sourceCall targetCall response →
+          callResponseRel'
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext }
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext }
+            response) :
+    ∃ tailTrace,
+      OpenResultPathRel callResponseRel' doneRel' (trace ++ tailTrace)
+        (OpenResult.bind source sourceNext)
+        (OpenResult.bind target targetNext) := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases sourceDone <;> cases targetDone <;>
+        simpa [OpenResult.bind] using hDone hDoneRel
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      rcases ih with ⟨tailTrace, hTail⟩
+      refine ⟨tailTrace, ?_⟩
+      simpa [OpenResult.bind] using
+        (OpenResultPathRel.call
+          (sourceCall :=
+            { site := sourceCall.site
+              resume := fun response =>
+                OpenResult.bind (sourceCall.resume response) sourceNext })
+          (targetCall :=
+            { site := targetCall.site
+              resume := fun response =>
+                OpenResult.bind (targetCall.resume response) targetNext })
+          hSite (hCallResponse hResponse) hTail)
+
 end OpenResultPathRel
 
 namespace OpenResultRel
 
 /--
 Project a tree-shaped open-result relation onto one concrete admitted response
-trace.
+trace, mapping the trace-level certificate into the continuation-shaped
+response relation used by the tree.
 
 This is intentionally one-way.  A fixed executable cutoff may describe a
 whole open tree locally, but the public compiler proof only needs the path
 selected by one finite black-box response trace.
+-/
+theorem path_of_resolves_of_responsesSatisfy_map
+    {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
+    {responseRel : CallResponse → Prop}
+    {callResponseRel :
+      OpenCall (OpenResult ε₁ α) →
+        OpenCall (OpenResult ε₂ β) → CallResponse → Prop}
+    {doneRel : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenTrace} {source : OpenResult ε₁ α}
+    {target : OpenResult ε₂ β} {sourceDone : Except ε₁ α}
+    (hRel :
+      OpenResultRel callResponseRel doneRel source target)
+    (hResolves : OpenResultResolves source trace sourceDone)
+    (hResponses : OpenTrace.ResponsesSatisfy responseRel trace)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        responseRel response →
+          callResponseRel sourceCall targetCall response) :
+    OpenResultPathRel callResponseRel doneRel trace source target := by
+  induction hResolves generalizing target with
+  | done =>
+      cases hRel with
+      | done hDone =>
+          exact OpenResultPathRel.done hDone
+  | @call sourceCall response trace sourceDone hTail ih =>
+      cases hRel with
+      | call hSite hResume =>
+          have hResponse : responseRel response :=
+            hResponses
+              { site := sourceCall.site, response := response } (by simp)
+          apply OpenResultPathRel.call hSite
+          · exact hCallResponse hResponse
+          · apply ih (hRel := hResume response (hCallResponse hResponse))
+            intro event hMem
+            exact hResponses event (List.mem_cons_of_mem _ hMem)
+
+/--
+Project a tree-shaped open-result relation whose response relation depends only
+on the concrete response certificate.
 -/
 theorem path_of_resolves_of_responsesSatisfy
     {ε₁ : Type u} {ε₂ : Type v} {α : Type w} {β : Type}
@@ -1877,23 +2129,11 @@ theorem path_of_resolves_of_responsesSatisfy
     (hResponses : OpenTrace.ResponsesSatisfy responseRel trace) :
     OpenResultPathRel
       (fun _sourceCall _targetCall response => responseRel response)
-      doneRel trace source target := by
-  induction hResolves generalizing target with
-  | done =>
-      cases hRel with
-      | done hDone =>
-          exact OpenResultPathRel.done hDone
-  | @call sourceCall response trace sourceDone hTail ih =>
-      cases hRel with
-      | call hSite hResume =>
-          have hResponse : responseRel response :=
-            hResponses
-              { site := sourceCall.site, response := response } (by simp)
-          apply OpenResultPathRel.call hSite
-          · exact hResponse
-          · apply ih (hRel := hResume response hResponse)
-            intro event hMem
-            exact hResponses event (List.mem_cons_of_mem _ hMem)
+      doneRel trace source target :=
+  path_of_resolves_of_responsesSatisfy_map hRel hResolves hResponses
+    (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
 
 end OpenResultRel
 
