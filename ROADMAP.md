@@ -594,6 +594,10 @@ Remaining work:
      syntax recursion: nil and cons consume whole-list `lowerBound1?` results,
      recursive tails reserve the generated outer-head cost, and recursive
      heads delegate to raw expression preservation.
+   - [x] Add the terminal-aware raw primitive-expression binder: argument-side
+     halt/revert outcomes become stopped raw expressions, regular completion
+     enters an explicit primitive continuation, and suspended argument calls
+     retain the full post-primitive response relation.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
