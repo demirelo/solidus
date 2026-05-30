@@ -6637,6 +6637,16 @@ theorem StateCheckpointAllowed.setSharedState
         simpa [StateCheckpointAllowed, EvmYul.Yul.State.setSharedState]
           using hAllowed
 
+theorem StateCheckpointAllowed.finishYulState
+    {canBreak canContinue canLeave : Bool} {state : State}
+    {site : OpenExternal.CallSite}
+    {response : OpenExternal.CallResponse}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state) :
+    StateCheckpointAllowed canBreak canContinue canLeave
+      (site.finishYulState state response) := by
+  simpa [OpenExternal.CallSite.finishYulState] using
+    StateCheckpointAllowed.setSharedState hAllowed
+
 theorem StateCheckpointAllowed.setMachineState
     {canBreak canContinue canLeave : Bool} {state : State}
     {machineState : EvmYul.MachineState}
@@ -13816,6 +13826,30 @@ theorem of_exact {layout : List Name} {state : State}
       cases jump <;>
         exact StoreDomainContains.of_exact
           (by simpa [StateStoreDomainExact] using hDomain)
+
+theorem setSharedState
+    {layout : List Name} {state : State}
+    {shared : EvmYul.SharedState .Yul}
+    (hState : StateStoreContains layout state) :
+    StateStoreContains layout
+      (EvmYul.Yul.State.setSharedState shared state) := by
+  cases state with
+  | Ok oldShared store =>
+      simpa [StateStoreContains, EvmYul.Yul.State.setSharedState] using hState
+  | OutOfFuel =>
+      simp [StateStoreContains, EvmYul.Yul.State.setSharedState]
+  | Checkpoint jump =>
+      cases jump <;>
+        simpa [StateStoreContains, EvmYul.Yul.State.setSharedState] using hState
+
+theorem finishYulState
+    {layout : List Name} {state : State}
+    {site : OpenExternal.CallSite}
+    {response : OpenExternal.CallResponse}
+    (hState : StateStoreContains layout state) :
+    StateStoreContains layout (site.finishYulState state response) := by
+  simpa [OpenExternal.CallSite.finishYulState] using
+    StateStoreContains.setSharedState hState
 
 theorem insert
     {layout : List Name} {state : State} {name : Name} {value : Word}
@@ -22782,6 +22816,363 @@ theorem bind_right
 end OpenResultDoneInvariant
 
 /--
+Caller-local invariant for an open internal user call after its callee body.
+
+The callee body may expose any number of external requests and may complete in
+any imported Yul state.  The imported user-call continuation restores the
+caller's local varstore, so checkpoint legality and visible-local containment
+follow from the caller alone after every shared response.
+-/
+theorem yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_checkpoint_contains
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {caller : State} {result : OpenExternal.YulOpenResult State}
+    {rets : List EvmYul.Identifier}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave caller)
+    (hContains : StateStoreContains layout caller) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            StateCheckpointAllowed canBreak canContinue canLeave stateAfter ∧
+            StateStoreContains layout stateAfter)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpenResult.bind result fun state₂ =>
+          let state₃ :=
+            EvmYul.Yul.State.setStore
+              (EvmYul.Yul.State.overwrite?
+                (EvmYul.Yul.State.reviveJump state₂) caller)
+              caller
+          .ok (state₃, List.map state₂.lookup! rets))) := by
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  refine
+    OpenResultDoneInvariant.bind
+      (OpenResultDoneInvariant.any (fun _doneResult => True.intro)
+        (OpenExternal.YulOpenResult.toOpenResult result))
+      ?_ ?_
+  · intro state₂ _hDone
+    exact OpenResultDoneInvariant.done (by
+      intro stateAfter values hDone
+      cases hDone
+      exact
+        ⟨StateCheckpointAllowed.callReturn hAllowed,
+          StateStoreContains.callRestore hContains⟩)
+  · intro err _hDone stateAfter values hDone
+    cases hDone
+
+/--
+Open internal user calls preserve caller checkpoint legality and visible-local
+containment after every external response.
+
+The selected callee body stays opaque here: its only caller-visible local effect
+is consumed by the imported restoration continuation above.
+-/
+theorem yulOpenCall_toOpenResult_doneInvariant_checkpoint_contains
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {args : List Word}
+    {functionName? : Option EvmYul.Yul.Ast.YulFunctionName}
+    {codeOverride : Option AstContract} {state : State}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (fun doneResult =>
+        ∀ {stateAfter : State} {values : List Word},
+          doneResult = .ok (stateAfter, values) →
+            StateCheckpointAllowed canBreak canContinue canLeave stateAfter ∧
+            StateStoreContains layout stateAfter)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call fuel args functionName? codeOverride
+          state)) := by
+  cases fuel with
+  | zero =>
+      simp [OpenExternal.YulOpen.call, OpenExternal.YulOpenResult.error]
+      exact OpenResultDoneInvariant.done (by
+        intro stateAfter values hDone
+        cases hDone)
+  | succ fuel' =>
+      unfold OpenExternal.YulOpen.call
+      cases hFind :
+          state.sharedState.accountMap.find? state.executionEnv.codeOwner with
+      | none =>
+          simp [hFind, OpenExternal.YulOpenResult.error]
+          exact OpenResultDoneInvariant.done (by
+            intro stateAfter values hDone
+            cases hDone)
+      | some yulContract =>
+          cases hFunction :
+              OpenExternal.YulOpen.callFunction? functionName?
+                (codeOverride.getD yulContract.code) with
+          | none =>
+              simp [hFind, hFunction, OpenExternal.YulOpenResult.error]
+              exact OpenResultDoneInvariant.done (by
+                intro stateAfter values hDone
+                cases hDone)
+          | some fn =>
+              simp [hFind, hFunction]
+              exact
+                yulOpenRestoreCallerAfterOpenBody_toOpenResult_doneInvariant_checkpoint_contains
+                  hAllowed hContains
+
+/--
+Completed open Yul pair results satisfy a caller-selected state invariant.
+
+Errors are vacuous; successful values carry only the state fact.  This is the
+generic bind layer used by checkpoint/store proofs without duplicating the
+open-result recursion for each invariant.
+-/
+def YulOpenPairStateDoneInv (stateInv : State → Prop) {α : Type} :
+    Except Exception (State × α) → Prop
+  | .ok (state, _) => stateInv state
+  | .error _ => True
+
+namespace YulOpenPairStateDoneInv
+
+theorem bind
+    {stateInv stateInv' : State → Prop} {α β : Type}
+    {result : OpenExternal.YulOpenResult (State × α)}
+    {next : State × α → OpenExternal.YulOpenResult (State × β)}
+    (hResult :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult result))
+    (hNext :
+      ∀ {state : State} {value : α},
+        stateInv state →
+          OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv')
+            (OpenExternal.YulOpenResult.toOpenResult (next (state, value)))) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv')
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpenResult.bind result next)) := by
+  rw [OpenExternal.YulOpenResult.toOpenResult_bind]
+  refine OpenResultDoneInvariant.bind hResult ?_ ?_
+  · intro pair hPair
+    rcases pair with ⟨state, value⟩
+    exact hNext hPair
+  · intro err _hError
+    trivial
+
+theorem map
+    {stateInv : State → Prop} {α β : Type}
+    {result : OpenExternal.YulOpenResult (State × α)}
+    (f : State × α → State × β)
+    (hMap : ∀ {state : State} {value : α}, stateInv state → stateInv (f (state, value)).1)
+    (hResult :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult result)) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpenResult.map f result)) := by
+  unfold OpenExternal.YulOpenResult.map
+  refine bind hResult ?_
+  intro state value hState
+  exact OpenResultDoneInvariant.done (hMap hState)
+
+theorem consResult
+    {stateInv : State → Prop} {arg : Word}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult result)) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.consResult arg result)) := by
+  exact
+    map (fun pair => (pair.1, arg :: pair.2)) (fun hState => hState) hResult
+
+theorem reverseResult
+    {stateInv : State → Prop}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult result)) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.reverseResult result)) := by
+  exact map (fun pair => (pair.1, pair.2.reverse)) (fun hState => hState) hResult
+
+theorem headResult
+    {stateInv : State → Prop}
+    {result : OpenExternal.YulOpenResult (State × List Word)}
+    (hResult :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult result)) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.headResult result)) := by
+  unfold OpenExternal.YulOpen.headResult
+  refine bind hResult ?_
+  intro state values hState
+  cases values with
+  | nil =>
+      exact OpenResultDoneInvariant.done (by
+        simpa [EvmYul.Yul.head', YulOpenPairStateDoneInv] using hState)
+  | cons value rest =>
+      exact OpenResultDoneInvariant.done hState
+
+theorem evalTail_of_head
+    {stateInv : State → Prop} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {head : OpenExternal.YulOpenResult (State × Word)}
+    (hHead :
+      OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+        (OpenExternal.YulOpenResult.toOpenResult head))
+    (hArgs :
+      ∀ {fuelTail : Nat} {state : State},
+        fuel = fuelTail.succ →
+        stateInv state →
+          OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalArgs fuelTail args codeOverride state))) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalTail fuel args codeOverride head)) := by
+  unfold OpenExternal.YulOpen.evalTail
+  refine bind hHead ?_
+  intro state value hState
+  cases fuel with
+  | zero =>
+      exact
+        OpenResultDoneInvariant.done
+          (doneInv := YulOpenPairStateDoneInv stateInv) True.intro
+  | succ fuelTail =>
+      exact consResult (hArgs rfl hState)
+
+theorem evalArgs_of_eval
+    {stateInv : State → Prop} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr} {state₀ : State},
+        expr ∈ args →
+        stateInv state₀ →
+          OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.eval evalFuel expr codeOverride state₀)))
+    (hState : stateInv state) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args codeOverride state)) := by
+  induction args generalizing fuel state with
+  | nil =>
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error]
+          exact
+            OpenResultDoneInvariant.done
+              (doneInv := YulOpenPairStateDoneInv stateInv) True.intro
+      | succ fuel' =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.ok]
+          exact
+            OpenResultDoneInvariant.done
+              (doneInv := YulOpenPairStateDoneInv stateInv) hState
+  | cons head tail ih =>
+      cases fuel with
+      | zero =>
+          simp [OpenExternal.YulOpen.evalArgs,
+            OpenExternal.YulOpenResult.error]
+          exact
+            OpenResultDoneInvariant.done
+              (doneInv := YulOpenPairStateDoneInv stateInv) True.intro
+      | succ fuel' =>
+          simp [OpenExternal.YulOpen.evalArgs]
+          exact
+            evalTail_of_head
+              (fuel := fuel') (args := tail) (codeOverride := codeOverride)
+              (head := OpenExternal.YulOpen.eval fuel' head codeOverride state)
+              (hEach (by simp) hState)
+              (by
+                intro fuelTail stateTail hFuel hStateTail
+                cases hFuel
+                exact
+                  ih
+                    (by
+                      intro evalFuel expr state₀ hMem hState₀
+                      exact hEach (by simp [hMem]) hState₀)
+                    hStateTail)
+
+theorem evalArgs_reverse_of_eval
+    {stateInv : State → Prop} {fuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract} {state : State}
+    (hEach :
+      ∀ {evalFuel : Nat} {expr : AstExpr} {state₀ : State},
+        expr ∈ args →
+        stateInv state₀ →
+          OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.eval evalFuel expr codeOverride state₀)))
+    (hState : stateInv state) :
+    OpenResultDoneInvariant (YulOpenPairStateDoneInv stateInv)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs fuel args.reverse codeOverride state)) :=
+  evalArgs_of_eval
+    (fuel := fuel) (args := args.reverse) (codeOverride := codeOverride)
+    (state := state)
+    (hEach := by
+      intro evalFuel expr state₀ hMem hState₀
+      exact hEach (by simpa using hMem) hState₀)
+    hState
+
+end YulOpenPairStateDoneInv
+
+/--
+Checkpoint legality plus visible-local containment for source states reached by
+the open evaluator.
+
+The two conjuncts remain explicit because statement-level store preservation
+will later carry a stronger exact-domain witness in addition to the protected
+visible layout.
+-/
+def StateCheckpointStoreContains
+    (layout : List Name) (canBreak canContinue canLeave : Bool) :
+    State → Prop :=
+  fun state =>
+    StateCheckpointAllowed canBreak canContinue canLeave state ∧
+      StateStoreContains layout state
+
+theorem sourcePairResult_toOpenResult_doneInvariant_checkpointStoreContains
+    {layout : List Name} {canBreak canContinue canLeave : Bool} {α : Type}
+    {result : Except Exception (State × α)}
+    (hAllowed :
+      SourcePairResultCheckpointAllowed canBreak canContinue canLeave result)
+    (hContains : SourcePairResultStoreContains layout result) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (.done result) := by
+  cases result with
+  | error err =>
+      exact OpenResultDoneInvariant.done True.intro
+  | ok pair =>
+      rcases pair with ⟨state, value⟩
+      exact OpenResultDoneInvariant.done ⟨hAllowed, hContains⟩
+
+theorem primCall_safe_toOpenResult_doneInvariant_checkpointStoreContains
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {prim : EvmYul.Operation .Yul}
+    {state : State} {args : List Word}
+    (hSafe : Safe.primitive prim)
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (.done (EvmYul.Yul.primCall fuel state prim args)) := by
+  apply sourcePairResult_toOpenResult_doneInvariant_checkpointStoreContains
+  · cases state with
+    | Ok shared store =>
+        exact
+          SourcePairResultCheckpointAllowed.primCall_of_safe_ok
+            PrimitiveCallCheckpointAllowedForSafe.of_primitive_families hSafe
+    | OutOfFuel =>
+        exact
+          PrimitiveCallCheckpointAllowedForSafeNonOk.of_primitive_families
+            hSafe (by intro shared store h; cases h) hAllowed
+    | Checkpoint jump =>
+        exact
+          PrimitiveCallCheckpointAllowedForSafeNonOk.of_primitive_families
+            hSafe (by intro shared store h; cases h) hAllowed
+  · exact StoreDomainCallSound.of_primitive_families.primCall hSafe hContains
+
+/--
 Open-evaluator state-domain invariant.
 
 Unlike the closed `evalArgs` domain lemmas above, this proposition follows
@@ -23884,6 +24275,50 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_state_domain_exact_status
                     EvmYul.Yul.State.setSharedState,
                     StateStoreDomainExact] using hDomain
 
+theorem yulPrimitiveEvalValuesOpenCall?_resume_state_checkpoint_contains_status
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {prim : EvmYul.Operation .Yul}
+    {args : List Word} {state : State}
+    {call :
+      OpenExternal.OpenCall
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state)
+    (hCall :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state prim args =
+        some call)
+    (response : OpenExternal.CallResponse) :
+    ∃ stateAfter,
+      call.resume response =
+        .ok (stateAfter, [response.statusWord]) ∧
+        StateCheckpointAllowed canBreak canContinue canLeave stateAfter ∧
+        StateStoreContains layout stateAfter := by
+  unfold OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall? at hCall
+  cases hKind : OpenExternal.CallKind.ofYulOperation? prim with
+  | none =>
+      simp [hKind] at hCall
+  | some kind =>
+      cases hOpen :
+          OpenExternal.CallKind.yulOpenCall? state kind args with
+      | none =>
+          simp [hKind, hOpen] at hCall
+      | some sourceCall =>
+          simp [hKind, hOpen] at hCall
+          cases hCall
+          unfold OpenExternal.CallKind.yulOpenCall? at hOpen
+          cases hSite :
+              OpenExternal.CallKind.yulCallSite? state kind args with
+          | none =>
+              simp [hSite] at hOpen
+          | some site =>
+              simp [hSite] at hOpen
+              cases hOpen
+              exact
+                ⟨site.finishYulState state response, by simp,
+                  StateCheckpointAllowed.finishYulState hAllowed,
+                  StateStoreContains.finishYulState hContains⟩
+
 theorem yulPrimitiveEvalValuesOpenCall?_resume_single_status
     {prim : EvmYul.Operation .Yul}
     {args : List Word} {state : State}
@@ -23920,10 +24355,9 @@ theorem yulPrimitiveEvalValuesOpenCall?_resume_single_status
               cases hOpen
               exact ⟨site.finishYulState state response, by simp⟩
 
-theorem primCall_yul_call_state_domain_exact_of_no_open_ok
-    {layout : List Name} {fuel : Nat} {state stateAfter : State}
+theorem primCall_yul_call_false_of_no_open_ok
+    {fuel : Nat} {state stateAfter : State}
     {args values : List Word}
-    (_hDomain : StateStoreDomainExact layout state)
     (hNoOpen :
       OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
           state (.System .CALL) args =
@@ -23931,7 +24365,7 @@ theorem primCall_yul_call_state_domain_exact_of_no_open_ok
     (hCall :
       EvmYul.Yul.primCall fuel state (.System .CALL) args =
         .ok (stateAfter, values)) :
-    StateStoreDomainExact layout stateAfter := by
+    False := by
   cases fuel with
   | zero =>
       simp [EvmYul.Yul.primCall] at hCall
@@ -23971,6 +24405,110 @@ theorem primCall_yul_call_state_domain_exact_of_no_open_ok
                                     OpenExternal.CallKind.yulOperands?,
                                     OpenExternal.CallKind.ofYulOperation?]
                                     at hNoOpen
+
+theorem primCall_yul_call_state_domain_exact_of_no_open_ok
+    {layout : List Name} {fuel : Nat} {state stateAfter : State}
+    {args values : List Word}
+    (_hDomain : StateStoreDomainExact layout state)
+    (hNoOpen :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state (.System .CALL) args =
+        none)
+    (hCall :
+      EvmYul.Yul.primCall fuel state (.System .CALL) args =
+        .ok (stateAfter, values)) :
+    StateStoreDomainExact layout stateAfter :=
+  False.elim (primCall_yul_call_false_of_no_open_ok hNoOpen hCall)
+
+theorem primCall_yul_call_checkpoint_allowed_of_no_open_ok
+    {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {state stateAfter : State}
+    {args values : List Word}
+    (_hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hNoOpen :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state (.System .CALL) args =
+        none)
+    (hCall :
+      EvmYul.Yul.primCall fuel state (.System .CALL) args =
+        .ok (stateAfter, values)) :
+    StateCheckpointAllowed canBreak canContinue canLeave stateAfter :=
+  False.elim (primCall_yul_call_false_of_no_open_ok hNoOpen hCall)
+
+theorem primCall_yul_call_store_contains_of_no_open_ok
+    {layout : List Name} {fuel : Nat} {state stateAfter : State}
+    {args values : List Word}
+    (_hContains : StateStoreContains layout state)
+    (hNoOpen :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state (.System .CALL) args =
+        none)
+    (hCall :
+      EvmYul.Yul.primCall fuel state (.System .CALL) args =
+        .ok (stateAfter, values)) :
+    StateStoreContains layout stateAfter :=
+  False.elim (primCall_yul_call_false_of_no_open_ok hNoOpen hCall)
+
+theorem primCall_yul_call_toOpenResult_doneInvariant_checkpointStoreContains_of_no_open
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {state : State} {args : List Word}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state)
+    (hNoOpen :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state (.System .CALL) args =
+        none) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (.done (EvmYul.Yul.primCall fuel state (.System .CALL) args)) := by
+  apply sourcePairResult_toOpenResult_doneInvariant_checkpointStoreContains
+  · cases hCall :
+        EvmYul.Yul.primCall fuel state (.System .CALL) args with
+    | error err =>
+        exact SourcePairResultCheckpointAllowed.error
+    | ok pair =>
+        rcases pair with ⟨stateAfter, values⟩
+        exact
+          SourcePairResultCheckpointAllowed.ok
+            (primCall_yul_call_checkpoint_allowed_of_no_open_ok
+              hAllowed hNoOpen hCall)
+  · cases hCall :
+        EvmYul.Yul.primCall fuel state (.System .CALL) args with
+    | error err =>
+        simp [SourcePairResultStoreContains]
+    | ok pair =>
+        rcases pair with ⟨stateAfter, values⟩
+        exact
+          SourcePairResultStoreContains.ok
+            (primCall_yul_call_store_contains_of_no_open_ok
+              hContains hNoOpen hCall)
+
+theorem yulPrimitiveEvalValuesOpenCall?_toOpenResult_doneInvariant_checkpointStoreContains_status
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {prim : EvmYul.Operation .Yul} {args : List Word} {state : State}
+    {call :
+      OpenExternal.OpenCall
+        (Except EvmYul.Yul.Exception (State × List Word))}
+    (hAllowed : StateCheckpointAllowed canBreak canContinue canLeave state)
+    (hContains : StateStoreContains layout state)
+    (hCall :
+      OpenExternal.CallKind.yulPrimitiveEvalValuesOpenCall?
+          state prim args =
+        some call) :
+    OpenResultDoneInvariant
+      (YulOpenPairStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (.call (OpenExternal.YulOpenResult.liftExceptCall call))) := by
+  exact OpenResultDoneInvariant.call (by
+    intro response
+    rcases
+        yulPrimitiveEvalValuesOpenCall?_resume_state_checkpoint_contains_status
+          hAllowed hContains hCall response with
+      ⟨stateAfter, hResume, hAllowedAfter, hContainsAfter⟩
+    simp [OpenExternal.YulOpenResult.liftExceptCall, hResume]
+    exact OpenResultDoneInvariant.done ⟨hAllowedAfter, hContainsAfter⟩)
 
 theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
     (fuel : Nat) :

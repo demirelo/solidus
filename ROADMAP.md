@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 19:57 PDT.
+Last updated: 2026-05-29 20:21 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -443,6 +443,12 @@ Remaining work:
      use that checked decomposition, reducing the next open theorem to a
      semantic argument-prelude/function-body problem rather than compiler
      case analysis.
+   - [x] Add the generic open pair-state bind layer plus concrete
+     checkpoint/store adapters for safe primitives, malformed non-suspending
+     ordinary `CALL`, exposed ordinary-`CALL` responses, and restored caller
+     locals after internal user calls. The open response adapter quantifies
+     over every shared abstract response and does not inspect a concrete
+     external world.
    - [ ] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
