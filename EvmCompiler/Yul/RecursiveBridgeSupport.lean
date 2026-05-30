@@ -38093,6 +38093,36 @@ theorem sourceArgAppendHeadValues_resolves_trace_eq_nil
     simpa using hTrace
 
 /--
+Peel the selected raw-head resolution out of generated head-value replay.
+
+The replay continuation is pure, so the raw head consumes the whole recorded
+trace even when its singleton projection later fails.
+-/
+theorem openResultResolves_bind_sourceArgAppendHeadValues_inv_left
+    {sourceHead :
+      OpenExternal.OpenResult Exception (State × List Word)}
+    {tailValues : List Word} {trace : OpenExternal.OpenTrace}
+    {result : Except Exception (State × List Word)}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.bind sourceHead
+          (sourceArgAppendHeadValues tailValues))
+        trace result) :
+    ∃ sourceHeadDone,
+      OpenExternal.OpenResultResolves sourceHead trace sourceHeadDone := by
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hError | hOk
+  · rcases hError with ⟨err, hHead, _hResult⟩
+    exact ⟨.error err, hHead⟩
+  · rcases hOk with ⟨left, right, value, hTrace, hHead, hAppend⟩
+    have hRight : right = [] :=
+      sourceArgAppendHeadValues_resolves_trace_eq_nil hAppend
+    subst right
+    simp only [List.append_nil] at hTrace
+    subst trace
+    exact ⟨.ok value, hHead⟩
+
+/--
 Terminal-aware scheduled reverse-cons source equation.
 
 The tail still evaluates first.  The head remains in `evalValues` form until
@@ -113045,6 +113075,399 @@ theorem sourceArgTerminalRawPreludeOpenResultPathRel_evalArgs_reverse_cons_sched
                 (targetFuel := preHead.length + tailFuel.succ.succ)
                 (pre := preHead) (lower := lowerHead)
                 (compiler := targetTailResult.1.state) hHeadWrites)⟩)
+
+/--
+Path-native lowering-component constructor for terminal-aware reverse-cons
+arguments.
+
+The recursive tail and head proofs choose cutoffs only for the concrete trace
+being replayed.  Once both selected cutoffs are known, the tail path is padded
+to a combined block cutoff and the head path is padded to the resulting suffix
+cutoff.  A terminal tail never enters the head continuation.
+-/
+theorem sourceArgTerminalRawPreludeOpenPathSoundWhen_cons_generated_of_lowerBound1?_components_head_expr
+    {cfg : StateRelConfig} {coverLayout layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState stateTail stateHead stateFresh : Fresh.State}
+    {preTail preHead : List Functions.Stmt}
+    {lowerTail : List (Locals.Expr 1)}
+    {lowerHead : Locals.Expr 1} {tmp : Name}
+    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hLayoutSubset : ∀ name, name ∈ layout → name ∈ coverLayout)
+    (hCovers : FreshCoversLayout coverLayout freshState)
+    (hTailLower :
+      Expr.List.lowerBound1? freshState tail =
+        some (preTail, lowerTail, stateTail))
+    (hHeadLower :
+      Expr.lower1? stateTail head = some (preHead, lowerHead, stateHead))
+    (hFresh : Fresh.fresh? stateHead = some (tmp, stateFresh))
+    (hTailSafe : Safe.CallSafe.exprs tail)
+    (hTail :
+      SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+        revertRel prim program ctx
+        (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride preTail
+        lowerTail (fun _sourceDone => True))
+    (hHead :
+      ∀ {ctxHead : Functions.Source.Ctx},
+        SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+          prim program ctxHead base.succ.succ head codeOverride preHead
+          lowerHead (fun _sourceDone => True))
+    (hHeadSingle :
+      ∀ {sourceTailResult : State × List Word}
+        {targetTailResult :
+          Functions.Source.Outcome × Functions.Source.Ctx},
+        SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+          prim lowerTail (.ok sourceTailResult) (.ok targetTailResult) →
+        OpenResultDoneInvariant
+          (fun sourceDone =>
+            ∀ {sourceAfter values},
+              sourceDone = .ok (sourceAfter, values) →
+                ∃ value, values = [value])
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
+              sourceTailResult.1))) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx
+      (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail)
+      codeOverride
+      (preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]))
+      (.var tmp :: lowerTail) allowed := by
+  rcases Expr.List.lowerBound1?_lowerArgs_vars hTailLower with
+    ⟨lowerNames, hLowerTailVars⟩
+  have hCoversTail : FreshCoversLayout coverLayout stateTail :=
+    freshCoversLayout_lowerBound1?_of_some hCovers hTailLower
+  have hTailNamesCover : FreshCoversLayout lowerNames stateTail :=
+    lowerBound1?_lowerArg_names_mem_final_used hTailLower hLowerTailVars
+  have hHeadWrites : SourceWritesDisjoint lowerNames preHead :=
+    lower1?_sourceWritesDisjoint hTailNamesCover hHeadLower
+  have hTailNamesCoverHead : FreshCoversLayout lowerNames stateHead :=
+    freshCoversLayout_lower1?_of_some hTailNamesCover hHeadLower
+  have hTmpFreshLower : tmp ∉ lowerNames := by
+    intro hMem
+    exact fresh?_name_not_mem_used hFresh
+      (hTailNamesCoverHead tmp hMem)
+  have hCoversHead : FreshCoversLayout coverLayout stateHead :=
+    freshCoversLayout_lower1?_of_some hCoversTail hHeadLower
+  have hTmpFreshLayout : tmp ∉ layout := by
+    intro hMem
+    exact fresh?_name_not_mem_used hFresh
+      (hCoversHead tmp (hLayoutSubset tmp hMem))
+  intro source compiler trace sourceDone hInitial hContains hResolveFull
+    _hAllowed hResponses minimumTargetFuel
+  have hTailContains :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceTailResult : State × List Word},
+            sourceDone = .ok sourceTailResult →
+              StateStoreContains layout sourceTailResult.1)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
+            codeOverride source)) := by
+    refine
+      OpenResultDoneInvariant.imp
+        (yulOpenEvalArgsReverse_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+          (layout := layout) (canBreak := false) (canContinue := false)
+          (canLeave := false)
+          (fuel := yulOpenEvalArgsAppendFuel base tail.reverse)
+          (args := tail) (codeOverride := codeOverride) (state := source)
+          hTailSafe ?_ hContains)
+        ?_
+    · cases hInitial with
+      | ok =>
+          simp [StateCheckpointAllowed]
+    · intro sourceTailDone hDone sourceTailResult hEq
+      cases sourceTailDone with
+      | error err =>
+          cases hEq
+      | ok pair =>
+          cases hEq
+          exact hDone.2
+  have hResolve := hResolveFull
+  rw [yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_evalValues]
+    at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hTailError | hTailOk
+  · rcases hTailError with ⟨err, hResolveTail, hSourceDone⟩
+    subst sourceDone
+    rcases
+        hTail hInitial hContains hResolveTail True.intro hResponses
+          (max minimumTargetFuel preTail.length) with
+      ⟨targetTailFuel, hMinimumTail, hTailPath⟩
+    rcases hTailPath.resolves with
+      ⟨sourceTailDone, targetTailDone, hSourceTail, hTargetTail, hTailDone⟩
+    have hSourceTailDone : sourceTailDone = .error err :=
+      OpenExternal.OpenResultResolves.deterministic hSourceTail hResolveTail
+    subst sourceTailDone
+    cases targetTailDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+    | ok targetTailResult =>
+        let suffixFuel := targetTailFuel - preTail.length
+        have hTargetFuelEq :
+            targetTailFuel = preTail.length + suffixFuel := by
+          dsimp [suffixFuel]
+          omega
+        have hTargetFull :
+            OpenExternal.OpenResultResolves
+              (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                targetTailFuel
+                { stmts :=
+                    preTail ++
+                      (preHead ++ [Functions.Stmt.let_ tmp lowerHead]) }
+                compiler)
+              trace (.ok targetTailResult) := by
+          rw [hTargetFuelEq]
+          rw [compilerOpen_block_runOpen_append_eq
+            (prim := prim) (program := program) (ctx := ctx)
+            (pre := preTail)
+            (suffix := preHead ++ [Functions.Stmt.let_ tmp lowerHead])
+            (state := compiler) (suffixFuel := suffixFuel)]
+          have hTargetTail' :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                  (preTail.length + suffixFuel) { stmts := preTail } compiler)
+                trace (.ok targetTailResult) := by
+            simpa only [← hTargetFuelEq] using hTargetTail
+          have hTargetSuffix :
+              OpenExternal.OpenResultResolves
+                (match targetTailResult.1.mode with
+                | .regular =>
+                    CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                      targetTailResult.2 suffixFuel
+                      { stmts :=
+                          preHead ++ [Functions.Stmt.let_ tmp lowerHead] }
+                      targetTailResult.1.state
+                | .brk | .cont | .leave | .halt _ =>
+                    OpenExternal.OpenResult.ok targetTailResult)
+                [] (.ok targetTailResult) := by
+            rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+            cases targetTailOutcome with
+            | mk targetTailState mode =>
+                cases mode with
+                | regular =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+                | brk =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+                | cont =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+                | leave =>
+                    cases err <;>
+                      simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+                | halt kind =>
+                    exact OpenExternal.OpenResultResolves.done
+          simpa only [List.append_nil] using
+            OpenExternal.OpenResultResolves.bind_ok
+              (next := fun targetTailResult =>
+                match targetTailResult.1.mode with
+                | .regular =>
+                    CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                      targetTailResult.2 suffixFuel
+                      { stmts :=
+                          preHead ++ [Functions.Stmt.let_ tmp lowerHead] }
+                      targetTailResult.1.state
+                | .brk | .cont | .leave | .halt _ =>
+                    OpenExternal.OpenResult.ok targetTailResult)
+              hTargetTail' hTargetSuffix
+        have hDoneFull :
+            SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+              revertRel prim (.var tmp :: lowerTail) (.error err)
+              (.ok targetTailResult) :=
+          sourceArgTerminalRawPreludeOpenDoneRel_error_replace_lowerArgs
+            hTailDone
+        refine
+          ⟨targetTailFuel,
+            (Nat.le_max_left minimumTargetFuel preTail.length).trans
+              hMinimumTail,
+            ?_⟩
+        exact
+          OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+            hResolveFull hTargetFull hResponses hDoneFull
+  · rcases hTailOk with
+      ⟨tailTrace, headTrace, sourceTailResult, hTrace, hResolveTail,
+        hResolveHeadReplay⟩
+    subst trace
+    have hResponsesTail : SourceOpenTraceResponsesAdmissible cfg tailTrace :=
+      OpenExternal.OpenTrace.left_of_append hResponses
+    have hResponsesHead : SourceOpenTraceResponsesAdmissible cfg headTrace :=
+      OpenExternal.OpenTrace.right_of_append hResponses
+    rcases
+        hTail hInitial hContains hResolveTail True.intro hResponsesTail
+          (max minimumTargetFuel preTail.length) with
+      ⟨targetTailFuel, hMinimumTail, hTailPath⟩
+    rcases hTailPath.resolves with
+      ⟨sourceTailDone, targetTailDone, hSourceTail, hTargetTail, hTailDone⟩
+    have hSourceTailDone : sourceTailDone = .ok sourceTailResult :=
+      OpenExternal.OpenResultResolves.deterministic hSourceTail hResolveTail
+    subst sourceTailDone
+    cases targetTailDone with
+    | error targetErr =>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hTailDone
+    | ok targetTailResult =>
+        have hTailRaw :
+            SourceArgRawPreludeOpenDoneRel cfg layout prim lowerTail
+              (.ok sourceTailResult) (.ok targetTailResult) :=
+          sourceArgRawPreludeOpenDoneRel_of_terminal_ok hTailDone
+        rcases targetTailResult with ⟨targetTailOutcome, targetTailCtx⟩
+        cases targetTailOutcome with
+        | mk targetTailState mode =>
+            cases mode with
+            | regular =>
+                rcases hTailRaw with ⟨hRelTail, _hTailEval⟩
+                have hContainsAfter :
+                    StateStoreContains layout sourceTailResult.1 :=
+                  (OpenResultDoneInvariant.of_resolves hTailContains
+                    hResolveTail) rfl
+                rcases
+                    openResultResolves_bind_sourceArgAppendHeadValues_inv_left
+                      hResolveHeadReplay with
+                  ⟨sourceHeadDone, hResolveHead⟩
+                rcases
+                    hHead hRelTail hContainsAfter hResolveHead True.intro
+                      hResponsesHead (preHead.length + 2) with
+                  ⟨targetHeadFuel, hMinimumHead, hHeadPath⟩
+                let targetFuel :=
+                  max targetTailFuel (preTail.length + targetHeadFuel)
+                let suffixFuel := targetFuel - preTail.length
+                let generatedTailFuel := suffixFuel - preHead.length - 2
+                have hTargetFuelEq :
+                    targetFuel = preTail.length + suffixFuel := by
+                  dsimp [targetFuel, suffixFuel]
+                  omega
+                have hSuffixFuelEq :
+                    suffixFuel =
+                      preHead.length + generatedTailFuel.succ.succ := by
+                  dsimp [targetFuel, suffixFuel, generatedTailFuel]
+                  omega
+                have hTailLe : targetTailFuel ≤ targetFuel :=
+                  Nat.le_max_left _ _
+                have hHeadLe : targetHeadFuel ≤ suffixFuel := by
+                  dsimp [targetFuel, suffixFuel]
+                  omega
+                have hTailPathPadded :=
+                  sourceArgTerminalRawPreludeOpenResultPathRel_runOpen_mono
+                    (prim := prim) (program := program) hTailLe
+                    hResponsesTail hTailPath
+                have hTargetTailPadded :=
+                  CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono
+                    prim program hTailLe hTargetTail
+                have hHeadPathPadded :=
+                  sourceExprRawPreludeOpenResultPathRel_runRaw_mono
+                    (ctx := targetTailCtx) hHeadLe hResponsesHead hHeadPath
+                have hGeneratedPath :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout
+                        terminalRel revertRel prim (.var tmp :: lowerTail))
+                      headTrace
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.evalValues base.succ.succ head
+                            codeOverride sourceTailResult.1))
+                        (sourceArgAppendHeadValues sourceTailResult.2))
+                      (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetTailCtx suffixFuel
+                        { stmts :=
+                            preHead ++ [Functions.Stmt.let_ tmp lowerHead] }
+                        targetTailState) := by
+                  rw [hSuffixFuelEq]
+                  rw [SourceExprSeqPreludeOpen.compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
+                    (prim := prim) (program := program)
+                    (ctx := targetTailCtx) (pre := preHead) (name := tmp)
+                    (lowerExpr := lowerHead) (tailFuel := generatedTailFuel)
+                    (state := targetTailState)]
+                  exact
+                    sourceArgTerminalRawPreludeOpenResultPathRel_bind_generated_head
+                      (cfg := cfg) (layout := layout)
+                      (terminalRel := terminalRel) (revertRel := revertRel)
+                      (prim := prim) (program := program)
+                      (lowerTail := lowerTail) (lowerNames := lowerNames)
+                      (tmp := tmp) (tailFuel := generatedTailFuel)
+                      (sourceTailResult := sourceTailResult)
+                      (targetTailResult :=
+                        (Functions.Source.Outcome.regular targetTailState,
+                          targetTailCtx))
+                      hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
+                      (by
+                        simpa only [← hSuffixFuelEq] using hHeadPathPadded)
+                      (hHeadSingle hTailDone)
+                      (by
+                        simpa only [← hSuffixFuelEq] using
+                          (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
+                            (names := lowerNames) (prim := prim)
+                            (program := program) (ctx := targetTailCtx)
+                            (targetFuel := suffixFuel) (pre := preHead)
+                            (lower := lowerHead) (compiler := targetTailState)
+                            hHeadWrites))
+                have hFullNormalized :
+                    OpenExternal.OpenResultPathRel
+                      (RelationallyAdmissibleOpenCallResponseRel cfg)
+                      (SourceArgTerminalRawPreludeOpenDoneRel cfg layout
+                        terminalRel revertRel prim (.var tmp :: lowerTail))
+                      (tailTrace ++ headTrace)
+                      (OpenExternal.OpenResult.bind
+                        (OpenExternal.YulOpenResult.toOpenResult
+                          (OpenExternal.YulOpen.evalArgs
+                            (yulOpenEvalArgsAppendFuel base tail.reverse)
+                            tail.reverse codeOverride source))
+                        (fun tailResult =>
+                          OpenExternal.OpenResult.bind
+                            (OpenExternal.YulOpenResult.toOpenResult
+                              (OpenExternal.YulOpen.evalValues base.succ.succ
+                                head codeOverride tailResult.1))
+                            (sourceArgAppendHeadValues tailResult.2)))
+                      (OpenExternal.OpenResult.bind
+                        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                          ctx targetFuel { stmts := preTail } compiler)
+                        (fun targetTailResult =>
+                          match targetTailResult.1.mode with
+                          | .regular =>
+                              CompilerOpen.FunctionsOpen.Block.runOpen prim
+                                program targetTailResult.2 suffixFuel
+                                { stmts :=
+                                    preHead ++
+                                      [Functions.Stmt.let_ tmp lowerHead] }
+                                targetTailResult.1.state
+                          | .brk | .cont | .leave | .halt _ =>
+                              OpenExternal.OpenResult.ok
+                                targetTailResult)) :=
+                  OpenExternal.OpenResultPathRel.bind_selected_ok
+                    hTailPathPadded hResolveTail hTargetTailPadded
+                    hGeneratedPath
+                    (by
+                      intro sourceCall targetCall response hResponse
+                      exact hResponse)
+                refine
+                  ⟨targetFuel,
+                    (Nat.le_max_left minimumTargetFuel preTail.length).trans
+                      (hMinimumTail.trans (Nat.le_max_left _ _)),
+                    ?_⟩
+                rw [yulOpen_toOpenResult_evalArgs_reverse_cons_scheduled_eq_bind_evalValues]
+                rw [hTargetFuelEq]
+                rw [compilerOpen_block_runOpen_append_eq
+                  (prim := prim) (program := program) (ctx := ctx)
+                  (pre := preTail)
+                  (suffix :=
+                    preHead ++ [Functions.Stmt.let_ tmp lowerHead])
+                  (state := compiler) (suffixFuel := suffixFuel)]
+                simpa only [← hTargetFuelEq] using hFullNormalized
+            | brk =>
+                cases hTailRaw
+            | cont =>
+                cases hTailRaw
+            | leave =>
+                cases hTailRaw
+            | halt kind =>
+                cases hTailRaw
 
 /--
 Terminal-aware raw reverse-cons argument composition.
