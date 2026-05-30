@@ -26578,6 +26578,277 @@ theorem yulOpenExecSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiv
   (yulOpenExec_execSeq_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
     fuel).2 hSafe
 
+theorem yulOpenExec_execSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    (fuel : Nat) :
+    (∀ {layout : List Name} {canBreak canContinue canLeave : Bool}
+      {stmt : AstStmt} {codeOverride : Option AstContract}
+      {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore},
+      Safe.CallSafe.stmt stmt →
+      ControlFlow.ScopedStmt canBreak canContinue canLeave stmt →
+      StoreDomainContains layout store →
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec fuel stmt codeOverride
+            (.Ok shared store)))) ∧
+    (∀ {layout : List Name} {canBreak canContinue canLeave : Bool}
+      {stmts : List AstStmt} {codeOverride : Option AstContract}
+      {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore},
+      Safe.CallSafe.stmts stmts →
+      ControlFlow.ScopedStmts canBreak canContinue canLeave stmts →
+      StoreDomainContains layout store →
+      OpenResultDoneInvariant
+        (YulOpenStateDoneInv
+          (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel stmts codeOverride
+            (.Ok shared store)))) := by
+  refine Nat.strong_induction_on fuel ?_
+  intro fuel ih
+  cases fuel with
+  | zero =>
+      constructor
+      · intro layout canBreak canContinue canLeave stmt codeOverride shared
+          store _hSafe _hScoped _hContains
+        simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+      · intro layout canBreak canContinue canLeave stmts codeOverride shared
+          store _hSafe _hScoped _hContains
+        simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpenResult.error]
+        exact OpenResultDoneInvariant.done True.intro
+  | succ fuel' =>
+      have ihFuel := ih fuel' (Nat.lt_succ_self fuel')
+      constructor
+      · intro layout canBreak canContinue canLeave stmt codeOverride shared
+          store hSafe hScoped hContains
+        have hState :
+            StateCheckpointStoreContains layout canBreak canContinue canLeave
+              (.Ok shared store) :=
+          StateCheckpointStoreContains.of_ok hContains
+        cases stmt with
+        | Block body =>
+            exact
+              yulOpenExec_block_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_execSeq
+                hContains
+                (ihFuel.2
+                  (by simpa [Safe.CallSafe.stmt] using hSafe)
+                  (by simpa [ControlFlow.ScopedStmt] using hScoped)
+                  hContains)
+        | Let names value? =>
+            cases value? with
+            | none =>
+                exact
+                  yulOpenExec_let_none_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                    hState
+            | some value =>
+                exact
+                  yulOpenExec_let_some_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_evalValues
+                    (yulOpenEvalValues_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+                      (by simpa [Safe.CallSafe.stmt] using hSafe)
+                      hState.1 hState.2)
+        | Assign names value =>
+            exact
+              yulOpenExec_assign_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_evalValues
+                (yulOpenEvalValues_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+                  (by simpa [Safe.CallSafe.stmt] using hSafe)
+                  hState.1 hState.2)
+        | ExprStmtCall value =>
+            exact
+              yulOpenExec_exprStmtCall_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe
+                (by simpa [Safe.CallSafe.stmt] using hSafe)
+                hState.1 hState.2
+        | Switch cond cases defaultBody =>
+            rcases hSafe with ⟨hCondSafe, hCasesSafe, hDefaultSafe⟩
+            have hTopState :
+                StateCheckpointStoreContains layout false false false
+                  (.Ok shared store) :=
+              StateCheckpointStoreContains.of_ok hContains
+            exact
+              yulOpenExec_switch_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_top_eval
+                (yulOpenEval_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+                  hCondSafe hTopState.1 hTopState.2)
+                (by
+                  intro sharedSelected storeSelected value hSelectedContains
+                  exact
+                    ihFuel.1
+                      (stmt :=
+                        .Block
+                          (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+                      (by
+                        simpa [Safe.CallSafe.stmt, Safe.CallSafe.stmts] using
+                          family_safe_cases_selectSwitchCase
+                            (by
+                              simpa [Safe.CallSafe.casesSafe] using
+                                hCasesSafe)
+                            (by
+                              simpa [Safe.CallSafe.stmts] using
+                                hDefaultSafe))
+                      (by
+                        simpa [ControlFlow.ScopedStmt] using
+                          ControlFlow.scopedCases_selectSwitchCase
+                            hScoped.1 hScoped.2)
+                      hSelectedContains)
+                (by
+                  intro value
+                  exact
+                    yulOpenExec_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                      (stmt :=
+                        .Block
+                          (EvmYul.Yul.selectSwitchCase value defaultBody cases))
+                      (by
+                        simpa [Safe.CallSafe.stmt, Safe.CallSafe.stmts] using
+                          family_safe_cases_selectSwitchCase
+                            (by
+                              simpa [Safe.CallSafe.casesSafe] using
+                                hCasesSafe)
+                            (by
+                              simpa [Safe.CallSafe.stmts] using
+                                hDefaultSafe)))
+        | For cond post body =>
+            rcases hSafe with ⟨hCondSafe, hPostSafe, hBodySafe⟩
+            rcases hScoped with ⟨hPostScoped, hBodyScoped⟩
+            cases fuel' with
+            | zero =>
+                simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.loop,
+                  OpenExternal.YulOpenResult.error]
+                exact OpenResultDoneInvariant.done True.intro
+            | succ fuel1 =>
+                cases fuel1 with
+                | zero =>
+                    simp [OpenExternal.YulOpen.exec, OpenExternal.YulOpen.loop,
+                      OpenExternal.YulOpenResult.error]
+                    exact OpenResultDoneInvariant.done True.intro
+                | succ sourceFuel =>
+                    have ihLoop := ih sourceFuel (by omega)
+                    have hTopState :
+                        StateCheckpointStoreContains layout false false false
+                          (.Ok shared store) :=
+                      StateCheckpointStoreContains.of_ok hContains
+                    simpa [OpenExternal.YulOpen.exec] using
+                      yulOpenLoop_succ_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_ok_parts
+                        hContains
+                        (yulOpenEval_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+                          hCondSafe hTopState.1 hTopState.2)
+                        (by
+                          intro sharedBodyInput storeBodyInput
+                            hBodyContains
+                          exact
+                            ihLoop.1
+                              (stmt := .Block body)
+                              (by
+                                simpa [Safe.CallSafe.stmt] using hBodySafe)
+                              (by
+                                simpa [ControlFlow.ScopedStmt] using
+                                  hBodyScoped)
+                              hBodyContains)
+                        (yulOpenExec_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                          (stmt := .Block body)
+                          (by simpa [Safe.CallSafe.stmt] using hBodySafe))
+                        (by
+                          intro sharedPostInput storePostInput
+                            hPostContains
+                          exact
+                            ihLoop.1
+                              (stmt := .Block post)
+                              (by
+                                simpa [Safe.CallSafe.stmt] using hPostSafe)
+                              (by
+                                simpa [ControlFlow.ScopedStmt] using
+                                  hPostScoped)
+                              hPostContains)
+                        (by
+                          intro sharedRecur storeRecur hRecurContains
+                          exact
+                            ihLoop.1
+                              (stmt := .For cond post body)
+                              ⟨hCondSafe, hPostSafe, hBodySafe⟩
+                              ⟨hPostScoped, hBodyScoped⟩
+                              hRecurContains)
+        | If cond body =>
+            rcases hSafe with ⟨hCondSafe, hBodySafe⟩
+            have hTopState :
+                StateCheckpointStoreContains layout false false false
+                  (.Ok shared store) :=
+              StateCheckpointStoreContains.of_ok hContains
+            exact
+              yulOpenExec_if_succ_toOpenResult_doneInvariant_checkpointStoreContains_of_top_eval
+                (yulOpenEval_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_primitiveFamilies
+                  hCondSafe hTopState.1 hTopState.2)
+                (by
+                  intro sharedBody storeBody hBodyContains
+                  exact
+                    ihFuel.1
+                      (stmt := .Block body)
+                      (by simpa [Safe.CallSafe.stmt] using hBodySafe)
+                      (by simpa [ControlFlow.ScopedStmt] using hScoped)
+                      hBodyContains)
+                (yulOpenExec_toOpenResult_doneInvariant_outOfFuel_of_callSafe_primitiveFamilies
+                  (stmt := .Block body)
+                  (by simpa [Safe.CallSafe.stmt] using hBodySafe))
+        | Continue =>
+            exact
+              yulOpenExec_continue_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                (by simpa [ControlFlow.ScopedStmt] using hScoped) hState
+        | Break =>
+            exact
+              yulOpenExec_break_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                (by simpa [ControlFlow.ScopedStmt] using hScoped) hState
+        | Leave =>
+            exact
+              yulOpenExec_leave_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                (by simpa [ControlFlow.ScopedStmt] using hScoped) hState
+      · intro layout canBreak canContinue canLeave stmts codeOverride shared
+          store hSafe hScoped hContains
+        have hState :
+            StateCheckpointStoreContains layout canBreak canContinue canLeave
+              (.Ok shared store) :=
+          StateCheckpointStoreContains.of_ok hContains
+        cases stmts with
+        | nil =>
+            exact
+              yulOpenExecSeq_nil_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                hState
+        | cons head tail =>
+            exact
+              yulOpenExecSeq_cons_succ_toOpenResult_doneInvariant_checkpointStoreContains
+                (ihFuel.1 hSafe.1 hScoped.1 hContains)
+                (by
+                  intro sharedTail storeTail hTailState
+                  exact ihFuel.2 hSafe.2 hScoped.2 hTailState.2)
+
+theorem yulOpenExec_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmt : AstStmt} {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    (hSafe : Safe.CallSafe.stmt stmt)
+    (hScoped : ControlFlow.ScopedStmt canBreak canContinue canLeave stmt)
+    (hContains : StoreDomainContains layout store) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel stmt codeOverride
+          (.Ok shared store))) :=
+  (yulOpenExec_execSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    fuel).1 hSafe hScoped hContains
+
+theorem yulOpenExecSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    {layout : List Name} {canBreak canContinue canLeave : Bool}
+    {fuel : Nat} {stmts : List AstStmt} {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
+    (hSafe : Safe.CallSafe.stmts stmts)
+    (hScoped : ControlFlow.ScopedStmts canBreak canContinue canLeave stmts)
+    (hContains : StoreDomainContains layout store) :
+    OpenResultDoneInvariant
+      (YulOpenStateDoneInv
+        (StateCheckpointStoreContains layout canBreak canContinue canLeave))
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.execSeq fuel stmts codeOverride
+          (.Ok shared store))) :=
+  (yulOpenExec_execSeq_ok_toOpenResult_doneInvariant_checkpointStoreContains_of_callSafe_scoped
+    fuel).2 hSafe hScoped hContains
+
 theorem yulOpenEvalValues_evalArgs_state_domain_exact_of_callSafe_primitiveFamilies
     (fuel : Nat) :
     (∀ {layout : List Name} {expr : AstExpr}

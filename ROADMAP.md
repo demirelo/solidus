@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 20:57 PDT.
+Last updated: 2026-05-29 21:00 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -495,7 +495,12 @@ Remaining work:
      condition state outward, `.OutOfFuel` follows the sticky body theorem,
      and a real `.Ok` condition state enters the verified body/post/recursion
      continuation.
-   - [ ] Recurse through compound expression contexts, including cases like
+   - [x] Assemble the ordinary CALL-safe scoped `exec`/`execSeq` induction:
+     declarations, assignments, statement-form calls, blocks, conditionals,
+     selected switch bodies, loops, control markers, and sequence tails now
+     preserve checkpoint admission and visible-local containment across every
+     exposed ordinary-`CALL` response.
+   - [x] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
    - [ ] Adapt internal user-call expression preservation when arguments may
