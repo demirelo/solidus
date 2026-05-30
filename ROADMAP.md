@@ -605,6 +605,15 @@ Remaining work:
    - [x] Recover compiler stack-sequence replay from regular terminal-aware raw
      generated arguments: the proof reverses the recorded source-order closed
      variable replay and derives the compiler-open stack evaluator result.
+   - [x] Add the regular terminal-aware raw primitive reuse adapter: generated
+     stack-sequence replay reconstructs the strict primitive input, existing
+     strict primitive continuations run unchanged, and successful values lift
+     back into the terminal-aware raw expression relation.
+   - [ ] Scope the structural raw argument dispatcher callback to head
+     subterms of the current argument list before assembling the final
+     recursive expression constructor. The existing universal-callback theorem
+     is low-level plumbing; the recursive wrapper must not ask its induction
+     hypothesis to prove arbitrary expressions.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.

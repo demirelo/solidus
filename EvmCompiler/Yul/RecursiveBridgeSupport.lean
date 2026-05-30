@@ -110031,6 +110031,117 @@ theorem sourceArgTerminalRawPreludeOpenDoneRel_toStackSeq_generated
             hSeq hEvalReverse,
           ⟨hRel, rfl⟩⟩
 
+/-- Open compiler expression shape for an arbitrary-output primitive cast. -/
+theorem compilerOpen_localsExpr_eval_cast_prim
+    {prim : Objects.Source.PrimitiveSemantics}
+    {op : Structured.BasicOp}
+    {lowerArgs :
+      Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {results : Nat} {state : Objects.Source.State}
+    (hOutputs : Expressions.Structured.BasicOp.outputs op = results) :
+    CompilerOpen.LocalsExpr.eval prim
+        (Expr.cast hOutputs (.prim op lowerArgs)) state =
+      OpenExternal.OpenResult.bind
+        (CompilerOpen.LocalsExpr.evalSeq prim lowerArgs state)
+        (fun argResult =>
+          CompilerOpen.Primitive.eval prim op argResult.1 argResult.2) := by
+  cases hOutputs
+  rfl
+
+/--
+Reuse an ordinary strict primitive continuation after regular terminal-aware
+raw generated arguments.
+
+The raw argument relation supplies the visible-state relation and generated
+variable replay.  The stack-replay adapter reconstructs the strict primitive
+input target, the existing primitive proof runs unchanged, and the strict
+result is lifted into `RawTarget.values`.
+-/
+theorem sourceExprRawPreludeOpenResultRel_prim_regular_of_arg_terminal
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {sourceFuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+    {op : Structured.BasicOp}
+    {argExprs : List (Locals.Expr 1)} {names : List Name}
+    {results : Nat}
+    {seq : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {hOutputs : Expressions.Structured.BasicOp.outputs op = results}
+    {sourceArgsResult : State × List Word}
+    {targetArgsResult :
+      Functions.Source.Outcome × Functions.Source.Ctx}
+    {exprCallResponseRel : SourceExprRawPreludeOpenCallResponseRel}
+    (hLowerVars :
+      argExprs = names.map (fun name => (.var name : Locals.Expr 1)))
+    (hSeq :
+      Expr.List.toStackSeq? argExprs
+          (Expressions.Structured.BasicOp.inputs op) =
+        some seq)
+    (hDone :
+      SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel revertRel
+        prim argExprs (.ok sourceArgsResult) (.ok targetArgsResult))
+    (hPrimitive :
+      ∀ {target : SourceArgPreludeOpenTarget},
+        SourceArgStackPreludeOpenDoneRel cfg layout (.ok sourceArgsResult)
+            (.ok target) →
+          OpenExternal.OpenResultRel
+            (fun sourceCall targetCall response =>
+              exprCallResponseRel sourceCall
+                { site := targetCall.site
+                  resume := fun response =>
+                    OpenExternal.OpenResult.map
+                      SourceExprPreludeOpen.RawTarget.values
+                      (targetCall.resume response) }
+                response)
+            (SourceArgStackPreludeOpenDoneRel cfg layout)
+            (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+              sourceArgsResult)
+            (OpenExternal.OpenResult.map
+              (fun primResult =>
+                { state := primResult.1
+                  ctx := target.ctx
+                  values := primResult.2 })
+              (CompilerOpen.Primitive.eval prim op target.state
+                target.values))) :
+    OpenExternal.OpenResultRel exprCallResponseRel
+      (SourceExprRawPreludeOpenDoneRel cfg layout terminalRel revertRel)
+      (yulPrimitiveOpenResultAfterArgsPrim sourceFuel yulPrim
+        sourceArgsResult)
+      (OpenExternal.OpenResult.map
+        (fun primResult =>
+          .values
+            { state := primResult.1
+              ctx := targetArgsResult.2
+              values := primResult.2 })
+        (CompilerOpen.LocalsExpr.eval prim
+          (Expr.cast hOutputs (.prim op seq))
+          targetArgsResult.1.state)) := by
+  have hReplay :=
+    sourceArgTerminalRawPreludeOpenDoneRel_toStackSeq_generated
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (argExprs := argExprs)
+      (names := names) (results := Expressions.Structured.BasicOp.inputs op)
+      (seq := seq) (sourceArgsResult := sourceArgsResult)
+      (targetArgsResult := targetArgsResult) hLowerVars hSeq hDone
+  let target : SourceArgPreludeOpenTarget :=
+    { state := targetArgsResult.1.state
+      ctx := targetArgsResult.2
+      values := sourceArgsResult.2 }
+  have hRaw :=
+    sourceExprRawPreludeOpenResultRel_values_of_stack
+      (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+      (revertRel := revertRel) (rawCallResponseRel := exprCallResponseRel)
+      (hPrimitive (target := target) (by
+        simpa [target] using hReplay.2))
+  rw [compilerOpen_localsExpr_eval_cast_prim hOutputs, hReplay.1]
+  simp only [OpenExternal.OpenResult.map] at hRaw ⊢
+  rw [openResult_bind_assoc_sourceBridge] at hRaw
+  simpa [target,
+    OpenExternal.OpenResult.bind,
+    OpenExternal.OpenResult.ok] using hRaw
+
 theorem sourceArgOpenResultRel_evalArgs_reverse_cons_scheduled_actual_run_final_replay_of_virtual_tail
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
