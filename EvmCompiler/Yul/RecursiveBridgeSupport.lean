@@ -6317,6 +6317,15 @@ namespace SourceCtxHandlersEq
 theorem refl (ctx : Functions.Source.Ctx) : SourceCtxHandlersEq ctx ctx :=
   ⟨rfl, rfl, rfl⟩
 
+theorem trans
+    {ctx ctx' ctx'' : Functions.Source.Ctx}
+    (hLeft : SourceCtxHandlersEq ctx ctx')
+    (hRight : SourceCtxHandlersEq ctx' ctx'') :
+    SourceCtxHandlersEq ctx ctx'' :=
+  ⟨hRight.breakScope.trans hLeft.breakScope,
+    hRight.continueScope.trans hLeft.continueScope,
+    hRight.leaveScope.trans hLeft.leaveScope⟩
+
 theorem of_runOpen_regular
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
@@ -6356,6 +6365,35 @@ theorem supported
     hSupported
 
 end SourceCtxHandlersEq
+
+/--
+Regular compiler-open prefixes may add hidden locals, but they retain every
+caller-visible name and preserve all control handlers.
+-/
+structure SourceCtxExtends
+    (ctx ctx' : Functions.Source.Ctx) : Prop where
+  scopeContains : ∀ name : Name, name ∈ ctx.scope → name ∈ ctx'.scope
+  handlersEq : SourceCtxHandlersEq ctx ctx'
+
+namespace SourceCtxExtends
+
+theorem refl (ctx : Functions.Source.Ctx) : SourceCtxExtends ctx ctx :=
+  ⟨fun _name hMem => hMem, SourceCtxHandlersEq.refl ctx⟩
+
+theorem trans
+    {ctx ctx' ctx'' : Functions.Source.Ctx}
+    (hLeft : SourceCtxExtends ctx ctx')
+    (hRight : SourceCtxExtends ctx' ctx'') :
+    SourceCtxExtends ctx ctx'' :=
+  ⟨fun name hMem => hRight.scopeContains name (hLeft.scopeContains name hMem),
+    SourceCtxHandlersEq.trans hLeft.handlersEq hRight.handlersEq⟩
+
+theorem cons (ctx : Functions.Source.Ctx) (name : Name) :
+    SourceCtxExtends ctx { ctx with scope := name :: ctx.scope } :=
+  ⟨fun oldName hMem => by simp [hMem],
+    ⟨rfl, rfl, rfl⟩⟩
+
+end SourceCtxExtends
 
 def HiddenModeHandlersAvailable
     (ctx : Functions.Source.Ctx) (layout : List Name)
@@ -23065,6 +23103,370 @@ theorem bind_right
 end OpenResultDoneInvariant
 
 /--
+Completion predicate for compiler-open computations that may extend a source
+context. Errors carry no context; successful outcomes retain the entry context.
+-/
+def SourceCtxExtendsResult (ctx : Functions.Source.Ctx) :
+    Except Functions.EVMException
+      (Functions.Source.Outcome × Functions.Source.Ctx) → Prop
+  | .error _err => True
+  | .ok (_outcome, ctxAfter) => SourceCtxExtends ctx ctxAfter
+
+namespace SourceCtxExtendsResult
+
+theorem ok
+    {ctx ctxAfter : Functions.Source.Ctx}
+    (outcome : Functions.Source.Outcome)
+    (hCtx : SourceCtxExtends ctx ctxAfter) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (OpenExternal.OpenResult.ok (outcome, ctxAfter)) := by
+  exact OpenResultDoneInvariant.done hCtx
+
+theorem invalid (ctx : Functions.Source.Ctx) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (CompilerOpen.invalid :
+        CompilerOpen.Result
+          (Functions.Source.Outcome × Functions.Source.Ctx)) := by
+  exact OpenResultDoneInvariant.done True.intro
+
+theorem error (ctx : Functions.Source.Ctx) (err : Functions.EVMException) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (OpenExternal.OpenResult.error err) :=
+  OpenResultDoneInvariant.done True.intro
+
+theorem bind
+    {α : Type*} {ctx : Functions.Source.Ctx}
+    {result : OpenExternal.OpenResult Functions.EVMException α}
+    {next :
+      α →
+        OpenExternal.OpenResult Functions.EVMException
+          (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hNext :
+      ∀ value,
+        OpenResultDoneInvariant (SourceCtxExtendsResult ctx) (next value)) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (OpenExternal.OpenResult.bind result next) := by
+  exact
+    OpenResultDoneInvariant.bind
+      (OpenResultDoneInvariant.any (fun _doneResult => True.intro) result)
+      (fun value _hDone => hNext value)
+      (fun _err _hDone => True.intro)
+
+theorem bind_ok
+    {α : Type*} {ctx ctxAfter : Functions.Source.Ctx}
+    (result : OpenExternal.OpenResult Functions.EVMException α)
+    (nextOutcome : α → Functions.Source.Outcome)
+    (hCtx : SourceCtxExtends ctx ctxAfter) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (OpenExternal.OpenResult.bind result
+        (fun value => OpenExternal.OpenResult.ok (nextOutcome value, ctxAfter))) :=
+  bind (fun value => ok (nextOutcome value) hCtx)
+
+theorem mono
+    {ctx ctxAfter : Functions.Source.Ctx}
+    {result :
+      OpenExternal.OpenResult Functions.EVMException
+        (Functions.Source.Outcome × Functions.Source.Ctx)}
+    (hCtx : SourceCtxExtends ctx ctxAfter)
+    (hInv : OpenResultDoneInvariant (SourceCtxExtendsResult ctxAfter) result) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx) result :=
+  OpenResultDoneInvariant.imp hInv (by
+    intro doneResult hDone
+    cases doneResult with
+    | error _err => exact True.intro
+    | ok result =>
+        exact SourceCtxExtends.trans hCtx hDone)
+
+end SourceCtxExtendsResult
+
+/--
+Every successful compiler-open statement path retains its caller context. A
+declaration may prepend one hidden local; every other statement restores the
+incoming context at its outward boundary.
+-/
+theorem compilerOpen_stmt_run_doneInvariant_ctxExtends
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (fuel : Nat) (stmt : Functions.Stmt) (state : Objects.Source.State) :
+    OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+      (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx fuel stmt state) := by
+  cases stmt with
+  | expr expr =>
+      simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+        SourceCtxExtendsResult.bind_ok
+          (CompilerOpen.LocalsExpr.eval prim expr state)
+          (fun result => Functions.Source.Outcome.regular result.1)
+          (SourceCtxExtends.refl ctx)
+  | let_ name value =>
+      simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+        SourceCtxExtendsResult.bind_ok
+          (CompilerOpen.LocalsExpr.evalOne prim value state)
+          (fun result => Functions.Source.Outcome.regular
+            (result.1.insert name result.2))
+          (SourceCtxExtends.cons ctx name)
+  | assign name value =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      split
+      · exact
+          SourceCtxExtendsResult.bind_ok
+            (CompilerOpen.LocalsExpr.evalOne prim value state)
+            (fun result =>
+              Functions.Source.Outcome.regular
+                (result.1.withVars
+                  (Locals.Source.Store.insert result.1.vars name result.2)))
+            (SourceCtxExtends.refl ctx)
+      · exact SourceCtxExtendsResult.invalid ctx
+  | block body =>
+      simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+        SourceCtxExtendsResult.bind_ok
+          (CompilerOpen.FunctionsOpen.Block.runScoped prim program ctx body fuel
+            state)
+          (fun outcome => outcome) (SourceCtxExtends.refl ctx)
+  | if_ cond body =>
+      cases fuel with
+      | zero =>
+          simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+            SourceCtxExtendsResult.invalid ctx
+      | succ fuel =>
+          simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+          refine SourceCtxExtendsResult.bind ?_
+          intro condResult
+          split
+          · exact
+              SourceCtxExtendsResult.bind_ok
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program ctx body
+                  fuel condResult.1)
+                (fun outcome => outcome) (SourceCtxExtends.refl ctx)
+          · exact
+              SourceCtxExtendsResult.ok
+                (Functions.Source.Outcome.regular condResult.1)
+                (SourceCtxExtends.refl ctx)
+  | switch scrutinee cases defaultBody =>
+      cases fuel with
+      | zero =>
+          simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+            SourceCtxExtendsResult.invalid ctx
+      | succ fuel =>
+          simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+          refine SourceCtxExtendsResult.bind ?_
+          intro scrutineeResult
+          split
+          · exact
+              SourceCtxExtendsResult.ok
+                (Functions.Source.Outcome.regular scrutineeResult.1)
+                (SourceCtxExtends.refl ctx)
+          · rename_i body hSelected
+            exact
+              SourceCtxExtendsResult.bind_ok
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program ctx body
+                  fuel scrutineeResult.1)
+                (fun outcome => outcome) (SourceCtxExtends.refl ctx)
+  | for_ init cond post body =>
+      cases fuel with
+      | zero =>
+          simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+            SourceCtxExtendsResult.invalid ctx
+      | succ fuel =>
+          simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+          refine SourceCtxExtendsResult.bind ?_
+          intro initResult
+          cases initResult.1.mode with
+          | regular =>
+              refine SourceCtxExtendsResult.bind ?_
+              intro loopOutcome
+              cases loopOutcome.mode with
+              | regular =>
+                  exact
+                    SourceCtxExtendsResult.ok
+                      (Functions.Source.Outcome.regular
+                        (loopOutcome.state.restrictTo ctx.scope))
+                      (SourceCtxExtends.refl ctx)
+              | brk => exact SourceCtxExtendsResult.invalid ctx
+              | cont => exact SourceCtxExtendsResult.invalid ctx
+              | leave =>
+                  exact
+                    SourceCtxExtendsResult.ok loopOutcome
+                      (SourceCtxExtends.refl ctx)
+              | halt kind =>
+                  exact
+                    SourceCtxExtendsResult.ok loopOutcome
+                      (SourceCtxExtends.refl ctx)
+          | brk => exact SourceCtxExtendsResult.invalid ctx
+          | cont => exact SourceCtxExtendsResult.invalid ctx
+          | leave =>
+              exact
+                SourceCtxExtendsResult.ok initResult.1 (SourceCtxExtends.refl ctx)
+          | halt kind =>
+              exact
+                SourceCtxExtendsResult.ok initResult.1 (SourceCtxExtends.refl ctx)
+  | brk =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      split
+      · exact SourceCtxExtendsResult.invalid ctx
+      · rename_i scope hScope
+        exact
+          SourceCtxExtendsResult.ok
+            (Functions.Source.Outcome.brk (state.restrictTo scope))
+            (SourceCtxExtends.refl ctx)
+  | cont =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      split
+      · exact SourceCtxExtendsResult.invalid ctx
+      · rename_i scope hScope
+        exact
+          SourceCtxExtendsResult.ok
+            (Functions.Source.Outcome.cont (state.restrictTo scope))
+            (SourceCtxExtends.refl ctx)
+  | leave =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      split
+      · exact SourceCtxExtendsResult.invalid ctx
+      · rename_i scope hScope
+        exact
+          SourceCtxExtendsResult.ok
+            (Functions.Source.Outcome.leave (state.restrictTo scope))
+            (SourceCtxExtends.refl ctx)
+  | call targets functionName args =>
+      cases fuel with
+      | zero =>
+          simpa only [CompilerOpen.FunctionsOpen.Stmt.run] using
+            SourceCtxExtendsResult.invalid ctx
+      | succ fuel =>
+          simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+          by_cases hTargets : targets.Nodup
+          · simp only [hTargets, ↓reduceIte]
+            refine SourceCtxExtendsResult.bind ?_
+            intro argResult
+            cases hFind :
+                Functions.Source.FunList.find? functionName program.functions with
+            | none => exact SourceCtxExtendsResult.invalid ctx
+            | some fn =>
+                simp only [hFind]
+                refine SourceCtxExtendsResult.bind ?_
+                intro callResult
+                cases callResult with
+                | returned sharedAfterCall returnValues =>
+                    cases hAssign :
+                        Functions.Source.Store.assignMany targets returnValues
+                          argResult.1.vars with
+                    | none =>
+                        simpa only [hAssign] using
+                          SourceCtxExtendsResult.invalid ctx
+                    | some returnStore =>
+                        simpa only [hAssign] using
+                          SourceCtxExtendsResult.ok
+                            (Functions.Source.Outcome.regular
+                              { shared := sharedAfterCall
+                                vars := returnStore })
+                            (SourceCtxExtends.refl ctx)
+                | halted kind haltedState =>
+                    exact
+                      SourceCtxExtendsResult.ok
+                        (Functions.Source.Outcome.halt kind haltedState)
+                        (SourceCtxExtends.refl ctx)
+          · simp only [hTargets, ↓reduceIte]
+            exact SourceCtxExtendsResult.invalid ctx
+  | terminal kind =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      split
+      · rename_i sharedAfter hTerminal
+        exact
+          SourceCtxExtendsResult.ok
+            (Functions.Source.Outcome.halt kind (state.withShared sharedAfter))
+            (SourceCtxExtends.refl ctx)
+      · rename_i err hTerminal
+        exact SourceCtxExtendsResult.error ctx err
+  | terminalArgs kind args =>
+      simp only [CompilerOpen.FunctionsOpen.Stmt.run]
+      refine SourceCtxExtendsResult.bind ?_
+      intro argResult
+      split
+      · rename_i sharedAfter hTerminal
+        exact
+          SourceCtxExtendsResult.ok
+            (Functions.Source.Outcome.halt kind
+              (argResult.1.withShared sharedAfter))
+            (SourceCtxExtends.refl ctx)
+      · rename_i err hTerminal
+        exact SourceCtxExtendsResult.error ctx err
+
+/--
+Every successful compiler-open block path retains its caller context, even when
+the selected path suspends and resumes through arbitrary external responses.
+-/
+theorem compilerOpen_block_runOpen_doneInvariant_ctxExtends
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) :
+    ∀ (ctx : Functions.Source.Ctx) (fuel : Nat) (block : Functions.Block)
+      (state : Objects.Source.State),
+      OpenResultDoneInvariant (SourceCtxExtendsResult ctx)
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel block
+          state) := by
+  intro ctx fuel
+  induction fuel generalizing ctx with
+  | zero =>
+      intro block state
+      simpa only [CompilerOpen.FunctionsOpen.Block.runOpen] using
+        SourceCtxExtendsResult.invalid ctx
+  | succ fuel ih =>
+      intro block state
+      cases block with
+      | mk stmts =>
+          cases stmts with
+          | nil =>
+              simpa only [CompilerOpen.FunctionsOpen.Block.runOpen] using
+                SourceCtxExtendsResult.ok
+                  (Functions.Source.Outcome.regular state)
+                  (SourceCtxExtends.refl ctx)
+          | cons stmt rest =>
+              simp only [CompilerOpen.FunctionsOpen.Block.runOpen]
+              refine
+                OpenResultDoneInvariant.bind
+                  (compilerOpen_stmt_run_doneInvariant_ctxExtends prim program ctx
+                    fuel stmt state) ?_ ?_
+              · intro stmtResult hStmt
+                cases stmtResult.1.mode with
+                | regular =>
+                    exact
+                      SourceCtxExtendsResult.mono hStmt
+                        (ih stmtResult.2 { stmts := rest } stmtResult.1.state)
+                | brk =>
+                    exact
+                      SourceCtxExtendsResult.ok stmtResult.1
+                        (SourceCtxExtends.refl ctx)
+                | cont =>
+                    exact
+                      SourceCtxExtendsResult.ok stmtResult.1
+                        (SourceCtxExtends.refl ctx)
+                | leave =>
+                    exact
+                      SourceCtxExtendsResult.ok stmtResult.1
+                        (SourceCtxExtends.refl ctx)
+                | halt kind =>
+                    exact
+                      SourceCtxExtendsResult.ok stmtResult.1
+                        (SourceCtxExtends.refl ctx)
+              · intro _err _hStmt
+                exact True.intro
+
+theorem compilerOpen_block_runOpen_resolves_ctxExtends
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Functions.Source.Ctx}
+    {fuel : Nat} {block : Functions.Block}
+    {state stateAfter : Objects.Source.State}
+    {mode : Locals.Source.Mode} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx fuel block
+          state)
+        trace (.ok ({ state := stateAfter, mode := mode }, ctxAfter))) :
+    SourceCtxExtends ctx ctxAfter :=
+  OpenResultDoneInvariant.of_resolves
+    (compilerOpen_block_runOpen_doneInvariant_ctxExtends prim program ctx fuel
+      block state)
+    hResolve
+
+/--
 Caller-local invariant for an open internal user call after its callee body.
 
 The callee body may expose any number of external requests and may complete in
@@ -35805,6 +36207,50 @@ theorem runRaw_resolves_mono
         CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
           hLe hPre)
       (fun hNext => hNext)
+
+/--
+A selected raw expression path that reaches values retains the entry context.
+Generated statement prefixes may add hidden locals, while external responses
+inside either the prefix or final lowered expression remain fully abstract.
+-/
+theorem runRaw_resolves_values_ctxExtends
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {targetFuel : Nat} {pre : List Functions.Stmt}
+    {results : Nat} {lower : Locals.Expr results}
+    {compiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace} {target : SourceArgPreludeOpenTarget}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runRaw prim program ctx targetFuel pre lower compiler)
+        trace (.ok (.values target))) :
+    SourceCtxExtends ctx target.ctx := by
+  unfold runRaw at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hPreError | hPreOk
+  · rcases hPreError with ⟨err, _hPre, hDone⟩
+    cases hDone
+  · rcases hPreOk with
+      ⟨_left, _right, preResult, _hTrace, hPre, hNext⟩
+    rcases preResult with ⟨preOutcome, ctxAfter⟩
+    rcases preOutcome with ⟨compilerAfterPre, mode⟩
+    cases mode with
+    | regular =>
+        have hCtx : SourceCtxExtends ctx ctxAfter :=
+          compilerOpen_block_runOpen_resolves_ctxExtends hPre
+        unfold OpenExternal.OpenResult.map at hNext
+        rcases OpenExternal.OpenResultResolves.bind_inv hNext with
+          hExprError | hExprOk
+        · rcases hExprError with ⟨err, _hExpr, hDone⟩
+          cases hDone
+        · rcases hExprOk with
+            ⟨_exprLeft, _exprRight, exprResult, _hExprTrace, _hExpr, hDone⟩
+          cases hDone
+          exact hCtx
+    | brk => cases hNext
+    | cont => cases hNext
+    | leave => cases hNext
+    | halt kind => cases hNext
 
 theorem run_done_regular
     {prim : Objects.Source.PrimitiveSemantics}
