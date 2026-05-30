@@ -38281,6 +38281,151 @@ theorem yulOpen_evalArgs_append_singleton_eq_of_fuel_le_twice_length
               simp [OpenExternal.YulOpen.evalArgs,
                 OpenExternal.YulOpen.evalTail, ih hTailFuel]
 
+def sourceArgAppendValues
+    (prefixValues : List Word) (suffixResult : State × List Word) :
+    OpenExternal.OpenResult Exception (State × List Word) :=
+  .done (.ok (suffixResult.1, prefixValues ++ suffixResult.2))
+
+/--
+Expose an appended open argument head at its exact residual evaluator fuel.
+
+Unlike the scheduled equation below, this keeps the post-head empty-tail
+evaluation explicit.  That distinction matters at the two boundary clocks:
+the head may be reachable while the final empty tail still exhausts fuel.
+-/
+theorem yulOpen_toOpenResult_evalArgs_append_singleton_eq_bind_evalTail
+    (headFuel : Nat) :
+    ∀ {argsPrefix : List AstExpr} {head : AstExpr}
+      {codeOverride : Option AstContract} {source : State},
+      OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs
+            (headFuel + (2 * argsPrefix.length + 1))
+            (argsPrefix ++ [head]) codeOverride source) =
+        OpenExternal.OpenResult.bind
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs
+              (headFuel + (2 * argsPrefix.length + 1))
+              argsPrefix codeOverride source))
+          (fun prefixResult =>
+            OpenExternal.OpenResult.bind
+              (OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+                  (OpenExternal.YulOpen.eval headFuel head codeOverride
+                    prefixResult.1)))
+              (sourceArgAppendValues prefixResult.2)) := by
+  intro argsPrefix
+  induction argsPrefix with
+  | nil =>
+      intro head codeOverride source
+      simpa [OpenExternal.YulOpen.evalArgs, sourceArgAppendValues,
+        OpenExternal.OpenResult.bind] using
+        (openResult_bind_done_ok_identity_sourceBridge
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+              (OpenExternal.YulOpen.eval headFuel head codeOverride source)))).symm
+  | cons first rest ih =>
+      intro head codeOverride source
+      let restFuel := headFuel + (2 * rest.length + 1)
+      have hTail :
+          ∀ firstOpen : OpenExternal.YulOpenResult (State × Word),
+            OpenExternal.YulOpenResult.toOpenResult
+                (OpenExternal.YulOpen.evalTail restFuel.succ
+                  (rest ++ [head]) codeOverride firstOpen) =
+              OpenExternal.OpenResult.bind
+                (OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.evalTail restFuel.succ rest
+                    codeOverride firstOpen))
+                (fun prefixResult =>
+                  OpenExternal.OpenResult.bind
+                    (OpenExternal.YulOpenResult.toOpenResult
+                      (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+                        (OpenExternal.YulOpen.eval headFuel head codeOverride
+                          prefixResult.1)))
+                    (sourceArgAppendValues prefixResult.2)) := by
+        intro firstOpen
+        exact
+          (OpenExternal.YulOpenResult.rec
+            (motive_1 := fun firstOpen =>
+              OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.evalTail restFuel.succ
+                    (rest ++ [head]) codeOverride firstOpen) =
+                OpenExternal.OpenResult.bind
+                  (OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.evalTail restFuel.succ rest
+                      codeOverride firstOpen))
+                  (fun prefixResult =>
+                    OpenExternal.OpenResult.bind
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+                          (OpenExternal.YulOpen.eval headFuel head codeOverride
+                            prefixResult.1)))
+                      (sourceArgAppendValues prefixResult.2)))
+            (motive_2 := fun firstCall =>
+              OpenExternal.YulOpenResult.toOpenResult
+                  (OpenExternal.YulOpen.evalTail restFuel.succ
+                    (rest ++ [head]) codeOverride (.call firstCall)) =
+                OpenExternal.OpenResult.bind
+                  (OpenExternal.YulOpenResult.toOpenResult
+                    (OpenExternal.YulOpen.evalTail restFuel.succ rest
+                      codeOverride (.call firstCall)))
+                  (fun prefixResult =>
+                    OpenExternal.OpenResult.bind
+                      (OpenExternal.YulOpenResult.toOpenResult
+                        (OpenExternal.YulOpen.evalTail headFuel [] codeOverride
+                          (OpenExternal.YulOpen.eval headFuel head codeOverride
+                            prefixResult.1)))
+                      (sourceArgAppendValues prefixResult.2)))
+            (done := by
+              intro firstDone
+              cases firstDone with
+              | error err =>
+                  simp [OpenExternal.YulOpen.evalTail,
+                    OpenExternal.YulOpenResult.bind,
+                    OpenExternal.YulOpenResult.toOpenResult,
+                    OpenExternal.OpenResult.bind]
+              | ok firstResult =>
+                  rcases firstResult with ⟨stateAfterFirst, firstValue⟩
+                  simp [OpenExternal.YulOpen.evalTail,
+                    OpenExternal.YulOpenResult.bind]
+                  rw [yulOpen_toOpenResult_consResult_eq_bind]
+                  rw [ih (head := head) (codeOverride := codeOverride)
+                    (source := stateAfterFirst)]
+                  rw [openResult_bind_assoc_sourceBridge]
+                  rw [yulOpen_toOpenResult_consResult_eq_bind]
+                  rw [openResult_bind_assoc_sourceBridge]
+                  apply OpenExternal.OpenResult.bind_congr_next
+                  intro restResult
+                  rw [openResult_bind_assoc_sourceBridge]
+                  cases headFuel <;>
+                    simp [OpenExternal.YulOpen.evalTail,
+                      OpenExternal.YulOpenResult.toOpenResult_bind,
+                      yulOpen_toOpenResult_consResult_eq_bind,
+                      sourceArgAppendValues, OpenExternal.OpenResult.bind] <;>
+                    apply OpenExternal.OpenResult.bind_congr_next <;>
+                    intro suffixResult <;>
+                    simp [sourceArgAppendValues, OpenExternal.OpenResult.bind])
+            (call := by
+              intro firstCall hResume
+              exact hResume)
+            (mk := by
+              intro site resume ihResume
+              simp [OpenExternal.YulOpen.evalTail,
+                OpenExternal.YulOpenResult.bind,
+                OpenExternal.YulOpenResult.toOpenResult,
+                OpenExternal.OpenResult.bind]
+              funext response
+              simpa [OpenExternal.YulOpen.evalTail] using ihResume response)
+            firstOpen)
+      have hFuelEq :
+          headFuel + (2 * (first :: rest).length + 1) =
+            restFuel.succ.succ := by
+        dsimp [restFuel]
+        omega
+      rw [hFuelEq]
+      simpa [OpenExternal.YulOpen.evalArgs] using
+        hTail
+          (OpenExternal.YulOpen.eval restFuel.succ first codeOverride source)
+
 theorem exists_base_yulOpenEvalArgsAppendFuel_of_length_overhead_le
     {fuel : Nat} (args : List AstExpr)
     (hFuel : 2 * args.length + 3 ≤ fuel) :
