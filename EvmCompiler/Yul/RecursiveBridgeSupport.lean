@@ -52178,16 +52178,14 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
     {revertRel : State → Objects.Source.State → Prop}
     {allowed : Except Exception State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
-    {program : Functions.Program} {fn : Functions.FunDef}
-    {args : List Word} {fuel : Nat}
-    {paramStore : Locals.Source.Store}
+    {fn : Functions.FunDef}
     {callerShared : EvmYul.SharedState .Yul}
     {callerStore : EvmYul.Yul.VarStore}
     {callerCompiler : Objects.Source.State}
     {bodySource : State} {bodyOutcome : Objects.Source.Outcome}
     {bodyCtx replayCtx : Functions.Source.Ctx}
     {tmp : Name} {value : Word}
-    {scope : EvmYul.Yul.VarStore}
+    {rets : List EvmYul.Identifier}
     {callResponseRel : SourceExprPreludeOpenCallResponseRel}
     (hCaller :
       SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
@@ -52196,25 +52194,9 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
       SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel allowed
         (.ok bodySource) (.ok (bodyOutcome, bodyCtx)))
     (hAllowed : allowed (.ok bodySource))
-    (hInsert :
-      Functions.Source.Store.insertMany fn.params args
-          Locals.Source.Store.empty =
-        some paramStore)
-    (hBody :
-      CompilerOpen.FunctionsOpen.Block.runOpen prim program
-          { (Functions.Source.Ctx.initial.withLeaveScope
-              (fn.returns ++ fn.params)) with
-            scope := fn.returns ++ fn.params }
-          fuel fn.body
-          ({ shared := callerCompiler.shared
-             vars :=
-              Functions.Source.Store.initReturns fn.returns paramStore } :
-            Objects.Source.State) =
-        .done (.ok (bodyOutcome, bodyCtx)))
     (hMode : bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave)
+    (hLowerReturns : fn.returns = identNames rets)
     (hReturns : ∀ name, name ∈ fn.returns → name ∈ bodyLayout)
-    (hScope :
-      ∀ name, name ∈ fn.returns → (scope.lookup name).isSome = true)
     (hLookup :
       Functions.Source.Store.lookupMany fn.returns
           bodyOutcome.state.vars =
@@ -52229,10 +52211,22 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
             (EvmYul.Yul.State.reviveJump bodySource)
             (.Ok callerShared callerStore))
           (.Ok callerShared callerStore),
-          [value]))
+          List.map bodySource.lookup! rets))
       (OpenExternal.OpenResult.bind
-        (CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
-          fuel.succ callerCompiler.shared)
+        (match bodyOutcome.mode with
+        | .regular | .leave =>
+            match
+              Functions.Source.Store.lookupMany fn.returns
+                bodyOutcome.state.vars with
+            | none => CompilerOpen.invalid
+            | some values =>
+                OpenExternal.OpenResult.ok
+                  (Functions.Source.CallResult.returned
+                    bodyOutcome.state.shared values)
+        | .brk | .cont => CompilerOpen.invalid
+        | .halt kind =>
+            OpenExternal.OpenResult.ok
+              (Functions.Source.CallResult.halted kind bodyOutcome.state))
         (fun callResult =>
           match callResult with
           | .returned sharedAfterCall returnValues =>
@@ -52251,34 +52245,49 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
           | .halted _kind _haltedState =>
               CompilerOpen.invalid)) := by
   have hValues :
-      [value] =
-        fn.returns.map fun name =>
-          EvmYul.Yul.State.lookup! name
-            (EvmYul.Yul.State.restrictStoreTo scope bodySource) :=
-    sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup_restrictStoreTo
-      (cfg := cfg) (layout := bodyLayout) (returns := fn.returns)
-      (terminalRel := terminalRel) (revertRel := revertRel)
-      (allowed := allowed) (source := bodySource) (scope := scope)
-      (outcome := bodyOutcome) (ctx := bodyCtx) (values := [value])
-      hDone hAllowed hMode hReturns hScope hLookup
-  have hRunBody :
-      CompilerOpen.FunctionsOpen.FunDef.runBody prim program fn args
-          fuel.succ callerCompiler.shared =
-        .done
-          (.ok
-            (Functions.Source.CallResult.returned
-              bodyOutcome.state.shared [value])) := by
-    simpa [← hValues] using
-      (compilerOpen_funDef_runBody_succ_returned_of_body_done_rel
-        (cfg := cfg) (layout := bodyLayout) (terminalRel := terminalRel)
-        (revertRel := revertRel) (allowed := allowed)
-        (source := bodySource) (scope := scope) (prim := prim)
-        (program := program) (fn := fn) (args := args)
-        (values := [value]) (fuel := fuel)
-        (shared := callerCompiler.shared) (paramStore := paramStore)
-        (bodyOutcome := bodyOutcome) (ctxAfter := bodyCtx)
-        hDone hAllowed hInsert hBody hMode hReturns hScope hLookup)
-  rw [hRunBody]
+      List.map bodySource.lookup! rets = [value] := by
+    have hMapped :
+        [value] =
+          fn.returns.map fun name =>
+            EvmYul.Yul.State.lookup! name bodySource :=
+      sourceOpenResultSeqDoneRel_lookupMany_eq_map_lookup!
+        (cfg := cfg) (layout := bodyLayout) (returns := fn.returns)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (allowed := allowed) (source := bodySource)
+        (outcome := bodyOutcome) (ctx := bodyCtx) (values := [value])
+        hDone hAllowed hMode hReturns hLookup
+    simpa [hLowerReturns, identNames] using hMapped.symm
+  rw [hValues]
+  have hTarget :
+      (match bodyOutcome.mode with
+      | .regular | .leave =>
+          match
+            Functions.Source.Store.lookupMany fn.returns
+              bodyOutcome.state.vars with
+          | none => CompilerOpen.invalid
+          | some values =>
+              OpenExternal.OpenResult.ok
+                (Functions.Source.CallResult.returned
+                  bodyOutcome.state.shared values)
+      | .brk | .cont => CompilerOpen.invalid
+      | .halt kind =>
+          OpenExternal.OpenResult.ok
+            (Functions.Source.CallResult.halted kind bodyOutcome.state)) =
+        OpenExternal.OpenResult.ok
+          (Functions.Source.CallResult.returned bodyOutcome.state.shared
+            [value]) := by
+    cases hMode with
+    | inl hRegular =>
+        cases bodyOutcome with
+        | mk bodyState mode =>
+            cases hRegular
+            simp [hLookup, OpenExternal.OpenResult.ok]
+    | inr hLeave =>
+        cases bodyOutcome with
+        | mk bodyState mode =>
+            cases hLeave
+            simp [hLookup, OpenExternal.OpenResult.ok]
+  rw [hTarget]
   have hBodyRel :
       SourceStateRel cfg bodyLayout
         (EvmYul.Yul.State.reviveJump bodySource) bodyOutcome.state :=
@@ -52320,6 +52329,306 @@ theorem sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
         simpa [Locals.Source.State.withShared, Locals.Source.State.insert]
           using hRestored)
       hAssign
+
+/-- Source continuation after a completed open internal-user-call body. -/
+def yulOpenUserCallRestoreResult
+    (caller : State) (rets : List EvmYul.Identifier) (bodySource : State) :
+    OpenExternal.OpenResult Exception (State × List Word) :=
+  OpenExternal.OpenResult.ok
+    (EvmYul.Yul.State.setStore
+      (EvmYul.Yul.State.overwrite?
+        (EvmYul.Yul.State.reviveJump bodySource) caller)
+      caller,
+      List.map bodySource.lookup! rets)
+
+/-- Target replay after `FunDef.runBody` returns from an internal user call. -/
+def compilerOpenUserCallResultReplay
+    (prim : Objects.Source.PrimitiveSemantics)
+    (tmp : Name) (argVars : Locals.Source.Store)
+    (replayCtx : Functions.Source.Ctx)
+    (callResult : Functions.Source.CallResult) :
+    OpenExternal.OpenResult Functions.EVMException SourceArgPreludeOpenTarget :=
+  match callResult with
+  | .returned sharedAfterCall returnValues =>
+      match Functions.Source.Store.assignMany [tmp] returnValues argVars with
+      | none => CompilerOpen.invalid
+      | some returnStore =>
+          OpenExternal.OpenResult.map
+            (fun exprResult =>
+              { state := exprResult.1
+                ctx := replayCtx
+                values := exprResult.2 })
+            (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+              { shared := sharedAfterCall
+                vars := returnStore })
+  | .halted _kind _haltedState =>
+      CompilerOpen.invalid
+
+/--
+Target continuation after a completed open internal-user-call body.
+
+This is the unfolded `FunDef.runBody` return handling followed by assignment to
+the hidden result slot and final variable replay.
+-/
+def compilerOpenUserCallBodyResultReplay
+    (prim : Objects.Source.PrimitiveSemantics)
+    (fn : Functions.FunDef) (tmp : Name) (argVars : Locals.Source.Store)
+    (replayCtx : Functions.Source.Ctx) (bodyResult : Objects.Source.Outcome) :
+    OpenExternal.OpenResult Functions.EVMException SourceArgPreludeOpenTarget :=
+  OpenExternal.OpenResult.bind
+    (match bodyResult.mode with
+    | .regular | .leave =>
+        match
+          Functions.Source.Store.lookupMany fn.returns bodyResult.state.vars
+            with
+        | none => CompilerOpen.invalid
+        | some values =>
+            OpenExternal.OpenResult.ok
+              (Functions.Source.CallResult.returned bodyResult.state.shared
+                values)
+    | .brk | .cont => CompilerOpen.invalid
+    | .halt kind =>
+        OpenExternal.OpenResult.ok
+          (Functions.Source.CallResult.halted kind bodyResult.state))
+    (compilerOpenUserCallResultReplay prim tmp argVars replayCtx)
+
+/--
+Successful open callee-body results needed by the internal-user-call
+expression continuation.
+
+The ordinary recursive body relation remains visible inside this strengthened
+done relation.  The extra fields are exactly the completed-return facts later
+derived from function-body scopedness, checkpoint filtering, and one-result
+arity.
+-/
+def SourceUserCallBodyReturnedDoneRel
+    (cfg : StateRelConfig) (bodyLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (allowed : Except Exception State → Prop) (fn : Functions.FunDef) :
+    Except Exception State →
+      Except Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx) → Prop
+  | .ok bodySource, .ok (bodyOutcome, bodyCtx) =>
+      SourceOpenResultSeqDoneRel cfg bodyLayout terminalRel revertRel allowed
+          (.ok bodySource) (.ok (bodyOutcome, bodyCtx)) ∧
+        allowed (.ok bodySource) ∧
+        ∃ value,
+          (bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave) ∧
+            Functions.Source.Store.lookupMany fn.returns
+                bodyOutcome.state.vars =
+              some [value]
+  | _, _ => False
+
+/--
+Open callee-body suspension composes through internal-user-call restoration.
+
+Every completed body result uses the returned-body callback above.  Every
+suspended external request remains visible and resumes through the same source
+and target continuations for all related abstract responses.
+-/
+theorem sourceArgStackPreludeOpenResultRel_user_call_bind_body_returned_single
+    {cfg : StateRelConfig} {callerLayout bodyLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {fn : Functions.FunDef}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler : Objects.Source.State}
+    {tmp : Name} {rets : List EvmYul.Identifier}
+    {replayCtx : Functions.Source.Ctx}
+    {sourceBody : OpenExternal.OpenResult Exception State}
+    {targetBody :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hCaller :
+      SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hBody :
+      OpenExternal.OpenResultRel bodyCallResponseRel
+        (SourceUserCallBodyReturnedDoneRel cfg bodyLayout terminalRel
+          revertRel allowed fn)
+        sourceBody targetBody)
+    (hLowerReturns : fn.returns = identNames rets)
+    (hReturns : ∀ name, name ∈ fn.returns → name ∈ bodyLayout)
+    (hFresh : tmp ∉ callerLayout)
+    (hContains : callerCompiler.vars.contains tmp = true)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (yulOpenUserCallRestoreResult
+                  (.Ok callerShared callerStore) rets) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun bodyResult =>
+                  compilerOpenUserCallBodyResultReplay prim fn tmp
+                    callerCompiler.vars replayCtx bodyResult.1) }
+          response →
+        bodyCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg callerLayout)
+      (OpenExternal.OpenResult.bind sourceBody
+        (yulOpenUserCallRestoreResult (.Ok callerShared callerStore) rets))
+      (OpenExternal.OpenResult.bind targetBody
+        (fun bodyResult =>
+          compilerOpenUserCallBodyResultReplay prim fn tmp
+            callerCompiler.vars replayCtx bodyResult.1)) := by
+  refine OpenExternal.OpenResultRel.bind hBody ?_ ?_
+  · intro sourceDone targetDone hDone
+    cases sourceDone with
+    | error err =>
+        cases targetDone <;> cases hDone
+    | ok bodySource =>
+        cases targetDone with
+        | error err =>
+            cases hDone
+        | ok targetResult =>
+            rcases targetResult with ⟨bodyOutcome, bodyCtx⟩
+            rcases hDone with
+              ⟨hDone, hAllowed, value, hMode, hLookup⟩
+            simpa [yulOpenUserCallRestoreResult,
+              compilerOpenUserCallBodyResultReplay] using
+              (sourceArgStackPreludeOpenResultRel_user_call_body_returned_single
+                (cfg := cfg) (callerLayout := callerLayout)
+                (bodyLayout := bodyLayout) (terminalRel := terminalRel)
+                (revertRel := revertRel) (allowed := allowed)
+                (prim := prim) (fn := fn) (callerShared := callerShared)
+                (callerStore := callerStore)
+                (callerCompiler := callerCompiler)
+                (bodySource := bodySource) (bodyOutcome := bodyOutcome)
+                (bodyCtx := bodyCtx) (replayCtx := replayCtx)
+                (tmp := tmp) (value := value) (rets := rets)
+                (callResponseRel := callResponseRel) hCaller hDone hAllowed
+                hMode hLowerReturns hReturns hLookup hFresh hContains)
+  · intro sourceCall targetCall response hResponse
+    exact hCallResponse hResponse
+
+/--
+Resolved open internal-user-call bodies compose into the expression result
+continuation.
+
+The source and target body executions may suspend at arbitrary external CALLs.
+Once a recursive body theorem relates those open executions, this theorem
+rewrites `YulOpen.call` and `FunDef.runBody` to the matching body binds and
+applies the suspension-preserving restoration wrapper above.
+-/
+theorem sourceArgStackPreludeOpenResultRel_user_call_succ_of_find_function_body
+    {cfg : StateRelConfig} {callerLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {lowerFn : Functions.FunDef}
+    {sourceFuel targetBodyFuel : Nat} {argValues : List Word}
+    {paramStore : Locals.Source.Store}
+    {functionName? : Option EvmYul.Yul.Ast.YulFunctionName}
+    {codeOverride : Option AstContract}
+    {yulContract : EvmYul.Account .Yul}
+    {f : EvmYul.Yul.Ast.FunctionDefinition}
+    {callerShared : EvmYul.SharedState .Yul}
+    {callerStore : EvmYul.Yul.VarStore}
+    {callerCompiler : Objects.Source.State}
+    {tmp : Name} {replayCtx : Functions.Source.Ctx}
+    {bodyCallResponseRel : SourceOpenSeqCallResponseRel}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hCaller :
+      SourceStateRel cfg callerLayout (.Ok callerShared callerStore)
+        callerCompiler)
+    (hFind :
+      callerShared.accountMap.find? callerShared.executionEnv.codeOwner =
+        some yulContract)
+    (hFunction :
+      OpenExternal.YulOpen.callFunction? functionName?
+          (codeOverride.getD yulContract.code) =
+        some f)
+    (hInsert :
+      Functions.Source.Store.insertMany lowerFn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hBody :
+      OpenExternal.OpenResultRel bodyCallResponseRel
+        (SourceUserCallBodyReturnedDoneRel cfg
+          (lowerFn.returns ++ lowerFn.params) terminalRel revertRel allowed
+          lowerFn)
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel (.Block f.body) codeOverride
+            (EvmYul.Yul.State.mkOk
+              (EvmYul.Yul.State.initcall f.params f.rets argValues
+                (.Ok callerShared callerStore)))))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+          { (Functions.Source.Ctx.initial.withLeaveScope
+              (lowerFn.returns ++ lowerFn.params)) with
+            scope := lowerFn.returns ++ lowerFn.params }
+          targetBodyFuel lowerFn.body
+          ({ shared := callerCompiler.shared
+             vars :=
+              Functions.Source.Store.initReturns lowerFn.returns
+                paramStore } :
+            Objects.Source.State)))
+    (hLowerReturns : lowerFn.returns = identNames f.rets)
+    (hFresh : tmp ∉ callerLayout)
+    (hContains : callerCompiler.vars.contains tmp = true)
+    (hCallResponse :
+      ∀ {sourceCall targetCall response},
+        callResponseRel
+          { site := sourceCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (sourceCall.resume response)
+                (yulOpenUserCallRestoreResult
+                  (.Ok callerShared callerStore) f.rets) }
+          { site := targetCall.site
+            resume := fun response =>
+              OpenExternal.OpenResult.bind (targetCall.resume response)
+                (fun bodyResult =>
+                  compilerOpenUserCallBodyResultReplay prim lowerFn tmp
+                    callerCompiler.vars replayCtx bodyResult.1) }
+          response →
+        bodyCallResponseRel sourceCall targetCall response) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg callerLayout)
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.call sourceFuel.succ argValues functionName?
+          codeOverride (.Ok callerShared callerStore)))
+      (OpenExternal.OpenResult.bind
+        (CompilerOpen.FunctionsOpen.FunDef.runBody prim program lowerFn
+          argValues targetBodyFuel.succ callerCompiler.shared)
+        (compilerOpenUserCallResultReplay prim tmp callerCompiler.vars
+          replayCtx)) := by
+  rw [yulOpen_toOpenResult_call_succ_eq_bind_body_of_find_function
+    (fuel := sourceFuel) (args := argValues)
+    (functionName? := functionName?) (codeOverride := codeOverride)
+    (state := (.Ok callerShared callerStore : State))
+    (yulContract := yulContract) (f := f) hFind hFunction]
+  rw [compilerOpen_funDef_runBody_succ_eq_bind_body_of_insertMany
+    (prim := prim) (program := program) (fn := lowerFn)
+    (args := argValues) (fuel := targetBodyFuel)
+    (shared := callerCompiler.shared) (paramStore := paramStore) hInsert]
+  rw [openResult_bind_assoc]
+  exact
+    sourceArgStackPreludeOpenResultRel_user_call_bind_body_returned_single
+      (cfg := cfg) (callerLayout := callerLayout)
+      (bodyLayout := lowerFn.returns ++ lowerFn.params)
+      (terminalRel := terminalRel) (revertRel := revertRel)
+      (allowed := allowed) (prim := prim) (fn := lowerFn)
+      (callerShared := callerShared) (callerStore := callerStore)
+      (callerCompiler := callerCompiler) (tmp := tmp) (rets := f.rets)
+      (replayCtx := replayCtx) (bodyCallResponseRel := bodyCallResponseRel)
+      (callResponseRel := callResponseRel) hCaller hBody hLowerReturns
+      (by
+        intro name hMem
+        exact List.mem_append_left lowerFn.params hMem)
+      hFresh hContains hCallResponse
 
 /--
 Target-side open shape of an internal function-call statement after the callee
