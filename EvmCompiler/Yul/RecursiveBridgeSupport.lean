@@ -22848,6 +22848,55 @@ theorem strengthen_rel
                 exact ih response hResponse (hSourceResume response)
                   (hTargetResume response))
 
+/--
+Strengthen one selected related path using execution-local invariants.
+
+This is the finite-trace sibling of `strengthen_rel`: only the response chosen
+by the path is followed at each suspended request.
+-/
+theorem strengthen_path_rel
+    {ε₁ ε₂ α : Type*} {β : Type}
+    {callResponseRel :
+      OpenExternal.OpenCall (OpenExternal.OpenResult ε₁ α) →
+        OpenExternal.OpenCall (OpenExternal.OpenResult ε₂ β) →
+        OpenExternal.CallResponse → Prop}
+    {doneRel doneRel' : Except ε₁ α → Except ε₂ β → Prop}
+    {trace : OpenExternal.OpenTrace}
+    {source : OpenExternal.OpenResult ε₁ α}
+    {target : OpenExternal.OpenResult ε₂ β}
+    {sourceDoneInv : Except ε₁ α → Prop}
+    {targetDoneInv : Except ε₂ β → Prop}
+    (hRel :
+      OpenExternal.OpenResultPathRel callResponseRel doneRel trace source
+        target)
+    (hSourceInv : OpenResultDoneInvariant sourceDoneInv source)
+    (hTargetInv : OpenResultDoneInvariant targetDoneInv target)
+    (hDone :
+      ∀ {sourceDone targetDone},
+        doneRel sourceDone targetDone →
+          sourceDoneInv sourceDone →
+          targetDoneInv targetDone →
+          doneRel' sourceDone targetDone) :
+    OpenExternal.OpenResultPathRel callResponseRel doneRel' trace source
+      target := by
+  induction hRel with
+  | @done sourceDone targetDone hDoneRel =>
+      cases hSourceInv with
+      | done hSourceDone =>
+          cases hTargetInv with
+          | done hTargetDone =>
+              exact
+                OpenExternal.OpenResultPathRel.done
+                  (hDone hDoneRel hSourceDone hTargetDone)
+  | @call sourceCall targetCall response trace hSite hResponse _hTail ih =>
+      cases hSourceInv with
+      | call hSourceResume =>
+          cases hTargetInv with
+          | call hTargetResume =>
+              exact
+                OpenExternal.OpenResultPathRel.call hSite hResponse
+                  (ih (hSourceResume response) (hTargetResume response))
+
 theorem bind
     {ε α β : Type*}
     {doneInv : Except ε α → Prop}
@@ -36212,6 +36261,107 @@ def SourceArgTerminalRawPreludeOpenSoundAtExactTarget
             codeOverride source))
         (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
           { stmts := pre } compiler)
+
+/--
+Finite-trace terminal-aware generated-argument-prefix soundness.
+
+For one admitted concrete source trace, choose a compiler-open cutoff at or
+above the requested floor and follow the same request/response path.  This is
+the argument-list counterpart of `SourceExprRawPreludeOpenPathSoundWhen`.
+-/
+def SourceArgTerminalRawPreludeOpenPathSoundWhen
+    (cfg : StateRelConfig) (layout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (args : List AstExpr)
+    (codeOverride : Option AstContract)
+    (pre : List Functions.Stmt) (lowerArgs : List (Locals.Expr 1))
+    (allowed : Except Exception (State × List Word) → Prop) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateRel cfg layout source compiler →
+    StateStoreContains layout source →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+          codeOverride source))
+      trace sourceDone →
+    allowed sourceDone →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    ∀ minimumTargetFuel,
+      ∃ targetFuel,
+        minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (RelationallyAdmissibleOpenCallResponseRel cfg)
+          (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+            revertRel prim lowerArgs)
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse
+              codeOverride source))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel { stmts := pre } compiler)
+
+/--
+Expose one local tree-shaped argument-prefix proof through the selected finite
+path interface.  Padding is applied only to the already successful compiler
+path selected by the source trace.
+-/
+theorem SourceArgTerminalRawPreludeOpenPathSoundWhen.of_atExact
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {args : List AstExpr}
+    {codeOverride : Option AstContract}
+    {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
+    {targetFuel : Nat}
+    {allowed : Except Exception (State × List Word) → Prop}
+    (hExact :
+      SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+        revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
+        targetFuel (RelationallyAdmissibleOpenCallResponseRel cfg)) :
+    SourceArgTerminalRawPreludeOpenPathSoundWhen cfg layout terminalRel
+      revertRel prim program ctx sourceFuel args codeOverride pre lowerArgs
+      allowed := by
+  intro source compiler trace sourceDone hInitial hContains hResolve _hAllowed
+    hResponses minimumTargetFuel
+  have hPath :
+      OpenExternal.OpenResultPathRel
+        (RelationallyAdmissibleOpenCallResponseRel cfg)
+        (SourceArgTerminalRawPreludeOpenDoneRel cfg layout terminalRel
+          revertRel prim lowerArgs)
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel args.reverse codeOverride
+            source))
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          { stmts := pre } compiler) :=
+    OpenExternal.OpenResultRel.path_of_resolves_of_responsesSatisfy
+      (hExact hInitial hContains) hResolve hResponses
+  rcases hPath.resolves with
+    ⟨sourceDone', targetDone, hSource, hTarget, hDone⟩
+  cases targetDone with
+  | error targetErr =>
+      cases sourceDone' <;>
+        simp [SourceArgTerminalRawPreludeOpenDoneRel] at hDone
+  | ok targetResult =>
+      let paddedFuel := max minimumTargetFuel targetFuel
+      have hTargetPadded :
+          OpenExternal.OpenResultResolves
+            (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              paddedFuel { stmts := pre } compiler)
+            trace (.ok targetResult) :=
+        CompilerOpen.FunctionsOpen.Block.runOpen_resolves_mono prim program
+          (Nat.le_max_right minimumTargetFuel targetFuel) hTarget
+      refine ⟨paddedFuel, Nat.le_max_left _ _, ?_⟩
+      exact
+        OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+          hSource hTargetPadded hResponses hDone
 
 theorem sourceArgTerminalRawPreludeOpenDoneRel_of_raw
     {cfg : StateRelConfig} {layout : List Name}
