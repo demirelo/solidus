@@ -53676,6 +53676,32 @@ def SourceOpenResultSeqSoundAtExactHiddenCtx
         (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
           targetFuel lowerBlock compiler)
 
+/--
+Open hidden-context sequence soundness above one uniform target-proof-fuel
+floor.
+
+The floor is chosen before either execution begins. Every larger target clock
+therefore exposes the exact same source-facing simulation contract through all
+universally quantified external responses; no post-suspension fuel choice is
+hidden in the relation.
+-/
+def SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx
+    (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmts : List AstStmt)
+    (codeOverride : Option AstContract) (lowerBlock : Functions.Block)
+    (minimumTargetFuel : Nat) (allowed : Except Exception State → Prop)
+    (callResponseRel : SourceOpenSeqCallResponseRel) : Prop :=
+  ∀ targetFuel,
+    minimumTargetFuel ≤ targetFuel →
+      SourceOpenResultSeqSoundAtExactHiddenCtx cfg layout outcomeLayout
+        terminalRel revertRel prim program ctx sourceFuel sourceStmts
+        codeOverride lowerBlock targetFuel allowed callResponseRel
+
 def SourceOpenResultSeqSoundWhenAtExactHiddenCtx
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
     (terminalRel :
@@ -53836,6 +53862,28 @@ theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
       codeOverride lowerBlock allowed callResponseRel := by
   intro source compiler hInitial
   exact ⟨targetFuel, hExact hInitial⟩
+
+theorem SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atOrAboveTargetFuel
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {minimumTargetFuel : Nat} {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAbove :
+      SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+        sourceStmts codeOverride lowerBlock minimumTargetFuel allowed
+        callResponseRel) :
+    SourceOpenResultSeqSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed callResponseRel :=
+  SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
+    (targetFuel := minimumTargetFuel) (hAbove minimumTargetFuel (by omega))
 
 /-- Associativity for the generic open-result bind. -/
 theorem openResult_bind_assoc
@@ -61227,6 +61275,35 @@ def CheckedOpenSeqLoweringSoundAtExactTargetWhenFreshNamesAtCompileFuelHiddenCtx
       codeOverride lowerBlock targetFuel allowed callResponseRel
 
 /--
+Checked open sequence lowering above one uniform residual target-proof-fuel
+floor.
+
+This is the constructive sequence contract used by recursive CALL bodies. It
+keeps the exact target clock visible while the recursive proof is assembled,
+then may be hidden at the public boundary after selecting the floor itself.
+-/
+def CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+    (cfg : StateRelConfig) (reserved layout outcomeLayout : List Name)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel compileFuel : Nat)
+    (sourceStmts : List AstStmt) (codeOverride : Option AstContract)
+    (minimumTargetFuel : Nat) (allowed : Except Exception State → Prop)
+    (callResponseRel : SourceOpenSeqCallResponseRel) :
+    Prop :=
+  ∀ {freshState freshState' lowerBlock},
+    FreshCoversLayout (reserved ++ layout) freshState →
+    Stmt.List.toBlockFuel? compileFuel freshState sourceStmts =
+      some (lowerBlock, freshState') →
+    SourceOpenResultSeqSoundAtOrAboveTargetFuelHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx sourceFuel
+      sourceStmts codeOverride lowerBlock minimumTargetFuel allowed
+      callResponseRel
+
+/--
 Checked hidden-context sequence target for the open external-CALL spine, hiding
 the target fuel just as the existing closed sequence target does.
 -/
@@ -61274,6 +61351,31 @@ theorem CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_atExa
   exact
     SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atExact
       (targetFuel := targetFuel) (hExact hCovers hLower)
+
+theorem CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx.of_atOrAboveTargetFuel
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {sourceStmts : List AstStmt} {codeOverride : Option AstContract}
+    {minimumTargetFuel : Nat} {allowed : Except Exception State → Prop}
+    {callResponseRel : SourceOpenSeqCallResponseRel}
+    (hAbove :
+      CheckedOpenSeqLoweringSoundAtOrAboveTargetFuelWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout outcomeLayout terminalRel revertRel prim program
+        ctx sourceFuel compileFuel sourceStmts codeOverride minimumTargetFuel
+        allowed callResponseRel) :
+    CheckedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout outcomeLayout terminalRel revertRel prim program ctx
+      sourceFuel compileFuel sourceStmts codeOverride allowed
+      callResponseRel := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  exact
+    SourceOpenResultSeqSoundWhenAtExactHiddenCtx.of_atOrAboveTargetFuel
+      (minimumTargetFuel := minimumTargetFuel) (hAbove hCovers hLower)
 
 theorem checkedOpenSeqLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
