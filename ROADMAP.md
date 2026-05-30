@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 20:27 PDT.
+Last updated: 2026-05-29 20:36 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -461,6 +461,11 @@ Remaining work:
      break/continue/leave markers, and sequence head/tail composition now
      preserve checkpoint legality and protected visible locals across every
      exposed response.
+   - [x] Add open call-statement and branch bricks: `ExprStmtCall`,
+     `execPrimCall`, and `execCall` reuse the recursive argument invariant,
+     assign returned values after completion, and keep exposed ordinary
+     `CALL` requests open; `if` and `switch` compose scalar evaluation into
+     recursively supplied blocks.
    - [ ] Recurse through compound expression contexts, including cases like
      `add(call(...), x)`, so nested CALLs are handled by expression structure
      rather than by direct statement-shape lemmas.
