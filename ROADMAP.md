@@ -516,6 +516,10 @@ Remaining work:
    - [x] Specialize resolved internal-call restoration to a checked CALL-safe
      selected function: callers now provide the ordinary recursive open body
      theorem and receive the restored `YulOpen.call` relation directly.
+   - [x] Replay a successful restored internal-call expression through its
+     generated hidden result slot: the returned singleton is assigned into the
+     existing compiler-only temp, read back as the source expression value,
+     and hidden again from the visible source layout.
    - [x] Build the user-call singleton/done-invariant part from checked
      user-call arity and the live open `YulOpen.call` result.
    - [ ] Relate or rule out expression error and out-of-fuel branches using

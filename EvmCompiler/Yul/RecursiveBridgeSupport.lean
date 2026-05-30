@@ -55904,6 +55904,70 @@ theorem sourceUserCallResultOpenResultRel_succ_of_find_function_body_callSafe_sc
       hLowerReturns hCallResponse
 
 /--
+Successful restored internal-user-call results replay through the generated
+hidden result slot.
+
+The compiler has inserted `tmp` before running the lowered call arguments, so
+the returned singleton can be assigned into that existing slot.  Reading the
+slot then reproduces the source expression value while the target-only local
+remains hidden from the visible source layout.  Terminal call results are
+intentionally excluded here: the raw statement continuation must propagate
+those before an enclosing expression attempts to read a value.
+-/
+theorem sourceUserCallResultDoneRel_replay_hidden_temp_of_ok
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {tmp : Name} {ctx : Functions.Source.Ctx}
+    {callerCompiler : Objects.Source.State}
+    {sourceAfter : State} {sourceValues : List Word}
+    {callResult : Functions.Source.CallResult}
+    {callResponseRel : SourceExprPreludeOpenCallResponseRel}
+    (hTmpFreshLayout : tmp ∉ layout)
+    (hTmpContains : callerCompiler.vars.contains tmp = true)
+    (hDone :
+      SourceUserCallResultDoneRel cfg layout callerCompiler terminalRel
+        revertRel (.ok (sourceAfter, sourceValues)) (.ok callResult))
+    (hSingle : ∃ value, sourceValues = [value]) :
+    OpenExternal.OpenResultRel callResponseRel
+      (SourceArgStackPreludeOpenDoneRel cfg layout)
+      (.done (.ok (sourceAfter, sourceValues)))
+      (match callResult with
+      | .returned sharedAfterCall returnValues =>
+          match Functions.Source.Store.assignMany [tmp] returnValues
+              callerCompiler.vars with
+          | none => CompilerOpen.invalid
+          | some returnStore =>
+              OpenExternal.OpenResult.map
+                (fun exprResult =>
+                  { state := exprResult.1
+                    ctx := { ctx with scope := tmp :: ctx.scope }
+                    values := exprResult.2 })
+                (CompilerOpen.LocalsExpr.eval prim (.var tmp)
+                  { shared := sharedAfterCall
+                    vars := returnStore })
+      | .halted _kind _haltedState => CompilerOpen.invalid) := by
+  rcases hSingle with ⟨value, hSourceValues⟩
+  subst sourceValues
+  cases callResult with
+  | returned sharedAfterCall returnValues =>
+      rcases hDone with ⟨hRel, hValues⟩
+      have hReturnValues : returnValues = [value] := by
+        simpa using hValues.symm
+      subst returnValues
+      simp [Functions.Source.Store.assignMany, hTmpContains,
+        CompilerOpen.LocalsExpr.eval, OpenExternal.OpenResult.map,
+        OpenExternal.OpenResult.ok, Locals.Source.State.insert,
+        Locals.Source.Store.insert_self]
+      exact
+        OpenExternal.OpenResultRel.done
+          ⟨SourceStateRel.insert_hidden hRel hTmpFreshLayout, rfl⟩
+  | halted kind haltedState =>
+      cases hDone
+
+/--
 Target-side open shape of an internal function-call statement after the callee
 has been resolved.
 
