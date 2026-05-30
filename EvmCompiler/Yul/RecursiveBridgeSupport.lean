@@ -36955,6 +36955,16 @@ def yulOpenEvalArgsAppendFuel (base : Nat) : List AstExpr → Nat
   | [] => base.succ.succ.succ
   | _head :: tail => (yulOpenEvalArgsAppendFuel base tail).succ.succ
 
+theorem yulOpenEvalArgsAppendFuel_append_singleton
+    (base : Nat) (args : List AstExpr) (head : AstExpr) :
+    yulOpenEvalArgsAppendFuel base (args ++ [head]) =
+      yulOpenEvalArgsAppendFuel base.succ.succ args := by
+  induction args with
+  | nil =>
+      simp [yulOpenEvalArgsAppendFuel]
+  | cons arg rest ih =>
+      simp [yulOpenEvalArgsAppendFuel, ih]
+
 /--
 Compiler-output base case for generated open argument preludes.
 
@@ -55245,25 +55255,26 @@ theorem compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {pre : List Functions.Stmt} {name : Name}
     {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat}
     {state : Objects.Source.State} :
     CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-        (pre.length + 2) { stmts := pre ++ [Functions.Stmt.let_ name lowerExpr] }
-        state =
+        (pre.length + tailFuel.succ.succ)
+        { stmts := pre ++ [Functions.Stmt.let_ name lowerExpr] } state =
       OpenExternal.OpenResult.bind
-        (SourceExprPreludeOpen.runRaw prim program ctx (pre.length + 2) pre
-          lowerExpr state)
-        (runLetTargetAfterRaw prim program name [] 1) := by
+        (SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ.succ) pre lowerExpr state)
+        (runLetTargetAfterRaw prim program name [] tailFuel.succ) := by
   rw [show pre ++ [Functions.Stmt.let_ name lowerExpr] =
       pre ++ ([Functions.Stmt.let_ name lowerExpr] ++ []) by simp]
   rw [compilerOpen_expr_prelude_let_single_append_raw_eq
     (prim := prim) (program := program) (ctx := ctx)
     (pre := pre) (tail := []) (name := name) (lowerExpr := lowerExpr)
-    (state := state) (suffixFuel := 1)]
+    (state := state) (suffixFuel := tailFuel.succ)]
   exact
     runLetTarget_eq_bind_runRaw
       (prim := prim) (program := program) (ctx := ctx)
       (pre := pre) (tail := []) (name := name) (lowerExpr := lowerExpr)
-      (tailFuel := 1) (compiler := state)
+      (tailFuel := tailFuel.succ) (compiler := state)
 
 /--
 Assignments consume terminal-aware expression preludes generically.
@@ -108919,7 +108930,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program}
     {lowerTail : List (Locals.Expr 1)} {lowerNames : List Name}
-    {tmp : Name}
+    {tmp : Name} {tailFuel : Nat}
     {sourceTailResult : State × List Word}
     {targetTailResult :
       Functions.Source.Outcome × Functions.Source.Ctx}
@@ -108965,7 +108976,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
             resume := fun response =>
               OpenExternal.OpenResult.bind (targetCall.resume response)
                 (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
-                  prim program tmp [] 1) }
+                  prim program tmp [] tailFuel.succ) }
           response →
         headCallResponseRel sourceCall targetCall response) :
     OpenExternal.OpenResultRel finalCallResponseRel
@@ -108975,7 +108986,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
         (sourceArgAppendHeadValues sourceTailResult.2))
       (OpenExternal.OpenResult.bind targetHead
         (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
-          prim program tmp [] 1)) := by
+          prim program tmp [] tailFuel.succ)) := by
   have hHeadStrong :
       OpenExternal.OpenResultRel headCallResponseRel
         (fun sourceDone targetDone =>
@@ -109119,7 +109130,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {preTail preHead : List Functions.Stmt}
     {lowerTail : List (Locals.Expr 1)} {lowerNames : List Name}
-    {lowerHead : Locals.Expr 1} {tmp : Name}
+    {lowerHead : Locals.Expr 1} {tmp : Name} {tailFuel : Nat}
     {base : Nat} {head : AstExpr} {tail : List AstExpr}
     {codeOverride : Option AstContract} {source : State}
     {compiler : Objects.Source.State}
@@ -109140,8 +109151,8 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (yulOpenEvalArgsAppendFuel base tail.reverse) tail.reverse
             codeOverride source))
         (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-          (preTail.length + (preHead.length + 2)) { stmts := preTail }
-          compiler))
+          (preTail.length + (preHead.length + tailFuel.succ.succ))
+          { stmts := preTail } compiler))
     (hHead :
       ∀ {sourceTailResult : State × List Word}
         {targetTailResult :
@@ -109154,7 +109165,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             (OpenExternal.YulOpen.evalValues base.succ.succ head codeOverride
               sourceTailResult.1))
           (SourceExprPreludeOpen.runRaw prim program targetTailResult.2
-            (preHead.length + 2) preHead lowerHead
+            (preHead.length + tailFuel.succ.succ) preHead lowerHead
             targetTailResult.1.state))
     (hHeadSingle :
       ∀ {sourceTailResult : State × List Word},
@@ -109185,7 +109196,8 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
                   match targetTailResult.1.mode with
                   | .regular =>
                       CompilerOpen.FunctionsOpen.Block.runOpen prim program
-                        targetTailResult.2 (preHead.length + 2)
+                        targetTailResult.2
+                        (preHead.length + tailFuel.succ.succ)
                         { stmts :=
                             preHead ++
                               [Functions.Stmt.let_ tmp lowerHead] }
@@ -109208,7 +109220,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
             resume := fun response =>
               OpenExternal.OpenResult.bind (targetCall.resume response)
                 (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
-                  prim program tmp [] 1) }
+                  prim program tmp [] tailFuel.succ) }
           response →
         headCallResponseRel sourceCall targetCall response) :
     OpenExternal.OpenResultRel finalCallResponseRel
@@ -109219,7 +109231,7 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
           (yulOpenEvalArgsAppendFuel base tail.reverse)
           (head :: tail).reverse codeOverride source))
       (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
-        (preTail.length + (preHead.length + 2))
+        (preTail.length + (preHead.length + tailFuel.succ.succ))
         { stmts :=
             preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]) }
         compiler) := by
@@ -109228,7 +109240,8 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
     (prim := prim) (program := program) (ctx := ctx)
     (pre := preTail)
     (suffix := preHead ++ [Functions.Stmt.let_ tmp lowerHead])
-    (state := compiler) (suffixFuel := preHead.length + 2)]
+    (state := compiler)
+    (suffixFuel := preHead.length + tailFuel.succ.succ)]
   exact
     sourceArgTerminalRawPreludeOpenResultRel_bind_tail
       (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
@@ -109242,19 +109255,22 @@ theorem sourceArgTerminalRawPreludeOpenResultRel_evalArgs_reverse_cons_scheduled
         rw [SourceExprSeqPreludeOpen.compilerOpen_expr_prelude_let_single_raw_eq_bind_runRaw
           (prim := prim) (program := program)
           (ctx := targetTailResult.2) (pre := preHead) (name := tmp)
-          (lowerExpr := lowerHead) (state := targetTailResult.1.state)]
+          (lowerExpr := lowerHead) (tailFuel := tailFuel)
+          (state := targetTailResult.1.state)]
         exact
           sourceArgTerminalRawPreludeOpenResultRel_bind_generated_head
             (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
             (revertRel := revertRel) (prim := prim) (program := program)
             (lowerTail := lowerTail) (lowerNames := lowerNames) (tmp := tmp)
+            (tailFuel := tailFuel)
             (sourceTailResult := sourceTailResult)
             (targetTailResult := targetTailResult)
             hLowerTailVars hTmpFreshLower hTmpFreshLayout hTailDone
             (hHead hTailDone) hHeadSingle
             (sourceExprPreludeOpen_runRaw_doneInvariant_varsAgree_of_writes
               (names := lowerNames) (prim := prim) (program := program)
-              (ctx := targetTailResult.2) (targetFuel := preHead.length + 2)
+              (ctx := targetTailResult.2)
+              (targetFuel := preHead.length + tailFuel.succ.succ)
               (pre := preHead) (lower := lowerHead)
               (compiler := targetTailResult.1.state) hHeadWrites)
             (by
@@ -109283,7 +109299,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     {freshState stateTail stateHead stateFresh : Fresh.State}
     {preTail preHead : List Functions.Stmt}
     {lowerTail : List (Locals.Expr 1)}
-    {lowerHead : Locals.Expr 1} {tmp : Name}
+    {lowerHead : Locals.Expr 1} {tmp : Name} {tailFuel : Nat}
     {base : Nat} {head : AstExpr} {tail : List AstExpr}
     {codeOverride : Option AstContract}
     {tailCallResponseRel finalCallResponseRel :
@@ -109301,13 +109317,14 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
         revertRel prim program ctx
         (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride preTail
-        lowerTail (preTail.length + (preHead.length + 2))
+        lowerTail (preTail.length + (preHead.length + tailFuel.succ.succ))
         tailCallResponseRel)
     (hHead :
       ∀ {ctxHead : Functions.Source.Ctx},
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
           revertRel prim program ctxHead base.succ.succ head codeOverride
-          preHead lowerHead (preHead.length + 2) headCallResponseRel)
+          preHead lowerHead (preHead.length + tailFuel.succ.succ)
+          headCallResponseRel)
     (hHeadSingle :
       ∀ {sourceTailResult : State × List Word},
         OpenResultDoneInvariant
@@ -109337,7 +109354,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
                   match targetTailResult.1.mode with
                   | .regular =>
                       CompilerOpen.FunctionsOpen.Block.runOpen prim program
-                        targetTailResult.2 (preHead.length + 2)
+                        targetTailResult.2
+                        (preHead.length + tailFuel.succ.succ)
                         { stmts :=
                             preHead ++
                               [Functions.Stmt.let_ tmp lowerHead] }
@@ -109360,14 +109378,15 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
             resume := fun response =>
               OpenExternal.OpenResult.bind (targetCall.resume response)
                 (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
-                  prim program tmp [] 1) }
+                  prim program tmp [] tailFuel.succ) }
           response →
         headCallResponseRel sourceCall targetCall response) :
     SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
       revertRel prim program ctx
       (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail) codeOverride
       (preTail ++ (preHead ++ [Functions.Stmt.let_ tmp lowerHead]))
-      (.var tmp :: lowerTail) (preTail.length + (preHead.length + 2))
+      (.var tmp :: lowerTail)
+      (preTail.length + (preHead.length + tailFuel.succ.succ))
       finalCallResponseRel := by
   rcases Expr.List.lowerBound1?_lowerArgs_vars hTailLower with
     ⟨lowerNames, hLowerTailVars⟩
@@ -109396,8 +109415,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (revertRel := revertRel) (prim := prim) (program := program)
       (ctx := ctx) (preTail := preTail) (preHead := preHead)
       (lowerTail := lowerTail) (lowerNames := lowerNames)
-      (lowerHead := lowerHead) (tmp := tmp) (base := base) (head := head)
-      (tail := tail) (codeOverride := codeOverride) (source := source)
+      (lowerHead := lowerHead) (tmp := tmp) (tailFuel := tailFuel)
+      (base := base) (head := head) (tail := tail)
+      (codeOverride := codeOverride) (source := source)
       (compiler := compiler) (tailCallResponseRel := tailCallResponseRel)
       (finalCallResponseRel := finalCallResponseRel)
       (headCallResponseRel := headCallResponseRel)
@@ -109451,7 +109471,7 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
     {freshState stateFresh : Fresh.State}
     {pre : List Functions.Stmt} {lowerArgs : List (Locals.Expr 1)}
-    {base : Nat} {head : AstExpr} {tail : List AstExpr}
+    {base tailFuel : Nat} {head : AstExpr} {tail : List AstExpr}
     {codeOverride : Option AstContract}
     {tailCallResponseRel finalCallResponseRel :
       SourceArgRawPreludeOpenCallResponseRel}
@@ -109470,7 +109490,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
         SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout
           terminalRel revertRel prim program ctx
           (yulOpenEvalArgsAppendFuel base tail.reverse) tail codeOverride
-          preTail lowerTail (preTail.length + (preHead.length + 2))
+          preTail lowerTail
+          (preTail.length + (preHead.length + tailFuel.succ.succ))
           tailCallResponseRel)
     (hHead :
       ∀ {stateTail preHead lowerHead stateHead}
@@ -109479,7 +109500,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
           some (preHead, lowerHead, stateHead) →
         SourceExprRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
           revertRel prim program ctxHead base.succ.succ head codeOverride
-          preHead lowerHead (preHead.length + 2) headCallResponseRel)
+          preHead lowerHead (preHead.length + tailFuel.succ.succ)
+          headCallResponseRel)
     (hHeadSingle :
       ∀ {sourceTailResult : State × List Word},
         OpenResultDoneInvariant
@@ -109515,7 +109537,8 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
                   match targetTailResult.1.mode with
                   | .regular =>
                       CompilerOpen.FunctionsOpen.Block.runOpen prim program
-                        targetTailResult.2 (preHead.length + 2)
+                        targetTailResult.2
+                        (preHead.length + tailFuel.succ.succ)
                         { stmts :=
                             preHead ++
                               [Functions.Stmt.let_ tmp lowerHead] }
@@ -109544,13 +109567,13 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
             resume := fun response =>
               OpenExternal.OpenResult.bind (targetCall.resume response)
                 (SourceExprSeqPreludeOpen.runLetTargetAfterRaw
-                  prim program tmp [] 1) }
+                  prim program tmp [] tailFuel.succ) }
           response →
         headCallResponseRel sourceCall targetCall response) :
     SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
       revertRel prim program ctx
       (yulOpenEvalArgsAppendFuel base tail.reverse) (head :: tail) codeOverride
-      pre lowerArgs pre.length.succ finalCallResponseRel := by
+      pre lowerArgs (pre.length + tailFuel.succ) finalCallResponseRel := by
   rcases lowerBound1?_cons_some_components hLower with
     ⟨preTail, lowerTail, stateTail, preHead, lowerHead, stateHead, tmp,
       hTailLower, hHeadLower, hFresh, hPre, hArgs⟩
@@ -109566,8 +109589,9 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_cons_generated_of_lowe
       (freshState := freshState) (stateTail := stateTail)
       (stateHead := stateHead) (stateFresh := stateFresh)
       (preTail := preTail) (preHead := preHead) (lowerTail := lowerTail)
-      (lowerHead := lowerHead) (tmp := tmp) (base := base) (head := head)
-      (tail := tail) (codeOverride := codeOverride)
+      (lowerHead := lowerHead) (tmp := tmp) (base := base)
+      (tailFuel := tailFuel) (head := head) (tail := tail)
+      (codeOverride := codeOverride)
       (tailCallResponseRel := tailCallResponseRel)
       (finalCallResponseRel := finalCallResponseRel)
       (headCallResponseRel := headCallResponseRel)

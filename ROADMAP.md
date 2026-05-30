@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 22:53 PDT.
+Last updated: 2026-05-29 23:04 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -586,6 +586,10 @@ Remaining work:
      compiler-output wrapper: recursive callers now provide the successful
      whole-list `lowerBound1?` result while tail/head lowering and fresh-temp
      components are recovered internally.
+   - [x] Parameterize the terminal-aware raw generated-head chain by remaining
+     target fuel, so recursively proved tails can reserve fuel for outer
+     generated heads instead of relying on the non-compositional minimal
+     `preHead.length + 2` case.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
@@ -1157,6 +1161,14 @@ actual modules rather than preserved through audit aliases.
      decoded-bytecode agreement; decode remains proved from
      `EncodingCorrect`/`DecodeSafety` inside
      `XRunListPathReady.of_emitInstr_checks_and_budget`.
+   - [x] Hide the remaining source-run stack-headroom premise behind checked
+     compiler acceptance:
+     `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticStackSafeNoReturnDataCopy?`.
+     Checked success now carries
+     `RecursiveBridgeSourceRunStackHeadroomCertificate program asm target`, so
+     recursive internal-call cycles can be admitted whenever their stack growth
+     is proved bounded enough, and the preferred public theorem no longer takes
+     `RecursiveBridgeActualSourceRunFrameStackHeadroom` directly.
    - [x] Wire the core predicate through the preferred public no-CALL roots.
      `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and its
      no-out companion now point at the strict no-`RETURNDATACOPY` core theorem,
