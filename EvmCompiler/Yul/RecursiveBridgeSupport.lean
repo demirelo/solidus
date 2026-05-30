@@ -56824,6 +56824,111 @@ theorem sourceExprPreludeOpen_runRaw_user_call_suffix_eq_bind_body_of_find_funct
         OpenExternal.OpenResult.bind, OpenExternal.OpenResult.ok]
 
 /--
+Terminal-aware target decomposition for a complete lowered internal user-call
+expression.
+
+Generated argument preludes run before the hidden result-slot suffix.  If that
+prefix stops, the raw endpoint retains the stopped outcome.  If it completes,
+the selected callee body remains open and restores through the hidden-slot raw
+replay endpoint.
+-/
+theorem sourceExprPreludeOpen_runRaw_user_call_lower1?_eq_open_call_body_of_find_function
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {freshState freshState' : Fresh.State}
+    {functionName : Name} {args : List AstExpr}
+    {pre : List Functions.Stmt} {lowerExpr : Locals.Expr 1}
+    {tailFuel : Nat} {compiler : Objects.Source.State}
+    {fn : Functions.FunDef}
+    (hLower :
+      Expr.lower1? freshState (.Call (.inr functionName) args) =
+        some (pre, lowerExpr, freshState'))
+    (hFind :
+      Functions.FunList.find? functionName program.functions = some fn) :
+    ∃ preArgs : List Functions.Stmt,
+    ∃ lowerArgs : List (Locals.Expr 1),
+    ∃ stateArgs : Fresh.State,
+    ∃ tmp : Name,
+      ObjectBuiltin.unsupported? functionName = false ∧
+      ((Expr.List.directCallArgsSafe? args = true ∧
+          Expr.List.toLocals1? args = some lowerArgs ∧
+          preArgs = [] ∧ stateArgs = freshState) ∨
+        (Expr.List.directCallArgsSafe? args = false ∧
+          Expr.List.lowerBound1? freshState args =
+            some (preArgs, lowerArgs, stateArgs))) ∧
+      Fresh.fresh? stateArgs = some (tmp, freshState') ∧
+      SourceExprPreludeOpen.runRaw prim program ctx
+          (pre.length + tailFuel.succ) pre lowerExpr compiler =
+        OpenExternal.OpenResult.bind
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            (preArgs.length +
+              ([Functions.Stmt.let_ tmp (.lit Expr.zero),
+                Functions.Stmt.call [tmp] functionName lowerArgs].length +
+                  tailFuel.succ))
+            { stmts := preArgs } compiler)
+          (fun preResult =>
+            match preResult.1.mode with
+            | .regular =>
+                OpenExternal.OpenResult.bind
+                  (CompilerOpen.FunctionsOpen.ArgList.eval prim lowerArgs
+                    (preResult.1.state.insert tmp Expr.zero))
+                  (fun argResult =>
+                    OpenExternal.OpenResult.bind
+                      (CompilerOpen.FunctionsOpen.FunDef.runBody prim program
+                        fn argResult.2 tailFuel argResult.1.shared)
+                      (compilerOpenUserCallReadHiddenTempRawResult prim tmp
+                        { preResult.2 with
+                          scope := tmp :: preResult.2.scope }
+                        argResult.1))
+            | .brk | .cont | .leave | .halt _ =>
+                OpenExternal.OpenResult.ok (.stopped preResult)) := by
+  rcases lower1?_user_call_some_components hLower with
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh,
+      hPreEq, hLowerEq⟩
+  subst pre
+  subst lowerExpr
+  refine
+    ⟨preArgs, lowerArgs, stateArgs, tmp, hUnsupported, hArgs, hFresh, ?_⟩
+  let suffix : List Functions.Stmt :=
+    [Functions.Stmt.let_ tmp (.lit Expr.zero),
+      Functions.Stmt.call [tmp] functionName lowerArgs]
+  have hFuel :
+      (preArgs ++ suffix).length + tailFuel.succ =
+        preArgs.length + (suffix.length + tailFuel.succ) := by
+    simp [suffix, List.length_append]
+    omega
+  rw [hFuel]
+  rw [sourceExprPreludeOpen_runRaw_append_eq
+    (prim := prim) (program := program) (ctx := ctx)
+    (pre := preArgs) (suffix := suffix) (lower := (.var tmp))
+    (state := compiler) (suffixFuel := suffix.length + tailFuel.succ)]
+  apply OpenExternal.OpenResult.bind_congr_next
+  intro preResult
+  rcases preResult with ⟨preOutcome, ctxAfter⟩
+  cases preOutcome with
+  | mk compilerAfter mode =>
+      cases mode with
+      | regular =>
+          simpa [suffix, Nat.succ_eq_add_one] using
+            (sourceExprPreludeOpen_runRaw_user_call_suffix_eq_bind_body_of_find_function
+              (prim := prim) (program := program) (ctx := ctxAfter)
+              (tmp := tmp) (functionName := functionName)
+              (lowerArgs := lowerArgs) (tailFuel := tailFuel)
+              (compiler := compilerAfter) (fn := fn) hFind)
+      | brk =>
+          simp [suffix, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+      | cont =>
+          simp [suffix, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+      | leave =>
+          simp [suffix, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+      | halt kind =>
+          simp [suffix, OpenExternal.OpenResult.bind,
+            OpenExternal.OpenResult.ok]
+
+/--
 Exact target-side shape of the hidden result-slot suffix emitted for an
 internal user-call expression at the expression-prelude level.
 

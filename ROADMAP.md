@@ -536,6 +536,10 @@ Remaining work:
      raw endpoint: hidden-slot initialization, lowered-argument evaluation,
      selected open body execution, and hidden-slot replay retain stopped
      terminal outcomes under the actual suffix scope.
+   - [x] Extend the terminal-aware suffix equation across the complete lowered
+     internal-call expression: generated argument preludes run first, any
+     suspended nested request remains visible, stopped prefixes remain stopped,
+     and only regular prefixes enter the selected callee body.
    - [x] Introduce the terminal-aware raw generated-expression runner and
      relation: regular preludes return the existing strict value payload,
      stopped preludes retain their full target outcome/context, append
