@@ -9,7 +9,7 @@ preferred public spine should admit ordinary `CALL` once the checklist closes.
 Do not add compatibility wrappers, direct let/assign CALL scaffolding, or a
 concrete external-world model to finish these steps.
 
-Last updated: 2026-05-29 21:06 PDT.
+Last updated: 2026-05-29 22:48 PDT.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -579,6 +579,10 @@ Remaining work:
    - [x] Derive raw reverse-cons freshness and write-disjointness obligations
      from checked lowering components, so recursive callers do not provide
      generated-variable bookkeeping as semantic assumptions.
+   - [x] Hide terminal-aware raw reverse-cons lowering decomposition behind a
+     compiler-output wrapper: recursive callers now provide the successful
+     whole-list `lowerBound1?` result while tail/head lowering and fresh-temp
+     components are recovered internally.
    - [x] Reuse the checked hidden-result-slot freshness theorem at the
      terminal-aware raw boundary: regular prefixes replay the reversed lowered
      arguments unchanged after insertion of the fresh compiler-only slot.
