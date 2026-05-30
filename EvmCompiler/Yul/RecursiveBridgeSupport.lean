@@ -35929,6 +35929,46 @@ theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_of_raw
   exact sourceArgTerminalRawPreludeOpenResultRel_of_raw (hRaw hInitial)
 
 /--
+Terminal-aware raw base case for recursive generated argument lowering.
+
+The empty source list and empty generated prefix both complete regularly.  The
+closed lowered argument replay is also empty, so no terminal branch or
+external request can arise.
+-/
+theorem sourceArgTerminalRawPreludeOpenSoundAtExactTarget_nil
+    {cfg : StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel targetFuel : Nat}
+    {codeOverride : Option AstContract}
+    {callResponseRel : SourceArgRawPreludeOpenCallResponseRel} :
+    SourceArgTerminalRawPreludeOpenSoundAtExactTarget cfg layout terminalRel
+      revertRel prim program ctx sourceFuel.succ ([] : List AstExpr)
+      codeOverride [] [] targetFuel.succ callResponseRel := by
+  intro source compiler hInitial
+  have hSource :
+      OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalArgs sourceFuel.succ
+            ([] : List AstExpr).reverse codeOverride source) =
+        .done (.ok (source, [])) := by
+    simp [OpenExternal.YulOpen.evalArgs, OpenExternal.YulOpenResult.ok,
+      OpenExternal.YulOpenResult.toOpenResult]
+  have hTarget :
+      CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+          targetFuel.succ { stmts := [] } compiler =
+        .done (.ok (Functions.Source.Outcome.regular compiler, ctx)) := by
+    simp [CompilerOpen.FunctionsOpen.Block.runOpen,
+      OpenExternal.OpenResult.ok]
+  rw [hSource, hTarget]
+  exact OpenExternal.OpenResultRel.done (by
+    simp [SourceArgTerminalRawPreludeOpenDoneRel,
+      Functions.Source.ArgList.eval]
+    exact hInitial)
+
+/--
 Compose a terminal-aware generated argument prefix with a raw expression
 continuation.
 
