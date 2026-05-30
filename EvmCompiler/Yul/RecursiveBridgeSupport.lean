@@ -54469,6 +54469,7 @@ allowed-result predicate.
 -/
 inductive SourceOpenStmtHeadPathDoneRel
     (cfg : StateRelConfig) (layout outcomeLayout : List Name)
+    (ctx : Functions.Source.Ctx)
     (terminalRel :
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
     (revertRel : State → Objects.Source.State → Prop)
@@ -54480,7 +54481,9 @@ inductive SourceOpenStmtHeadPathDoneRel
       {shared : EvmYul.SharedState .Yul} {store : EvmYul.Yul.VarStore}
       {compiler : Objects.Source.State} {ctxAfter : Functions.Source.Ctx} :
       SourceStateExactRel cfg layout (.Ok shared store) compiler →
-      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
+      (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+      SourceCtxHandlersEq ctx ctxAfter →
+      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
         revertRel allowed (.ok (.Ok shared store))
         (.ok (Functions.Source.Outcome.regular compiler, ctxAfter))
   | stopping
@@ -54490,7 +54493,7 @@ inductive SourceOpenStmtHeadPathDoneRel
       (allowed sourceResult →
         SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
           sourceResult outcome) →
-      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
+      SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx terminalRel
         revertRel allowed sourceResult (.ok (outcome, ctxAfter))
 
 /--
@@ -54523,8 +54526,8 @@ def SourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx
         minimumTargetFuel ≤ targetFuel ∧
         OpenExternal.OpenResultPathRel
           (SourceOpenTraceCallResponseRel cfg)
-          (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout terminalRel
-            revertRel allowed)
+          (SourceOpenStmtHeadPathDoneRel cfg layout outcomeLayout ctx
+            terminalRel revertRel allowed)
           trace
           (OpenExternal.YulOpenResult.toOpenResult
             (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride
@@ -54583,6 +54586,8 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
         lowerHead allowed)
     (hTail :
       ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
         SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
           outcomeLayout terminalRel revertRel prim program ctxAfter sourceFuel
           rest codeOverride lowerTail allowed) :
@@ -54705,10 +54710,10 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
         cases headDone with
         | Ok shared store =>
             cases hHeadDone with
-            | regular hAfter =>
+            | regular hAfter hScopeAfter hHandlersAfter =>
                 rcases
-                    hTail (ctxAfter := targetCtx) hAfter hSourceTail hAllowed
-                      hTailResponses
+                    hTail (ctxAfter := targetCtx) hScopeAfter hHandlersAfter
+                      hAfter hSourceTail hAllowed hTailResponses
                       (max minimumTargetFuel headFuel) with
                   ⟨tailFuel, hMinimumTail, hTailPath⟩
                 rcases hTailPath.resolves with
@@ -55443,7 +55448,8 @@ theorem sourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
                               hTargetBody)
                             hResponses
                             (SourceOpenStmtHeadPathDoneRel.regular
-                              hExactRestricted)
+                              hExactRestricted hScopeContains
+                              (SourceCtxHandlersEq.refl ctx))
         | OutOfFuel =>
             have hOuterAllowed : allowed (.ok (.OutOfFuel : State)) :=
               hStoppingAllowed
@@ -55540,6 +55546,66 @@ theorem sourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
                       (by
                         intro _hAllowed
                         exact hOuterOutcomeRel))
+
+/--
+Attach one selected scoped `.Block` head to its syntactic tail.
+
+The nested body chooses its own finite target cutoff through `hBody`.  Once the
+scoped head has completed regularly, the ordinary selected-path composer enters
+the syntactic tail at the restored outer context.
+-/
+theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_block_succ_of_seq
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodyFuel : Nat} {body rest : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBody : Functions.Block}
+    {lowerTail : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBody : Safe.CallSafe.stmts body)
+    (hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body)
+    (hBody :
+      ∀ {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout bodyOutcomeLayout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          bodyOutcomeLayout terminalRel revertRel prim program ctx bodyFuel body
+          codeOverride lowerBody allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+          terminalRel revertRel prim program ctxAfter bodyFuel.succ rest
+          codeOverride lowerTail allowed) :
+    SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout outcomeLayout
+      terminalRel revertRel prim program ctx bodyFuel.succ.succ
+      (.Block body :: rest) codeOverride
+      { stmts := .block lowerBody :: lowerTail.stmts } allowed :=
+  sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_of_head
+    (sourceFuel := bodyFuel.succ) (head := .Block body)
+    (lowerHead := .block lowerBody)
+    (hHead :=
+      sourceOpenStmtHeadPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
+        hAllowed hSupported hScopeContains hSafeBody hScopedBody hBody)
+    (hTail := hTail)
 
 /--
 Lift an open function-body sequence relation through imported Yul block-scope
@@ -65761,6 +65827,188 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           (ctx := ctx) (sourceFuel := sourceFuel) (names := names)
           (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
           hSourceScoped hReservedHead hTail (compileFuel := compileFuel)
+
+/--
+Checked path-native lift for one scoped `.Block` head.
+
+The compiler-produced nested block is exposed by the block lowering
+decomposition.  Recursive body soundness runs at the strictly smaller body
+fuel, while regular completion transports the preserved visible-scope and
+handler invariants into the syntactic tail.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_succ_of_seq
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodyFuel : Nat} {body rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBlock : Safe.CallSafe.stmt (.Block body))
+    (hScopedBlock :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.Block body))
+    (hBody :
+      ∀ {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout bodyOutcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout bodyOutcomeLayout terminalRel revertRel prim program
+          ctx bodyFuel compileFuel body codeOverride allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter bodyFuel.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        bodyFuel.succ.succ compileFuel (.Block body :: rest) codeOverride
+        allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState'
+    hCovers hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ bodyLowerFuel =>
+      rcases
+          BridgeFacts.toFunctionsListFuel?_block_components
+            (fuel := bodyLowerFuel) hLower with
+        ⟨lowerBody, hLowerBody, hHeadEq⟩
+      subst lowerHead
+      have hTailCovers : FreshCoversLayout (reserved ++ layout) stateHead :=
+        freshCoversLayout_toFunctionsListFuel?_of_some hCovers hLower
+      unfold SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      exact
+        sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_block_succ_of_seq
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+          (program := program) (ctx := ctx) (bodyFuel := bodyFuel)
+          (body := body) (rest := rest) (codeOverride := codeOverride)
+          (lowerBody := lowerBody) (lowerTail := lowerTail)
+          (allowed := allowed) hAllowed hSupported hScopeContains
+          (by simpa [Safe.CallSafe.stmt] using hSafeBlock)
+          (by simpa [ControlFlow.ScopedStmt] using hScopedBlock)
+          (by
+            intro bodyOutcomeLayout allowedBody hAllowedBody hSupportedBody
+            exact
+              (hBody (compileFuel := bodyLowerFuel) hAllowedBody hSupportedBody)
+                hCovers hLowerBody)
+          (by
+            intro ctxAfter hScopeAfter hHandlersAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                (compileFuel := bodyLowerFuel.succ.succ) hScopeAfter
+                (by
+                  intro sourceResult hAllow
+                  exact
+                    SourceCtxHandlersEq.supported hHandlersAfter
+                      (hSupported hAllow)))
+                hTailCovers hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone)
+
+/--
+Fuel-dispatched checked selected-path constructor for `.Block body :: rest`.
+-/
+theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_dispatch
+    {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {body rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBlock : Safe.CallSafe.stmt (.Block body))
+    (hScopedBlock :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.Block body))
+    (hBody :
+      ∀ {bodyFuel : Nat} {bodyOutcomeLayout : List Name}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        bodyFuel ≤ tailFuel →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultOutcomeLayoutSupported ctx layout bodyOutcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout bodyOutcomeLayout terminalRel revertRel prim program
+          ctx bodyFuel compileFuel body codeOverride allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfter layout outcomeLayout
+            sourceResult) →
+        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+          reserved layout outcomeLayout terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout outcomeLayout terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Block body :: rest) codeOverride allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .Block body)
+          (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed
+  | succ bodyFuel =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_succ_of_seq
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (bodyFuel := bodyFuel) (body := body) (rest := rest)
+          (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed hSupported hScopeContains hSafeBlock hScopedBlock
+          (by
+            intro bodyOutcomeLayout allowedBody compileFuel hAllowedBody
+              hSupportedBody
+            exact
+              hBody (bodyFuel := bodyFuel) (Nat.le_succ bodyFuel) hAllowedBody
+                hSupportedBody)
+          hTail (compileFuel := compileFuel)
 
 /--
 Checked path-native lift for a singleton source head that stops its surrounding
