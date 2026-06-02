@@ -94317,6 +94317,74 @@ theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_
       (hSound hCovers hLower) hSupported hWithin
 
 /--
+Checked typed finite-path sequence soundness for a nonempty list whose head
+cannot be lowered at any compile fuel.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_no_lowering
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hNoLower :
+      ∀ fuel freshState,
+        Stmt.toFunctionsListFuel? fuel freshState head = none) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx sourceFuel
+      compileFuel (head :: rest) codeOverride allowed := by
+  intro freshState freshState' lowerBlock _hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ fuel =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          have hHeadNone :
+              Stmt.toFunctionsListFuel? lowerFuel freshState head = none :=
+            hNoLower lowerFuel freshState
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+            hHeadNone] at hLower
+
+/--
+Frontier-shaped typed finite-path constructor for rejected statement heads.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_no_lowering
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hNoLower :
+      ∀ fuel freshState,
+        Stmt.toFunctionsListFuel? fuel freshState head = none) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (head :: rest) codeOverride allowed := by
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_no_lowering
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx)
+      (sourceFuel := tailFuel.succ) (compileFuel := compileFuel)
+      (head := head) (rest := rest) (codeOverride := codeOverride)
+      (allowed := allowed) hNoLower
+
+/--
 Checked typed-kont lift for an uninitialized declaration head.
 
 The source-visible layout grows by the declared names on regular fallthrough;
