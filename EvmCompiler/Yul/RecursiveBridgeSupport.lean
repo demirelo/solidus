@@ -220341,6 +220341,228 @@ theorem callOpenLoopContinuationPathLoweringFrontierAt_three
             (allowed := allowed) hAllowedRelatable)
 
 /--
+Productive finite-path generated loop-continuation frontier.
+
+At imported source fuel `bound + 4`, the three structural `.For` ticks expose
+normalized `runLoopSource (bound + 1)`. Condition evaluation therefore runs at
+`bound + 1`, body/post blocks run at `bound`, and the recursive post-regular
+loop edge uses imported fuel `bound + 1`, all supplied by the recursive
+frontiers bounded at `bound + 1`.
+-/
+theorem callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_succ_of_programCALL_recursive
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {bound : Nat}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        bound.succ)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program bound.succ)
+    (hRecKont :
+      CALLOpenSeqKontPathRecursiveAt cfg terminalRel revertRel prim
+        yulProgram program bound.succ)
+    (hLoopRec :
+      CALLOpenLoopContinuationPathRecursiveAt cfg terminalRel revertRel prim
+        yulProgram program bound.succ)
+    (hPrim :
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op) :
+    CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel revertRel
+      prim yulProgram program bound.succ.succ.succ.succ := by
+  exact
+    callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_of_runLoopSource
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (yulProgram := yulProgram) (program := program)
+      (bound := bound.succ)
+      (by
+        intro headCompileFuel reserved layout outcomeLayout ctx allowed
+          canBreak canContinue canLeave cond post body freshState
+          freshStateAfterCond freshStateAfterPost freshState' preCond
+          lowerCond lowerPost lowerBody hSafe hScoped hOk hSourceScoped
+          hReserved hCovers hCondLower hPostLower hBodyLower
+          hAllowedRelatable hSupported hScopeContains
+        have hSafeCond : Safe.CallSafe.expr cond := by
+          simpa [Safe.CallSafe.stmt] using hSafe.1
+        have hSafePost : Safe.CallSafe.stmts post := by
+          simpa [Safe.CallSafe.stmt] using hSafe.2.1
+        have hSafeBody : Safe.CallSafe.stmts body := by
+          simpa [Safe.CallSafe.stmt] using hSafe.2.2
+        have hScopedPost :
+            ControlFlow.ScopedStmts false false canLeave post := by
+          simpa [ControlFlow.ScopedStmt] using hScoped.1
+        have hScopedBody :
+            ControlFlow.ScopedStmts true true canLeave body := by
+          simpa [ControlFlow.ScopedStmt] using hScoped.2
+        have hCondOk :
+            UserCallArity.ExprOk yulProgram.contract cond := by
+          simpa [UserCallArity.StmtOk] using hOk.1
+        have hPostOk :
+            UserCallArity.StmtsOk yulProgram.contract post := by
+          simpa [UserCallArity.StmtOk] using hOk.2.1
+        have hBodyOk :
+            UserCallArity.StmtsOk yulProgram.contract body := by
+          simpa [UserCallArity.StmtOk] using hOk.2.2
+        have hCondScoped : SourceExprScoped layout cond :=
+          SourceLexical.for_cond_scoped hSourceScoped
+        have hPostScoped : SourceLexical.StmtsScoped layout post :=
+          SourceLexical.for_post_scoped hSourceScoped
+        have hBodyScoped : SourceLexical.StmtsScoped layout body :=
+          SourceLexical.for_body_scoped hSourceScoped
+        have hReservedPost :
+            SourceNamesReserved reserved (Stmt.List.names post) :=
+          SourceNamesReserved.for_post hReserved
+        have hReservedBody :
+            SourceNamesReserved reserved (Stmt.List.names body) :=
+          SourceNamesReserved.for_body hReserved
+        have hCoversAfterCond :
+            FreshCoversLayout (reserved ++ layout) freshStateAfterCond :=
+          freshCoversLayout_lower1?_of_some hCovers hCondLower
+        have hCoversAfterPost :
+            FreshCoversLayout (reserved ++ layout) freshStateAfterPost :=
+          freshCoversLayout_toBlockFuel?_of_some hCoversAfterCond hPostLower
+        unfold SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx
+        intro source compiler trace sourceDone hInitial hResolve hLoopAllowed
+          hResponses minimumTargetFuel
+        exact
+          (sourceRunLoopContinuationPathSound_generated_condition_body_post_of_checked_facts
+            (cfg := cfg) (layout := layout)
+            (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (allowed := allowed) (prim := prim)
+            (program := program) (ctx := ctx) (bodySeqFuel := bound)
+            (cond := cond) (post := post) (body := body)
+            (codeOverride := some yulProgram.contract)
+            (freshState := freshState)
+            (freshStateAfterCond := freshStateAfterCond) (pre := preCond)
+            (lowerCond := lowerCond) (lowerPost := lowerPost)
+            (lowerBody := lowerBody) (canBreak := canBreak)
+            (canContinue := canContinue) (canLeave := canLeave)
+            hScopeContains hSafe hScoped hCondScoped hCondLower
+            hAllowedRelatable hSupported
+            (lower1?_sourceExprRawPreludeOpenPathSoundWhen_callSafe_expr_of_lower1?_actual_fuel_recursive
+              (cfg := cfg) (coverLayout := reserved ++ layout)
+              (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (program := program) (contract := yulProgram.contract)
+              (fuelBound := bound.succ)
+              (hLayoutSubset := fun name hMem =>
+                List.mem_append_right reserved hMem)
+              (hPrim := by
+                intro fuel yulPrim op hSafePrim hBasic
+                exact hPrim hSafePrim hBasic)
+              (hFindUser := fun hExprOk =>
+                context.find_function_of_user_expr_ok hExprOk)
+              (hUserRegular := by
+                intro base functionName args nestedFreshState nestedFreshState'
+                  fn hBodyFuel hNestedCovers _hNestedSafe _hNestedScoped
+                  hExprOk hFind
+                exact
+                  SourceExprRawPreludeOpenUserCallRegularPathWhen.of_programCALL_recursive
+                    context hNestedCovers hFind hExprOk hBodyFuel
+                    hBodyFuelAdequate hRec)
+              (sourceFuel := bound.succ) (freshState := freshState)
+              (freshState' := freshStateAfterCond) (pre := preCond)
+              (lower := lowerCond)
+              (ctx :=
+                ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+              (allowed := SourcePairResultPropagatesErrorTo allowed)
+              (Nat.le_refl bound.succ)
+              (by
+                intro err hErr
+                exact hAllowedRelatable (by
+                  simpa [SourcePairResultPropagatesErrorTo] using hErr))
+              hCovers hSafeCond hCondScoped hCondOk hCondLower)
+            (by
+              intro functionName args hEq hSafeCall hScopedCall hLowerCall
+                source compiler hInitial
+              exact
+                lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_single_of_lower1?_cases_userArity
+                  (cfg := cfg) (layout := layout) (sourceFuel := bound)
+                  (expr := .Call (.inr functionName) args)
+                  (contract := yulProgram.contract)
+                  (freshState := freshState)
+                  (freshState' := freshStateAfterCond) (pre := preCond)
+                  (lower := lowerCond) hSafeCall hScopedCall hLowerCall
+                  (by
+                    intro functionName' args' hEq'
+                    cases hEq'
+                    simpa [hEq] using hCondOk)
+                  hInitial)
+            (by
+              intro ctxAfterPre allowedBody hBodyScope hHandlersBody
+                hAllowedBody hSupportedBody
+              exact
+                (hRecKont (sourceFuelRec := bound)
+                  (reservedRec := reserved) (currentLayoutRec := layout)
+                  (kontsRec :=
+                    SourceModeKontLayouts.block layout outcomeLayout)
+                  (ctxRec := ctxAfterPre) (compileFuelRec := headCompileFuel)
+                  (sourceStmtsRec := body) (allowedRec := allowedBody)
+                  (canBreakRec := true) (canContinueRec := true)
+                  (canLeaveRec := canLeave) (by omega) hSafeBody
+                  hScopedBody hBodyOk hBodyScoped hReservedBody
+                  hAllowedBody hSupportedBody
+                  (SourceModeKontLayouts.block_controlWithin layout
+                    outcomeLayout)
+                  hBodyScope)
+                  hCoversAfterPost hBodyLower)
+            (by
+              intro ctxAfterPre allowedPost hPostScope hHandlersPost
+                hAllowedPost hSupportedPost
+              exact
+                (hRec (sourceFuelRec := bound) (reservedRec := reserved)
+                  (layoutRec := layout) (outcomeLayoutRec := outcomeLayout)
+                  (ctxRec := ctxAfterPre) (compileFuelRec := headCompileFuel)
+                  (sourceStmtsRec := post) (allowedRec := allowedPost)
+                  (canBreakRec := false) (canContinueRec := false)
+                  (canLeaveRec := canLeave) (by omega) hSafePost
+                  hScopedPost hPostOk hPostScoped hReservedPost
+                  hAllowedPost hSupportedPost hPostScope)
+                  hCoversAfterCond hPostLower)
+            (by
+              intro ctxAfterPre allowedPost hPostScope hHandlersPost
+                hAllowedPost hSupportedPost
+              exact
+                (hRec (sourceFuelRec := bound) (reservedRec := reserved)
+                  (layoutRec := layout) (outcomeLayoutRec := layout)
+                  (ctxRec := ctxAfterPre) (compileFuelRec := headCompileFuel)
+                  (sourceStmtsRec := post) (allowedRec := allowedPost)
+                  (canBreakRec := false) (canContinueRec := false)
+                  (canLeaveRec := canLeave) (by omega) hSafePost
+                  hScopedPost hPostOk hPostScoped hReservedPost
+                  hAllowedPost hSupportedPost hPostScope)
+                  hCoversAfterCond hPostLower)
+            (hLoopRec (sourceFuelRec := bound.succ)
+              (headCompileFuelRec := headCompileFuel)
+              (reservedRec := reserved) (layoutRec := layout)
+              (outcomeLayoutRec := outcomeLayout) (ctxRec := ctx)
+              (allowedRec := allowed) (canBreakRec := canBreak)
+              (canContinueRec := canContinue) (canLeaveRec := canLeave)
+              (condRec := cond) (postRec := post) (bodyRec := body)
+              (freshStateRec := freshState)
+              (freshStateAfterCondRec := freshStateAfterCond)
+              (freshStateAfterPostRec := freshStateAfterPost)
+              (freshStateRec' := freshState') (preCondRec := preCond)
+              (lowerCondRec := lowerCond) (lowerPostRec := lowerPost)
+              (lowerBodyRec := lowerBody) (Nat.le_refl bound.succ)
+              hSafe hScoped hOk hSourceScoped hReserved hCovers hCondLower
+              hPostLower hBodyLower hAllowedRelatable hSupported
+              hScopeContains)
+            (hPrim (layout := layout) (fuel := bound.succ.succ)
+              (yulPrim := (.CompBit .ISZERO : EvmYul.Operation .Yul))
+              (op := .iszero) (by simp [Safe.primitive])
+              (by simp [Prim.toBasicOp?])))
+            hInitial hResolve hLoopAllowed hResponses minimumTargetFuel)
+
+/--
 Open CALL-safe sequence frontier at source fuel zero.
 
 No statement can expose an external CALL at this fuel; the source open
