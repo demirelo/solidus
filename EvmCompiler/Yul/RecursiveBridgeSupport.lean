@@ -258049,6 +258049,107 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
     hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed hSupported
     hScopeContains
 
+/--
+Canonical ordinary open CALL sequence frontier from typed-continuation
+frontiers up to the same bound.
+
+The sequence induction supplies ordinary recursive sequence callbacks for all
+smaller source fuels.  The only extra recursive family required by generated
+control is the typed-continuation frontier; generated loop-continuations are
+constructed inside the canonical one-head wrapper from those two families.
+-/
+theorem callOpenSeqPathLoweringFrontierAt_canonical_of_programCALL_kont_frontiers
+    {cfg : StateRelConfig}
+    {yulProgram : Program} {program : Functions.Program}
+    {bound : Nat}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        bound)
+    (hKontFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec ≤ bound →
+          CALLOpenSeqKontPathLoweringFrontierAt cfg
+            (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+              cfg)
+            (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+            Locals.Source.PrimitiveSemantics.structured yulProgram program
+            sourceFuelRec)
+    (hPrim :
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout
+            Locals.Source.PrimitiveSemantics.structured fuel yulPrim op) :
+    CALLOpenSeqPathLoweringFrontierAt cfg
+      (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+      (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+      Locals.Source.PrimitiveSemantics.structured yulProgram program bound := by
+  intro reserved layout outcomeLayout ctx compileFuel sourceStmts allowed
+    canBreak canContinue canLeave hSafe hScoped hStmtsOk hSourceScoped
+    hReserved hAllowed hSupported hScopeContains
+  exact
+    checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_le_of_cons_frontier_recursive_callSafe_reserved_supported
+      (cfg := cfg)
+      (terminalRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+      (revertRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (yulProgram := yulProgram) (program := program) (bound := bound)
+      (by
+        intro tailFuel reservedHead layoutHead outcomeLayoutHead ctxHead head
+          rest allowedHead canBreakHead canContinueHead canLeaveHead hTailFuel
+          hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
+          hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail
+          hAllowedHead hSupportedHead hScopeHead hRecSeq
+        have hBodyFuelAdequateTail :
+            SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg
+              yulProgram.contract tailFuel := by
+          intro bodyFuel hFuel
+          exact hBodyFuelAdequate (by omega)
+        intro compileFuelHead
+        exact
+          checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_single_expr_dispatch_canonical_terminal_of_programCALL_frontiers
+            (cfg := cfg) (reserved := reservedHead) (layout := layoutHead)
+            (outcomeLayout := outcomeLayoutHead) (yulProgram := yulProgram)
+            (program := program) (tailFuel := tailFuel) (ctx := ctxHead)
+            (compileFuel := compileFuelHead)
+            (head := head) (rest := rest) (allowed := allowedHead)
+            (canBreak := canBreakHead) (canContinue := canContinueHead)
+            (canLeave := canLeaveHead) context hBodyFuelAdequateTail
+            (by
+              intro sourceFuelRec hFuelRec reservedRec layoutRec
+                outcomeLayoutRec ctxRec compileFuelRec sourceStmtsRec
+                allowedRec canBreakRec canContinueRec canLeaveRec hSafeRec
+                hScopedRec hOkRec hSourceScopedRec hReservedRec hAllowedRec
+                hSupportedRec hScopeRec
+              exact
+                hRecSeq (sourceFuelRec := sourceFuelRec)
+                  (reservedRec := reservedRec) (layoutRec := layoutRec)
+                  (outcomeLayoutRec := outcomeLayoutRec) (ctxRec := ctxRec)
+                  (compileFuelRec := compileFuelRec)
+                  (sourceStmtsRec := sourceStmtsRec)
+                  (allowedRec := allowedRec) (canBreakRec := canBreakRec)
+                  (canContinueRec := canContinueRec)
+                  (canLeaveRec := canLeaveRec) hFuelRec hSafeRec hScopedRec
+                  hOkRec hSourceScopedRec hReservedRec hAllowedRec
+                  hSupportedRec hScopeRec)
+            (by
+              intro sourceFuelRec hFuelRec
+              exact hKontFrontier (sourceFuelRec := sourceFuelRec) (by omega))
+            hPrim hSafeHead hScopedHead hStmtOkHead hSourceScopedHead
+            hTailScoped hSafeTail hScopedTail hStmtOkTail hReservedHead
+            hReservedTail hAllowedHead hSupportedHead hScopeHead)
+      (sourceFuel := bound) (reserved := reserved) (layout := layout)
+      (outcomeLayout := outcomeLayout) (ctx := ctx)
+      (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+      (allowed := allowed) (canBreak := canBreak)
+      (canContinue := canContinue) (canLeave := canLeave)
+      (Nat.le_refl bound) hSafe hScoped hStmtsOk hSourceScoped hReserved
+      hAllowed hSupported hScopeContains
+
 end CanonicalTerminalOpenFrontier
 
 structure RecursiveBridgeExprResultContracts
