@@ -163920,6 +163920,222 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
               OpenExternal.YulOpenResult.error])
 
 /--
+Typed-continuation sibling of
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_two_of_outOfFuel`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_two_of_outOfFuel
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Assign names (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout konts terminalRel revertRel prim program ctx 2
+        compileFuel
+        (.Assign names (.Call (.inr functionName) args) :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (sourceFuel := 2)
+      (compileFuel := compileFuel)
+      (sourceStmts :=
+        .Assign names (.Call (.inr functionName) args) :: rest)
+      (codeOverride := codeOverride) (allowed := allowed) hAllowed
+      (by
+        intro source compiler hInitial
+        cases hInitial with
+        | @ok shared store compiler _hShared _hVars hDomain =>
+            have hCheck :
+                EvmYul.Yul.checkAssignment (.Ok shared store) names =
+                  .ok () :=
+              StoreDomainExact.checkAssignment_ok hDomain
+                (SourceLexical.assign_names_nodup hSourceScoped)
+                (SourceLexical.assign_names_mem hSourceScoped)
+            simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+              OpenExternal.YulOpen.evalValues, hCheck,
+              OpenExternal.YulOpenResult.bind,
+              OpenExternal.YulOpenResult.error])
+
+/--
+Typed-continuation sibling of
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_three_of_outOfFuel`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_three_of_outOfFuel
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Assign names (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout konts terminalRel revertRel prim program ctx 3
+        compileFuel
+        (.Assign names (.Call (.inr functionName) args) :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (sourceFuel := 3)
+      (compileFuel := compileFuel)
+      (sourceStmts :=
+        .Assign names (.Call (.inr functionName) args) :: rest)
+      (codeOverride := codeOverride) (allowed := allowed) hAllowed
+      (by
+        intro source compiler hInitial
+        cases hInitial with
+        | @ok shared store compiler _hShared _hVars hDomain =>
+            have hCheck :
+                EvmYul.Yul.checkAssignment (.Ok shared store) names =
+                  .ok () :=
+              StoreDomainExact.checkAssignment_ok hDomain
+                (SourceLexical.assign_names_nodup hSourceScoped)
+                (SourceLexical.assign_names_mem hSourceScoped)
+            simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+              OpenExternal.YulOpen.evalValues, OpenExternal.YulOpen.evalArgs,
+              OpenExternal.YulOpen.reverseResult, hCheck,
+              OpenExternal.YulOpenResult.bind,
+              OpenExternal.YulOpenResult.map,
+              OpenExternal.YulOpenResult.error])
+
+/--
+Typed-continuation sibling of
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_two_of_outOfFuel`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_two_of_outOfFuel
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout konts terminalRel revertRel prim program ctx 2
+        compileFuel
+        (.Let names (some (.Call (.inr functionName) args)) :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (sourceFuel := 2)
+      (compileFuel := compileFuel)
+      (sourceStmts :=
+        .Let names (some (.Call (.inr functionName) args)) :: rest)
+      (codeOverride := codeOverride) (allowed := allowed) hAllowed
+      (by
+        intro source compiler hInitial
+        cases hInitial with
+        | @ok shared store compiler _hShared _hVars hDomain =>
+            have hCheck :
+                EvmYul.Yul.checkDeclaration (.Ok shared store) names =
+                  .ok () :=
+              StoreDomainExact.checkDeclaration_ok hDomain
+                (SourceLexical.let_some_names_nodup hSourceScoped)
+                (SourceLexical.let_some_names_fresh hSourceScoped)
+            simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+              OpenExternal.YulOpen.evalValues, hCheck,
+              OpenExternal.YulOpenResult.bind,
+              OpenExternal.YulOpenResult.error])
+
+/--
+Typed-continuation sibling of
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_three_of_outOfFuel`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_three_of_outOfFuel
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout konts terminalRel revertRel prim program ctx 3
+        compileFuel
+        (.Let names (some (.Call (.inr functionName) args)) :: rest)
+        codeOverride allowed := by
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (sourceFuel := 3)
+      (compileFuel := compileFuel)
+      (sourceStmts :=
+        .Let names (some (.Call (.inr functionName) args)) :: rest)
+      (codeOverride := codeOverride) (allowed := allowed) hAllowed
+      (by
+        intro source compiler hInitial
+        cases hInitial with
+        | @ok shared store compiler _hShared _hVars hDomain =>
+            have hCheck :
+                EvmYul.Yul.checkDeclaration (.Ok shared store) names =
+                  .ok () :=
+              StoreDomainExact.checkDeclaration_ok hDomain
+                (SourceLexical.let_some_names_nodup hSourceScoped)
+                (SourceLexical.let_some_names_fresh hSourceScoped)
+            simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+              OpenExternal.YulOpen.evalValues, OpenExternal.YulOpen.evalArgs,
+              OpenExternal.YulOpen.reverseResult, hCheck,
+              OpenExternal.YulOpenResult.bind,
+              OpenExternal.YulOpenResult.map,
+              OpenExternal.YulOpenResult.error])
+
+/--
 Program-context checked compiler-output lift for the source-fuel-four
 discarded direct-call boundary.
 -/
