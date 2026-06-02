@@ -103787,6 +103787,107 @@ theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_
       (compileFuel := compileFuel)
 
 /--
+Dispatcher-ready typed-continuation frontier for `break :: rest`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_break_reserved_supported
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Break :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_break_succ_of_supported_dispatch
+    (cfg := cfg) (reserved := reserved) (layout := layout) (konts := konts)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+    (codeOverride := some yulProgram.contract) (allowed := allowed)
+    hAllowed hSupported hWithin
+
+/--
+Dispatcher-ready typed-continuation frontier for `continue :: rest`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_continue_reserved_supported
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Continue :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_continue_succ_of_supported_dispatch
+    (cfg := cfg) (reserved := reserved) (layout := layout) (konts := konts)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+    (codeOverride := some yulProgram.contract) (allowed := allowed)
+    hAllowed hSupported hWithin
+
+/--
+Dispatcher-ready typed-continuation frontier for `leave :: rest`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_leave_reserved_supported
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Leave :: rest)
+        (some yulProgram.contract) allowed :=
+  checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_leave_succ_of_supported_dispatch
+    (cfg := cfg) (reserved := reserved) (layout := layout) (konts := konts)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+    (codeOverride := some yulProgram.contract) (allowed := allowed)
+    hAllowed hSupported
+
+/--
 Strong-fuel finite-path sequence induction for the open typed-continuation
 spine.
 
