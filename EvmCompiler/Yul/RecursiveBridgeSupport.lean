@@ -165738,6 +165738,644 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                 (hSupported hAllow)))
 
 /--
+Program-context typed-kont checked compiler-output lift for the source-fuel-four
+discarded direct-call boundary.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_user_call_four_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract 3)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program 3)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hSafeStmt :
+      Safe.CallSafe.stmt
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter 3 compileFuel rest (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx 4
+        compileFuel (.ExprStmtCall (.Call (.inr functionName) args) :: rest)
+        (some yulProgram.contract) allowed := by
+  intro compileFuel
+  intro freshState freshState' lowerBlock hCovers hLower
+  unfold SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx
+  intro source compiler trace sourceDone
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.exprStmt_user_call_args hSourceScoped
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_user_call_four
+      (compileFuel := compileFuel)
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (args := args) (rest := rest)
+      (contract := yulProgram.contract) (functionName := functionName)
+      (allowed := allowed)
+      (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hAllowed hSupported hWithin hArgsSafe hScopeContains
+      (by
+        intro freshState stateArgs preArgs lowerArgs hCovers hArgsLower
+        exact
+          sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+            (tailFuel := 3) (sourceFuel := 2) context hBodyFuelAdequate hRec
+            hPrim hAllowed hCovers hArgsSafe hArgsScoped hStmtOk.2
+            hArgsLower (by omega) (by omega))
+      hTail hCovers hLower
+      (source := source) (compiler := compiler) (trace := trace)
+      (sourceDone := sourceDone)
+
+/--
+Program-context typed-kont checked compiler-output lift for the source-fuel-four
+assignment-form direct-call boundary.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_four_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract 3)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program 3)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
+    (hSafeStmt :
+      Safe.CallSafe.stmt (.Assign names (.Call (.inr functionName) args)))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Assign names (.Call (.inr functionName) args)))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Assign names (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter 3 compileFuel rest (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx 4
+        compileFuel
+        (.Assign names (.Call (.inr functionName) args) :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.assign_user_call_args hSourceScoped
+  have hTargetsNoDup : (identNames names).Nodup :=
+    SourceLexical.assign_names_nodup hSourceScoped
+  have hTargetsMem : ∀ name, name ∈ identNames names → name ∈ layout :=
+    SourceLexical.assign_names_mem hSourceScoped
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_four
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (names := names)
+      (functionName := functionName) (args := args) (rest := rest)
+      (contract := yulProgram.contract)
+      hNames (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hTargetsNoDup hTargetsMem hAllowed hSupported hWithin hArgsSafe
+      hScopeContains
+      (by
+        intro freshState stateArgs preArgs lowerArgs hCovers hArgs
+        exact
+          sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+            (tailFuel := 3) (sourceFuel := 1) context hBodyFuelAdequate hRec
+            hPrim hAllowed hCovers hArgsSafe hArgsScoped hStmtOk.2 hArgs
+            (by omega) (by omega))
+      hTail (compileFuel := compileFuel)
+
+/--
+Program-context typed-kont checked compiler-output lift for the source-fuel-four
+declaration-form direct-call boundary.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_four_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract 3)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program 3)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
+    (hSafeStmt :
+      Safe.CallSafe.stmt
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let names (some (.Call (.inr functionName) args)))))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name,
+          name ∈ (identNames names).reverse ++ layout →
+          name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved ((identNames names).reverse ++ layout) konts
+          terminalRel revertRel prim program ctxAfter 3 compileFuel rest
+          (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx 4
+        compileFuel
+        (.Let names (some (.Call (.inr functionName) args)) :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.let_user_call_args hSourceScoped
+  have hTargetsNoDup : (identNames names).Nodup :=
+    SourceLexical.let_some_names_nodup hSourceScoped
+  have hTargetsFresh : ∀ name, name ∈ identNames names → name ∉ layout :=
+    SourceLexical.let_some_names_fresh hSourceScoped
+  have hTargetsReserved : SourceNamesReserved reserved (identNames names) := by
+    intro name hMem
+    exact hReservedHead name (by simpa [Stmt.names] using Or.inl hMem)
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_four
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx) (names := names)
+      (functionName := functionName) (args := args) (rest := rest)
+      (contract := yulProgram.contract)
+      hNames (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hTargetsNoDup hTargetsFresh hTargetsReserved hAllowed hSupported
+      hWithin hArgsSafe hScopeContains
+      (by
+        intro freshState stateArgs preArgs lowerArgs hCovers hArgs
+        exact
+          sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+            (tailFuel := 3) (sourceFuel := 1)
+            (ctx := { ctx with
+              scope := (identNames names).reverse ++ ctx.scope })
+            context hBodyFuelAdequate hRec hPrim hAllowed hCovers hArgsSafe
+            hArgsScoped hStmtOk.2 hArgs (by omega) (by omega))
+      hTail (compileFuel := compileFuel)
+
+/--
+Program-context typed-kont checked compiler-output lift for a discarded direct
+internal call.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_user_call_succ_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {fuel : Nat} {ctx : Functions.Source.Ctx}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        fuel.succ.succ.succ.succ)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program fuel.succ.succ.succ.succ)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hSafeStmt :
+      Safe.CallSafe.stmt
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.ExprStmtCall (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter fuel.succ.succ.succ.succ compileFuel rest
+          (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ.succ.succ compileFuel
+        (.ExprStmtCall (.Call (.inr functionName) args) :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.exprStmt_user_call_args hSourceScoped
+  have hCallOk :
+      ∃ params returns body,
+        yulProgram.contract.functions.lookup functionName =
+            some (.Def params returns body) ∧
+          args.length = params.length ∧
+          (identNames ([] : List EvmYul.Identifier)).length = returns.length := by
+    rcases hStmtOk.1 with ⟨params, body, hLookup, hArgsLength⟩
+    exact ⟨params, [], body, hLookup, hArgsLength, by simp [identNames]⟩
+  apply
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_exprStmt_user_call_succ
+      (fuel := fuel.succ.succ)
+      (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hSupported hWithin
+  · intro freshState stateArgs preArgs lowerArgs hCovers hArgs
+    exact
+      SourceOpenUserCallTargetsBlockPathSoundWhen.of_programCALL_recursive
+        (reserved := reserved) (tailFuel := fuel.succ.succ.succ.succ)
+        (bodyFuel := fuel)
+        (argsFuel := fuel.succ.succ.succ) context (by omega)
+        hBodyFuelAdequate hRec hArgsSafe hScopeContains hArgs
+        (sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+          (tailFuel := fuel.succ.succ.succ.succ)
+          (sourceFuel := fuel.succ.succ.succ) context hBodyFuelAdequate hRec
+          hPrim hAllowed hCovers hArgsSafe hArgsScoped hStmtOk.2 hArgs
+          (by omega) (by omega))
+        hCallOk (by simp [identNames]) (by simp [identNames])
+  · exact hTail
+
+/--
+Program-context typed-kont checked compiler-output lift for an assignment-form
+direct internal call.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_succ_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {fuel : Nat} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        fuel.succ.succ.succ.succ)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program fuel.succ.succ.succ.succ)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
+    (hSafeStmt :
+      Safe.CallSafe.stmt (.Assign names (.Call (.inr functionName) args)))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Assign names (.Call (.inr functionName) args)))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Assign names (.Call (.inr functionName) args)))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter fuel.succ.succ.succ.succ compileFuel rest
+          (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ.succ.succ compileFuel
+        (.Assign names (.Call (.inr functionName) args) :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.assign_user_call_args hSourceScoped
+  have hTargetsNoDup : (identNames names).Nodup :=
+    SourceLexical.assign_names_nodup hSourceScoped
+  have hTargetsMem : ∀ name, name ∈ identNames names → name ∈ layout :=
+    SourceLexical.assign_names_mem hSourceScoped
+  have hCallOk :
+      ∃ params returns body,
+        yulProgram.contract.functions.lookup functionName =
+            some (.Def params returns body) ∧
+          args.length = params.length ∧
+          (identNames names).length = returns.length := by
+    rcases hStmtOk with ⟨hCall, _hArgsOk⟩
+    rcases hCall with ⟨params, returns, body, hLookup, hReturns, hArgs⟩
+    exact ⟨params, returns, body, hLookup, hArgs, by
+      simpa [identNames] using hReturns⟩
+  apply
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_assign_user_call_succ
+      (fuel := fuel.succ.succ)
+      hNames (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hTargetsNoDup hTargetsMem hSupported hWithin
+  · intro freshState stateArgs preArgs lowerArgs hCovers hArgs
+    exact
+      SourceOpenUserCallTargetsBlockPathSoundWhen.of_programCALL_recursive
+        (reserved := reserved) (tailFuel := fuel.succ.succ.succ.succ)
+        (bodyFuel := fuel) (argsFuel := fuel.succ.succ) context (by omega)
+        hBodyFuelAdequate hRec hArgsSafe hScopeContains hArgs
+        (sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+          (tailFuel := fuel.succ.succ.succ.succ)
+          (sourceFuel := fuel.succ.succ) context hBodyFuelAdequate hRec hPrim
+          hAllowed hCovers hArgsSafe hArgsScoped hStmtOk.2 hArgs (by omega)
+          (by omega))
+        hCallOk hTargetsNoDup hTargetsMem
+  · exact hTail
+
+/--
+Program-context typed-kont checked compiler-output lift for a declaration-form
+direct internal call.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_succ_of_programCALL_recursive
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {fuel : Nat} {ctx : Functions.Source.Ctx}
+    {names : List EvmYul.Identifier}
+    {functionName : Name} {args : List AstExpr} {rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        fuel.succ.succ.succ.succ)
+    (hRec :
+      CALLOpenSeqPathRecursiveAt cfg terminalRel revertRel prim yulProgram
+        program fuel.succ.succ.succ.succ)
+    (hPrim :
+      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
+        {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op)
+    (hNames :
+      names = [] ∨ ∃ name next rest, names = name :: next :: rest)
+    (hSafeStmt :
+      Safe.CallSafe.stmt
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hStmtOk :
+      UserCallArity.StmtOk yulProgram.contract
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hSourceScoped :
+      SourceLexical.StmtScoped layout
+        (.Let names (some (.Call (.inr functionName) args))))
+    (hReservedHead :
+      SourceNamesReserved reserved
+        (Stmt.names (.Let names (some (.Call (.inr functionName) args)))))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name,
+          name ∈ (identNames names).reverse ++ layout →
+          name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctxAfter
+            ((identNames names).reverse ++ layout) konts sourceResult) →
+        SourceModeKontLayouts.ControlWithin
+          ((identNames names).reverse ++ layout) konts →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved ((identNames names).reverse ++ layout) konts
+          terminalRel revertRel prim program ctxAfter
+          fuel.succ.succ.succ.succ compileFuel rest
+          (some yulProgram.contract) allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        fuel.succ.succ.succ.succ.succ compileFuel
+        (.Let names (some (.Call (.inr functionName) args)) :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeCall :
+      Safe.CallSafe.expr (.Call (.inr functionName) args) := by
+    simpa [Safe.CallSafe.stmt] using hSafeStmt
+  have hArgsSafe : Safe.CallSafe.exprs args :=
+    callSafe_exprs_of_callSafe_expr_user_call hSafeCall
+  have hArgsScoped : SourceExprsScoped layout args :=
+    SourceLexical.let_user_call_args hSourceScoped
+  have hTargetsNoDup : (identNames names).Nodup :=
+    SourceLexical.let_some_names_nodup hSourceScoped
+  have hTargetsFresh : ∀ name, name ∈ identNames names → name ∉ layout :=
+    SourceLexical.let_some_names_fresh hSourceScoped
+  have hTargetsReserved : SourceNamesReserved reserved (identNames names) := by
+    intro name hMem
+    exact hReservedHead name (by simpa [Stmt.names] using Or.inl hMem)
+  have hCallOk :
+      ∃ params returns body,
+        yulProgram.contract.functions.lookup functionName =
+            some (.Def params returns body) ∧
+          args.length = params.length ∧
+          (identNames names).length = returns.length := by
+    rcases hStmtOk with ⟨hCall, _hArgsOk⟩
+    rcases hCall with ⟨params, returns, body, hLookup, hReturns, hArgs⟩
+    exact ⟨params, returns, body, hLookup, hArgs, by
+      simpa [identNames] using hReturns⟩
+  apply
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_let_user_call_succ
+      (fuel := fuel.succ.succ)
+      hNames (unsupported_false_of_callSafe_expr_user_call hSafeCall)
+      hTargetsNoDup hTargetsFresh hTargetsReserved hSupported hWithin
+  · intro freshState stateArgs preArgs lowerArgs hCovers hArgs
+    have hProtectedCovers :
+        FreshCoversLayout (identNames names) freshState := by
+      intro name hMem
+      exact freshCoversLayout_mem_left hCovers (hTargetsReserved name hMem)
+    have hPreWrites : SourceWritesDisjoint (identNames names) preArgs := by
+      rcases hArgs with hDirect | hLower
+      · rcases hDirect with ⟨_hDirect, _hToLocals, hPre, _hState⟩
+        subst preArgs
+        exact SourceWritesDisjoint.nil
+      · exact lowerBound1?_sourceWritesDisjoint hProtectedCovers hLower.2
+    intro source compiler trace sourceDone hInitial hContains hResolve
+      hStoppingAllowed hResponses minimumTargetFuel
+    exact
+      (SourceOpenUserCallLetTargetsBlockPathSoundWhen.of_programCALL_recursive
+        (reserved := reserved) (tailFuel := fuel.succ.succ.succ.succ)
+        (bodyFuel := fuel) (argsFuel := fuel.succ.succ)
+        (ctx := { ctx with scope := (identNames names).reverse ++ ctx.scope })
+        context (by omega) hBodyFuelAdequate hRec hArgsSafe
+        (by
+          intro name hMem
+          rcases List.mem_append.mp hMem with hNew | hOld
+          · exact List.mem_append_left _ hNew
+          · exact List.mem_append_right _ (hScopeContains name hOld))
+        hArgs
+        (sourceArgTerminalRawPreludeOpenPathSoundWhen_of_direct_or_lowerBound1?_of_programCALL_recursive
+          (tailFuel := fuel.succ.succ.succ.succ)
+          (sourceFuel := fuel.succ.succ)
+          (ctx := { ctx with scope := (identNames names).reverse ++ ctx.scope })
+          context hBodyFuelAdequate hRec hPrim
+          hAllowed hCovers hArgsSafe hArgsScoped hStmtOk.2 hArgs (by omega)
+          (by omega))
+        hCallOk hTargetsNoDup hTargetsFresh hPreWrites)
+        hInitial hContains hResolve hStoppingAllowed hResponses
+        minimumTargetFuel
+  · intro ctxAfter compileFuel hScopeAfter hHandlersAfter
+    exact
+      hTail (ctxAfter := ctxAfter) (compileFuel := compileFuel) hScopeAfter
+        hHandlersAfter
+        (by
+          intro sourceResult hAllow
+          exact
+            SourceResultModeKontSupported.mono_currentLayout
+              (ctx := ctxAfter) (currentLayout := layout)
+              (currentLayout' := (identNames names).reverse ++ layout)
+              (konts := konts) (sourceResult := sourceResult)
+              (by
+                intro name hMem
+                exact List.mem_append_right _ hMem)
+              (SourceCtxHandlersEq.modeKontSupported hHandlersAfter
+                (hSupported hAllow)))
+        (SourceModeKontLayouts.ControlWithin.mono_current
+          (currentLayout := layout)
+          (currentLayout' := (identNames names).reverse ++ layout)
+          (konts := konts)
+          (by
+            intro name hMem
+            exact List.mem_append_right _ hMem)
+          hWithin)
+
+/--
 Recursive raw expression preservation with a selected-callee body hook.
 
 Expression recursion is well-founded on syntax size. Primitive and internal
