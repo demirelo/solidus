@@ -5964,6 +5964,30 @@ theorem mono_currentLayout
           · exact ⟨hSupported.1,
               fun name hMem => hSubset name (hSupported.2 name hMem)⟩
 
+theorem withRegular_current
+    {ctx : Functions.Source.Ctx} {currentLayout : List Name}
+    {konts : SourceModeKontLayouts}
+    {sourceResult : Except Exception State}
+    (hSupported :
+      SourceResultModeKontSupported ctx currentLayout konts sourceResult) :
+    SourceResultModeKontSupported ctx currentLayout
+      (SourceModeKontLayouts.withRegular currentLayout konts)
+      sourceResult := by
+  cases sourceResult with
+  | error err =>
+      simpa [SourceResultModeKontSupported]
+  | ok source =>
+      cases source with
+      | Ok shared store =>
+          intro name hMem
+          simpa [SourceModeKontLayouts.withRegular] using hMem
+      | OutOfFuel =>
+          simp [SourceResultModeKontSupported]
+      | Checkpoint jump =>
+          cases jump <;>
+            simpa [SourceResultModeKontSupported,
+              SourceModeKontLayouts.withRegular] using hSupported
+
 theorem to_leave_layout_compatible_of_not_regular_no_loop
     {ctx : Functions.Source.Ctx} {currentLayout : List Name}
     {konts : SourceModeKontLayouts}
@@ -63168,6 +63192,63 @@ inductive SourceOpenStmtHeadKontPathDoneRel
         revertRel allowed sourceResult (.ok (outcome, ctxAfter))
 
 /--
+Finite-path preservation target for one lowered statement head with typed
+mode-continuation layouts.
+
+This is the statement-level sibling of
+`SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtxTo`; it exists so
+singleton structural lowerings can reuse the same `Stmt.run` proof before being
+lifted into an emitted block prefix.
+-/
+def SourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtxTo
+    (cfg : StateRelConfig) (layout resultLayout : List Name)
+    (konts : SourceModeKontLayouts)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmt : AstStmt)
+    (codeOverride : Option AstContract) (lowerStmt : Functions.Stmt)
+    (allowed : Except Exception State → Prop) : Prop :=
+  ∀ {source compiler trace sourceDone},
+    SourceStateExactRel cfg layout source compiler →
+    OpenExternal.OpenResultResolves
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride source))
+      trace sourceDone →
+    (SourceResultNotRegularOk sourceDone → allowed sourceDone) →
+    SourceOpenTraceResponsesAdmissible cfg trace →
+    ∀ minimumTargetFuel,
+      ∃ targetFuel,
+        minimumTargetFuel ≤ targetFuel ∧
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenStmtHeadKontPathDoneRel cfg resultLayout konts ctx
+            terminalRel revertRel allowed)
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec sourceFuel sourceStmt codeOverride
+              source))
+          (CompilerOpen.FunctionsOpen.Stmt.run prim program ctx targetFuel
+            lowerStmt compiler)
+
+abbrev SourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtx
+    (cfg : StateRelConfig) (layout : List Name)
+    (konts : SourceModeKontLayouts)
+    (terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop)
+    (revertRel : State → Objects.Source.State → Prop)
+    (prim : Objects.Source.PrimitiveSemantics)
+    (program : Functions.Program) (ctx : Functions.Source.Ctx)
+    (sourceFuel : Nat) (sourceStmt : AstStmt)
+    (codeOverride : Option AstContract) (lowerStmt : Functions.Stmt)
+    (allowed : Except Exception State → Prop) : Prop :=
+  SourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtxTo cfg layout layout
+    konts terminalRel revertRel prim program ctx sourceFuel sourceStmt
+    codeOverride lowerStmt allowed
+
+/--
 Finite-path preservation target for one emitted statement block whose regular
 completion changes the current source-visible layout, with typed continuations
 for every non-regular mode.
@@ -63219,6 +63300,389 @@ abbrev SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtx
   SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtxTo cfg layout layout
     konts terminalRel revertRel prim program ctx sourceFuel sourceStmt
     codeOverride lowerHead allowed
+
+/--
+Lift one typed statement-head path into the emitted-block-head boundary.
+
+This is the typed-continuation counterpart of
+`SourceOpenBlockHeadPathSoundWhenAtExactHiddenCtx.of_stmt`.
+-/
+theorem SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtxTo.of_stmt
+    {cfg : StateRelConfig} {layout resultLayout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmt : AstStmt}
+    {codeOverride : Option AstContract} {lowerStmt : Functions.Stmt}
+    {allowed : Except Exception State → Prop}
+    (hStmt :
+      SourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtxTo cfg layout
+        resultLayout konts terminalRel revertRel prim program ctx sourceFuel
+        sourceStmt codeOverride lowerStmt allowed) :
+    SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtxTo cfg layout
+      resultLayout konts terminalRel revertRel prim program ctx sourceFuel
+      sourceStmt codeOverride { stmts := [lowerStmt] } allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  rcases hStmt hInitial hResolve hStoppingAllowed hResponses
+      minimumTargetFuel with
+    ⟨stmtFuel, hMinimumStmt, hStmtPath⟩
+  rcases hStmtPath.resolves with
+    ⟨sourceDone', targetDone, hSource, hTarget, hDone⟩
+  have hSourceDoneEq : sourceDone = sourceDone' :=
+    OpenExternal.OpenResultResolves.deterministic hResolve hSource
+  subst sourceDone'
+  cases targetDone with
+  | error targetErr =>
+      cases hDone
+  | ok targetDone =>
+      rcases targetDone with ⟨targetOutcome, targetCtx⟩
+      have hTargetPadded :=
+        CompilerOpen.FunctionsOpen.Stmt.run_resolves_mono prim program
+          (Nat.le_succ stmtFuel) hTarget
+      let compilerAfter := targetOutcome.state
+      cases hDone with
+      | regular hAfter hScope hHandlers =>
+          have hTargetBlock :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                  stmtFuel.succ.succ { stmts := [lowerStmt] } compiler)
+                trace
+                (.ok (Functions.Source.Outcome.regular compilerAfter,
+                  targetCtx)) := by
+            rw [compilerOpen_block_runOpen_cons_succ]
+            have hTail :
+                OpenExternal.OpenResultResolves
+                  (CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                    targetCtx stmtFuel.succ { stmts := [] } compilerAfter)
+                  []
+                  (.ok (Functions.Source.Outcome.regular compilerAfter,
+                    targetCtx)) := by
+              rw [compilerOpen_block_runOpen_nil_succ]
+              exact OpenExternal.OpenResultResolves.done
+            simpa using
+              (OpenExternal.OpenResultResolves.bind_ok
+                (next := fun stmtResult =>
+                  match stmtResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        stmtResult.2 stmtFuel.succ { stmts := [] }
+                        stmtResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok (stmtResult.1, ctx))
+                hTargetPadded hTail)
+          refine ⟨stmtFuel.succ.succ, by omega, ?_⟩
+          exact
+            OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+              hSource hTargetBlock hResponses
+              (SourceOpenStmtHeadKontPathDoneRel.regular hAfter hScope
+                hHandlers)
+      | stopping hNotRegular hOutcome =>
+          have hOutcomeRel := hOutcome (hStoppingAllowed hNotRegular)
+          have hMode : targetOutcome.mode ≠ .regular :=
+            SourceResultKontOutcomeRel.mode_ne_regular_of_notRegular
+              hNotRegular hOutcomeRel
+          have hTargetBlock :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+                  stmtFuel.succ.succ { stmts := [lowerStmt] } compiler)
+                trace (.ok (targetOutcome, ctx)) := by
+            rw [compilerOpen_block_runOpen_cons_succ]
+            have hStop :
+                OpenExternal.OpenResultResolves
+                  (match targetOutcome.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        targetCtx stmtFuel.succ { stmts := [] }
+                        targetOutcome.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok (targetOutcome, ctx))
+                  [] (.ok (targetOutcome, ctx)) := by
+              cases hOutcomeMode : targetOutcome.mode <;>
+                simp_all [OpenExternal.OpenResult.ok] <;>
+                exact OpenExternal.OpenResultResolves.done
+            simpa using
+              (OpenExternal.OpenResultResolves.bind_ok
+                (next := fun stmtResult =>
+                  match stmtResult.1.mode with
+                  | .regular =>
+                      CompilerOpen.FunctionsOpen.Block.runOpen prim program
+                        stmtResult.2 stmtFuel.succ { stmts := [] }
+                        stmtResult.1.state
+                  | .brk | .cont | .leave | .halt _ =>
+                      OpenExternal.OpenResult.ok (stmtResult.1, ctx))
+                hTargetPadded hStop)
+          refine ⟨stmtFuel.succ.succ, by omega, ?_⟩
+          exact
+            OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+              hSource hTargetBlock hResponses
+              (SourceOpenStmtHeadKontPathDoneRel.stopping hNotRegular
+                hOutcome)
+
+/--
+Selected-path preservation for one imported Yul block statement with typed
+mode continuations.
+
+The body runs under a temporary continuation map whose regular target is the
+block entry layout.  If the block finishes abruptly, the result is converted
+back to the caller-provided continuation map; if it falls through, both source
+and target scoped cleanups reconstruct an exact state at the entry layout.
+-/
+theorem sourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodyFuel : Nat} {body : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBody : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBody : Safe.CallSafe.stmts body)
+    (hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body)
+    (hBody :
+      ∀ {kontsBody : SourceModeKontLayouts}
+        {allowedBody : Except Exception State → Prop},
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctx layout kontsBody
+            sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout kontsBody →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          kontsBody terminalRel revertRel prim program ctx bodyFuel body
+          codeOverride lowerBody allowedBody) :
+    SourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtx cfg layout konts
+      terminalRel revertRel prim program ctx bodyFuel.succ (.Block body)
+      codeOverride (.block lowerBody) allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hStoppingAllowed
+    hResponses minimumTargetFuel
+  cases hInitial with
+  | @ok shared store compiler hShared hVars hDomain =>
+      let blockKonts :=
+        SourceModeKontLayouts.withRegular layout konts
+      have hInitialExact :
+          SourceStateExactRel cfg layout (.Ok shared store) compiler :=
+        SourceStateExactRel.ok hShared hVars hDomain
+      have hEntryContains : StoreDomainContains layout store :=
+        StoreDomainContains.of_exact hDomain
+      have hDomainInv :
+          OpenResultDoneInvariant
+            (YulOpenStateDoneInv (StateStoreDomainExact layout))
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.exec bodyFuel.succ (.Block body)
+                codeOverride (.Ok shared store))) :=
+        yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callSafe_scoped
+          (layout := layout) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          (fuel := bodyFuel.succ) (body := body)
+          (codeOverride := codeOverride) (shared := shared) (store := store)
+          hSafeBody hScopedBody hDomain
+      have hBlockWithin :
+          SourceModeKontLayouts.ControlWithin layout blockKonts :=
+        SourceModeKontLayouts.ControlWithin.withRegular layout hWithin
+      have hSupportedDoneBlock :
+          SourceResultModeKontSupported ctx layout blockKonts sourceDone := by
+        cases sourceDone with
+        | error err =>
+            exact
+              SourceResultModeKontSupported.withRegular_current
+                (hSupported
+                  (hStoppingAllowed (by
+                    simp [SourceResultNotRegularOk])))
+        | ok sourceState =>
+            cases sourceState with
+            | Ok sharedAfter storeAfter =>
+                intro name hMem
+                simpa [blockKonts, SourceModeKontLayouts.withRegular]
+                  using hMem
+            | OutOfFuel =>
+                simp [SourceResultModeKontSupported]
+            | Checkpoint jump =>
+                exact
+                  SourceResultModeKontSupported.withRegular_current
+                    (hSupported
+                      (hStoppingAllowed (by
+                        cases jump <;> simp [SourceResultNotRegularOk])))
+      have hBodySound :
+          SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+            blockKonts terminalRel revertRel prim program ctx bodyFuel body
+            codeOverride lowerBody
+            (fun result => restrictSourceResultTo store result = sourceDone) :=
+        hBody
+          (kontsBody := blockKonts)
+          (allowedBody :=
+            fun result => restrictSourceResultTo store result = sourceDone)
+          (by
+            intro result hEq
+            apply SourceResultRelatable.of_restrictStoreTo (scope := store)
+            change SourceResultRelatable (restrictSourceResultTo store result)
+            rw [hEq]
+            cases sourceDone with
+            | error err =>
+                exact
+                  hAllowed
+                    (hStoppingAllowed (by
+                      simp [SourceResultNotRegularOk]))
+            | ok sourceState =>
+                cases sourceState with
+                | Ok sharedAfter storeAfter =>
+                    simp [SourceResultRelatable]
+                | OutOfFuel =>
+                    exact
+                      hAllowed
+                        (hStoppingAllowed (by
+                          simp [SourceResultNotRegularOk]))
+                | Checkpoint jump =>
+                    exact
+                      hAllowed
+                        (hStoppingAllowed (by
+                          cases jump <;> simp [SourceResultNotRegularOk])))
+          (by
+            intro result hEq
+            cases result with
+            | error err =>
+                simp [SourceResultModeKontSupported]
+            | ok resultState =>
+                cases resultState with
+                | Ok sharedAfter storeAfter =>
+                    intro name hMem
+                    simpa [blockKonts, SourceModeKontLayouts.withRegular]
+                      using hMem
+                | OutOfFuel =>
+                    simp [SourceResultModeKontSupported]
+                | Checkpoint jump =>
+                    have hSupportedRestrict :
+                        SourceResultModeKontSupported ctx layout konts
+                          (restrictSourceResultTo store
+                            (.ok (.Checkpoint jump) :
+                              Except Exception State)) := by
+                      rw [hEq]
+                      exact
+                        hSupported
+                          (hStoppingAllowed (by
+                            rw [← hEq]
+                            cases jump <;>
+                              simp [SourceResultNotRegularOk,
+                                restrictSourceResultTo,
+                                EvmYul.Yul.State.restrictStoreTo]))
+                    exact
+                      SourceResultModeKontSupported.withRegular_current
+                        (SourceResultModeKontSupported.of_restrictStoreTo
+                          (scope := store) hSupportedRestrict))
+          hBlockWithin
+      rcases
+          sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result_supported
+            (cfg := cfg) (layout := layout) (konts := blockKonts)
+            (terminalRel := terminalRel) (revertRel := revertRel)
+            (prim := prim) (program := program) (ctx := ctx)
+            (sourceFuel := bodyFuel) (sourceStmts := body)
+            (codeOverride := codeOverride) (lowerBlock := lowerBody)
+            (shared := shared) (store := store) (compiler := compiler)
+            (trace := trace) (sourceResult := sourceDone)
+            hBodySound hInitialExact hResolve hSupportedDoneBlock
+            hBlockWithin hResponses minimumTargetFuel with
+        ⟨targetFuel, targetOutcome, targetCtxAfter, hMinimumTargetFuel,
+          hTargetBody, hOutcomeRelBlock⟩
+      cases sourceDone with
+      | error err =>
+          have hNotRegular : SourceResultNotRegularOk
+              (.error err : Except Exception State) := by
+            simp [SourceResultNotRegularOk]
+          have hMode : targetOutcome.mode ≠ .regular :=
+            SourceResultKontOutcomeRel.mode_ne_regular_of_notRegular
+              hNotRegular hOutcomeRelBlock
+          have hOutcomeRel :
+              SourceResultKontOutcomeRel cfg konts terminalRel revertRel
+                (.error err : Except Exception State) targetOutcome :=
+            SourceResultKontOutcomeRel.of_withRegular_nonregular
+              (regular := layout) hOutcomeRelBlock hMode
+          refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+          exact
+            OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+              hResolve
+              (compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
+                hMode hTargetBody)
+              hResponses
+              (SourceOpenStmtHeadKontPathDoneRel.stopping hNotRegular
+                (by intro _hAllow; exact hOutcomeRel))
+      | ok sourceState =>
+          cases sourceState with
+          | Ok sharedAfter storeAfter =>
+              rcases
+                  SourceResultKontOutcomeRel.ok_regular_parts
+                    hOutcomeRelBlock with
+                ⟨compilerAfter, hOutcomeEq, hRelAfter⟩
+              subst targetOutcome
+              have hDomainAfterState :
+                  StateStoreDomainExact layout (.Ok sharedAfter storeAfter) :=
+                OpenResultDoneInvariant.of_resolves hDomainInv hResolve
+              have hDomainAfter :
+                  StoreDomainExact layout storeAfter := by
+                simpa [StateStoreDomainExact] using hDomainAfterState
+              have hRelRestricted :
+                  SourceStateRel cfg layout (.Ok sharedAfter storeAfter)
+                    (compilerAfter.restrictTo ctx.scope) :=
+                SourceStateRel.restrictCompilerTo_of_subset
+                  (by
+                    simpa [blockKonts, SourceModeKontLayouts.withRegular]
+                      using hRelAfter)
+                  hScopeContains
+              have hExactRestricted :
+                  SourceStateExactRel cfg layout (.Ok sharedAfter storeAfter)
+                    (compilerAfter.restrictTo ctx.scope) :=
+                SourceStateExactRel.ofRelDomain hRelRestricted hDomainAfter
+              refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+              exact
+                OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                  hResolve
+                  (compilerOpen_stmt_run_block_resolves_of_runOpen_regular
+                    hTargetBody)
+                  hResponses
+                  (SourceOpenStmtHeadKontPathDoneRel.regular
+                    hExactRestricted hScopeContains
+                    (SourceCtxHandlersEq.refl ctx))
+          | OutOfFuel =>
+              cases hOutcomeRelBlock with
+              | ok hOk =>
+                  cases hOk with
+                  | regular hState => cases hState
+          | Checkpoint jump =>
+              have hNotRegular : SourceResultNotRegularOk
+                  (.ok (.Checkpoint jump) : Except Exception State) := by
+                cases jump <;> simp [SourceResultNotRegularOk]
+              have hMode : targetOutcome.mode ≠ .regular :=
+                SourceResultKontOutcomeRel.mode_ne_regular_of_notRegular
+                  hNotRegular hOutcomeRelBlock
+              have hOutcomeRel :
+                  SourceResultKontOutcomeRel cfg konts terminalRel revertRel
+                    (.ok (.Checkpoint jump) : Except Exception State)
+                    targetOutcome :=
+                SourceResultKontOutcomeRel.of_withRegular_nonregular
+                  (regular := layout) hOutcomeRelBlock hMode
+              refine ⟨targetFuel, hMinimumTargetFuel, ?_⟩
+              exact
+                OpenExternal.OpenResultPathRel.of_resolves_of_responsesSatisfy
+                  hResolve
+                  (compilerOpen_stmt_run_block_resolves_of_runOpen_nonregular
+                    hMode hTargetBody)
+                  hResponses
+                  (SourceOpenStmtHeadKontPathDoneRel.stopping hNotRegular
+                    (by intro _hAllow; exact hOutcomeRel))
 
 /--
 Attach one selected emitted-block head to its syntactic tail for the open
@@ -102481,6 +102945,521 @@ theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_
           (ctx := ctx) (sourceFuel := sourceFuel) (rest := rest)
           (codeOverride := codeOverride) (allowed := allowed) hSupported
           (compileFuel := compileFuel)
+
+/--
+Checked typed-kont lift for one scoped `.Block` head.
+
+The block body is proved at the strictly smaller body fuel under whatever
+typed continuation map the semantic block proof requests; the syntactic tail is
+proved after regular scoped cleanup restores the entry layout and handlers.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_succ_of_seq
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodyFuel : Nat} {body rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBlock : Safe.CallSafe.stmt (.Block body))
+    (hScopedBlock :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.Block body))
+    (hBody :
+      ∀ {kontsBody : SourceModeKontLayouts}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctx layout kontsBody
+            sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout kontsBody →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout kontsBody terminalRel revertRel prim program ctx
+          bodyFuel compileFuel body codeOverride allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctxAfter layout konts sourceResult) →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter bodyFuel.succ compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        bodyFuel.succ.succ compileFuel (.Block body :: rest) codeOverride
+        allowed := by
+  intro compileFuel
+  apply
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+  intro freshState stateHead lowerFuel lowerHead lowerTail freshState'
+    hCovers hLower hLowerTail
+  cases lowerFuel with
+  | zero =>
+      simp [Stmt.toFunctionsListFuel?] at hLower
+  | succ bodyLowerFuel =>
+      rcases
+          BridgeFacts.toFunctionsListFuel?_block_components
+            (fuel := bodyLowerFuel) hLower with
+        ⟨lowerBody, hLowerBody, hHeadEq⟩
+      subst lowerHead
+      have hTailCovers : FreshCoversLayout (reserved ++ layout) stateHead :=
+        freshCoversLayout_toFunctionsListFuel?_of_some hCovers hLower
+      unfold SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx
+      intro source compiler trace sourceDone
+      exact
+        sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_of_blockHead
+          (cfg := cfg) (layout := layout) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (prim := prim) (program := program) (ctx := ctx)
+          (sourceFuel := bodyFuel.succ) (head := .Block body)
+          (rest := rest) (codeOverride := codeOverride)
+          (lowerHead := { stmts := [.block lowerBody] })
+          (lowerTail := lowerTail) (allowed := allowed)
+          (hHead :=
+            SourceOpenBlockHeadKontPathSoundWhenAtExactHiddenCtxTo.of_stmt
+              (sourceOpenStmtHeadKontPathSoundWhenAtExactHiddenCtx_block_succ_of_seq
+                (cfg := cfg) (layout := layout) (konts := konts)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := ctx)
+                (bodyFuel := bodyFuel) (body := body)
+                (codeOverride := codeOverride) (lowerBody := lowerBody)
+                (allowed := allowed)
+                (canBreak := canBreak) (canContinue := canContinue)
+                (canLeave := canLeave)
+                hAllowed hSupported hWithin hScopeContains
+                (by simpa [Safe.CallSafe.stmt] using hSafeBlock)
+                (by simpa [ControlFlow.ScopedStmt] using hScopedBlock)
+                (by
+                  intro kontsBody allowedBody hAllowedBody hSupportedBody
+                    hWithinBody
+                  exact
+                    (hBody (kontsBody := kontsBody)
+                      (allowedBody := allowedBody)
+                      (compileFuel := bodyLowerFuel)
+                      hAllowedBody hSupportedBody hWithinBody)
+                      hCovers hLowerBody)))
+          (hTail := by
+            intro ctxAfter hScopeAfter hHandlersAfter
+            exact
+              (hTail (ctxAfter := ctxAfter)
+                (compileFuel := bodyLowerFuel.succ.succ)
+                hScopeAfter hHandlersAfter
+                (by
+                  intro sourceResult hAllow
+                  exact
+                    SourceCtxHandlersEq.modeKontSupported hHandlersAfter
+                      (hSupported hAllow)))
+                hTailCovers hLowerTail)
+          (source := source) (compiler := compiler) (trace := trace)
+          (sourceDone := sourceDone)
+
+/--
+Fuel-dispatched checked typed-kont constructor for `.Block body :: rest`.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_dispatch
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {body rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafeBlock : Safe.CallSafe.stmt (.Block body))
+    (hScopedBlock :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.Block body))
+    (hBody :
+      ∀ {bodyFuel : Nat} {kontsBody : SourceModeKontLayouts}
+        {allowedBody : Except Exception State → Prop}
+        {compileFuel : Nat},
+        bodyFuel ≤ tailFuel →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctx layout kontsBody
+            sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout kontsBody →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout kontsBody terminalRel revertRel prim program ctx
+          bodyFuel compileFuel body codeOverride allowedBody)
+    (hTail :
+      ∀ {ctxAfter : Functions.Source.Ctx} {compileFuel : Nat},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfter.scope) →
+        SourceCtxHandlersEq ctx ctxAfter →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctxAfter layout konts sourceResult) →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program
+          ctxAfter tailFuel compileFuel rest codeOverride allowed) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Block body :: rest) codeOverride
+        allowed := by
+  intro compileFuel
+  cases tailFuel with
+  | zero =>
+      exact
+        checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (konts := konts) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := .Block body)
+          (rest := rest) (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed
+  | succ bodyFuel =>
+      exact
+        checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_succ_of_seq
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (konts := konts) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (bodyFuel := bodyFuel) (body := body) (rest := rest)
+          (codeOverride := codeOverride) (allowed := allowed)
+          hAllowed hSupported hWithin hScopeContains hSafeBlock hScopedBlock
+          (by
+            intro kontsBody allowedBody compileFuel hAllowedBody
+              hSupportedBody hWithinBody
+            exact
+              hBody (bodyFuel := bodyFuel) (kontsBody := kontsBody)
+                (allowedBody := allowedBody) (compileFuel := compileFuel)
+                (Nat.le_succ bodyFuel) hAllowedBody hSupportedBody
+                hWithinBody)
+          hTail (compileFuel := compileFuel)
+
+/--
+Dispatcher-ready typed-kont frontier for a scoped `.Block`.
+
+This packages the source safety/scoping facts around
+`checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_dispatch`
+and uses the strong smaller-fuel callback for both the nested body and the
+syntactic tail.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_block_recursive_reserved_supported
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {ctx : Functions.Source.Ctx}
+    {tailFuel : Nat} {body rest : List AstStmt}
+    {allowed : Except Exception State → Prop}
+    {canBreak canContinue canLeave : Bool}
+    (hSafeBlock : Safe.CallSafe.stmt (.Block body))
+    (hScopedBlock :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave (.Block body))
+    (hStmtOkBlock : UserCallArity.StmtOk yulProgram.contract (.Block body))
+    (hSourceScopedBlock : SourceLexical.StmtScoped layout (.Block body))
+    (hTailScoped :
+      SourceLexical.StmtsScoped
+        (SourceLexical.StmtOutLayout layout (.Block body)) rest)
+    (hSafeTail : Safe.CallSafe.stmts rest)
+    (hScopedTail :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave rest)
+    (hStmtOkTail : UserCallArity.StmtsOk yulProgram.contract rest)
+    (hReservedBlock :
+      SourceNamesReserved reserved (Stmt.names (.Block body)))
+    (hReservedTail : SourceNamesReserved reserved (Stmt.List.names rest))
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hRec :
+      ∀ {sourceFuelRec : Nat} {reservedRec layoutRec : List Name}
+        {kontsRec : SourceModeKontLayouts}
+        {ctxRec : Functions.Source.Ctx} {compileFuelRec : Nat}
+        {sourceStmtsRec : List AstStmt}
+        {allowedRec : Except Exception State → Prop}
+        {canBreakRec canContinueRec canLeaveRec : Bool},
+        sourceFuelRec ≤ tailFuel →
+        Safe.CallSafe.stmts sourceStmtsRec →
+        ControlFlow.ScopedStmts canBreakRec canContinueRec canLeaveRec
+          sourceStmtsRec →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmtsRec →
+        SourceLexical.StmtsScoped layoutRec sourceStmtsRec →
+        SourceNamesReserved reservedRec (Stmt.List.names sourceStmtsRec) →
+        (∀ {sourceResult}, allowedRec sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedRec sourceResult →
+          SourceResultModeKontSupported ctxRec layoutRec kontsRec
+            sourceResult) →
+        SourceModeKontLayouts.ControlWithin layoutRec kontsRec →
+        (∀ name : Name, name ∈ layoutRec → name ∈ ctxRec.scope) →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reservedRec layoutRec kontsRec terminalRel revertRel prim
+          program ctxRec sourceFuelRec compileFuelRec sourceStmtsRec
+          (some yulProgram.contract) allowedRec) :
+    ∀ {compileFuel : Nat},
+      CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+        cfg reserved layout konts terminalRel revertRel prim program ctx
+        tailFuel.succ compileFuel (.Block body :: rest)
+        (some yulProgram.contract) allowed := by
+  have hSafeBody : Safe.CallSafe.stmts body := by
+    simpa [Safe.CallSafe.stmt] using hSafeBlock
+  have hScopedBody :
+      ControlFlow.ScopedStmts canBreak canContinue canLeave body := by
+    simpa [ControlFlow.ScopedStmt] using hScopedBlock
+  have hStmtOkBody : UserCallArity.StmtsOk yulProgram.contract body := by
+    simpa [UserCallArity.StmtOk] using hStmtOkBlock
+  have hSourceScopedBody : SourceLexical.StmtsScoped layout body := by
+    simpa [SourceLexical.StmtScoped] using hSourceScopedBlock
+  have hReservedBody : SourceNamesReserved reserved (Stmt.List.names body) := by
+    simpa [Stmt.names] using hReservedBlock
+  intro compileFuel
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_block_dispatch
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel)
+      (revertRel := revertRel) (prim := prim) (program := program)
+      (ctx := ctx) (tailFuel := tailFuel) (body := body) (rest := rest)
+      (codeOverride := some yulProgram.contract) (allowed := allowed)
+      hAllowed hSupported hWithin hScopeContains hSafeBlock hScopedBlock
+      (by
+        intro bodyFuel kontsBody allowedBody compileFuel hBodyFuel
+          hAllowedBody hSupportedBody hWithinBody
+        exact
+          hRec (sourceFuelRec := bodyFuel) (reservedRec := reserved)
+            (layoutRec := layout) (kontsRec := kontsBody)
+            (ctxRec := ctx) (compileFuelRec := compileFuel)
+            (sourceStmtsRec := body) (allowedRec := allowedBody)
+            (canBreakRec := canBreak) (canContinueRec := canContinue)
+            (canLeaveRec := canLeave) hBodyFuel hSafeBody hScopedBody
+            hStmtOkBody hSourceScopedBody hReservedBody hAllowedBody
+            hSupportedBody hWithinBody hScopeContains)
+      (by
+        intro ctxAfter compileFuel hScopeAfter hHandlersAfter
+          hSupportedAfter
+        exact
+          hRec (sourceFuelRec := tailFuel) (reservedRec := reserved)
+            (layoutRec := layout) (kontsRec := konts)
+            (ctxRec := ctxAfter) (compileFuelRec := compileFuel)
+            (sourceStmtsRec := rest) (allowedRec := allowed)
+            (canBreakRec := canBreak) (canContinueRec := canContinue)
+            (canLeaveRec := canLeave) (Nat.le_refl tailFuel) hSafeTail
+            hScopedTail hStmtOkTail
+            (by
+              simpa [SourceLexical.StmtOutLayout] using hTailScoped)
+            hReservedTail hAllowed hSupportedAfter hWithin hScopeAfter)
+      (compileFuel := compileFuel)
+
+/--
+Strong-fuel finite-path sequence induction for the open typed-continuation
+spine.
+
+Unlike the older exact-bound helper below, this version exposes a recursive
+callback for any source fuel below the current head.  Structural heads such as
+`.Block` need that callback for their nested bodies.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_le_of_cons_frontier_recursive_callSafe_reserved_supported
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    ∀ {bound : Nat},
+      (∀ {tailFuel : Nat} {reserved layout : List Name}
+        {konts : SourceModeKontLayouts} {ctx : Functions.Source.Ctx}
+        {head : AstStmt} {rest : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        tailFuel ≤ bound →
+        Safe.CallSafe.stmt head →
+        ControlFlow.ScopedStmt canBreak canContinue canLeave head →
+        UserCallArity.StmtOk yulProgram.contract head →
+        SourceLexical.StmtScoped layout head →
+        SourceLexical.StmtsScoped (SourceLexical.StmtOutLayout layout head)
+          rest →
+        Safe.CallSafe.stmts rest →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave rest →
+        UserCallArity.StmtsOk yulProgram.contract rest →
+        SourceNamesReserved reserved (Stmt.names head) →
+        SourceNamesReserved reserved (Stmt.List.names rest) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout konts sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout konts →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        (∀ {sourceFuelRec : Nat} {reservedRec layoutRec : List Name}
+          {kontsRec : SourceModeKontLayouts}
+          {ctxRec : Functions.Source.Ctx} {compileFuelRec : Nat}
+          {sourceStmtsRec : List AstStmt}
+          {allowedRec : Except Exception State → Prop}
+          {canBreakRec canContinueRec canLeaveRec : Bool},
+          sourceFuelRec ≤ tailFuel →
+          Safe.CallSafe.stmts sourceStmtsRec →
+          ControlFlow.ScopedStmts canBreakRec canContinueRec canLeaveRec
+            sourceStmtsRec →
+          UserCallArity.StmtsOk yulProgram.contract sourceStmtsRec →
+          SourceLexical.StmtsScoped layoutRec sourceStmtsRec →
+          SourceNamesReserved reservedRec (Stmt.List.names sourceStmtsRec) →
+          (∀ {sourceResult}, allowedRec sourceResult →
+            SourceResultRelatable sourceResult) →
+          (∀ {sourceResult}, allowedRec sourceResult →
+            SourceResultModeKontSupported ctxRec layoutRec kontsRec
+              sourceResult) →
+          SourceModeKontLayouts.ControlWithin layoutRec kontsRec →
+          (∀ name : Name, name ∈ layoutRec → name ∈ ctxRec.scope) →
+          CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+            cfg reservedRec layoutRec kontsRec terminalRel revertRel prim
+            program ctxRec sourceFuelRec compileFuelRec sourceStmtsRec
+            (some yulProgram.contract) allowedRec) →
+        ∀ {compileFuel : Nat},
+          CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+            cfg reserved layout konts terminalRel revertRel prim program ctx
+            tailFuel.succ compileFuel (head :: rest)
+            (some yulProgram.contract) allowed) →
+      ∀ {sourceFuel : Nat} {reserved layout : List Name}
+        {konts : SourceModeKontLayouts} {ctx : Functions.Source.Ctx}
+        {compileFuel : Nat} {sourceStmts : List AstStmt}
+        {allowed : Except Exception State → Prop}
+        {canBreak canContinue canLeave : Bool},
+        sourceFuel ≤ bound →
+        Safe.CallSafe.stmts sourceStmts →
+        ControlFlow.ScopedStmts canBreak canContinue canLeave sourceStmts →
+        UserCallArity.StmtsOk yulProgram.contract sourceStmts →
+        SourceLexical.StmtsScoped layout sourceStmts →
+        SourceNamesReserved reserved (Stmt.List.names sourceStmts) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowed sourceResult →
+          SourceResultModeKontSupported ctx layout konts sourceResult) →
+        SourceModeKontLayouts.ControlWithin layout konts →
+        (∀ name : Name, name ∈ layout → name ∈ ctx.scope) →
+        CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg reserved layout konts terminalRel revertRel prim program ctx
+          sourceFuel compileFuel sourceStmts (some yulProgram.contract)
+          allowed := by
+  intro bound
+  induction bound with
+  | zero =>
+      intro hCons sourceFuel reserved layout konts ctx compileFuel sourceStmts
+        allowed canBreak canContinue canLeave hFuel _hSafe _hScoped _hStmtsOk
+        _hSourceScoped _hReserved hAllowed _hSupported _hWithin
+        _hScopeContains
+      have hFuelZero : sourceFuel = 0 := Nat.eq_zero_of_le_zero hFuel
+      subst sourceFuel
+      intro freshState freshState' lowerBlock hCovers hLower
+      exact
+        (checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (konts := konts) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel)
+          (sourceStmts := sourceStmts)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed) hCovers hLower
+  | succ bound ih =>
+      intro hCons sourceFuel reserved layout konts ctx compileFuel sourceStmts
+        allowed canBreak canContinue canLeave hFuel hSafe hScoped hStmtsOk
+        hSourceScoped hReserved hAllowed hSupported hWithin hScopeContains
+      cases sourceFuel with
+      | zero =>
+          exact
+            checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+              (cfg := cfg) (reserved := reserved) (layout := layout)
+              (konts := konts) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim) (program := program)
+              (ctx := ctx) (compileFuel := compileFuel)
+              (sourceStmts := sourceStmts)
+              (codeOverride := some yulProgram.contract) (allowed := allowed)
+              hAllowed
+      | succ tailFuel =>
+          have hTailFuel : tailFuel ≤ bound := Nat.succ_le_succ_iff.mp hFuel
+          cases sourceStmts with
+          | nil =>
+              intro freshState freshState' lowerBlock hCovers hLower
+              exact
+                (checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+                  (cfg := cfg) (reserved := reserved) (layout := layout)
+                  (konts := konts) (terminalRel := terminalRel)
+                  (revertRel := revertRel) (prim := prim) (program := program)
+                  (ctx := ctx) (sourceFuel := tailFuel.succ)
+                  (compileFuel := compileFuel)
+                  (codeOverride := some yulProgram.contract)
+                  (allowed := allowed) hAllowed hSupported) hCovers hLower
+          | cons head rest =>
+              intro freshState freshState' lowerBlock hCovers hLower
+              exact
+                (hCons (tailFuel := tailFuel) (reserved := reserved)
+                  (layout := layout) (konts := konts) (ctx := ctx)
+                  (head := head) (rest := rest) (allowed := allowed)
+                  (canBreak := canBreak) (canContinue := canContinue)
+                  (canLeave := canLeave)
+                  (Nat.le_trans hTailFuel (Nat.le_succ bound))
+                  (by simpa [Safe.CallSafe.stmts] using hSafe.1)
+                  (by simpa [ControlFlow.ScopedStmts] using hScoped.1)
+                  (by simpa [UserCallArity.StmtsOk] using hStmtsOk.1)
+                  hSourceScoped.1 hSourceScoped.2 hSafe.2 hScoped.2
+                  hStmtsOk.2
+                  (SourceNamesReserved.stmt_of_cons hReserved)
+                  (SourceNamesReserved.tail_of_cons hReserved)
+                  hAllowed hSupported hWithin hScopeContains
+                  (by
+                    intro sourceFuelRec reservedRec layoutRec kontsRec ctxRec
+                      compileFuelRec sourceStmtsRec allowedRec canBreakRec
+                      canContinueRec canLeaveRec hFuelRec hSafeRec hScopedRec
+                      hStmtsOkRec hSourceScopedRec hReservedRec hAllowedRec
+                      hSupportedRec hWithinRec hScopeContainsRec
+                    exact
+                      ih
+                        (by
+                          intro tailFuel' reserved' layout' konts' ctx'
+                            head' rest' allowed' canBreak' canContinue'
+                            canLeave' hFuel'
+                          exact
+                            hCons
+                              (tailFuel := tailFuel') (reserved := reserved')
+                              (layout := layout') (konts := konts')
+                              (ctx := ctx') (head := head') (rest := rest')
+                              (allowed := allowed') (canBreak := canBreak')
+                              (canContinue := canContinue')
+                              (canLeave := canLeave')
+                              (Nat.le_trans hFuel' (Nat.le_succ bound)))
+                        (sourceFuel := sourceFuelRec) (reserved := reservedRec)
+                        (layout := layoutRec) (konts := kontsRec)
+                        (ctx := ctxRec) (compileFuel := compileFuelRec)
+                        (sourceStmts := sourceStmtsRec)
+                        (allowed := allowedRec) (canBreak := canBreakRec)
+                        (canContinue := canContinueRec)
+                        (canLeave := canLeaveRec)
+                        (Nat.le_trans hFuelRec hTailFuel) hSafeRec
+                        hScopedRec hStmtsOkRec hSourceScopedRec hReservedRec
+                        hAllowedRec hSupportedRec hWithinRec
+                        hScopeContainsRec)
+                  (compileFuel := compileFuel)) hCovers hLower
 
 /--
 Typed-continuation open finite-path sequence induction from a one-head
