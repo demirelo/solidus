@@ -68440,6 +68440,52 @@ def SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx
           generatedBody targetFuel compiler)
 
 /--
+Normalized source loop continuations at fuel zero cannot satisfy the admitted
+open result boundary.
+
+This is the normalized counterpart of the imported low-fuel helper below. It is
+needed for the public imported fuel-3 edge, where the three structural `.For`
+ticks expose `runLoopSource 0`.
+-/
+theorem SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx.zero
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {lowerPost generatedBody : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx 0 cond post body
+      codeOverride lowerPost generatedBody allowed := by
+  intro source compiler trace sourceDone _hInitial hResolve hAllowed
+    _hResponses _minimumTargetFuel
+  have hResolveDone :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.done (.error (.OutOfFuel : Exception)))
+        trace sourceDone := by
+    simpa [runLoopSource, OpenExternal.YulOpen.eval,
+      OpenExternal.YulOpen.headResult, OpenExternal.YulOpen.evalValues,
+      OpenExternal.YulOpenResult.toOpenResult,
+      OpenExternal.YulOpenResult.bind,
+      OpenExternal.YulOpenResult.error] using hResolve
+  cases hResolveDone
+  have hOutOfFuelRelatable :
+      SourceResultRelatable (.error (.OutOfFuel : Exception)) :=
+    hAllowedRelatable (hAllowed (by simp [SourceResultNotRegularOk]))
+  have hFalse :
+      SourceResultRelatable (.error (.OutOfFuel : Exception)) → False := by
+    intro hRelatable
+    simpa [SourceResultRelatable] using hRelatable
+  exact False.elim (hFalse hOutOfFuelRelatable)
+
+/--
 Low-fuel source loop continuations cannot be selected by the public open
 frontier's allowed-result filter.
 
@@ -220249,6 +220295,50 @@ theorem callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_of_runLoop
       (allowed := allowed)
       (hRunLoop hSafe hScoped hOk hSourceScoped hReserved hCovers
         hCondLower hPostLower hBodyLower hAllowed hSupported hScopeContains)
+
+/--
+Finite-path generated loop-continuation frontier at imported source fuel three.
+
+After the three imported `.For` structural ticks, this is exactly normalized
+`runLoopSource 0`, which cannot produce an admitted relatable result.
+-/
+theorem callOpenLoopContinuationPathLoweringFrontierAt_three
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel revertRel
+      prim yulProgram program 3 := by
+  exact
+    callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_of_runLoopSource
+      (cfg := cfg) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (yulProgram := yulProgram) (program := program)
+      (bound := 0)
+      (by
+        intro headCompileFuel reserved layout outcomeLayout ctx allowed
+          canBreak canContinue canLeave cond post body freshState
+          freshStateAfterCond freshStateAfterPost freshState' preCond
+          lowerCond lowerPost lowerBody _hSafe _hScoped _hOk
+          _hSourceScoped _hReserved _hCovers _hCondLower _hPostLower
+          _hBodyLower hAllowedRelatable _hSupported _hScopeContains
+        exact
+          SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx.zero
+            (cfg := cfg) (layout := layout)
+            (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+            (revertRel := revertRel) (prim := prim) (program := program)
+            (ctx := ctx) (cond := cond) (post := post) (body := body)
+            (codeOverride := some yulProgram.contract)
+            (lowerPost := lowerPost)
+            (generatedBody :=
+              { stmts :=
+                  preCond ++
+                    [Functions.Stmt.if_
+                      (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                      { stmts := [Functions.Stmt.brk] }] ++
+                    lowerBody.stmts })
+            (allowed := allowed) hAllowedRelatable)
 
 /--
 Open CALL-safe sequence frontier at source fuel zero.
