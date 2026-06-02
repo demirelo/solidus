@@ -166740,10 +166740,9 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
 /--
 Combined one-head dispatcher for the open CALL finite-path frontier.
 
-This is the current reusable frontier for the successor case: structural heads,
+This is the reusable frontier for the successor case: structural heads,
 single-result expression heads, expression statements, and loop heads are
-discharged by proved wrappers. Only the final unknown fallback stays with
-`hOther`.
+discharged by proved wrappers, with no unknown fallback branch.
 -/
 theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_single_expr_dispatch_of_programCALL_recursive
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
@@ -166839,90 +166838,132 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
           sourceResult)
-    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
-    (hOther :
-      ∀ {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout terminalRel revertRel prim program ctx
-          tailFuel.succ compileFuel (head :: rest) (some yulProgram.contract)
-          allowed) :
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout terminalRel revertRel prim program ctx
         tailFuel.succ compileFuel (head :: rest) (some yulProgram.contract)
-        allowed :=
-  checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_dispatch_of_programCALL_recursive
-    (cfg := cfg) (reserved := reserved) (layout := layout)
-    (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
-    (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
-    (program := program) (tailFuel := tailFuel) (ctx := ctx)
-    (head := head) (rest := rest) (allowed := allowed)
-    (canBreak := canBreak) (canContinue := canContinue)
-    (canLeave := canLeave) context hBodyFuelAdequate hRec hPrim hSafeHead
-    hScopedHead hStmtOkHead hSourceScopedHead hTailScoped hSafeTail
-    hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed hSupported
-    hScopeContains
-    (by
-      cases head with
-      | Let names value? =>
-          exact
-            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_dispatch_of_programCALL_recursive
-              (cfg := cfg) (reserved := reserved) (layout := layout)
-              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
-              (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
-              (program := program) (tailFuel := tailFuel) (ctx := ctx)
-              (names := names) (value? := value?) (rest := rest)
-              (allowed := allowed) (canBreak := canBreak)
-              (canContinue := canContinue) (canLeave := canLeave)
-              context hBodyFuelAdequate hRec hPrim hSafeHead hStmtOkHead
-              hSourceScopedHead hTailScoped hSafeTail hScopedTail hStmtOkTail
-              hReservedHead hReservedTail hAllowed hSupported hScopeContains
-      | Assign names sourceExpr =>
-          exact
-            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_dispatch_of_programCALL_recursive
-              (cfg := cfg) (reserved := reserved) (layout := layout)
-              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
-              (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
-              (program := program) (tailFuel := tailFuel) (ctx := ctx)
-              (names := names) (sourceExpr := sourceExpr) (rest := rest)
-              (allowed := allowed) (canBreak := canBreak)
-              (canContinue := canContinue) (canLeave := canLeave)
-              context hBodyFuelAdequate hRec hPrim hSafeHead hStmtOkHead
-              hSourceScopedHead hTailScoped hSafeTail hScopedTail hStmtOkTail
-              hReservedHead hReservedTail hAllowed hSupported hScopeContains
-      | ExprStmtCall expr =>
-          exact
-            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_expr_stmt_dispatch_exhaustive_of_programCALL_recursive
-              (cfg := cfg) (reserved := reserved) (layout := layout)
-              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
-              (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
-              (program := program) (tailFuel := tailFuel) (ctx := ctx)
-              (expr := expr) (rest := rest)
-              (allowed := allowed) (canBreak := canBreak)
-              (canContinue := canContinue) (canLeave := canLeave)
-              context hBodyFuelAdequate hRec hPrim hTerminalOpen hSafeHead
-              hStmtOkHead hSourceScopedHead hTailScoped hSafeTail hScopedTail
-              hStmtOkTail hReservedTail hAllowed hSupported hScopeContains
-      | For cond post body =>
-          exact
-            checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_for_dispatch_of_programCALL_recursive
-              (cfg := cfg) (reserved := reserved) (layout := layout)
-              (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
-              (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
-              (program := program) (tailFuel := tailFuel) (ctx := ctx)
-              (cond := cond) (post := post) (body := body) (rest := rest)
-              (allowed := allowed) (canBreak := canBreak)
-              (canContinue := canContinue) (canLeave := canLeave)
-              context hBodyFuelAdequate hRec hRecKont hLoopRec hPrim
-              hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
-              hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail
-              hAllowed hSupported hScopeContains
-      | Block _ => exact hOther
-      | Switch _ _ _ => exact hOther
-      | If _ _ => exact hOther
-      | Break => exact hOther
-      | Continue => exact hOther
-      | Leave => exact hOther)
+        allowed := by
+  cases head with
+  | Block body =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_block_recursive_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (ctx := ctx) (tailFuel := tailFuel)
+          (body := body) (rest := rest) (allowed := allowed)
+          (canBreak := canBreak) (canContinue := canContinue)
+          (canLeave := canLeave) hSafeHead hScopedHead hStmtOkHead
+          hSourceScopedHead hTailScoped hSafeTail hScopedTail hStmtOkTail
+          hReservedHead hReservedTail hAllowed hSupported hScopeContains hRec
+  | If cond body =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_if_expr_dispatch_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (cond := cond) (body := body) (rest := rest) (allowed := allowed)
+          (canBreak := canBreak) (canContinue := canContinue)
+          (canLeave := canLeave) context hBodyFuelAdequate hRec hPrim
+          hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
+          hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail
+          hAllowed hSupported hScopeContains
+  | Switch scrutinee cases defaultBody =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_switch_expr_dispatch_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (scrutinee := scrutinee) (cases := cases)
+          (defaultBody := defaultBody) (rest := rest) (allowed := allowed)
+          (canBreak := canBreak) (canContinue := canContinue)
+          (canLeave := canLeave) context hBodyFuelAdequate hRec hPrim
+          hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
+          hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail
+          hAllowed hSupported hScopeContains
+  | Break =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_break_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hSupported
+  | Continue =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_continue_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hSupported
+  | Leave =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_leave_reserved_supported
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (tailFuel := tailFuel) (rest := rest)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hSupported
+  | Let names value? =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_let_dispatch_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (names := names) (value? := value?) (rest := rest)
+          (allowed := allowed) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          context hBodyFuelAdequate hRec hPrim hSafeHead hStmtOkHead
+          hSourceScopedHead hTailScoped hSafeTail hScopedTail hStmtOkTail
+          hReservedHead hReservedTail hAllowed hSupported hScopeContains
+  | Assign names sourceExpr =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_assign_dispatch_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (names := names) (sourceExpr := sourceExpr) (rest := rest)
+          (allowed := allowed) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          context hBodyFuelAdequate hRec hPrim hSafeHead hStmtOkHead
+          hSourceScopedHead hTailScoped hSafeTail hScopedTail hStmtOkTail
+          hReservedHead hReservedTail hAllowed hSupported hScopeContains
+  | ExprStmtCall expr =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_expr_stmt_dispatch_exhaustive_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (expr := expr) (rest := rest)
+          (allowed := allowed) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          context hBodyFuelAdequate hRec hPrim hTerminalOpen hSafeHead
+          hStmtOkHead hSourceScopedHead hTailScoped hSafeTail hScopedTail
+          hStmtOkTail hReservedTail hAllowed hSupported hScopeContains
+  | For cond post body =>
+      exact
+        checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_for_dispatch_of_programCALL_recursive
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (yulProgram := yulProgram)
+          (program := program) (tailFuel := tailFuel) (ctx := ctx)
+          (cond := cond) (post := post) (body := body) (rest := rest)
+          (allowed := allowed) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          context hBodyFuelAdequate hRec hRecKont hLoopRec hPrim hSafeHead
+          hScopedHead hStmtOkHead hSourceScopedHead hTailScoped hSafeTail
+          hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed
+          hSupported hScopeContains
 
 theorem sourceArgListPreludeRegularAllCheckedAt_of_recursiveExprDispatcher_reservedBridge_arity
     {cfg : StateRelConfig}
@@ -257773,8 +257814,7 @@ branch wired internally.
 This removes the caller-supplied `hTerminalOpen` parameter for the canonical
 terminal/revert relations: terminal primitive expression statements now use
 the checked post-argument open terminal contract constructed above. The generic
-frontier now installs productive loop heads internally, so only the final
-unknown fallback flows through `hOther`.
+frontier now covers every head constructor directly.
 -/
 theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_single_expr_dispatch_canonical_terminal_of_programCALL_recursive
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
@@ -257833,16 +257873,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
           sourceResult)
-    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
-    (hOther :
-      ∀ {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout
-          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
-          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
-          Locals.Source.PrimitiveSemantics.structured program ctx
-          tailFuel.succ compileFuel (head :: rest) (some yulProgram.contract)
-          allowed) :
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout
@@ -257884,7 +257915,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           hResponses)
     hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
     hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed
-    hSupported hScopeContains hOther
+    hSupported hScopeContains
 
 /--
 Canonical one-head open CALL frontier from exact-fuel recursive frontiers.
@@ -257951,16 +257982,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
       ∀ {sourceResult}, allowed sourceResult →
         SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
           sourceResult)
-    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
-    (hOther :
-      ∀ {compileFuel : Nat},
-        CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
-          reserved layout outcomeLayout
-          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
-          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
-          Locals.Source.PrimitiveSemantics.structured program ctx
-          tailFuel.succ compileFuel (head :: rest) (some yulProgram.contract)
-          allowed) :
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope) :
     ∀ {compileFuel : Nat},
       CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
         reserved layout outcomeLayout
@@ -258025,7 +258047,7 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
           (op := op) hSafePrim hBasic)
     hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped hSafeTail
     hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed hSupported
-    hScopeContains hOther
+    hScopeContains
 
 end CanonicalTerminalOpenFrontier
 
