@@ -73306,6 +73306,334 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_break_of_genera
       (SourceOpenLoopContinuationPathDoneRel.regular hExactLoop)
 
 /--
+Direct nonzero/body-`break` generated loop-continuation branch from the
+expression and typed-body callbacks.
+
+This is the direct `runForLoop` counterpart of the statement-head wrapper:
+it extracts the actual generated guard state from the selected condition path,
+uses the recursive typed-body proof at that state, and then closes the branch
+with the direct generated-body shell above.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_break_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace : OpenExternal.OpenTrace}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace
+        (.ok (.Checkpoint (.Break sharedAfterBody storeAfterBody))))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (condTrace ++ bodyTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ) (shared := sharedAfterCond)
+                (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodyResponses :
+              SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+            OpenExternal.OpenTrace.right_of_append hResponses
+          have hSupportedBodyBreak :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                (.ok (.Checkpoint
+                  (.Break sharedAfterBody storeAfterBody))) := by
+            refine ⟨ctx.scope, ?_, ?_⟩
+            · simpa [Functions.Source.Ctx.withoutLoopControl,
+                Functions.Source.Ctx.withLoopControl] using
+                hCtxExtends.handlersEq.breakScope
+            · intro name hMem
+              exact hScopeContains name
+                (by simpa [SourceModeKontLayouts.block] using hMem)
+          have hBodySupported :
+              ∀ {sourceResult : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourceResult =
+                    (.ok (.Checkpoint
+                      (.Break sharedAfterBody storeAfterBody)) :
+                      Except Exception State) →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourceResult := by
+            intro sourceResult hAllowed
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowed]
+                  exact hSupportedBodyBreak)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_brk
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (sharedAfter := sharedAfterBody)
+                (storeAfter := storeAfterBody)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        (.ok (.Checkpoint
+                          (.Break sharedAfterBody storeAfterBody)) :
+                          Except Exception State))
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hBodySupported)
+                hExactGuard hSourceBody hSupportedBodyBreak hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, compilerAfterBody, ctxAfterBody, hBodyFuel,
+              hTargetBody, hRelBody⟩
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok (Functions.Source.Outcome.brk compilerAfterBody)) := by
+            simpa using
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.brk compilerAfterBody)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace)
+                (.ok (Functions.Source.Outcome.brk compilerAfterBody)) := by
+            simpa [hTraceEq, List.append_assoc] using hGeneratedBodyRaw
+          have hTargetFuelBound :
+              minimumTargetFuel ≤
+                (pre.length + Nat.max rawFuel
+                  (1 + Nat.max bodyFuel 1)).succ := by
+            have hRawLe :
+                rawFuel ≤
+                  pre.length + Nat.max rawFuel
+                    (1 + Nat.max bodyFuel 1) :=
+              Nat.le_add_left_of_le
+                (Nat.le_max_left rawFuel (1 + Nat.max bodyFuel 1))
+            exact
+              Nat.le_trans hRawFuel
+                (Nat.le_trans hRawLe
+                  (Nat.le_succ
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))))
+          exact
+            ⟨(pre.length + Nat.max rawFuel
+                (1 + Nat.max bodyFuel 1)).succ,
+              hTargetFuelBound,
+              sourceOpenLoopContinuationPathRel_generated_nonzero_body_break_of_generated_body
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := bodySeqFuel.succ)
+                (bodyFuel :=
+                  pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                (cond := cond) (post := post) (body := body)
+                (codeOverride := codeOverride) (shared := shared)
+                (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody) (compiler := compiler)
+                (compilerAfterBody := compilerAfterBody)
+                (generatedBody :=
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts })
+                (value := value) (condTrace := condTrace)
+                (bodyTrace := bodyTrace) hResolveValues hNonzero
+                hSourceBody hGeneratedBody hDomainBody hRelBody
+                hResponses⟩
+
+/--
 Selected open path for the nonzero-condition/body-`break` loop branch.
 
 The raw condition path supplies the same nonzero word to source and target.
@@ -74193,6 +74521,787 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_stopping_of_gen
         hNotRegular hOutcome)
 
 /--
+Direct nonzero/body-stopping generated loop-continuation branch from the
+expression and typed-body callbacks.
+
+The selected body result is non-regular and cannot be `break`/`continue`, so
+the typed block relation collapses to the ordinary final outcome relation and
+the direct `runForLoop` shell propagates it unchanged.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_stopping_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond : EvmYul.SharedState .Yul}
+    {store storeAfterCond : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace sourceResult)
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (condTrace ++ bodyTrace) sourceResult)
+    (hBodySupportedEntry :
+      SourceResultModeKontSupported
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope) layout
+        (SourceModeKontLayouts.block layout outcomeLayout) sourceResult)
+    (hBodyRelatableEntry : SourceResultRelatable sourceResult)
+    (hNotRegular : SourceResultNotRegularOk sourceResult)
+    (hNoBreak :
+      ∀ {sharedBreak : EvmYul.SharedState .Yul}
+        {storeBreak : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Break sharedBreak storeBreak)) →
+        False)
+    (hNoContinue :
+      ∀ {sharedContinue : EvmYul.SharedState .Yul}
+        {storeContinue : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Continue sharedContinue storeContinue)) →
+        False)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (condTrace ++ bodyTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodyResponses :
+              SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+            OpenExternal.OpenTrace.right_of_append hResponses
+          have hBodySupportedTarget :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                sourceResult := by
+            exact
+              SourceResultModeKontSupported.of_handler_eq
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctx' := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (sourceResult := sourceResult)
+                hCtxExtends.handlersEq.breakScope
+                hCtxExtends.handlersEq.continueScope
+                hCtxExtends.handlersEq.leaveScope
+                hBodySupportedEntry
+          have hBodySupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourcePre =
+                    sourceResult →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourcePre := by
+            intro sourcePre hAllowed
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowed]
+                  exact hBodySupportedTarget)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (sourceResult := sourceResult)
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        sourceResult)
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          exact hBodyRelatableEntry))
+                  hBodySupported)
+                hExactGuard hSourceBody hBodySupportedTarget hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, bodyOutcome, ctxAfterBody, hBodyFuel, hTargetBody,
+              hBodyKontRel⟩
+          have hBodyOutcomeRel :
+              SourceResultOutcomeRel cfg outcomeLayout terminalRel revertRel
+                sourceResult bodyOutcome :=
+            SourceResultKontOutcomeRel.to_outcome_block_of_not_regular_no_loop
+              (cfg := cfg) (layout := layout)
+              (outcomeLayout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              hBodyKontRel hNotRegular hNoBreak hNoContinue
+          have hBodyMode :
+              bodyOutcome.mode = .leave ∨
+                ∃ kind : Assembly.HaltKind,
+                  bodyOutcome.mode = .halt kind :=
+            SourceResultOutcomeRel.mode_leave_or_halt_of_not_regular_no_loop
+              (cfg := cfg) (layout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              hBodyOutcomeRel hNotRegular hNoBreak hNoContinue
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok
+                  (match bodyOutcome.mode with
+                  | .regular =>
+                      Functions.Source.Outcome.regular
+                        (bodyOutcome.state.restrictTo
+                          (ctx.withoutLoopControl.withLoopControl
+                            ctx.scope ctx.scope).scope)
+                  | .brk | .cont | .leave | .halt _ => bodyOutcome)) := by
+            exact
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome := bodyOutcome)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace) (.ok bodyOutcome) := by
+            have hGeneratedBody' :
+                OpenExternal.OpenResultResolves
+                  (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                    (ctx.withoutLoopControl.withLoopControl
+                      ctx.scope ctx.scope)
+                    { stmts :=
+                        pre ++
+                          [Functions.Stmt.if_
+                            (.prim .iszero
+                              (Locals.ExprSeq.cons lowerCond .nil))
+                            { stmts := [Functions.Stmt.brk] }] ++
+                          lowerBody.stmts }
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))
+                    compiler)
+                  (preTrace ++ (exprTrace ++ bodyTrace))
+                  (.ok bodyOutcome) := by
+              rcases bodyOutcome with ⟨bodyState, bodyMode⟩
+              rcases hBodyMode with hLeave | hHalt
+              · cases bodyMode with
+                | regular => simp at hLeave
+                | brk => simp at hLeave
+                | cont => simp at hLeave
+                | leave =>
+                    simpa [Functions.Source.Outcome.leave,
+                      Locals.Source.Outcome.leave] using hGeneratedBodyRaw
+                | halt kind => simp at hLeave
+              · rcases hHalt with ⟨kind, hHalt⟩
+                cases bodyMode with
+                | regular => simp at hHalt
+                | brk => simp at hHalt
+                | cont => simp at hHalt
+                | leave => simp at hHalt
+                | halt kind' =>
+                    simpa [Functions.Source.Outcome.halt,
+                      Locals.Source.Outcome.halt] using hGeneratedBodyRaw
+            simpa [hTraceEq, List.append_assoc] using hGeneratedBody'
+          have hTargetFuelBound :
+              minimumTargetFuel ≤
+                (pre.length + Nat.max rawFuel
+                  (1 + Nat.max bodyFuel 1)).succ := by
+            have hRawLe :
+                rawFuel ≤
+                  pre.length + Nat.max rawFuel
+                    (1 + Nat.max bodyFuel 1) :=
+              Nat.le_add_left_of_le
+                (Nat.le_max_left rawFuel (1 + Nat.max bodyFuel 1))
+            exact
+              Nat.le_trans hRawFuel
+                (Nat.le_trans hRawLe
+                  (Nat.le_succ
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))))
+          exact
+            ⟨(pre.length + Nat.max rawFuel
+                (1 + Nat.max bodyFuel 1)).succ,
+              hTargetFuelBound,
+              sourceOpenLoopContinuationPathRel_generated_nonzero_body_stopping_of_generated_body
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := bodySeqFuel.succ)
+                (bodyFuel :=
+                  pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                (cond := cond) (post := post) (body := body)
+                (codeOverride := codeOverride) (shared := shared)
+                (store := store) (compiler := compiler)
+                (generatedBody :=
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts })
+                (condTrace := condTrace) (bodyTrace := bodyTrace)
+                (sourceResult := sourceResult) (bodyOutcome := bodyOutcome)
+                hSourceLoop hGeneratedBody hBodyMode hNotRegular
+                (by intro _hAllowed; exact hBodyOutcomeRel) hResponses⟩
+
+/--
+Direct splitter for selected nonzero generated loop-continuation body paths.
+
+The condition has already evaluated to a nonzero singleton. This dispatcher
+consumes the selected `runLoopSourceAfterHead` suffix, closes body error,
+`break`, and `leave` branches through direct `runForLoop` wrappers, and leaves
+only the two post-producing body modes as callbacks.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_split_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond : EvmYul.SharedState .Yul}
+    {store storeAfterCond : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace suffix : OpenExternal.OpenTrace}
+    {sourceDone : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSuffix :
+      OpenExternal.OpenResultResolves
+        (runLoopSourceAfterHead bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store)
+          ((.Ok sharedAfterCond storeAfterCond : State), value))
+        suffix sourceDone)
+    (hAllowed :
+      SourceResultNotRegularOk sourceDone → allowed sourceDone)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hBodyBreakDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Break sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyRegularDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyContinueDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout
+          (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+    (hBodyRegular :
+      ∀ {bodyTrace postSuffix sharedAfterBody storeAfterBody},
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)) →
+        OpenExternal.OpenResultResolves
+          (runLoopSourceAfterBody bodySeqFuel.succ cond post body
+            codeOverride (.Ok shared store)
+            (.Ok sharedAfterBody storeAfterBody))
+          postSuffix sourceDone →
+        SourceOpenTraceResponsesAdmissible cfg
+          ((condTrace ++ bodyTrace) ++ postSuffix) →
+        ∀ minimumTargetFuel,
+          ∃ targetFuel,
+            minimumTargetFuel ≤ targetFuel ∧
+            OpenExternal.OpenResultPathRel
+              (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+              (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+                terminalRel revertRel allowed)
+              ((condTrace ++ bodyTrace) ++ postSuffix)
+              (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                (.Ok shared store))
+              (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+                (ctx.withoutLoopControl)
+                (.lit (EvmYul.UInt256.ofNat 1))
+                (ctx.withoutLoopControl) lowerPost
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                { stmts :=
+                    pre ++
+                      [Functions.Stmt.if_
+                        (.prim .iszero
+                          (Locals.ExprSeq.cons lowerCond .nil))
+                        { stmts := [Functions.Stmt.brk] }] ++
+                      lowerBody.stmts }
+                targetFuel compiler))
+    (hBodyContinue :
+      ∀ {bodyTrace postSuffix sharedAfterBody storeAfterBody},
+        StateStoreDomainExact layout
+          (.Checkpoint (.Continue sharedAfterBody storeAfterBody)) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))) →
+        OpenExternal.OpenResultResolves
+          (runLoopSourceAfterBody bodySeqFuel.succ cond post body
+            codeOverride (.Ok shared store)
+            (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+          postSuffix sourceDone →
+        SourceOpenTraceResponsesAdmissible cfg
+          ((condTrace ++ bodyTrace) ++ postSuffix) →
+        ∀ minimumTargetFuel,
+          ∃ targetFuel,
+            minimumTargetFuel ≤ targetFuel ∧
+            OpenExternal.OpenResultPathRel
+              (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+              (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+                terminalRel revertRel allowed)
+              ((condTrace ++ bodyTrace) ++ postSuffix)
+              (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                (.Ok shared store))
+              (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+                (ctx.withoutLoopControl)
+                (.lit (EvmYul.UInt256.ofNat 1))
+                (ctx.withoutLoopControl) lowerPost
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                { stmts :=
+                    pre ++
+                      [Functions.Stmt.if_
+                        (.prim .iszero
+                          (Locals.ExprSeq.cons lowerCond .nil))
+                        { stmts := [Functions.Stmt.brk] }] ++
+                      lowerBody.stmts }
+                targetFuel compiler))
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg (condTrace ++ suffix)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (condTrace ++ suffix)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  rcases
+      runLoopSourceAfterHead_nonzero_resolves_inv_body
+        (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride)
+        (source := (.Ok shared store : State))
+        (condState := (.Ok sharedAfterCond storeAfterCond : State))
+        (value := value) hNonzero hSuffix with
+    hBodyError | hBodyOk
+  · rcases hBodyError with ⟨err, hSourceBody, hDone⟩
+    subst sourceDone
+    have hSourceLoop :
+        OpenExternal.OpenResultResolves
+          (runLoopSource bodySeqFuel.succ cond post body codeOverride
+            (.Ok shared store))
+          (condTrace ++ suffix) (.error err) :=
+      runLoopSource_resolves_body_error_of_evalValues_nonzero
+        (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (shared := shared)
+        (sharedAfterCond := sharedAfterCond) (store := store)
+        (storeAfterCond := storeAfterCond) (value := value)
+        (trace := condTrace) (bodyTrace := suffix)
+        hResolveValues hNonzero hSourceBody
+    exact
+      sourceRunLoopContinuationPathSound_generated_nonzero_body_stopping_of_callbacks
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (allowed := allowed) (prim := prim) (program := program)
+        (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+        (minimumTargetFuel := minimumTargetFuel)
+        (cond := cond) (post := post) (body := body)
+        (codeOverride := codeOverride) (shared := shared)
+        (sharedAfterCond := sharedAfterCond) (store := store)
+        (storeAfterCond := storeAfterCond) (compiler := compiler)
+        (pre := pre) (lowerCond := lowerCond) (lowerPost := lowerPost)
+        (lowerBody := lowerBody) (value := value)
+        (condTrace := condTrace) (bodyTrace := suffix)
+        (sourceResult := (.error err)) hScopeContains hCondOpen hBodySound
+        hPrim hInitial hResolveValues hNonzero hDomainCond hSourceBody
+        hSourceLoop
+        (by simp [SourceResultModeKontSupported])
+        (hAllowedRelatable (hAllowed (by simp [SourceResultNotRegularOk])))
+        (by simp [SourceResultNotRegularOk])
+        (by intro sharedBreak storeBreak hEq; cases hEq)
+        (by intro sharedContinue storeContinue hEq; cases hEq)
+        hResponses
+  · rcases hBodyOk with
+      ⟨bodyTrace, postSuffix, bodyResult, hTrace, hSourceBody, hAfterBody⟩
+    subst suffix
+    cases bodyResult with
+    | OutOfFuel =>
+        exact False.elim
+          (runLoopSourceAfterBody_outOfFuel_resolves_false_of_allowed_relatable
+            (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+            (body := body) (codeOverride := codeOverride)
+            (shared := shared) (store := store) (trace := postSuffix)
+            (sourceDone := sourceDone) hAfterBody hAllowed
+            hAllowedRelatable)
+    | Ok sharedAfterBody storeAfterBody =>
+        simpa [List.append_assoc] using
+          hBodyRegular
+            (hBodyRegularDomain hSourceBody)
+            hSourceBody hAfterBody
+            (by simpa [List.append_assoc] using hResponses)
+            minimumTargetFuel
+    | Checkpoint jump =>
+        cases jump with
+        | Continue sharedAfterBody storeAfterBody =>
+            simpa [List.append_assoc] using
+              hBodyContinue
+                (hBodyContinueDomain hSourceBody)
+                hSourceBody hAfterBody
+                (by simpa [List.append_assoc] using hResponses)
+                minimumTargetFuel
+        | Break sharedAfterBody storeAfterBody =>
+            rcases runLoopSourceAfterBody_break_resolves_inv hAfterBody with
+              ⟨hPostSuffix, hDone⟩
+            subst postSuffix
+            subst sourceDone
+            have hResponsesBody :
+                SourceOpenTraceResponsesAdmissible cfg
+                  (condTrace ++ bodyTrace) := by
+              simpa [List.append_assoc] using hResponses
+            simpa using
+              sourceRunLoopContinuationPathSound_generated_nonzero_body_break_of_callbacks
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+                (minimumTargetFuel := minimumTargetFuel)
+                (cond := cond) (post := post) (body := body)
+                (codeOverride := codeOverride) (shared := shared)
+                (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody) (compiler := compiler)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerPost := lowerPost) (lowerBody := lowerBody)
+                (value := value) (condTrace := condTrace)
+                (bodyTrace := bodyTrace) hScopeContains hCondOpen hBodySound
+                hPrim hInitial hResolveValues hNonzero hDomainCond
+                hSourceBody (hBodyBreakDomain hSourceBody) hResponsesBody
+        | Leave sharedAfterBody storeAfterBody =>
+            rcases runLoopSourceAfterBody_leave_resolves_inv hAfterBody with
+              ⟨hPostSuffix, hDone⟩
+            subst postSuffix
+            subst sourceDone
+            have hSourceLoop :
+                OpenExternal.OpenResultResolves
+                  (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                    (.Ok shared store))
+                  (condTrace ++ bodyTrace)
+                  (.ok (.Checkpoint (.Leave sharedAfterBody storeAfterBody))) :=
+              runLoopSource_resolves_body_leave_of_evalValues_nonzero
+                (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+                (body := body) (codeOverride := codeOverride)
+                (shared := shared) (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody) (value := value)
+                (trace := condTrace) (bodyTrace := bodyTrace)
+                hResolveValues hNonzero hSourceBody
+            have hResponsesBody :
+                SourceOpenTraceResponsesAdmissible cfg
+                  (condTrace ++ bodyTrace) := by
+              simpa [List.append_assoc] using hResponses
+            simpa using
+              sourceRunLoopContinuationPathSound_generated_nonzero_body_stopping_of_callbacks
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+                (minimumTargetFuel := minimumTargetFuel)
+                (cond := cond) (post := post) (body := body)
+                (codeOverride := codeOverride) (shared := shared)
+                (sharedAfterCond := sharedAfterCond) (store := store)
+                (storeAfterCond := storeAfterCond) (compiler := compiler)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerPost := lowerPost) (lowerBody := lowerBody)
+                (value := value) (condTrace := condTrace)
+                (bodyTrace := bodyTrace)
+                (sourceResult :=
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterBody storeAfterBody)) :
+                    Except Exception State))
+                hScopeContains hCondOpen hBodySound hPrim hInitial
+                hResolveValues hNonzero hDomainCond hSourceBody hSourceLoop
+                (SourceResultModeKontSupported.block_loop_of_outcome_supported_not_regular_no_loop
+                  (ctx := ctx) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (sourceResult :=
+                    (.ok (.Checkpoint
+                      (.Leave sharedAfterBody storeAfterBody)) :
+                      Except Exception State))
+                  (hSupported (hAllowed
+                    (by simp [SourceResultNotRegularOk,
+                      EvmYul.Yul.State.overwrite?])))
+                  (by simp [SourceResultNotRegularOk,
+                    EvmYul.Yul.State.overwrite?])
+                  (by intro sharedBreak storeBreak hEq; cases hEq)
+                  (by intro sharedContinue storeContinue hEq; cases hEq))
+                (by simp [SourceResultRelatable])
+                (by simp [SourceResultNotRegularOk,
+                  EvmYul.Yul.State.overwrite?])
+                (by intro sharedBreak storeBreak hEq; cases hEq)
+                (by intro sharedContinue storeContinue hEq; cases hEq)
+                hResponsesBody
+
+/--
 Direct generated `runForLoop` post-stopping branch once both the generated body
 and generated post paths have already been selected.
 
@@ -74279,6 +75388,959 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_stopping_o
       hSourceLoop hTargetLoop hResponses
       (SourceOpenLoopContinuationPathDoneRel.stopping
         hNotRegular hOutcome)
+
+/--
+Direct nonzero/body-regular/post-stopping generated loop-continuation branch
+from callbacks.
+
+The selected body finishes regularly, the selected post leaves or halts, and
+the direct `runForLoop` shell propagates the post outcome without routing
+through the outer statement-level `for_` wrapper.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_stopping_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postTrace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hSourcePost :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+            codeOverride (.Ok sharedAfterBody storeAfterBody)))
+        postTrace sourceResult)
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        ((condTrace ++ bodyTrace) ++ postTrace) sourceResult)
+    (hPostSupportedEntry :
+      SourceResultOutcomeLayoutSupported (ctx.withoutLoopControl) layout
+        outcomeLayout sourceResult)
+    (hPostRelatableEntry : SourceResultRelatable sourceResult)
+    (hNotRegular : SourceResultNotRegularOk sourceResult)
+    (hNoBreak :
+      ∀ {sharedBreak : EvmYul.SharedState .Yul}
+        {storeBreak : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Break sharedBreak storeBreak)) →
+        False)
+    (hNoContinue :
+      ∀ {sharedContinue : EvmYul.SharedState .Yul}
+        {storeContinue : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Continue sharedContinue storeContinue)) →
+        False)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        ((condTrace ++ bodyTrace) ++ postTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hCondBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace) :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hCondBodyResponses
+  have hBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+    OpenExternal.OpenTrace.right_of_append hCondBodyResponses
+  have hPostResponses :
+      SourceOpenTraceResponsesAdmissible cfg postTrace :=
+    OpenExternal.OpenTrace.right_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodySupportedTarget :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                (.ok (.Ok sharedAfterBody storeAfterBody)) :=
+            SourceResultModeKontSupported.block_regular
+          have hBodySupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourcePre =
+                    (.ok (.Ok sharedAfterBody storeAfterBody) :
+                      Except Exception State) →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourcePre := by
+            intro sourcePre hAllowedBody
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowedBody]
+                  exact hBodySupportedTarget)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (sourceResult :=
+                  (.ok (.Ok sharedAfterBody storeAfterBody) :
+                    Except Exception State))
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        (.ok (.Ok sharedAfterBody storeAfterBody) :
+                          Except Exception State))
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hBodySupported)
+                hExactGuard hSourceBody hBodySupportedTarget hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, bodyOutcome, ctxAfterBody, hBodyFuel, hTargetBody,
+              hBodyKontRel⟩
+          rcases
+              SourceResultKontOutcomeRel.ok_regular_parts hBodyKontRel with
+            ⟨compilerAfterBody, hBodyOutcomeEq, hRelBody⟩
+          subst bodyOutcome
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterBody.restrictTo
+                      (ctx.withoutLoopControl.withLoopControl
+                        ctx.scope ctx.scope).scope))) := by
+            simpa [Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular] using
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.regular compilerAfterBody)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace)
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterBody.restrictTo ctx.scope))) := by
+            simpa [hTraceEq, List.append_assoc,
+              Functions.Source.Ctx.withoutLoopControl,
+              Functions.Source.Ctx.withLoopControl] using hGeneratedBodyRaw
+          have hRelBodyScoped :
+              SourceStateRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody)
+                (compilerAfterBody.restrictTo ctx.scope) :=
+            SourceStateRel.restrictCompilerTo_of_subset hRelBody
+              hScopeContains
+          have hExactPost :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody)
+                (compilerAfterBody.restrictTo ctx.scope) :=
+            SourceStateExactRel.ofRelStateDomain hRelBodyScoped hDomainBody
+          have hPostScope :
+              ∀ name : Name, name ∈ layout →
+                name ∈ (ctx.withoutLoopControl).scope := by
+            intro name hMem
+            simpa [Functions.Source.Ctx.withoutLoopControl] using
+              hScopeContains name hMem
+          have hPostSupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterBody sourcePre =
+                    sourceResult →
+                  SourceResultOutcomeLayoutSupported
+                    (ctx.withoutLoopControl) layout outcomeLayout
+                    sourcePre := by
+            intro sourcePre hAllowedPost
+            exact
+              SourceResultOutcomeLayoutSupported.of_restrictStoreTo
+                (ctx := ctx.withoutLoopControl) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (scope := storeAfterBody)
+                (by
+                  rw [hAllowedPost]
+                  exact hPostSupportedEntry)
+          rcases
+              sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program)
+                (ctx := ctx.withoutLoopControl)
+                (sourceFuel := bodySeqFuel) (sourceStmts := post)
+                (codeOverride := codeOverride) (lowerBlock := lowerPost)
+                (shared := sharedAfterBody) (store := storeAfterBody)
+                (compiler := compilerAfterBody.restrictTo ctx.scope)
+                (trace := postTrace) (sourceResult := sourceResult)
+                (hPostSound
+                  (allowedPost :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterBody result =
+                        sourceResult)
+                  hPostScope (SourceCtxHandlersEq.refl _)
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterBody)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterBody sourcePre)
+                          rw [hEq]
+                          exact hPostRelatableEntry))
+                  hPostSupported)
+                hExactPost hSourcePost hPostSupportedEntry hPostResponses
+                minimumTargetFuel with
+            ⟨postFuel, postOutcome, ctxAfterPost, hPostFuel, hTargetPostOpen,
+              hPostOutcomeRel⟩
+          have hPostMode :
+              postOutcome.mode = .leave ∨
+                ∃ kind : Assembly.HaltKind,
+                  postOutcome.mode = .halt kind :=
+            SourceResultOutcomeRel.mode_leave_or_halt_of_not_regular_no_loop
+              (cfg := cfg) (layout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              hPostOutcomeRel hNotRegular hNoBreak hNoContinue
+          have hTargetPost :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  (compilerAfterBody.restrictTo ctx.scope))
+                postTrace (.ok postOutcome) :=
+            compilerOpen_block_runScoped_resolves_leave_or_halt_of_runOpen_resolves
+              (prim := prim) (program := program)
+              (ctx := ctx.withoutLoopControl) (ctxAfter := ctxAfterPost)
+              (block := lowerPost) (fuel := postFuel)
+              (state := compilerAfterBody.restrictTo ctx.scope)
+              (outcome := postOutcome) (trace := postTrace)
+              hPostMode hTargetPostOpen
+          have hTargetFuelBound :
+              minimumTargetFuel ≤
+                (Nat.max
+                  (pre.length + Nat.max rawFuel
+                    (1 + Nat.max bodyFuel 1))
+                  postFuel).succ := by
+            have hRawLe :
+                rawFuel ≤
+                  Nat.max
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))
+                    postFuel := by
+              exact
+                Nat.le_trans
+                  (Nat.le_add_left_of_le
+                    (Nat.le_max_left rawFuel
+                      (1 + Nat.max bodyFuel 1)))
+                  (Nat.le_max_left _ _)
+            exact
+              Nat.le_trans hRawFuel
+                (Nat.le_trans hRawLe
+                  (Nat.le_succ
+                    (Nat.max
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      postFuel)))
+          exact
+            ⟨(Nat.max
+                (pre.length + Nat.max rawFuel
+                  (1 + Nat.max bodyFuel 1))
+                postFuel).succ,
+              hTargetFuelBound,
+              sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_stopping_of_generated_paths
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := bodySeqFuel.succ)
+                (bodyFuel :=
+                  pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                (postFuel := postFuel) (cond := cond) (post := post)
+                (body := body) (codeOverride := codeOverride)
+                (shared := shared) (store := store) (compiler := compiler)
+                (lowerPost := lowerPost)
+                (generatedBody :=
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts })
+                (condTrace := condTrace) (bodyTrace := bodyTrace)
+                (postTrace := postTrace) (sourceResult := sourceResult)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.regular
+                    (compilerAfterBody.restrictTo ctx.scope))
+                (postOutcome := postOutcome) hSourceLoop hGeneratedBody
+                (Or.inl rfl) hTargetPost hPostMode hNotRegular
+                (by intro _hAllowed; exact hPostOutcomeRel) hResponses⟩
+
+/--
+Direct nonzero/body-continue/post-stopping generated loop-continuation branch
+from callbacks.
+
+This is the `continue` sibling of the regular-body wrapper: the typed body
+proof produces a continue outcome, the generated post runs from that revived
+body state, and a selected post leave/halt escapes the direct loop shell.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_stopping_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postTrace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace
+        (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hSourcePost :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+            codeOverride (.Ok sharedAfterBody storeAfterBody)))
+        postTrace sourceResult)
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        ((condTrace ++ bodyTrace) ++ postTrace) sourceResult)
+    (hPostSupportedEntry :
+      SourceResultOutcomeLayoutSupported (ctx.withoutLoopControl) layout
+        outcomeLayout sourceResult)
+    (hPostRelatableEntry : SourceResultRelatable sourceResult)
+    (hNotRegular : SourceResultNotRegularOk sourceResult)
+    (hNoBreak :
+      ∀ {sharedBreak : EvmYul.SharedState .Yul}
+        {storeBreak : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Break sharedBreak storeBreak)) →
+        False)
+    (hNoContinue :
+      ∀ {sharedContinue : EvmYul.SharedState .Yul}
+        {storeContinue : EvmYul.Yul.VarStore},
+        sourceResult =
+          .ok (.Checkpoint (.Continue sharedContinue storeContinue)) →
+        False)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        ((condTrace ++ bodyTrace) ++ postTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hCondBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace) :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hCondBodyResponses
+  have hBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+    OpenExternal.OpenTrace.right_of_append hCondBodyResponses
+  have hPostResponses :
+      SourceOpenTraceResponsesAdmissible cfg postTrace :=
+    OpenExternal.OpenTrace.right_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodySupportedTarget :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                (.ok (.Checkpoint
+                  (.Continue sharedAfterBody storeAfterBody))) :=
+            SourceResultModeKontSupported.block_continue_of_loop_handlers
+              (ctx := ctx) (ctxAfter := target.ctx)
+              (layout := layout) (outcomeLayout := outcomeLayout)
+              hCtxExtends.handlersEq hScopeContains
+          have hBodySupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourcePre =
+                    (.ok (.Checkpoint
+                      (.Continue sharedAfterBody storeAfterBody)) :
+                      Except Exception State) →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourcePre := by
+            intro sourcePre hAllowedBody
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowedBody]
+                  exact hBodySupportedTarget)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (sourceResult :=
+                  (.ok (.Checkpoint
+                    (.Continue sharedAfterBody storeAfterBody)) :
+                    Except Exception State))
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        (.ok (.Checkpoint
+                          (.Continue sharedAfterBody storeAfterBody)) :
+                          Except Exception State))
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hBodySupported)
+                hExactGuard hSourceBody hBodySupportedTarget hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, bodyOutcome, ctxAfterBody, hBodyFuel, hTargetBody,
+              hBodyKontRel⟩
+          rcases
+              SourceResultKontOutcomeRel.ok_continue_parts hBodyKontRel with
+            ⟨compilerAfterBody, hBodyOutcomeEq, hRelBody⟩
+          subst bodyOutcome
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok (Functions.Source.Outcome.cont compilerAfterBody)) := by
+            simpa [Functions.Source.Outcome.cont,
+              Locals.Source.Outcome.cont] using
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.cont compilerAfterBody)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace)
+                (.ok (Functions.Source.Outcome.cont compilerAfterBody)) := by
+            simpa [hTraceEq, List.append_assoc] using hGeneratedBodyRaw
+          have hExactPost :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody) compilerAfterBody :=
+            SourceStateExactRel.ofRelStateDomain hRelBody hDomainBody
+          have hPostScope :
+              ∀ name : Name, name ∈ layout →
+                name ∈ (ctx.withoutLoopControl).scope := by
+            intro name hMem
+            simpa [Functions.Source.Ctx.withoutLoopControl] using
+              hScopeContains name hMem
+          have hPostSupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterBody sourcePre =
+                    sourceResult →
+                  SourceResultOutcomeLayoutSupported
+                    (ctx.withoutLoopControl) layout outcomeLayout
+                    sourcePre := by
+            intro sourcePre hAllowedPost
+            exact
+              SourceResultOutcomeLayoutSupported.of_restrictStoreTo
+                (ctx := ctx.withoutLoopControl) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (scope := storeAfterBody)
+                (by
+                  rw [hAllowedPost]
+                  exact hPostSupportedEntry)
+          rcases
+              sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program)
+                (ctx := ctx.withoutLoopControl)
+                (sourceFuel := bodySeqFuel) (sourceStmts := post)
+                (codeOverride := codeOverride) (lowerBlock := lowerPost)
+                (shared := sharedAfterBody) (store := storeAfterBody)
+                (compiler := compilerAfterBody)
+                (trace := postTrace) (sourceResult := sourceResult)
+                (hPostSound
+                  (allowedPost :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterBody result =
+                        sourceResult)
+                  hPostScope (SourceCtxHandlersEq.refl _)
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterBody)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterBody sourcePre)
+                          rw [hEq]
+                          exact hPostRelatableEntry))
+                  hPostSupported)
+                hExactPost hSourcePost hPostSupportedEntry hPostResponses
+                minimumTargetFuel with
+            ⟨postFuel, postOutcome, ctxAfterPost, hPostFuel, hTargetPostOpen,
+              hPostOutcomeRel⟩
+          have hPostMode :
+              postOutcome.mode = .leave ∨
+                ∃ kind : Assembly.HaltKind,
+                  postOutcome.mode = .halt kind :=
+            SourceResultOutcomeRel.mode_leave_or_halt_of_not_regular_no_loop
+              (cfg := cfg) (layout := outcomeLayout)
+              (terminalRel := terminalRel) (revertRel := revertRel)
+              hPostOutcomeRel hNotRegular hNoBreak hNoContinue
+          have hTargetPost :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  compilerAfterBody)
+                postTrace (.ok postOutcome) :=
+            compilerOpen_block_runScoped_resolves_leave_or_halt_of_runOpen_resolves
+              (prim := prim) (program := program)
+              (ctx := ctx.withoutLoopControl) (ctxAfter := ctxAfterPost)
+              (block := lowerPost) (fuel := postFuel)
+              (state := compilerAfterBody)
+              (outcome := postOutcome) (trace := postTrace)
+              hPostMode hTargetPostOpen
+          have hTargetFuelBound :
+              minimumTargetFuel ≤
+                (Nat.max
+                  (pre.length + Nat.max rawFuel
+                    (1 + Nat.max bodyFuel 1))
+                  postFuel).succ := by
+            have hRawLe :
+                rawFuel ≤
+                  Nat.max
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))
+                    postFuel := by
+              exact
+                Nat.le_trans
+                  (Nat.le_add_left_of_le
+                    (Nat.le_max_left rawFuel
+                      (1 + Nat.max bodyFuel 1)))
+                  (Nat.le_max_left _ _)
+            exact
+              Nat.le_trans hRawFuel
+                (Nat.le_trans hRawLe
+                  (Nat.le_succ
+                    (Nat.max
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      postFuel)))
+          exact
+            ⟨(Nat.max
+                (pre.length + Nat.max rawFuel
+                  (1 + Nat.max bodyFuel 1))
+                postFuel).succ,
+              hTargetFuelBound,
+              sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_stopping_of_generated_paths
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (sourceFuel := bodySeqFuel.succ)
+                (bodyFuel :=
+                  pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                (postFuel := postFuel) (cond := cond) (post := post)
+                (body := body) (codeOverride := codeOverride)
+                (shared := shared) (store := store) (compiler := compiler)
+                (lowerPost := lowerPost)
+                (generatedBody :=
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts })
+                (condTrace := condTrace) (bodyTrace := bodyTrace)
+                (postTrace := postTrace) (sourceResult := sourceResult)
+                (bodyOutcome := Functions.Source.Outcome.cont compilerAfterBody)
+                (postOutcome := postOutcome) hSourceLoop hGeneratedBody
+                (Or.inr rfl) hTargetPost hPostMode hNotRegular
+                (by intro _hAllowed; exact hPostOutcomeRel) hResponses⟩
 
 /--
 Direct generated `runForLoop` post-regular recursive branch once the generated
@@ -74387,6 +76449,1084 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_regular_lo
   exact
     SourceOpenLoopContinuationPathDoneRel.pathRel_of_resolves
       hSourceLoop hTargetLoopTrace hResponses hDone
+
+/--
+Direct nonzero/body-regular/post-regular recursive branch from callbacks.
+
+The body and post target paths are selected from the recursive sequence
+callbacks.  Once the post is regular, the inner direct loop-continuation
+callback supplies the remaining finite path.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_regular_loop_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody sharedAfterPost :
+      EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody storeAfterPost :
+      EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postTrace loopTrace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hSourcePost :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+            codeOverride (.Ok sharedAfterBody storeAfterBody)))
+        postTrace (.ok (.Ok sharedAfterPost storeAfterPost)))
+    (hDomainPost :
+      StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace) sourceResult)
+    (hSourceInnerLoop :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.For cond post body)
+            codeOverride (.Ok sharedAfterPost storeAfterPost)))
+        loopTrace sourceResult)
+    (hAllowed :
+      SourceResultNotRegularOk sourceResult → allowed sourceResult)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hPrefixResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postTrace) :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  have hCondBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace) :=
+    OpenExternal.OpenTrace.left_of_append hPrefixResponses
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hCondBodyResponses
+  have hBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+    OpenExternal.OpenTrace.right_of_append hCondBodyResponses
+  have hPostResponses :
+      SourceOpenTraceResponsesAdmissible cfg postTrace :=
+    OpenExternal.OpenTrace.right_of_append hPrefixResponses
+  have hLoopResponses :
+      SourceOpenTraceResponsesAdmissible cfg loopTrace :=
+    OpenExternal.OpenTrace.right_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodySupportedTarget :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                (.ok (.Ok sharedAfterBody storeAfterBody)) :=
+            SourceResultModeKontSupported.block_regular
+          have hBodySupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourcePre =
+                    (.ok (.Ok sharedAfterBody storeAfterBody) :
+                      Except Exception State) →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourcePre := by
+            intro sourcePre hAllowedBody
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowedBody]
+                  exact hBodySupportedTarget)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (sourceResult :=
+                  (.ok (.Ok sharedAfterBody storeAfterBody) :
+                    Except Exception State))
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        (.ok (.Ok sharedAfterBody storeAfterBody) :
+                          Except Exception State))
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hBodySupported)
+                hExactGuard hSourceBody hBodySupportedTarget hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, bodyOutcome, ctxAfterBody, hBodyFuel, hTargetBody,
+              hBodyKontRel⟩
+          rcases
+              SourceResultKontOutcomeRel.ok_regular_parts hBodyKontRel with
+            ⟨compilerAfterBody, hBodyOutcomeEq, hRelBody⟩
+          subst bodyOutcome
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterBody.restrictTo
+                      (ctx.withoutLoopControl.withLoopControl
+                        ctx.scope ctx.scope).scope))) := by
+            simpa [Functions.Source.Outcome.regular,
+              Locals.Source.Outcome.regular] using
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.regular compilerAfterBody)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace)
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterBody.restrictTo ctx.scope))) := by
+            simpa [hTraceEq, List.append_assoc,
+              Functions.Source.Ctx.withoutLoopControl,
+              Functions.Source.Ctx.withLoopControl] using hGeneratedBodyRaw
+          have hRelBodyScoped :
+              SourceStateRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody)
+                (compilerAfterBody.restrictTo ctx.scope) :=
+            SourceStateRel.restrictCompilerTo_of_subset hRelBody
+              hScopeContains
+          have hExactPost :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody)
+                (compilerAfterBody.restrictTo ctx.scope) :=
+            SourceStateExactRel.ofRelStateDomain hRelBodyScoped hDomainBody
+          have hPostScope :
+              ∀ name : Name, name ∈ layout →
+                name ∈ (ctx.withoutLoopControl).scope := by
+            intro name hMem
+            simpa [Functions.Source.Ctx.withoutLoopControl] using
+              hScopeContains name hMem
+          have hPostSupportedTarget :
+              SourceResultOutcomeLayoutSupported (ctx.withoutLoopControl)
+                layout layout (.ok (.Ok sharedAfterPost storeAfterPost)) := by
+            intro name hMem
+            exact hMem
+          have hPostSupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterBody sourcePre =
+                    (.ok (.Ok sharedAfterPost storeAfterPost) :
+                      Except Exception State) →
+                  SourceResultOutcomeLayoutSupported
+                    (ctx.withoutLoopControl) layout layout sourcePre := by
+            intro sourcePre hAllowedPost
+            exact
+              SourceResultOutcomeLayoutSupported.of_restrictStoreTo
+                (ctx := ctx.withoutLoopControl) (layout := layout)
+                (outcomeLayout := layout)
+                (scope := storeAfterBody)
+                (by
+                  rw [hAllowedPost]
+                  exact hPostSupportedTarget)
+          rcases
+              sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := layout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program)
+                (ctx := ctx.withoutLoopControl)
+                (sourceFuel := bodySeqFuel) (sourceStmts := post)
+                (codeOverride := codeOverride) (lowerBlock := lowerPost)
+                (shared := sharedAfterBody) (store := storeAfterBody)
+                (compiler := compilerAfterBody.restrictTo ctx.scope)
+                (trace := postTrace)
+                (sourceResult :=
+                  (.ok (.Ok sharedAfterPost storeAfterPost) :
+                    Except Exception State))
+                (hPostSound
+                  (allowedPost :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterBody result =
+                        (.ok (.Ok sharedAfterPost storeAfterPost) :
+                          Except Exception State))
+                  hPostScope (SourceCtxHandlersEq.refl _)
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterBody)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterBody sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hPostSupported)
+                hExactPost hSourcePost hPostSupportedTarget hPostResponses
+                minimumTargetFuel with
+            ⟨postFuel, postOutcome, ctxAfterPost, hPostFuel, hTargetPostOpen,
+              hPostOutcomeRel⟩
+          rcases SourceResultOutcomeRel.ok_regular_parts hPostOutcomeRel with
+            ⟨compilerAfterPostOpen, hPostOutcomeEq, hRelPost⟩
+          subst postOutcome
+          let compilerAfterPost :=
+            compilerAfterPostOpen.restrictTo ctx.scope
+          have hTargetPostScoped :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  (compilerAfterBody.restrictTo ctx.scope))
+                postTrace
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterPostOpen.restrictTo
+                      (ctx.withoutLoopControl).scope))) :=
+            compilerOpen_block_runScoped_resolves_regular_of_runOpen_resolves
+              (prim := prim) (program := program)
+              (ctx := ctx.withoutLoopControl) (ctxAfter := ctxAfterPost)
+              (block := lowerPost) (fuel := postFuel)
+              (state := compilerAfterBody.restrictTo ctx.scope)
+              (stateAfter := compilerAfterPostOpen)
+              (trace := postTrace) hTargetPostOpen
+          have hTargetPost :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  (compilerAfterBody.restrictTo ctx.scope))
+                postTrace
+                (.ok (Functions.Source.Outcome.regular compilerAfterPost)) := by
+            simpa [compilerAfterPost,
+              Functions.Source.Ctx.withoutLoopControl] using
+              hTargetPostScoped
+          have hRelPostScoped :
+              SourceStateRel cfg layout
+                (.Ok sharedAfterPost storeAfterPost) compilerAfterPost :=
+            SourceStateRel.restrictCompilerTo_of_subset hRelPost
+              hScopeContains
+          have hPostExact :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterPost storeAfterPost) compilerAfterPost :=
+            SourceStateExactRel.ofRelStateDomain hRelPostScoped hDomainPost
+          rcases
+              hLoopSound hPostExact hSourceInnerLoop hAllowed hLoopResponses
+                minimumTargetFuel with
+            ⟨loopFuel, hLoopFuel, hLoopPath⟩
+          rcases OpenExternal.OpenResultPathRel.resolves hLoopPath with
+            ⟨sourceDoneLoop, targetDoneLoop, hSourceInnerLoop',
+              hTargetLoop, hDone⟩
+          have hSourceLoopDone :
+              sourceDoneLoop = sourceResult :=
+            OpenExternal.OpenResultResolves.deterministic hSourceInnerLoop'
+              hSourceInnerLoop
+          subst sourceDoneLoop
+          cases targetDoneLoop with
+          | error targetErr =>
+              cases hDone
+          | ok loopOutcome =>
+              have hTargetFuelBound :
+                  minimumTargetFuel ≤
+                    (Nat.max
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      (Nat.max postFuel loopFuel)).succ := by
+                have hLoopLe :
+                    loopFuel ≤
+                      Nat.max
+                        (pre.length + Nat.max rawFuel
+                          (1 + Nat.max bodyFuel 1))
+                        (Nat.max postFuel loopFuel) :=
+                  Nat.le_trans (Nat.le_max_right postFuel loopFuel)
+                    (Nat.le_max_right
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      (Nat.max postFuel loopFuel))
+                exact
+                  Nat.le_trans hLoopFuel
+                    (Nat.le_trans hLoopLe
+                      (Nat.le_succ
+                        (Nat.max
+                          (pre.length + Nat.max rawFuel
+                            (1 + Nat.max bodyFuel 1))
+                          (Nat.max postFuel loopFuel))))
+              exact
+                ⟨(Nat.max
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))
+                    (Nat.max postFuel loopFuel)).succ,
+                  hTargetFuelBound,
+                  sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_regular_loop_of_generated_paths
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (allowed := allowed) (prim := prim)
+                    (program := program) (ctx := ctx)
+                    (sourceFuel := bodySeqFuel.succ)
+                    (bodyFuel :=
+                      pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                    (postFuel := postFuel) (loopFuel := loopFuel)
+                    (cond := cond) (post := post) (body := body)
+                    (codeOverride := codeOverride) (shared := shared)
+                    (store := store) (compiler := compiler)
+                    (lowerPost := lowerPost)
+                    (generatedBody :=
+                      { stmts :=
+                          pre ++
+                            [Functions.Stmt.if_
+                              (.prim .iszero
+                                (Locals.ExprSeq.cons lowerCond .nil))
+                              { stmts := [Functions.Stmt.brk] }] ++
+                            lowerBody.stmts })
+                    (condTrace := condTrace) (bodyTrace := bodyTrace)
+                    (postTrace := postTrace) (loopTrace := loopTrace)
+                    (sourceResult := sourceResult)
+                    (bodyOutcome :=
+                      Functions.Source.Outcome.regular
+                        (compilerAfterBody.restrictTo ctx.scope))
+                    (postOutcome :=
+                      Functions.Source.Outcome.regular compilerAfterPost)
+                    (loopOutcome := loopOutcome) hSourceLoop hGeneratedBody
+                    (Or.inl rfl) hTargetPost rfl hTargetLoop hDone
+                    hResponses⟩
+
+/--
+Direct nonzero/body-continue/post-regular recursive branch from callbacks.
+
+The selected body exits through `continue`, the generated post completes
+regularly from the revived state, and the inner loop-continuation callback
+supplies the remaining finite path.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_regular_loop_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody sharedAfterPost :
+      EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody storeAfterPost :
+      EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postTrace loopTrace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace
+        (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hSourcePost :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+            codeOverride (.Ok sharedAfterBody storeAfterBody)))
+        postTrace (.ok (.Ok sharedAfterPost storeAfterPost)))
+    (hDomainPost :
+      StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace) sourceResult)
+    (hSourceInnerLoop :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.For cond post body)
+            codeOverride (.Ok sharedAfterPost storeAfterPost)))
+        loopTrace sourceResult)
+    (hAllowed :
+      SourceResultNotRegularOk sourceResult → allowed sourceResult)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hPrefixResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postTrace) :=
+    OpenExternal.OpenTrace.left_of_append hResponses
+  have hCondBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg (condTrace ++ bodyTrace) :=
+    OpenExternal.OpenTrace.left_of_append hPrefixResponses
+  have hCondResponses :
+      SourceOpenTraceResponsesAdmissible cfg condTrace :=
+    OpenExternal.OpenTrace.left_of_append hCondBodyResponses
+  have hBodyResponses :
+      SourceOpenTraceResponsesAdmissible cfg bodyTrace :=
+    OpenExternal.OpenTrace.right_of_append hCondBodyResponses
+  have hPostResponses :
+      SourceOpenTraceResponsesAdmissible cfg postTrace :=
+    OpenExternal.OpenTrace.right_of_append hPrefixResponses
+  have hLoopResponses :
+      SourceOpenTraceResponsesAdmissible cfg loopTrace :=
+    OpenExternal.OpenTrace.right_of_append hResponses
+  rcases
+      hCondOpen (SourceStateExactRel.toRel hInitial)
+        (SourceStateExactRel.stateStoreContains hInitial) hResolveValues
+        (by simp [SourcePairResultPropagatesErrorTo])
+        hCondResponses minimumTargetFuel with
+    ⟨rawFuel, hRawFuel, hRawPath⟩
+  rcases hRawPath.resolves with
+    ⟨sourceDone, targetDone, hSourceRaw, hTargetRaw, hDoneRaw⟩
+  have hSourceDone :
+      sourceDone =
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value])) :
+          Except Exception (State × List Word)) :=
+    OpenExternal.OpenResultResolves.deterministic hSourceRaw hResolveValues
+  subst sourceDone
+  cases targetDone with
+  | error targetErr =>
+      simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+  | ok rawTarget =>
+      cases rawTarget with
+      | stopped target =>
+          simp [SourceExprRawPreludeOpenDoneRel] at hDoneRaw
+      | values target =>
+          rcases hDoneRaw with ⟨hRelAfterArg, hValues⟩
+          have hTargetValues : target.values = [value] := by
+            simpa using hValues.symm
+          rcases
+              SourceExprPreludeOpen.runRaw_resolves_values_parts
+                hTargetRaw with
+            ⟨preTrace, exprTrace, compilerAfterPre, ctxAfterPre, hTraceEq,
+              hPre, hCtxAfterPre, hArg⟩
+          subst ctxAfterPre
+          have hArgValue :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.LocalsExpr.eval prim lowerCond
+                  compilerAfterPre)
+                exprTrace (.ok (target.state, [value])) := by
+            simpa [hTargetValues] using hArg
+          rcases
+              compilerOpen_generated_iszero_condition_false_of_nonzero_arity
+                (cfg := cfg) (layout := layout) (prim := prim)
+                (sourceFuel := bodySeqFuel.succ)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compilerBefore := compilerAfterPre)
+                (compilerAfterArg := target.state) (lowerCond := lowerCond)
+                (value := value) (trace := exprTrace) hPrim hRelAfterArg
+                hArgValue hNonzero with
+            ⟨compilerAfterGuard, hGuardFalse, hRelGuard⟩
+          have hCtxExtends :
+              SourceCtxExtends
+                (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                target.ctx :=
+            SourceExprPreludeOpen.runRaw_resolves_values_ctxExtends hTargetRaw
+          have hBodyScope :
+              ∀ name : Name, name ∈ layout → name ∈ target.ctx.scope := by
+            intro name hMem
+            exact
+              hCtxExtends.scopeContains name
+                (by
+                  simpa [Functions.Source.Ctx.withoutLoopControl,
+                    Functions.Source.Ctx.withLoopControl] using
+                    hScopeContains name hMem)
+          have hExactGuard :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterCond storeAfterCond) compilerAfterGuard :=
+            SourceStateExactRel.ofRelStateDomain hRelGuard hDomainCond
+          have hBodySupportedTarget :
+              SourceResultModeKontSupported target.ctx layout
+                (SourceModeKontLayouts.block layout outcomeLayout)
+                (.ok (.Checkpoint
+                  (.Continue sharedAfterBody storeAfterBody))) :=
+            SourceResultModeKontSupported.block_continue_of_loop_handlers
+              (ctx := ctx) (ctxAfter := target.ctx)
+              (layout := layout) (outcomeLayout := outcomeLayout)
+              hCtxExtends.handlersEq hScopeContains
+          have hBodySupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterCond sourcePre =
+                    (.ok (.Checkpoint
+                      (.Continue sharedAfterBody storeAfterBody)) :
+                      Except Exception State) →
+                  SourceResultModeKontSupported target.ctx layout
+                    (SourceModeKontLayouts.block layout outcomeLayout)
+                    sourcePre := by
+            intro sourcePre hAllowedBody
+            exact
+              SourceResultModeKontSupported.of_restrictStoreTo
+                (ctx := target.ctx) (currentLayout := layout)
+                (konts := SourceModeKontLayouts.block layout outcomeLayout)
+                (scope := storeAfterCond)
+                (by
+                  rw [hAllowedBody]
+                  exact hBodySupportedTarget)
+          rcases
+              sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program) (ctx := target.ctx)
+                (sourceFuel := bodySeqFuel) (sourceStmts := body)
+                (codeOverride := codeOverride) (lowerBlock := lowerBody)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                (compiler := compilerAfterGuard) (trace := bodyTrace)
+                (sourceResult :=
+                  (.ok (.Checkpoint
+                    (.Continue sharedAfterBody storeAfterBody)) :
+                    Except Exception State))
+                (hBodySound
+                  (allowedBody :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterCond result =
+                        (.ok (.Checkpoint
+                          (.Continue sharedAfterBody storeAfterBody)) :
+                          Except Exception State))
+                  hBodyScope hCtxExtends.handlersEq
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterCond)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterCond sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hBodySupported)
+                hExactGuard hSourceBody hBodySupportedTarget hBodyResponses
+                minimumTargetFuel with
+            ⟨bodyFuel, bodyOutcome, ctxAfterBody, hBodyFuel, hTargetBody,
+              hBodyKontRel⟩
+          rcases
+              SourceResultKontOutcomeRel.ok_continue_parts hBodyKontRel with
+            ⟨compilerAfterBody, hBodyOutcomeEq, hRelBody⟩
+          subst bodyOutcome
+          have hGeneratedBodyRaw :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (preTrace ++ (exprTrace ++ bodyTrace))
+                (.ok (Functions.Source.Outcome.cont compilerAfterBody)) := by
+            simpa [Functions.Source.Outcome.cont,
+              Locals.Source.Outcome.cont] using
+              compilerOpen_generated_for_body_guard_false_resolves_body
+                (prim := prim) (program := program)
+                (ctx :=
+                  ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                (ctxAfterPre := target.ctx) (ctxAfterBody := ctxAfterBody)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerBody := lowerBody) (preFuel := rawFuel)
+                (bodyFuel := bodyFuel) (compiler := compiler)
+                (compilerAfterPre := compilerAfterPre)
+                (compilerAfterGuard := compilerAfterGuard)
+                (bodyOutcome :=
+                  Functions.Source.Outcome.cont compilerAfterBody)
+                (preTrace := preTrace) (guardTrace := exprTrace)
+                (bodyTrace := bodyTrace) hPre hGuardFalse hTargetBody
+          have hGeneratedBody :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+                  { stmts :=
+                      pre ++
+                        [Functions.Stmt.if_
+                          (.prim .iszero
+                            (Locals.ExprSeq.cons lowerCond .nil))
+                          { stmts := [Functions.Stmt.brk] }] ++
+                        lowerBody.stmts }
+                  (pre.length + Nat.max rawFuel (1 + Nat.max bodyFuel 1))
+                  compiler)
+                (condTrace ++ bodyTrace)
+                (.ok (Functions.Source.Outcome.cont compilerAfterBody)) := by
+            simpa [hTraceEq, List.append_assoc] using hGeneratedBodyRaw
+          have hExactPostStart :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterBody storeAfterBody) compilerAfterBody :=
+            SourceStateExactRel.ofRelStateDomain hRelBody hDomainBody
+          have hPostScope :
+              ∀ name : Name, name ∈ layout →
+                name ∈ (ctx.withoutLoopControl).scope := by
+            intro name hMem
+            simpa [Functions.Source.Ctx.withoutLoopControl] using
+              hScopeContains name hMem
+          have hPostSupportedTarget :
+              SourceResultOutcomeLayoutSupported (ctx.withoutLoopControl)
+                layout layout (.ok (.Ok sharedAfterPost storeAfterPost)) := by
+            intro name hMem
+            exact hMem
+          have hPostSupported :
+              ∀ {sourcePre : Except Exception State},
+                restrictSourceResultTo storeAfterBody sourcePre =
+                    (.ok (.Ok sharedAfterPost storeAfterPost) :
+                      Except Exception State) →
+                  SourceResultOutcomeLayoutSupported
+                    (ctx.withoutLoopControl) layout layout sourcePre := by
+            intro sourcePre hAllowedPost
+            exact
+              SourceResultOutcomeLayoutSupported.of_restrictStoreTo
+                (ctx := ctx.withoutLoopControl) (layout := layout)
+                (outcomeLayout := layout)
+                (scope := storeAfterBody)
+                (by
+                  rw [hAllowedPost]
+                  exact hPostSupportedTarget)
+          rcases
+              sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_target_block_result
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := layout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (prim := prim) (program := program)
+                (ctx := ctx.withoutLoopControl)
+                (sourceFuel := bodySeqFuel) (sourceStmts := post)
+                (codeOverride := codeOverride) (lowerBlock := lowerPost)
+                (shared := sharedAfterBody) (store := storeAfterBody)
+                (compiler := compilerAfterBody)
+                (trace := postTrace)
+                (sourceResult :=
+                  (.ok (.Ok sharedAfterPost storeAfterPost) :
+                    Except Exception State))
+                (hPostSound
+                  (allowedPost :=
+                    fun result =>
+                      restrictSourceResultTo storeAfterBody result =
+                        (.ok (.Ok sharedAfterPost storeAfterPost) :
+                          Except Exception State))
+                  hPostScope (SourceCtxHandlersEq.refl _)
+                  (by
+                    intro sourcePre hEq
+                    exact
+                      SourceResultRelatable.of_restrictStoreTo
+                        (scope := storeAfterBody)
+                        (by
+                          change
+                            SourceResultRelatable
+                              (restrictSourceResultTo storeAfterBody sourcePre)
+                          rw [hEq]
+                          simp [SourceResultRelatable]))
+                  hPostSupported)
+                hExactPostStart hSourcePost hPostSupportedTarget hPostResponses
+                minimumTargetFuel with
+            ⟨postFuel, postOutcome, ctxAfterPost, hPostFuel, hTargetPostOpen,
+              hPostOutcomeRel⟩
+          rcases SourceResultOutcomeRel.ok_regular_parts hPostOutcomeRel with
+            ⟨compilerAfterPostOpen, hPostOutcomeEq, hRelPost⟩
+          subst postOutcome
+          let compilerAfterPost :=
+            compilerAfterPostOpen.restrictTo ctx.scope
+          have hTargetPostScoped :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  compilerAfterBody)
+                postTrace
+                (.ok
+                  (Functions.Source.Outcome.regular
+                    (compilerAfterPostOpen.restrictTo
+                      (ctx.withoutLoopControl).scope))) :=
+            compilerOpen_block_runScoped_resolves_regular_of_runOpen_resolves
+              (prim := prim) (program := program)
+              (ctx := ctx.withoutLoopControl) (ctxAfter := ctxAfterPost)
+              (block := lowerPost) (fuel := postFuel)
+              (state := compilerAfterBody)
+              (stateAfter := compilerAfterPostOpen)
+              (trace := postTrace) hTargetPostOpen
+          have hTargetPost :
+              OpenExternal.OpenResultResolves
+                (CompilerOpen.FunctionsOpen.Block.runScoped prim program
+                  (ctx.withoutLoopControl) lowerPost postFuel
+                  compilerAfterBody)
+                postTrace
+                (.ok (Functions.Source.Outcome.regular compilerAfterPost)) := by
+            simpa [compilerAfterPost,
+              Functions.Source.Ctx.withoutLoopControl] using
+              hTargetPostScoped
+          have hRelPostScoped :
+              SourceStateRel cfg layout
+                (.Ok sharedAfterPost storeAfterPost) compilerAfterPost :=
+            SourceStateRel.restrictCompilerTo_of_subset hRelPost
+              hScopeContains
+          have hPostExact :
+              SourceStateExactRel cfg layout
+                (.Ok sharedAfterPost storeAfterPost) compilerAfterPost :=
+            SourceStateExactRel.ofRelStateDomain hRelPostScoped hDomainPost
+          rcases
+              hLoopSound hPostExact hSourceInnerLoop hAllowed hLoopResponses
+                minimumTargetFuel with
+            ⟨loopFuel, hLoopFuel, hLoopPath⟩
+          rcases OpenExternal.OpenResultPathRel.resolves hLoopPath with
+            ⟨sourceDoneLoop, targetDoneLoop, hSourceInnerLoop',
+              hTargetLoop, hDone⟩
+          have hSourceLoopDone :
+              sourceDoneLoop = sourceResult :=
+            OpenExternal.OpenResultResolves.deterministic hSourceInnerLoop'
+              hSourceInnerLoop
+          subst sourceDoneLoop
+          cases targetDoneLoop with
+          | error targetErr =>
+              cases hDone
+          | ok loopOutcome =>
+              have hTargetFuelBound :
+                  minimumTargetFuel ≤
+                    (Nat.max
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      (Nat.max postFuel loopFuel)).succ := by
+                have hLoopLe :
+                    loopFuel ≤
+                      Nat.max
+                        (pre.length + Nat.max rawFuel
+                          (1 + Nat.max bodyFuel 1))
+                        (Nat.max postFuel loopFuel) :=
+                  Nat.le_trans (Nat.le_max_right postFuel loopFuel)
+                    (Nat.le_max_right
+                      (pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                      (Nat.max postFuel loopFuel))
+                exact
+                  Nat.le_trans hLoopFuel
+                    (Nat.le_trans hLoopLe
+                      (Nat.le_succ
+                        (Nat.max
+                          (pre.length + Nat.max rawFuel
+                            (1 + Nat.max bodyFuel 1))
+                          (Nat.max postFuel loopFuel))))
+              exact
+                ⟨(Nat.max
+                    (pre.length + Nat.max rawFuel
+                      (1 + Nat.max bodyFuel 1))
+                    (Nat.max postFuel loopFuel)).succ,
+                  hTargetFuelBound,
+                  sourceOpenLoopContinuationPathRel_generated_nonzero_body_post_regular_loop_of_generated_paths
+                    (cfg := cfg) (layout := layout)
+                    (outcomeLayout := outcomeLayout)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (allowed := allowed) (prim := prim)
+                    (program := program) (ctx := ctx)
+                    (sourceFuel := bodySeqFuel.succ)
+                    (bodyFuel :=
+                      pre.length + Nat.max rawFuel
+                        (1 + Nat.max bodyFuel 1))
+                    (postFuel := postFuel) (loopFuel := loopFuel)
+                    (cond := cond) (post := post) (body := body)
+                    (codeOverride := codeOverride) (shared := shared)
+                    (store := store) (compiler := compiler)
+                    (lowerPost := lowerPost)
+                    (generatedBody :=
+                      { stmts :=
+                          pre ++
+                            [Functions.Stmt.if_
+                              (.prim .iszero
+                                (Locals.ExprSeq.cons lowerCond .nil))
+                              { stmts := [Functions.Stmt.brk] }] ++
+                            lowerBody.stmts })
+                    (condTrace := condTrace) (bodyTrace := bodyTrace)
+                    (postTrace := postTrace) (loopTrace := loopTrace)
+                    (sourceResult := sourceResult)
+                    (bodyOutcome :=
+                      Functions.Source.Outcome.cont compilerAfterBody)
+                    (postOutcome :=
+                      Functions.Source.Outcome.regular compilerAfterPost)
+                    (loopOutcome := loopOutcome) hSourceLoop hGeneratedBody
+                    (Or.inr rfl) hTargetPost rfl hTargetLoop hDone
+                    hResponses⟩
 
 /--
 Selected open path for nonzero-condition body branches that stop the whole loop.
@@ -77644,6 +80784,1295 @@ theorem sourceOpenLoopHeadPathSound_generated_nonzero_body_continue_post_regular
                 hSourceLoop hTargetLoopTrace hResponses hDone⟩
 
 /--
+Direct loop-continuation splitter for selected nonzero/body-regular post paths.
+
+The body has completed regularly. This consumes the selected
+`runLoopSourceAfterBody` suffix and dispatches to the direct post-stopping or
+post-regular recursive loop-continuation wrappers.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_split_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postSuffix : OpenExternal.OpenTrace}
+    {sourceDone : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSoundFinal :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPostSoundLoop :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)))
+    (hDomainBody :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hPostRegularDomain :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace (.ok (.Ok sharedAfterPost storeAfterPost)) →
+        StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hPostBreakFalse :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Break sharedAfterPost storeAfterPost))) →
+        False)
+    (hPostContinueFalse :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Continue sharedAfterPost storeAfterPost))) →
+        False)
+    (hAfterBody :
+      OpenExternal.OpenResultResolves
+        (runLoopSourceAfterBody bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store) (.Ok sharedAfterBody storeAfterBody))
+        postSuffix sourceDone)
+    (hAllowed :
+      SourceResultNotRegularOk sourceDone → allowed sourceDone)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postSuffix)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        ((condTrace ++ bodyTrace) ++ postSuffix)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  rcases
+      runLoopSourceAfterBody_regular_resolves_inv_post hAfterBody with
+    hPostError | hPostOk
+  · rcases hPostError with ⟨err, hSourcePost, hDone⟩
+    subst sourceDone
+    have hSourceLoop :
+        OpenExternal.OpenResultResolves
+          (runLoopSource bodySeqFuel.succ cond post body codeOverride
+            (.Ok shared store))
+          ((condTrace ++ bodyTrace) ++ postSuffix) (.error err) :=
+      runLoopSource_resolves_body_regular_post_error_of_evalValues_nonzero
+        (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (shared := shared)
+        (sharedAfterCond := sharedAfterCond)
+        (sharedAfterBody := sharedAfterBody) (store := store)
+        (storeAfterCond := storeAfterCond)
+        (storeAfterBody := storeAfterBody) (value := value)
+        (trace := condTrace) (bodyTrace := bodyTrace)
+        (postTrace := postSuffix) hResolveValues hNonzero hSourceBody
+        hSourcePost
+    exact
+      sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_stopping_of_callbacks
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (allowed := allowed) (prim := prim) (program := program)
+        (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+        (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+        (post := post) (body := body) (codeOverride := codeOverride)
+        (shared := shared) (sharedAfterCond := sharedAfterCond)
+        (sharedAfterBody := sharedAfterBody) (store := store)
+        (storeAfterCond := storeAfterCond) (storeAfterBody := storeAfterBody)
+        (compiler := compiler) (pre := pre) (lowerCond := lowerCond)
+        (lowerPost := lowerPost) (lowerBody := lowerBody) (value := value)
+        (condTrace := condTrace) (bodyTrace := bodyTrace)
+        (postTrace := postSuffix) (sourceResult := .error err)
+        hScopeContains hCondOpen hBodySound hPostSoundFinal hPrim hInitial
+        hResolveValues hNonzero hDomainCond hSourceBody hDomainBody
+        hSourcePost hSourceLoop
+        (by simp [SourceResultOutcomeLayoutSupported])
+        (hAllowedRelatable (hAllowed (by simp [SourceResultNotRegularOk])))
+        (by simp [SourceResultNotRegularOk])
+        (by intro sharedBreak storeBreak hEq; cases hEq)
+        (by intro sharedContinue storeContinue hEq; cases hEq)
+        hResponses
+  · rcases hPostOk with
+      ⟨postTrace, loopTrace, postResult, hTrace, hSourcePost, hAfterPost⟩
+    subst postSuffix
+    cases postResult with
+    | OutOfFuel =>
+        exact False.elim
+          (runLoopSourceAfterPost_outOfFuel_resolves_false_of_allowed_relatable
+            (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+            (body := body) (codeOverride := codeOverride)
+            (shared := shared) (store := store) (trace := loopTrace)
+            (sourceDone := sourceDone) hAfterPost hAllowed
+            hAllowedRelatable)
+    | Ok sharedAfterPost storeAfterPost =>
+        rcases
+            runLoopSourceAfterPost_regular_resolves_inv_loop_ok_source
+              (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+              (body := body) (codeOverride := codeOverride)
+              (shared := shared) (store := sharedAfterBody)
+              (sharedPost := sharedAfterPost) (sourceStore := store)
+              (storePost := storeAfterPost) hAfterPost with
+          ⟨loopDone, hSourceInnerLoop, hDone⟩
+        subst sourceDone
+        have hSourceLoop :
+            OpenExternal.OpenResultResolves
+              (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                (.Ok shared store))
+              (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)
+              loopDone :=
+          runLoopSource_resolves_body_regular_post_regular_loop_of_evalValues_nonzero
+            (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+            (body := body) (codeOverride := codeOverride)
+            (shared := shared) (sharedAfterCond := sharedAfterCond)
+            (sharedAfterBody := sharedAfterBody)
+            (sharedAfterPost := sharedAfterPost) (store := store)
+            (storeAfterCond := storeAfterCond)
+            (storeAfterBody := storeAfterBody)
+            (storeAfterPost := storeAfterPost) (value := value)
+            (trace := condTrace) (bodyTrace := bodyTrace)
+            (postTrace := postTrace) (loopTrace := loopTrace)
+            hResolveValues hNonzero hSourceBody hSourcePost
+            hSourceInnerLoop
+        simpa [List.append_assoc] using
+          sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_regular_loop_of_callbacks
+            (cfg := cfg) (layout := layout)
+            (outcomeLayout := outcomeLayout)
+            (terminalRel := terminalRel) (revertRel := revertRel)
+            (allowed := allowed) (prim := prim) (program := program)
+            (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+            (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+            (post := post) (body := body) (codeOverride := codeOverride)
+            (shared := shared) (sharedAfterCond := sharedAfterCond)
+            (sharedAfterBody := sharedAfterBody)
+            (sharedAfterPost := sharedAfterPost) (store := store)
+            (storeAfterCond := storeAfterCond)
+            (storeAfterBody := storeAfterBody)
+            (storeAfterPost := storeAfterPost) (compiler := compiler)
+            (pre := pre) (lowerCond := lowerCond)
+            (lowerPost := lowerPost) (lowerBody := lowerBody)
+            (value := value) (condTrace := condTrace)
+            (bodyTrace := bodyTrace) (postTrace := postTrace)
+            (loopTrace := loopTrace) (sourceResult := loopDone)
+            hScopeContains hCondOpen hBodySound hPostSoundLoop hLoopSound
+            hPrim hInitial hResolveValues hNonzero hDomainCond hSourceBody
+            hDomainBody hSourcePost (hPostRegularDomain hSourcePost)
+            hSourceLoop hSourceInnerLoop hAllowed
+            (by simpa [List.append_assoc] using hResponses)
+    | Checkpoint jump =>
+        cases jump with
+        | Continue sharedAfterPost storeAfterPost =>
+            exact False.elim (hPostContinueFalse hSourcePost)
+        | Break sharedAfterPost storeAfterPost =>
+            exact False.elim (hPostBreakFalse hSourcePost)
+        | Leave sharedAfterPost storeAfterPost =>
+            rcases runLoopSourceAfterPost_leave_resolves_inv hAfterPost with
+              ⟨hLoopTrace, hDone⟩
+            subst loopTrace
+            have hDoneSimple :
+                sourceDone =
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost)) :
+                    Except Exception State) := by
+              simpa [EvmYul.Yul.State.overwrite?] using hDone
+            subst sourceDone
+            have hSourceLoop :
+                OpenExternal.OpenResultResolves
+                  (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                    (.Ok shared store))
+                  ((condTrace ++ bodyTrace) ++ postTrace)
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost))) :=
+              runLoopSource_resolves_body_regular_post_leave_of_evalValues_nonzero
+                (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+                (body := body) (codeOverride := codeOverride)
+                (shared := shared) (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody)
+                (sharedAfterPost := sharedAfterPost) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody)
+                (storeAfterPost := storeAfterPost) (value := value)
+                (trace := condTrace) (bodyTrace := bodyTrace)
+                (postTrace := postTrace) hResolveValues hNonzero
+                hSourceBody hSourcePost
+            simpa [List.append_assoc] using
+              sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_stopping_of_callbacks
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+                (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+                (post := post) (body := body) (codeOverride := codeOverride)
+                (shared := shared) (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody) (compiler := compiler)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerPost := lowerPost) (lowerBody := lowerBody)
+                (value := value) (condTrace := condTrace)
+                (bodyTrace := bodyTrace) (postTrace := postTrace)
+                (sourceResult :=
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost)) :
+                    Except Exception State))
+                hScopeContains hCondOpen hBodySound hPostSoundFinal hPrim
+                hInitial hResolveValues hNonzero hDomainCond hSourceBody
+                hDomainBody hSourcePost hSourceLoop
+                (SourceResultOutcomeLayoutSupported.withoutLoopControl_of_supported_not_regular_no_loop
+                  (ctx := ctx) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (sourceResult :=
+                    (.ok (.Checkpoint
+                      (.Leave sharedAfterPost storeAfterPost)) :
+                      Except Exception State))
+                  (hSupported (hAllowed
+                    (by simp [SourceResultNotRegularOk,
+                      EvmYul.Yul.State.overwrite?])))
+                  (by simp [SourceResultNotRegularOk,
+                    EvmYul.Yul.State.overwrite?])
+                  (by intro sharedBreak storeBreak hEq; cases hEq)
+                  (by intro sharedContinue storeContinue hEq; cases hEq))
+                (by simp [SourceResultRelatable])
+                (by simp [SourceResultNotRegularOk,
+                  EvmYul.Yul.State.overwrite?])
+                (by intro sharedBreak storeBreak hEq; cases hEq)
+                (by intro sharedContinue storeContinue hEq; cases hEq)
+                (by simpa [List.append_assoc] using hResponses)
+
+/--
+Direct loop-continuation splitter for selected nonzero/body-continue post
+paths.
+
+The body has exited with `continue`; the splitter revives the post-entry domain
+fact, consumes the selected post suffix, and dispatches to the direct
+post-stopping or post-regular recursive loop-continuation wrappers.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_split_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+    {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace bodyTrace postSuffix : OpenExternal.OpenTrace}
+    {sourceDone : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSoundFinal :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPostSoundLoop :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSourceBody :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+            codeOverride (.Ok sharedAfterCond storeAfterCond)))
+        bodyTrace
+        (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))))
+    (hDomainBody :
+      StateStoreDomainExact layout
+        (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+    (hPostRegularDomain :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace (.ok (.Ok sharedAfterPost storeAfterPost)) →
+        StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hPostBreakFalse :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Break sharedAfterPost storeAfterPost))) →
+        False)
+    (hPostContinueFalse :
+      ∀ {sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Continue sharedAfterPost storeAfterPost))) →
+        False)
+    (hAfterBody :
+      OpenExternal.OpenResultResolves
+        (runLoopSourceAfterBody bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store)
+          (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+        postSuffix sourceDone)
+    (hAllowed :
+      SourceResultNotRegularOk sourceDone → allowed sourceDone)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hResponses :
+      SourceOpenTraceResponsesAdmissible cfg
+        ((condTrace ++ bodyTrace) ++ postSuffix)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        ((condTrace ++ bodyTrace) ++ postSuffix)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) := by
+  have hDomainBodyOk :
+      StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody) := by
+    simpa [StateStoreDomainExact] using hDomainBody
+  rcases
+      runLoopSourceAfterBody_continue_resolves_inv_post hAfterBody with
+    hPostError | hPostOk
+  · rcases hPostError with ⟨err, hSourcePost, hDone⟩
+    subst sourceDone
+    have hSourceLoop :
+        OpenExternal.OpenResultResolves
+          (runLoopSource bodySeqFuel.succ cond post body codeOverride
+            (.Ok shared store))
+          ((condTrace ++ bodyTrace) ++ postSuffix) (.error err) :=
+      runLoopSource_resolves_body_continue_post_error_of_evalValues_nonzero
+        (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+        (body := body) (codeOverride := codeOverride) (shared := shared)
+        (sharedAfterCond := sharedAfterCond)
+        (sharedAfterBody := sharedAfterBody) (store := store)
+        (storeAfterCond := storeAfterCond)
+        (storeAfterBody := storeAfterBody) (value := value)
+        (trace := condTrace) (bodyTrace := bodyTrace)
+        (postTrace := postSuffix) hResolveValues hNonzero hSourceBody
+        hSourcePost
+    exact
+      sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_stopping_of_callbacks
+        (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (allowed := allowed) (prim := prim) (program := program)
+        (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+        (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+        (post := post) (body := body) (codeOverride := codeOverride)
+        (shared := shared) (sharedAfterCond := sharedAfterCond)
+        (sharedAfterBody := sharedAfterBody) (store := store)
+        (storeAfterCond := storeAfterCond) (storeAfterBody := storeAfterBody)
+        (compiler := compiler) (pre := pre) (lowerCond := lowerCond)
+        (lowerPost := lowerPost) (lowerBody := lowerBody) (value := value)
+        (condTrace := condTrace) (bodyTrace := bodyTrace)
+        (postTrace := postSuffix) (sourceResult := .error err)
+        hScopeContains hCondOpen hBodySound hPostSoundFinal hPrim hInitial
+        hResolveValues hNonzero hDomainCond hSourceBody hDomainBodyOk
+        hSourcePost hSourceLoop
+        (by simp [SourceResultOutcomeLayoutSupported])
+        (hAllowedRelatable (hAllowed (by simp [SourceResultNotRegularOk])))
+        (by simp [SourceResultNotRegularOk])
+        (by intro sharedBreak storeBreak hEq; cases hEq)
+        (by intro sharedContinue storeContinue hEq; cases hEq)
+        hResponses
+  · rcases hPostOk with
+      ⟨postTrace, loopTrace, postResult, hTrace, hSourcePost, hAfterPost⟩
+    subst postSuffix
+    cases postResult with
+    | OutOfFuel =>
+        exact False.elim
+          (runLoopSourceAfterPost_outOfFuel_resolves_false_of_allowed_relatable
+            (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+            (body := body) (codeOverride := codeOverride)
+            (shared := shared) (store := store) (trace := loopTrace)
+            (sourceDone := sourceDone) hAfterPost hAllowed
+            hAllowedRelatable)
+    | Ok sharedAfterPost storeAfterPost =>
+        rcases
+            runLoopSourceAfterPost_regular_resolves_inv_loop_ok_source
+              (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+              (body := body) (codeOverride := codeOverride)
+              (shared := shared) (store := sharedAfterBody)
+              (sharedPost := sharedAfterPost) (sourceStore := store)
+              (storePost := storeAfterPost) hAfterPost with
+          ⟨loopDone, hSourceInnerLoop, hDone⟩
+        subst sourceDone
+        have hSourceLoop :
+            OpenExternal.OpenResultResolves
+              (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                (.Ok shared store))
+              (((condTrace ++ bodyTrace) ++ postTrace) ++ loopTrace)
+              loopDone :=
+          runLoopSource_resolves_body_continue_post_regular_loop_of_evalValues_nonzero
+            (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+            (body := body) (codeOverride := codeOverride)
+            (shared := shared) (sharedAfterCond := sharedAfterCond)
+            (sharedAfterBody := sharedAfterBody)
+            (sharedAfterPost := sharedAfterPost) (store := store)
+            (storeAfterCond := storeAfterCond)
+            (storeAfterBody := storeAfterBody)
+            (storeAfterPost := storeAfterPost) (value := value)
+            (trace := condTrace) (bodyTrace := bodyTrace)
+            (postTrace := postTrace) (loopTrace := loopTrace)
+            hResolveValues hNonzero hSourceBody hSourcePost
+            hSourceInnerLoop
+        simpa [List.append_assoc] using
+          sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_regular_loop_of_callbacks
+            (cfg := cfg) (layout := layout)
+            (outcomeLayout := outcomeLayout)
+            (terminalRel := terminalRel) (revertRel := revertRel)
+            (allowed := allowed) (prim := prim) (program := program)
+            (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+            (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+            (post := post) (body := body) (codeOverride := codeOverride)
+            (shared := shared) (sharedAfterCond := sharedAfterCond)
+            (sharedAfterBody := sharedAfterBody)
+            (sharedAfterPost := sharedAfterPost) (store := store)
+            (storeAfterCond := storeAfterCond)
+            (storeAfterBody := storeAfterBody)
+            (storeAfterPost := storeAfterPost) (compiler := compiler)
+            (pre := pre) (lowerCond := lowerCond)
+            (lowerPost := lowerPost) (lowerBody := lowerBody)
+            (value := value) (condTrace := condTrace)
+            (bodyTrace := bodyTrace) (postTrace := postTrace)
+            (loopTrace := loopTrace) (sourceResult := loopDone)
+            hScopeContains hCondOpen hBodySound hPostSoundLoop hLoopSound
+            hPrim hInitial hResolveValues hNonzero hDomainCond hSourceBody
+            hDomainBodyOk hSourcePost (hPostRegularDomain hSourcePost)
+            hSourceLoop hSourceInnerLoop hAllowed
+            (by simpa [List.append_assoc] using hResponses)
+    | Checkpoint jump =>
+        cases jump with
+        | Continue sharedAfterPost storeAfterPost =>
+            exact False.elim (hPostContinueFalse hSourcePost)
+        | Break sharedAfterPost storeAfterPost =>
+            exact False.elim (hPostBreakFalse hSourcePost)
+        | Leave sharedAfterPost storeAfterPost =>
+            rcases runLoopSourceAfterPost_leave_resolves_inv hAfterPost with
+              ⟨hLoopTrace, hDone⟩
+            subst loopTrace
+            have hDoneSimple :
+                sourceDone =
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost)) :
+                    Except Exception State) := by
+              simpa [EvmYul.Yul.State.overwrite?] using hDone
+            subst sourceDone
+            have hSourceLoop :
+                OpenExternal.OpenResultResolves
+                  (runLoopSource bodySeqFuel.succ cond post body codeOverride
+                    (.Ok shared store))
+                  ((condTrace ++ bodyTrace) ++ postTrace)
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost))) :=
+              runLoopSource_resolves_body_continue_post_leave_of_evalValues_nonzero
+                (fuel := bodySeqFuel.succ) (cond := cond) (post := post)
+                (body := body) (codeOverride := codeOverride)
+                (shared := shared) (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody)
+                (sharedAfterPost := sharedAfterPost) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody)
+                (storeAfterPost := storeAfterPost) (value := value)
+                (trace := condTrace) (bodyTrace := bodyTrace)
+                (postTrace := postTrace) hResolveValues hNonzero
+                hSourceBody hSourcePost
+            simpa [List.append_assoc] using
+              sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_stopping_of_callbacks
+                (cfg := cfg) (layout := layout)
+                (outcomeLayout := outcomeLayout)
+                (terminalRel := terminalRel) (revertRel := revertRel)
+                (allowed := allowed) (prim := prim) (program := program)
+                (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+                (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+                (post := post) (body := body) (codeOverride := codeOverride)
+                (shared := shared) (sharedAfterCond := sharedAfterCond)
+                (sharedAfterBody := sharedAfterBody) (store := store)
+                (storeAfterCond := storeAfterCond)
+                (storeAfterBody := storeAfterBody) (compiler := compiler)
+                (pre := pre) (lowerCond := lowerCond)
+                (lowerPost := lowerPost) (lowerBody := lowerBody)
+                (value := value) (condTrace := condTrace)
+                (bodyTrace := bodyTrace) (postTrace := postTrace)
+                (sourceResult :=
+                  (.ok (.Checkpoint
+                    (.Leave sharedAfterPost storeAfterPost)) :
+                    Except Exception State))
+                hScopeContains hCondOpen hBodySound hPostSoundFinal hPrim
+                hInitial hResolveValues hNonzero hDomainCond hSourceBody
+                hDomainBodyOk hSourcePost hSourceLoop
+                (SourceResultOutcomeLayoutSupported.withoutLoopControl_of_supported_not_regular_no_loop
+                  (ctx := ctx) (layout := layout)
+                  (outcomeLayout := outcomeLayout)
+                  (sourceResult :=
+                    (.ok (.Checkpoint
+                      (.Leave sharedAfterPost storeAfterPost)) :
+                      Except Exception State))
+                  (hSupported (hAllowed
+                    (by simp [SourceResultNotRegularOk,
+                      EvmYul.Yul.State.overwrite?])))
+                  (by simp [SourceResultNotRegularOk,
+                    EvmYul.Yul.State.overwrite?])
+                  (by intro sharedBreak storeBreak hEq; cases hEq)
+                  (by intro sharedContinue storeContinue hEq; cases hEq))
+                (by simp [SourceResultRelatable])
+                (by simp [SourceResultNotRegularOk,
+                  EvmYul.Yul.State.overwrite?])
+                (by intro sharedBreak storeBreak hEq; cases hEq)
+                (by intro sharedContinue storeContinue hEq; cases hEq)
+                (by simpa [List.append_assoc] using hResponses)
+
+/--
+Direct loop-continuation splitter for selected nonzero generated-loop
+body/post paths.
+
+This composes the direct nonzero-body splitter with the body-regular and
+body-continue post splitters, leaving no post-producing body branch as an
+external callback.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_nonzero_body_post_split_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared sharedAfterCond : EvmYul.SharedState .Yul}
+    {store storeAfterCond : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {value : Word}
+    {condTrace suffix : OpenExternal.OpenTrace}
+    {sourceDone : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSoundFinal :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPostSoundLoop :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveValues :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store)))
+        condTrace
+        (.ok (((.Ok sharedAfterCond storeAfterCond : State), [value]))))
+    (hNonzero : value ≠ EvmYul.UInt256.ofNat 0)
+    (hDomainCond :
+      StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond))
+    (hSuffix :
+      OpenExternal.OpenResultResolves
+        (runLoopSourceAfterHead bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store)
+          ((.Ok sharedAfterCond storeAfterCond : State), value))
+        suffix sourceDone)
+    (hAllowed :
+      SourceResultNotRegularOk sourceDone → allowed sourceDone)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hBodyBreakDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Break sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyRegularDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyContinueDomain :
+      ∀ {sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout
+          (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+    (hPostRegularDomain :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace (.ok (.Ok sharedAfterPost storeAfterPost)) →
+        StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hPostBreakFalse :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Break sharedAfterPost storeAfterPost))) →
+        False)
+    (hPostContinueFalse :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Continue sharedAfterPost storeAfterPost))) →
+        False)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg (condTrace ++ suffix)) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        (condTrace ++ suffix)
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) :=
+  sourceRunLoopContinuationPathSound_generated_nonzero_body_split_of_callbacks
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel)
+    (allowed := allowed) (prim := prim) (program := program) (ctx := ctx)
+    (bodySeqFuel := bodySeqFuel) (minimumTargetFuel := minimumTargetFuel)
+    (cond := cond) (post := post) (body := body)
+    (codeOverride := codeOverride) (shared := shared)
+    (sharedAfterCond := sharedAfterCond) (store := store)
+    (storeAfterCond := storeAfterCond) (compiler := compiler)
+    (pre := pre) (lowerCond := lowerCond) (lowerPost := lowerPost)
+    (lowerBody := lowerBody) (value := value) (condTrace := condTrace)
+    (suffix := suffix) (sourceDone := sourceDone)
+    hScopeContains hAllowedRelatable hCondOpen hBodySound hPrim hInitial
+    hResolveValues hNonzero hDomainCond hSuffix hAllowed hSupported
+    hBodyBreakDomain hBodyRegularDomain hBodyContinueDomain
+    (by
+      intro bodyTrace postSuffix sharedAfterBody storeAfterBody hDomainBody
+        hSourceBody hAfterBody hResponsesBody minimumTargetFuel
+      exact
+        sourceRunLoopContinuationPathSound_generated_nonzero_body_regular_post_split_of_callbacks
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed := allowed) (prim := prim) (program := program)
+          (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+          (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+          (post := post) (body := body) (codeOverride := codeOverride)
+          (shared := shared) (sharedAfterCond := sharedAfterCond)
+          (sharedAfterBody := sharedAfterBody) (store := store)
+          (storeAfterCond := storeAfterCond)
+          (storeAfterBody := storeAfterBody) (compiler := compiler)
+          (pre := pre) (lowerCond := lowerCond) (lowerPost := lowerPost)
+          (lowerBody := lowerBody) (value := value)
+          (condTrace := condTrace) (bodyTrace := bodyTrace)
+          (postSuffix := postSuffix) (sourceDone := sourceDone)
+          hScopeContains hAllowedRelatable hCondOpen hBodySound
+          hPostSoundFinal hPostSoundLoop hLoopSound hPrim hInitial
+          hResolveValues hNonzero hDomainCond hSourceBody hDomainBody
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            exact hPostRegularDomain hDomainBody hPost)
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            exact hPostBreakFalse hPost)
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            exact hPostContinueFalse hPost)
+          hAfterBody hAllowed hSupported hResponsesBody)
+    (by
+      intro bodyTrace postSuffix sharedAfterBody storeAfterBody hDomainBody
+        hSourceBody hAfterBody hResponsesBody minimumTargetFuel
+      exact
+        sourceRunLoopContinuationPathSound_generated_nonzero_body_continue_post_split_of_callbacks
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed := allowed) (prim := prim) (program := program)
+          (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+          (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+          (post := post) (body := body) (codeOverride := codeOverride)
+          (shared := shared) (sharedAfterCond := sharedAfterCond)
+          (sharedAfterBody := sharedAfterBody) (store := store)
+          (storeAfterCond := storeAfterCond)
+          (storeAfterBody := storeAfterBody) (compiler := compiler)
+          (pre := pre) (lowerCond := lowerCond) (lowerPost := lowerPost)
+          (lowerBody := lowerBody) (value := value)
+          (condTrace := condTrace) (bodyTrace := bodyTrace)
+          (postSuffix := postSuffix) (sourceDone := sourceDone)
+          hScopeContains hAllowedRelatable hCondOpen hBodySound
+          hPostSoundFinal hPostSoundLoop hLoopSound hPrim hInitial
+          hResolveValues hNonzero hDomainCond hSourceBody hDomainBody
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            have hDomainBodyOk :
+                StateStoreDomainExact layout
+                  (.Ok sharedAfterBody storeAfterBody) := by
+              simpa [StateStoreDomainExact] using hDomainBody
+            exact hPostRegularDomain hDomainBodyOk hPost)
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            exact hPostBreakFalse hPost)
+          (by
+            intro sharedAfterPost storeAfterPost postTrace hPost
+            exact hPostContinueFalse hPost)
+          hAfterBody hAllowed hSupported hResponsesBody)
+    hResponses
+
+/--
+Direct dispatcher for a productive generated loop continuation, split from
+condition evaluation through body/post execution and recursive loop
+continuation.
+
+This is the direct `runForLoop` analogue of the statement-level generated-loop
+dispatcher: condition-terminal and zero-condition branches close in the
+condition splitter, while nonzero branches are handed to the direct body/post
+splitter.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_condition_body_post_split_of_callbacks
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel minimumTargetFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {trace : OpenExternal.OpenTrace} {sourceDone : Except Exception State}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hCondDone :
+      OpenResultDoneInvariant
+        (fun sourceDone =>
+          ∀ {sourceAfter values},
+            sourceDone = .ok (sourceAfter, values) →
+              StateStoreDomainExact layout sourceAfter ∧
+                ∃ value, values = [value])
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.evalValues bodySeqFuel.succ cond codeOverride
+            (.Ok shared store))))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSoundFinal :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPostSoundLoop :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero)
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hSourceLoop :
+      OpenExternal.OpenResultResolves
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        trace sourceDone)
+    (hAllowed :
+      SourceResultNotRegularOk sourceDone → allowed sourceDone)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hBodyBreakDomain :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Break sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyRegularDomain :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace (.ok (.Ok sharedAfterBody storeAfterBody)) →
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody))
+    (hBodyContinueDomain :
+      ∀ {sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
+        {storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
+        {bodyTrace : OpenExternal.OpenTrace},
+        StateStoreDomainExact layout (.Ok sharedAfterCond storeAfterCond) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block body)
+              codeOverride (.Ok sharedAfterCond storeAfterCond)))
+          bodyTrace
+          (.ok (.Checkpoint (.Continue sharedAfterBody storeAfterBody))) →
+        StateStoreDomainExact layout
+          (.Checkpoint (.Continue sharedAfterBody storeAfterBody)))
+    (hPostRegularDomain :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        StateStoreDomainExact layout (.Ok sharedAfterBody storeAfterBody) →
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace (.ok (.Ok sharedAfterPost storeAfterPost)) →
+        StateStoreDomainExact layout (.Ok sharedAfterPost storeAfterPost))
+    (hPostBreakFalse :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Break sharedAfterPost storeAfterPost))) →
+        False)
+    (hPostContinueFalse :
+      ∀ {sharedAfterBody sharedAfterPost : EvmYul.SharedState .Yul}
+        {storeAfterBody storeAfterPost : EvmYul.Yul.VarStore}
+        {postTrace : OpenExternal.OpenTrace},
+        OpenExternal.OpenResultResolves
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec bodySeqFuel.succ (.Block post)
+              codeOverride (.Ok sharedAfterBody storeAfterBody)))
+          postTrace
+          (.ok (.Checkpoint (.Continue sharedAfterPost storeAfterPost))) →
+        False)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace) :
+    ∃ targetFuel,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultPathRel
+        (SourceOpenLoopContinuationTraceCallResponseRel cfg)
+        (SourceOpenLoopContinuationPathDoneRel cfg layout outcomeLayout
+          terminalRel revertRel allowed)
+        trace
+        (runLoopSource bodySeqFuel.succ cond post body codeOverride
+          (.Ok shared store))
+        (CompilerOpen.FunctionsOpen.Stmt.runForLoop prim program
+          (ctx.withoutLoopControl) (.lit (EvmYul.UInt256.ofNat 1))
+          (ctx.withoutLoopControl) lowerPost
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          { stmts :=
+              pre ++
+                [Functions.Stmt.if_
+                  (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                  { stmts := [Functions.Stmt.brk] }] ++
+                lowerBody.stmts }
+          targetFuel compiler) :=
+  sourceRunLoopContinuationPathSound_generated_condition_split_of_cond_open
+    (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+    (terminalRel := terminalRel) (revertRel := revertRel)
+    (allowed := allowed) (prim := prim) (program := program) (ctx := ctx)
+    (sourceFuel := bodySeqFuel.succ)
+    (minimumTargetFuel := minimumTargetFuel) (cond := cond) (post := post)
+    (body := body) (codeOverride := codeOverride) (shared := shared)
+    (store := store) (compiler := compiler) (pre := pre)
+    (lowerCond := lowerCond) (lowerPost := lowerPost)
+    (lowerBody := lowerBody) (trace := trace) (sourceDone := sourceDone)
+    hScopeContains hCondOpen hCondDone hPrim hInitial hSourceLoop hAllowed
+    hResponses
+    (by
+      intro condTrace suffix sharedAfter storeAfter value hValueNonzero
+        hDomainCond hResolveValues hSuffix hResponsesNonzero
+        minimumTargetFuel
+      exact
+        sourceRunLoopContinuationPathSound_generated_nonzero_body_post_split_of_callbacks
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed := allowed) (prim := prim) (program := program)
+          (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+          (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+          (post := post) (body := body) (codeOverride := codeOverride)
+          (shared := shared) (sharedAfterCond := sharedAfter)
+          (store := store) (storeAfterCond := storeAfter)
+          (compiler := compiler) (pre := pre) (lowerCond := lowerCond)
+          (lowerPost := lowerPost) (lowerBody := lowerBody)
+          (value := value) (condTrace := condTrace) (suffix := suffix)
+          (sourceDone := sourceDone) hScopeContains hAllowedRelatable
+          hCondOpen hBodySound hPostSoundFinal hPostSoundLoop hLoopSound
+          hPrim hInitial hResolveValues hValueNonzero hDomainCond hSuffix
+          hAllowed hSupported
+          (by
+            intro sharedAfterBody storeAfterBody bodyTrace hBody
+            exact hBodyBreakDomain hDomainCond hBody)
+          (by
+            intro sharedAfterBody storeAfterBody bodyTrace hBody
+            exact hBodyRegularDomain hDomainCond hBody)
+          (by
+            intro sharedAfterBody storeAfterBody bodyTrace hBody
+            exact hBodyContinueDomain hDomainCond hBody)
+          hPostRegularDomain hPostBreakFalse hPostContinueFalse
+          hResponsesNonzero)
+
+/--
 Statement-level splitter for selected nonzero/body-regular generated-loop post
 paths.
 
@@ -79185,6 +83614,251 @@ theorem sourceOpenLoopHeadPathSound_generated_condition_body_post_block_of_callb
           hSupported hBodyBreakDomain hBodyRegularDomain
           hBodyContinueDomain hPostRegularDomain hPostBreakFalse
           hPostContinueFalse hResponses
+
+/--
+Generated loop-continuation contract with the mechanical Yul side facts
+constructed.
+
+This is the direct normalized sibling of the generated-loop head wrapper:
+domain preservation, singleton condition arity, post loop-control
+impossibility, and `leave` support are derived here, and the result targets
+`runLoopSource`/`runForLoop` directly.
+-/
+theorem sourceRunLoopContinuationPathSound_generated_condition_body_post_of_checked_facts
+    {cfg : StateRelConfig} {layout outcomeLayout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {bodySeqFuel : Nat}
+    {cond : AstExpr} {post body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {freshState freshStateAfterCond : Fresh.State}
+    {pre : List Functions.Stmt} {lowerCond : Locals.Expr 1}
+    {lowerPost lowerBody : Functions.Block}
+    {canBreak canContinue canLeave : Bool}
+    (hScopeContains : ∀ name : Name, name ∈ layout → name ∈ ctx.scope)
+    (hSafe : Safe.CallSafe.stmt (.For cond post body))
+    (hScoped :
+      ControlFlow.ScopedStmt canBreak canContinue canLeave
+        (.For cond post body))
+    (hCondScoped : SourceExprScoped layout cond)
+    (hCondLower :
+      Expr.lower1? freshState cond =
+        some (pre, lowerCond, freshStateAfterCond))
+    (hAllowedRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultOutcomeLayoutSupported ctx layout outcomeLayout
+          sourceResult)
+    (hCondOpen :
+      SourceExprRawPreludeOpenPathSoundWhen cfg layout terminalRel revertRel
+        prim program
+        (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+        bodySeqFuel.succ cond codeOverride pre lowerCond
+        (SourcePairResultPropagatesErrorTo allowed))
+    (hCondUserSingle :
+      ∀ {functionName : Name} {args : List AstExpr},
+        cond = .Call (.inr functionName) args →
+        Safe.CallSafe.expr (.Call (.inr functionName) args) →
+        SourceExprScoped layout (.Call (.inr functionName) args) →
+        Expr.lower1? freshState (.Call (.inr functionName) args) =
+          some (pre, lowerCond, freshStateAfterCond) →
+      ∀ {source compiler},
+        SourceStateRel cfg layout source compiler →
+          OpenResultDoneInvariant
+            (fun sourceDone =>
+              ∀ {sourceAfter values},
+                sourceDone = .ok (sourceAfter, values) →
+                  ∃ value, values = [value])
+            (OpenExternal.YulOpenResult.toOpenResult
+              (OpenExternal.YulOpen.evalValues bodySeqFuel.succ
+                (.Call (.inr functionName) args) codeOverride source)))
+    (hBodySound :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedBody : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq
+          (ctx.withoutLoopControl.withLoopControl ctx.scope ctx.scope)
+          ctxAfterPre →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedBody sourceResult →
+          SourceResultModeKontSupported ctxAfterPre layout
+            (SourceModeKontLayouts.block layout outcomeLayout)
+            sourceResult) →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          (SourceModeKontLayouts.block layout outcomeLayout) terminalRel
+          revertRel prim program ctxAfterPre bodySeqFuel body codeOverride
+          lowerBody allowedBody)
+    (hPostSoundFinal :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout
+            outcomeLayout sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout
+          outcomeLayout terminalRel revertRel prim program ctxAfterPre
+          bodySeqFuel post codeOverride lowerPost allowedPost)
+    (hPostSoundLoop :
+      ∀ {ctxAfterPre : Functions.Source.Ctx}
+        {allowedPost : Except Exception State → Prop},
+        (∀ name : Name, name ∈ layout → name ∈ ctxAfterPre.scope) →
+        SourceCtxHandlersEq (ctx.withoutLoopControl) ctxAfterPre →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultRelatable sourceResult) →
+        (∀ {sourceResult}, allowedPost sourceResult →
+          SourceResultOutcomeLayoutSupported ctxAfterPre layout layout
+            sourceResult) →
+        SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+          terminalRel revertRel prim program ctxAfterPre bodySeqFuel post
+          codeOverride lowerPost allowedPost)
+    (hLoopSound :
+      SourceOpenLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+        outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+        cond post body codeOverride lowerPost
+        { stmts :=
+            pre ++
+              [Functions.Stmt.if_
+                (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+                { stmts := [Functions.Stmt.brk] }] ++
+              lowerBody.stmts }
+        allowed)
+    (hPrim :
+      PrimitiveStackSoundAtArity cfg layout prim bodySeqFuel.succ.succ
+        (.CompBit .ISZERO : EvmYul.Operation .Yul) .iszero) :
+    SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx cfg layout
+      outcomeLayout terminalRel revertRel prim program ctx bodySeqFuel.succ
+      cond post body codeOverride lowerPost
+      { stmts :=
+          pre ++
+            [Functions.Stmt.if_
+              (.prim .iszero (Locals.ExprSeq.cons lowerCond .nil))
+              { stmts := [Functions.Stmt.brk] }] ++
+            lowerBody.stmts }
+      allowed := by
+  have hSafeFor := hSafe
+  rcases hSafe with ⟨hCondSafe, hPostSafe, hBodySafe⟩
+  rcases hScoped with ⟨hPostScoped, hBodyScoped⟩
+  unfold SourceRunLoopContinuationPathSoundWhenAtExactHiddenCtx
+  intro source compiler trace sourceDone hInitial hResolve hAllowed hResponses
+    minimumTargetFuel
+  cases hInitial with
+  | ok hShared hVars hDomain =>
+      exact
+        sourceRunLoopContinuationPathSound_generated_condition_body_post_split_of_callbacks
+          (cfg := cfg) (layout := layout) (outcomeLayout := outcomeLayout)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed := allowed) (prim := prim) (program := program)
+          (ctx := ctx) (bodySeqFuel := bodySeqFuel)
+          (minimumTargetFuel := minimumTargetFuel) (cond := cond)
+          (post := post) (body := body) (codeOverride := codeOverride)
+          (compiler := compiler) (pre := pre) (lowerCond := lowerCond)
+          (lowerPost := lowerPost) (lowerBody := lowerBody)
+          (trace := trace) (sourceDone := sourceDone)
+          hScopeContains hAllowedRelatable hCondOpen
+          (lower1?_yulOpenEvalValues_callSafe_expr_doneInvariant_domain_single_of_lower1?_cases
+            (cfg := cfg) (layout := layout) (sourceFuel := bodySeqFuel)
+            (expr := cond) (codeOverride := codeOverride)
+            (freshState := freshState)
+            (freshState' := freshStateAfterCond) (pre := pre)
+            (lower := lowerCond) hCondSafe hCondScoped hCondLower
+            hCondUserSingle
+            (SourceStateExactRel.ok hShared hVars hDomain))
+          hBodySound hPostSoundFinal hPostSoundLoop hLoopSound hPrim
+          (SourceStateExactRel.ok hShared hVars hDomain) hResolve hAllowed
+          hSupported
+          (by
+            intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+              bodyTrace hDomainCond hBody
+            have hInv :=
+              yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callSafe_scoped
+                (layout := layout) (canBreak := true)
+                (canContinue := true) (canLeave := canLeave)
+                (fuel := bodySeqFuel.succ)
+                (body := body) (codeOverride := codeOverride)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                hBodySafe hBodyScoped
+                (by simpa [StateStoreDomainExact] using hDomainCond)
+            have hState :
+                StateStoreDomainExact layout
+                  (.Checkpoint (.Break sharedAfterBody storeAfterBody)) :=
+              OpenResultDoneInvariant.of_resolves hInv hBody
+            simpa [StateStoreDomainExact] using hState)
+          (by
+            intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+              bodyTrace hDomainCond hBody
+            have hInv :=
+              yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callSafe_scoped
+                (layout := layout) (canBreak := true)
+                (canContinue := true) (canLeave := canLeave)
+                (fuel := bodySeqFuel.succ)
+                (body := body) (codeOverride := codeOverride)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                hBodySafe hBodyScoped
+                (by simpa [StateStoreDomainExact] using hDomainCond)
+            have hState :
+                StateStoreDomainExact layout
+                  (.Ok sharedAfterBody storeAfterBody) :=
+              OpenResultDoneInvariant.of_resolves hInv hBody
+            simpa [StateStoreDomainExact] using hState)
+          (by
+            intro sharedAfterCond sharedAfterBody storeAfterCond storeAfterBody
+              bodyTrace hDomainCond hBody
+            have hInv :=
+              yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callSafe_scoped
+                (layout := layout) (canBreak := true)
+                (canContinue := true) (canLeave := canLeave)
+                (fuel := bodySeqFuel.succ)
+                (body := body) (codeOverride := codeOverride)
+                (shared := sharedAfterCond) (store := storeAfterCond)
+                hBodySafe hBodyScoped
+                (by simpa [StateStoreDomainExact] using hDomainCond)
+            exact OpenResultDoneInvariant.of_resolves hInv hBody)
+          (by
+            intro sharedAfterBody sharedAfterPost storeAfterBody storeAfterPost
+              postTrace hDomainBody hPost
+            have hInv :=
+              yulOpenExec_block_toOpenResult_doneInvariant_stateStoreDomainExact_of_callSafe_scoped
+                (layout := layout) (canBreak := false)
+                (canContinue := false) (canLeave := canLeave)
+                (fuel := bodySeqFuel.succ)
+                (body := post) (codeOverride := codeOverride)
+                (shared := sharedAfterBody) (store := storeAfterBody)
+                hPostSafe hPostScoped
+                (by simpa [StateStoreDomainExact] using hDomainBody)
+            have hState :
+                StateStoreDomainExact layout
+                  (.Ok sharedAfterPost storeAfterPost) :=
+              OpenResultDoneInvariant.of_resolves hInv hPost
+            simpa [StateStoreDomainExact] using hState)
+          (by
+            intro sharedAfterBody sharedAfterPost storeAfterBody storeAfterPost
+              postTrace hPost
+            exact
+              yulOpenExec_toOpenResult_noBreak_of_callSafe_scoped
+                (stmt := .Block post)
+                (by simpa [Safe.CallSafe.stmt] using hPostSafe)
+                (by simpa [ControlFlow.ScopedStmt] using hPostScoped)
+                hPost)
+          (by
+            intro sharedAfterBody sharedAfterPost storeAfterBody storeAfterPost
+              postTrace hPost
+            exact
+              yulOpenExec_toOpenResult_noContinue_of_callSafe_scoped
+                (stmt := .Block post)
+                (by simpa [Safe.CallSafe.stmt] using hPostSafe)
+                (by simpa [ControlFlow.ScopedStmt] using hPostScoped)
+                hPost)
+          hResponses
 
 /--
 Generated-loop head contract with the mechanical Yul side facts constructed.
