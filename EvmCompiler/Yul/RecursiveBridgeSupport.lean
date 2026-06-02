@@ -58557,6 +58557,92 @@ def SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx
             targetFuel lowerBlock compiler)
 
 /--
+Lift an ordinary same-layout finite path to typed continuations.
+
+The source and target open computations are unchanged; only the done relation
+is strengthened from a single outcome layout to the declared mode-continuation
+layouts using the static support/within facts.
+-/
+theorem sourceOpenResultSeqPathRel_to_kont_same_layout_supported_within
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts} {ctx : Functions.Source.Ctx}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {allowed : Except Exception State → Prop}
+    {source : OpenExternal.OpenResult Exception State}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {trace : OpenExternal.OpenTrace}
+    (hPath :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqDoneRel cfg layout terminalRel revertRel allowed)
+        trace source target)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts) :
+    OpenExternal.OpenResultPathRel
+      (SourceOpenTraceCallResponseRel cfg)
+      (SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel allowed)
+      trace source target := by
+  induction hPath with
+  | @done sourceDone targetDone hDone =>
+      exact
+        OpenExternal.OpenResultPathRel.done (by
+          intro hAllowed
+          cases targetDone with
+          | error targetErr =>
+              exact hDone hAllowed
+          | ok targetResult =>
+              rcases targetResult with ⟨sourceOutcome, ctxAfter⟩
+              exact
+                SourceResultOutcomeRel.to_kont_of_supported_within
+                  (ctx := ctx) (hSupported hAllowed) hWithin
+                  (hDone hAllowed))
+  | call hSite hResponse _hTail ih =>
+      exact
+        OpenExternal.OpenResultPathRel.call hSite hResponse ih
+
+/--
+View an ordinary same-layout finite-trace sequence proof as a typed-kont proof.
+-/
+theorem sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_of_same_layout_supported_within
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hSound :
+      SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx cfg layout layout
+        terminalRel revertRel prim program ctx sourceFuel sourceStmts
+        codeOverride lowerBlock allowed)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts) :
+    SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout konts
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed := by
+  intro source compiler trace sourceDone hInitial hResolve hAllowed
+    hResponses minimumTargetFuel
+  rcases hSound hInitial hResolve hAllowed hResponses minimumTargetFuel with
+    ⟨targetFuel, hMinimum, hPath⟩
+  exact
+    ⟨targetFuel, hMinimum,
+      sourceOpenResultSeqPathRel_to_kont_same_layout_supported_within
+        (cfg := cfg) (layout := layout) (konts := konts) (ctx := ctx)
+        (terminalRel := terminalRel) (revertRel := revertRel)
+        (allowed := allowed) hPath hSupported hWithin⟩
+
+/--
 Project ordinary finite-trace sequence soundness to a concrete regular target
 result.
 
@@ -93454,6 +93540,121 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
                       (by
                         simp [Stmt.List.toBlockFuel?, hLowerRest]))
                       hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
+Decompose one checked lowered `head :: rest` block for a path-native typed
+continuation constructor.
+
+This is the typed-continuation sibling of
+`checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components`.
+The callback receives exactly the compiler-produced head statement list and
+tail block, while the semantic target keeps the declared mode continuations.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_of_components
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat}
+    {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hCons :
+      ∀ {freshState stateHead lowerFuel lowerHead lowerTail freshState'},
+        FreshCoversLayout (reserved ++ layout) freshState →
+        Stmt.toFunctionsListFuel? lowerFuel freshState head =
+          some (lowerHead, stateHead) →
+        Stmt.List.toBlockFuel? lowerFuel.succ stateHead rest =
+          some (lowerTail, freshState') →
+        SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout
+          konts terminalRel revertRel prim program ctx sourceFuel
+          (head :: rest) codeOverride
+          { stmts := lowerHead ++ lowerTail.stmts } allowed) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx
+      sourceFuel compileFuel (head :: rest) codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ functionsFuel =>
+      cases functionsFuel with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ lowerFuel =>
+          cases hLowerHead :
+              Stmt.toFunctionsListFuel? lowerFuel freshState head with
+          | none =>
+              simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                hLowerHead] at hLower
+          | some headResult =>
+              rcases headResult with ⟨lowerHead, stateHead⟩
+              cases hLowerRest :
+                  Stmt.List.toFunctionsFuel? lowerFuel stateHead rest with
+              | none =>
+                  simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?,
+                    hLowerHead, hLowerRest] at hLower
+              | some restResult =>
+                  rcases restResult with ⟨lowerRest, stateRest⟩
+                  have hPair :
+                      (({ stmts := lowerHead ++ lowerRest } : Functions.Block),
+                          stateRest) =
+                        (lowerBlock, freshState') := by
+                    simpa [Stmt.List.toBlockFuel?,
+                      Stmt.List.toFunctionsFuel?, hLowerHead, hLowerRest]
+                      using hLower
+                  cases hPair
+                  unfold SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx
+                  intro source compiler trace sourceDone
+                    hInitial hResolves hAllowed hResponses minimumTargetFuel
+                  exact
+                    (hCons (freshState := freshState)
+                      (stateHead := stateHead) (lowerFuel := lowerFuel)
+                      (lowerHead := lowerHead)
+                      (lowerTail := { stmts := lowerRest })
+                      (freshState' := freshState') hCovers hLowerHead
+                      (by
+                        simp [Stmt.List.toBlockFuel?, hLowerRest]))
+                      hInitial hResolves hAllowed hResponses minimumTargetFuel
+
+/--
+Checked open path adapter from ordinary same-layout sequence soundness to
+typed-continuation soundness.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_same_layout_supported_within
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hSound :
+      CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+        reserved layout layout terminalRel revertRel prim program ctx
+        sourceFuel compileFuel sourceStmts codeOverride allowed)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx sourceFuel
+      compileFuel sourceStmts codeOverride allowed := by
+  intro freshState freshState' lowerBlock hCovers hLower
+  exact
+    sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_of_same_layout_supported_within
+      (cfg := cfg) (layout := layout) (konts := konts)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+      (sourceStmts := sourceStmts) (codeOverride := codeOverride)
+      (lowerBlock := lowerBlock) (allowed := allowed)
+      (hSound hCovers hLower) hSupported hWithin
 
 /--
 Checked open finite-path sequence constructor for generated `for` heads.
