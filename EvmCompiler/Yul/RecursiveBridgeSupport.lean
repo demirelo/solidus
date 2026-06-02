@@ -220563,6 +220563,244 @@ theorem callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_succ_of_pr
             hInitial hResolve hLoopAllowed hResponses minimumTargetFuel)
 
 /--
+Finite-path generated loop-continuation frontier from smaller CALL frontiers.
+
+This packages the whole generated-loop fuel split.  Fuels `0`, `1`, and `2`
+are imported-Yul fuel failures, fuel `3` is the normalized zero-iteration edge,
+and fuel `4 + n` uses the productive branch with sequence, typed-continuation,
+and generated-loop callbacks drawn only from strictly smaller source fuels.
+-/
+theorem callOpenLoopContinuationPathLoweringFrontierAt_of_programCALL_smaller_frontiers
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {bound : Nat}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        bound)
+    (hSeqFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec < bound →
+          CALLOpenSeqPathLoweringFrontierAt cfg terminalRel revertRel prim
+            yulProgram program sourceFuelRec)
+    (hKontFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec < bound →
+          CALLOpenSeqKontPathLoweringFrontierAt cfg terminalRel revertRel prim
+            yulProgram program sourceFuelRec)
+    (hLoopFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec < bound →
+          CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel
+            revertRel prim yulProgram program sourceFuelRec)
+    (hPrim :
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op) :
+    CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel revertRel
+      prim yulProgram program bound := by
+  cases bound with
+  | zero =>
+      exact
+        callOpenLoopContinuationPathLoweringFrontierAt_low_fuel
+          (cfg := cfg) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim)
+          (yulProgram := yulProgram) (program := program)
+          (bound := 0) (by omega)
+  | succ bound1 =>
+      cases bound1 with
+      | zero =>
+          exact
+            callOpenLoopContinuationPathLoweringFrontierAt_low_fuel
+              (cfg := cfg) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (yulProgram := yulProgram) (program := program)
+              (bound := 1) (by omega)
+      | succ bound2 =>
+          cases bound2 with
+          | zero =>
+              exact
+                callOpenLoopContinuationPathLoweringFrontierAt_low_fuel
+                  (cfg := cfg) (terminalRel := terminalRel)
+                  (revertRel := revertRel) (prim := prim)
+                  (yulProgram := yulProgram) (program := program)
+                  (bound := 2) (by omega)
+          | succ bound3 =>
+              cases bound3 with
+              | zero =>
+                  exact
+                    callOpenLoopContinuationPathLoweringFrontierAt_three
+                      (cfg := cfg) (terminalRel := terminalRel)
+                      (revertRel := revertRel) (prim := prim)
+                      (yulProgram := yulProgram) (program := program)
+              | succ bound =>
+                  change
+                    CALLOpenLoopContinuationPathLoweringFrontierAt cfg
+                      terminalRel revertRel prim yulProgram program
+                      bound.succ.succ.succ.succ
+                  unfold CALLOpenLoopContinuationPathLoweringFrontierAt
+                  have hBodyFuelAdequate' :
+                      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg
+                        yulProgram.contract bound.succ := by
+                    intro bodyFuel hFuel
+                    exact hBodyFuelAdequate (by omega)
+                  have hProductive :
+                      CALLOpenLoopContinuationPathLoweringFrontierAt cfg
+                        terminalRel revertRel prim yulProgram program
+                        bound.succ.succ.succ.succ :=
+                    callOpenLoopContinuationPathLoweringFrontierAt_succ_succ_succ_succ_of_programCALL_recursive
+                      (cfg := cfg) (terminalRel := terminalRel)
+                      (revertRel := revertRel) (prim := prim)
+                      (yulProgram := yulProgram) (program := program)
+                      (bound := bound) context hBodyFuelAdequate'
+                      (CALLOpenSeqPathRecursiveAt.of_frontiers_le
+                        (cfg := cfg) (terminalRel := terminalRel)
+                        (revertRel := revertRel) (prim := prim)
+                        (yulProgram := yulProgram) (program := program)
+                        (bound := bound.succ)
+                        (by
+                          intro sourceFuelRec hFuel
+                          exact
+                            hSeqFrontier (sourceFuelRec := sourceFuelRec)
+                              (by omega)))
+                      (CALLOpenSeqKontPathRecursiveAt.of_frontiers_le
+                        (cfg := cfg) (terminalRel := terminalRel)
+                        (revertRel := revertRel) (prim := prim)
+                        (yulProgram := yulProgram) (program := program)
+                        (bound := bound.succ)
+                        (by
+                          intro sourceFuelRec hFuel
+                          exact
+                            hKontFrontier (sourceFuelRec := sourceFuelRec)
+                              (by omega)))
+                      (CALLOpenLoopContinuationPathRecursiveAt.of_frontiers_le
+                        (cfg := cfg) (terminalRel := terminalRel)
+                        (revertRel := revertRel) (prim := prim)
+                        (yulProgram := yulProgram) (program := program)
+                        (bound := bound.succ)
+                        (by
+                          intro sourceFuelRec hFuel
+                          exact
+                            hLoopFrontier (sourceFuelRec := sourceFuelRec)
+                              (by omega)))
+                      hPrim
+                  intro headCompileFuel reserved layout outcomeLayout ctx
+                    allowed canBreak canContinue canLeave cond post body
+                    freshState freshStateAfterCond freshStateAfterPost
+                    freshState' preCond lowerCond lowerPost lowerBody hSafe
+                    hScoped hOk hSourceScoped hReserved hCovers hCondLower
+                    hPostLower hBodyLower hAllowed hSupported hScopeContains
+                  exact
+                    hProductive (headCompileFuel := headCompileFuel)
+                      (reserved := reserved) (layout := layout)
+                      (outcomeLayout := outcomeLayout) (ctx := ctx)
+                      (allowed := allowed) (canBreak := canBreak)
+                      (canContinue := canContinue) (canLeave := canLeave)
+                      (cond := cond) (post := post) (body := body)
+                      (freshState := freshState)
+                      (freshStateAfterCond := freshStateAfterCond)
+                      (freshStateAfterPost := freshStateAfterPost)
+                      (freshState' := freshState') (preCond := preCond)
+                      (lowerCond := lowerCond) (lowerPost := lowerPost)
+                      (lowerBody := lowerBody) hSafe hScoped hOk
+                      hSourceScoped hReserved hCovers hCondLower hPostLower
+                      hBodyLower hAllowed hSupported hScopeContains
+
+/--
+Generated loop-continuation frontiers up to a bound from sequence and
+typed-continuation frontiers up to the same bound.
+
+The proof is a strong induction on the selected loop fuel.  Each step invokes
+`callOpenLoopContinuationPathLoweringFrontierAt_of_programCALL_smaller_frontiers`,
+so recursive generated-loop edges are satisfied only from strictly smaller
+loop-frontier induction hypotheses.
+-/
+theorem callOpenLoopContinuationPathLoweringFrontiersUpTo_of_programCALL_sequence_kont_frontiers
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program}
+    {bound : Nat}
+    (context : ProgramCALLBridgeContext yulProgram program)
+    (hBodyFuelAdequate :
+      SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg yulProgram.contract
+        bound)
+    (hSeqFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec ≤ bound →
+          CALLOpenSeqPathLoweringFrontierAt cfg terminalRel revertRel prim
+            yulProgram program sourceFuelRec)
+    (hKontFrontier :
+      ∀ {sourceFuelRec : Nat},
+        sourceFuelRec ≤ bound →
+          CALLOpenSeqKontPathLoweringFrontierAt cfg terminalRel revertRel prim
+            yulProgram program sourceFuelRec)
+    (hPrim :
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
+        Safe.primitive yulPrim →
+        Prim.toBasicOp? yulPrim = some op →
+          PrimitiveStackSoundAtArity cfg layout prim fuel yulPrim op) :
+    ∀ {sourceFuelRec : Nat},
+      sourceFuelRec ≤ bound →
+        CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel
+          revertRel prim yulProgram program sourceFuelRec := by
+  intro sourceFuelRec
+  induction sourceFuelRec using Nat.strong_induction_on with
+  | h sourceFuelRec ih =>
+      intro hLe
+      have hBodyFuelAdequate' :
+          SourceOpenInternalUserCallBodyFuelAdequateUpTo cfg
+            yulProgram.contract sourceFuelRec := by
+        intro bodyFuel hFuel
+        exact hBodyFuelAdequate (by omega)
+      have hFrontier :
+          CALLOpenLoopContinuationPathLoweringFrontierAt cfg terminalRel
+            revertRel prim yulProgram program sourceFuelRec :=
+        callOpenLoopContinuationPathLoweringFrontierAt_of_programCALL_smaller_frontiers
+          (cfg := cfg) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim)
+          (yulProgram := yulProgram) (program := program)
+          (bound := sourceFuelRec) context hBodyFuelAdequate'
+          (by
+            intro smaller hSmaller
+            exact hSeqFrontier (sourceFuelRec := smaller) (by omega))
+          (by
+            intro smaller hSmaller
+            exact hKontFrontier (sourceFuelRec := smaller) (by omega))
+          (by
+            intro smaller hSmaller
+            exact ih smaller hSmaller (by omega))
+          hPrim
+      intro headCompileFuel reserved layout outcomeLayout ctx allowed canBreak
+        canContinue canLeave cond post body freshState freshStateAfterCond
+        freshStateAfterPost freshState' preCond lowerCond lowerPost lowerBody
+        hSafe hScoped hOk hSourceScoped hReserved hCovers hCondLower
+        hPostLower hBodyLower hAllowed hSupported hScopeContains
+      exact
+        hFrontier (headCompileFuel := headCompileFuel) (reserved := reserved)
+          (layout := layout) (outcomeLayout := outcomeLayout) (ctx := ctx)
+          (allowed := allowed) (canBreak := canBreak)
+          (canContinue := canContinue) (canLeave := canLeave)
+          (cond := cond) (post := post) (body := body)
+          (freshState := freshState)
+          (freshStateAfterCond := freshStateAfterCond)
+          (freshStateAfterPost := freshStateAfterPost)
+          (freshState' := freshState') (preCond := preCond)
+          (lowerCond := lowerCond) (lowerPost := lowerPost)
+          (lowerBody := lowerBody) hSafe hScoped hOk hSourceScoped hReserved
+          hCovers hCondLower hPostLower hBodyLower hAllowed hSupported
+          hScopeContains
+
+/--
 Open CALL-safe sequence frontier at source fuel zero.
 
 No statement can expose an external CALL at this fuel; the source open
@@ -257651,9 +257889,10 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
 /--
 Canonical one-head open CALL frontier from exact-fuel recursive frontiers.
 
-This is the public-spine-facing shape: sequence, typed-continuation sequence,
-and generated loop-continuation callbacks are constructed locally from
-frontiers at smaller source-fuel bounds.
+This is the public-spine-facing shape: sequence and typed-continuation
+frontiers are supplied by the surrounding source-fuel induction, while
+generated loop-continuation callbacks are constructed locally from those
+frontiers and their own smaller-loop induction.
 -/
 theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_single_expr_dispatch_canonical_terminal_of_programCALL_frontiers
     {cfg : StateRelConfig} {reserved layout outcomeLayout : List Name}
@@ -257684,18 +257923,9 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
             (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
             Locals.Source.PrimitiveSemantics.structured yulProgram program
             sourceFuelRec)
-    (hLoopFrontier :
-      ∀ {sourceFuelRec : Nat},
-        sourceFuelRec ≤ tailFuel →
-          CALLOpenLoopContinuationPathLoweringFrontierAt cfg
-            (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
-              cfg)
-            (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
-            Locals.Source.PrimitiveSemantics.structured yulProgram program
-            sourceFuelRec)
     (hPrim :
-      ∀ {fuel : Nat} {yulPrim : EvmYul.Operation .Yul}
-        {op : Structured.BasicOp},
+      ∀ {layout : List Name} {fuel : Nat}
+        {yulPrim : EvmYul.Operation .Yul} {op : Structured.BasicOp},
         Safe.primitive yulPrim →
         Prim.toBasicOp? yulPrim = some op →
           PrimitiveStackSoundAtArity cfg layout
@@ -257772,10 +258002,30 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons
         RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
       (prim := Locals.Source.PrimitiveSemantics.structured)
       (yulProgram := yulProgram) (program := program)
-      (bound := tailFuel) hLoopFrontier)
-    hPrim hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped
-    hSafeTail hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed
-    hSupported hScopeContains hOther
+      (bound := tailFuel)
+      (callOpenLoopContinuationPathLoweringFrontiersUpTo_of_programCALL_sequence_kont_frontiers
+        (cfg := cfg)
+        (terminalRel :=
+          RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (revertRel :=
+          RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        (prim := Locals.Source.PrimitiveSemantics.structured)
+        (yulProgram := yulProgram) (program := program)
+        (bound := tailFuel) context hBodyFuelAdequate hSeqFrontier
+        hKontFrontier
+        (by
+          intro primLayout fuel yulPrim op hSafePrim hBasic
+          exact
+            hPrim (layout := primLayout) (fuel := fuel)
+              (yulPrim := yulPrim) (op := op) hSafePrim hBasic)))
+    (by
+      intro fuel yulPrim op hSafePrim hBasic
+      exact
+        hPrim (layout := layout) (fuel := fuel) (yulPrim := yulPrim)
+          (op := op) hSafePrim hBasic)
+    hSafeHead hScopedHead hStmtOkHead hSourceScopedHead hTailScoped hSafeTail
+    hScopedTail hStmtOkTail hReservedHead hReservedTail hAllowed hSupported
+    hScopeContains hOther
 
 end CanonicalTerminalOpenFrontier
 
