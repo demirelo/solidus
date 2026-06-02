@@ -100434,6 +100434,236 @@ theorem checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
                       hDone)
 
 /--
+Typed finite-path hidden-context sequence soundness for impossible source
+out-of-fuel branches.
+-/
+theorem sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_of_execSeq_outOfFuel
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hExec :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source =
+            .error (.OutOfFuel : Exception)) :
+    SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout konts
+      terminalRel revertRel prim program ctx sourceFuel sourceStmts
+      codeOverride lowerBlock allowed := by
+  intro source compiler trace sourceDone hInitial hResolves hAllow _hResponses
+    _minimumTargetFuel
+  have hDone :
+      OpenExternal.OpenResultResolves
+        (.done (.error (.OutOfFuel : Exception))) trace sourceDone := by
+    simpa [hExec hInitial, OpenExternal.YulOpenResult.toOpenResult] using
+      hResolves
+  cases hDone
+  have hRelatable :
+      SourceResultRelatable (.error (.OutOfFuel : Exception)) :=
+    hAllowed hAllow
+  cases hRelatable
+
+/--
+Checked typed finite-path wrapper for impossible source out-of-fuel branches.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hExec :
+      ∀ {source compiler},
+        SourceStateExactRel cfg layout source compiler →
+          OpenExternal.YulOpen.execSeq sourceFuel sourceStmts codeOverride
+              source =
+            .error (.OutOfFuel : Exception)) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx sourceFuel
+      compileFuel sourceStmts codeOverride allowed := by
+  intro _freshState _freshState' lowerBlock _hCovers _hLower
+  exact
+    sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_of_execSeq_outOfFuel
+      (cfg := cfg) (layout := layout) (konts := konts)
+      (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+      (program := program) (ctx := ctx) (sourceFuel := sourceFuel)
+      (sourceStmts := sourceStmts) (codeOverride := codeOverride)
+      (lowerBlock := lowerBlock) (allowed := allowed) hAllowed hExec
+
+/--
+Checked typed finite-path hidden-context sequence bridge at source fuel zero.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx 0
+      compileFuel sourceStmts codeOverride allowed :=
+  checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    (cfg := cfg) (reserved := reserved) (layout := layout) (konts := konts)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := 0)
+    (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+    (codeOverride := codeOverride) (allowed := allowed) hAllowed
+    (by
+      intro source compiler hInitial
+      simp [OpenExternal.YulOpen.execSeq])
+
+/--
+Checked typed finite-path hidden-context sequence bridge for any nonempty
+sequence at source fuel one.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {compileFuel : Nat} {head : AstStmt} {rest : List AstStmt}
+    {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx 1
+      compileFuel (head :: rest) codeOverride allowed :=
+  checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_of_execSeq_outOfFuel
+    (cfg := cfg) (reserved := reserved) (layout := layout) (konts := konts)
+    (terminalRel := terminalRel) (revertRel := revertRel) (prim := prim)
+    (program := program) (ctx := ctx) (sourceFuel := 1)
+    (compileFuel := compileFuel) (sourceStmts := head :: rest)
+    (codeOverride := codeOverride) (allowed := allowed) hAllowed
+    (by
+      intro source compiler hInitial
+      simp [OpenExternal.YulOpen.execSeq, OpenExternal.YulOpen.exec,
+        OpenExternal.YulOpenResult.bind, OpenExternal.YulOpenResult.error])
+
+/--
+Checked empty typed finite-path hidden-context sequence bridge.
+-/
+theorem checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+    {cfg : StateRelConfig} {reserved layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel compileFuel : Nat} {codeOverride : Option AstContract}
+    {allowed : Except Exception State → Prop}
+    (hRelatable :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultRelatable sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult) :
+    CheckedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx cfg
+      reserved layout konts terminalRel revertRel prim program ctx sourceFuel
+      compileFuel [] codeOverride allowed := by
+  intro freshState freshState' lowerBlock _hCovers hLower
+  cases compileFuel with
+  | zero =>
+      simp [Stmt.List.toBlockFuel?] at hLower
+  | succ compileFuel' =>
+      cases compileFuel' with
+      | zero =>
+          simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?] at hLower
+      | succ compileFuel'' =>
+          have hLowerSome :
+              some (({ stmts := [] } : Functions.Block), freshState) =
+                some (lowerBlock, freshState') := by
+            simpa [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?]
+              using hLower
+          have hLowerPair :
+              (({ stmts := [] } : Functions.Block), freshState) =
+                (lowerBlock, freshState') :=
+            Option.some.inj hLowerSome
+          cases hLowerPair
+          intro source compiler trace sourceDone hInitial hResolves hAllow
+            _hResponses minimumTargetFuel
+          cases sourceFuel with
+          | zero =>
+              have hResolveDone :
+                  OpenExternal.OpenResultResolves
+                    (.done (.error (.OutOfFuel : Exception))) trace
+                    sourceDone := by
+                simpa [OpenExternal.YulOpen.execSeq,
+                  OpenExternal.YulOpenResult.toOpenResult] using hResolves
+              cases hResolveDone
+              have hRelatable' := hRelatable hAllow
+              exact False.elim
+                (by
+                  simpa [SourceResultRelatable] using hRelatable')
+          | succ sourceFuel' =>
+              cases hInitial with
+              | @ok shared store compiler hShared hVars _hDomain =>
+                  have hResolveDone :
+                      OpenExternal.OpenResultResolves
+                        (.done (.ok (.Ok shared store))) trace sourceDone := by
+                    simpa [OpenExternal.YulOpen.execSeq,
+                      OpenExternal.YulOpenResult.toOpenResult] using hResolves
+                  cases hResolveDone
+                  have hDone :
+                      SourceOpenResultSeqKontDoneRel cfg konts terminalRel
+                        revertRel allowed
+                        (.ok (.Ok shared store))
+                        (.ok (Functions.Source.Outcome.regular compiler,
+                          ctx)) := by
+                    intro hAllow
+                    have hSubset :
+                        ∀ name : Name,
+                          name ∈ konts.regular → name ∈ layout := by
+                      simpa [SourceResultModeKontSupported] using
+                        hSupported hAllow
+                    exact
+                      SourceResultKontOutcomeRel.ok
+                        (SourceOkKontOutcomeRel.regular
+                          (SourceStateRel.ok hShared
+                            (by
+                              intro name hMem
+                              exact hVars name (hSubset name hMem))))
+                  refine ⟨minimumTargetFuel.succ, Nat.le_succ _, ?_⟩
+                  simpa [OpenExternal.YulOpen.execSeq,
+                    OpenExternal.YulOpenResult.toOpenResult,
+                    CompilerOpen.FunctionsOpen.Block.runOpen,
+                    OpenExternal.OpenResult.ok] using
+                    (OpenExternal.OpenResultPathRel.done
+                      (callResponseRel := SourceOpenTraceCallResponseRel cfg)
+                      hDone)
+
+/--
 Assemble checked finite-path sequence preservation from a one-head
 constructor. The recursive tail receives the predecessor source-fuel bound;
 each concrete admitted trace still chooses its own target cutoff.
@@ -220964,6 +221194,65 @@ theorem callOpenSeqPathLoweringFrontierAt_one
         checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
           (cfg := cfg) (reserved := reserved) (layout := layout)
           (outcomeLayout := outcomeLayout) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (compileFuel := compileFuel) (head := head)
+          (rest := rest) (codeOverride := some yulProgram.contract)
+          (allowed := allowed) hAllowed
+
+/--
+Finite-path CALL-safe typed-continuation sequence frontier at source fuel zero.
+-/
+theorem callOpenSeqKontPathLoweringFrontierAt_zero
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqKontPathLoweringFrontierAt cfg terminalRel revertRel prim
+      yulProgram program 0 := by
+  intro reserved layout konts ctx compileFuel sourceStmts allowed canBreak
+    canContinue canLeave _hSafe _hScoped _hStmtOk _hSourceScoped _hReserved
+    hAllowed _hSupported _hWithin _hScopeContains
+  exact
+    checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_zero
+      (cfg := cfg) (reserved := reserved) (layout := layout)
+      (konts := konts) (terminalRel := terminalRel) (revertRel := revertRel)
+      (prim := prim) (program := program) (ctx := ctx)
+      (compileFuel := compileFuel) (sourceStmts := sourceStmts)
+      (codeOverride := some yulProgram.contract) (allowed := allowed)
+      hAllowed
+
+/--
+Finite-path CALL-safe typed-continuation sequence frontier at source fuel one.
+-/
+theorem callOpenSeqKontPathLoweringFrontierAt_one
+    {cfg : StateRelConfig}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {yulProgram : Program} {program : Functions.Program} :
+    CALLOpenSeqKontPathLoweringFrontierAt cfg terminalRel revertRel prim
+      yulProgram program 1 := by
+  intro reserved layout konts ctx compileFuel sourceStmts allowed canBreak
+    canContinue canLeave _hSafe _hScoped _hStmtOk _hSourceScoped _hReserved
+    hAllowed hSupported _hWithin _hScopeContains
+  cases sourceStmts with
+  | nil =>
+      exact
+        checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_nil
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (konts := konts) (terminalRel := terminalRel)
+          (revertRel := revertRel) (prim := prim) (program := program)
+          (ctx := ctx) (sourceFuel := 1) (compileFuel := compileFuel)
+          (codeOverride := some yulProgram.contract) (allowed := allowed)
+          hAllowed hSupported
+  | cons head rest =>
+      exact
+        checkedOpenSeqKontPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_one
+          (cfg := cfg) (reserved := reserved) (layout := layout)
+          (konts := konts) (terminalRel := terminalRel)
           (revertRel := revertRel) (prim := prim) (program := program)
           (ctx := ctx) (compileFuel := compileFuel) (head := head)
           (rest := rest) (codeOverride := some yulProgram.contract)
