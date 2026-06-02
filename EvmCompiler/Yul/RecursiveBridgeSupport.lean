@@ -6207,6 +6207,107 @@ theorem restrictStoreTo_block_of_scope_contains
           (terminalRel := terminalRel) (revertRel := revertRel)
           hRevert
 
+theorem restrictStoreTo_of_scope_contains
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {ctx : Functions.Source.Ctx}
+    {scope : EvmYul.Yul.VarStore}
+    {sourceResult : Except Exception State}
+    {sourceOutcome : Objects.Source.Outcome}
+    (hScopeLayout :
+      ∀ name : Name, name ∈ layout → (scope.lookup name).isSome = true)
+    (hSupported :
+      SourceResultModeKontSupported ctx layout konts
+        (restrictSourceResultTo scope sourceResult))
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hRel :
+      SourceResultKontOutcomeRel cfg konts terminalRel revertRel sourceResult
+        sourceOutcome) :
+    SourceResultKontOutcomeRel cfg konts terminalRel revertRel
+      (restrictSourceResultTo scope sourceResult) sourceOutcome := by
+  cases hRel with
+  | ok hOk =>
+      cases hOk with
+      | regular hState =>
+          cases hState with
+          | ok hShared hVars =>
+              have hScopeRegular :
+                  ∀ name : Name, name ∈ konts.regular →
+                    (scope.lookup name).isSome = true := by
+                intro name hMem
+                apply hScopeLayout
+                simpa [restrictSourceResultTo,
+                  EvmYul.Yul.State.restrictStoreTo,
+                  SourceResultModeKontSupported] using
+                  hSupported name hMem
+              exact
+                SourceResultKontOutcomeRel.ok
+                  (SourceOkKontOutcomeRel.regular
+                    (by
+                      simpa [restrictSourceResultTo,
+                        EvmYul.Yul.State.restrictStoreTo] using
+                        (SourceStateRel.restrictStoreTo_of_scope_contains
+                          (SourceStateRel.ok hShared hVars)
+                          hScopeRegular)))
+      | brk hState =>
+          have hScopeBreak :
+              ∀ name : Name, name ∈ konts.brk →
+                (scope.lookup name).isSome = true := by
+            intro name hMem
+            exact hScopeLayout name (hWithin.brk name hMem)
+          exact
+            SourceResultKontOutcomeRel.ok
+              (SourceOkKontOutcomeRel.brk
+                (by
+                  simpa [restrictSourceResultTo,
+                    EvmYul.Yul.State.restrictStoreTo] using
+                    (SourceStateRel.restrictStoreTo_of_scope_contains
+                      hState hScopeBreak)))
+      | cont hState =>
+          have hScopeContinue :
+              ∀ name : Name, name ∈ konts.cont →
+                (scope.lookup name).isSome = true := by
+            intro name hMem
+            exact hScopeLayout name (hWithin.cont name hMem)
+          exact
+            SourceResultKontOutcomeRel.ok
+              (SourceOkKontOutcomeRel.cont
+                (by
+                  simpa [restrictSourceResultTo,
+                    EvmYul.Yul.State.restrictStoreTo] using
+                    (SourceStateRel.restrictStoreTo_of_scope_contains
+                      hState hScopeContinue)))
+      | leave hState =>
+          have hScopeLeave :
+              ∀ name : Name, name ∈ konts.leave →
+                (scope.lookup name).isSome = true := by
+            intro name hMem
+            apply hScopeLayout
+            exact hSupported.2 name hMem
+          exact
+            SourceResultKontOutcomeRel.ok
+              (SourceOkKontOutcomeRel.leave
+                (by
+                  simpa [restrictSourceResultTo,
+                    EvmYul.Yul.State.restrictStoreTo] using
+                    (SourceStateRel.restrictStoreTo_of_scope_contains
+                      hState hScopeLeave)))
+  | yulHalt hTerminal =>
+      exact
+        SourceResultKontOutcomeRel.yulHalt
+          (cfg := cfg) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          hTerminal
+  | revert hRevert =>
+      exact
+        SourceResultKontOutcomeRel.revert
+          (cfg := cfg) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          hRevert
+
 end SourceResultKontOutcomeRel
 
 namespace SourceResultKontOutcomeRel
@@ -61101,6 +61202,266 @@ theorem sourceOpenResultSeqKontPathRel_exec_block_succ_of_seq_block
                     (hDone hAllowed))) (by
       intro sourceCall targetCall response hResponse
       exact hResponse)
+
+/--
+Lift one selected open typed-continuation sequence path through imported Yul
+block cleanup for arbitrary caller continuations.
+
+The block-shaped adapter above is enough for generated loop bodies.  Lexical
+source blocks need this more general form because `break`, `continue`, and
+`leave` propagate to the caller's declared continuation layouts.
+-/
+theorem sourceOpenResultSeqKontPathRel_exec_block_succ_of_seq_supported
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {ctx : Functions.Source.Ctx}
+    {fuel : Nat} {body : List AstStmt}
+    {codeOverride : Option AstContract}
+    {source : State}
+    {target :
+      OpenExternal.OpenResult Functions.EVMException
+        (Objects.Source.Outcome × Functions.Source.Ctx)}
+    {trace : OpenExternal.OpenTrace}
+    {allowed : Except Exception State → Prop}
+    (hScopeLayout :
+      ∀ name : Name, name ∈ layout →
+        (source.store.lookup name).isSome = true)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hSeq :
+      OpenExternal.OpenResultPathRel
+        (SourceOpenTraceCallResponseRel cfg)
+        (SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel
+          (fun result => allowed (restrictSourceResultTo source.store result)))
+        trace
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.execSeq fuel body codeOverride source))
+        target) :
+    OpenExternal.OpenResultPathRel
+      (SourceOpenTraceCallResponseRel cfg)
+      (SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel allowed)
+      trace
+      (OpenExternal.YulOpenResult.toOpenResult
+        (OpenExternal.YulOpen.exec fuel.succ (.Block body) codeOverride
+          source))
+      target := by
+  rw [yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq]
+  rw [← openResult_bind_ok_eq target]
+  exact OpenExternal.OpenResultPathRel.bind_nil
+    (sourceNext := fun sourceAfter =>
+      OpenExternal.OpenResult.ok
+        (EvmYul.Yul.State.restrictStoreTo source.store sourceAfter))
+    (targetNext := fun targetAfter => OpenExternal.OpenResult.ok targetAfter)
+    (callResponseRel' := SourceOpenTraceCallResponseRel cfg)
+    (doneRel' :=
+      SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel allowed)
+    hSeq (by
+      intro sourceDone targetDone hDone
+      cases sourceDone with
+      | error err =>
+          cases targetDone <;>
+            exact OpenExternal.OpenResultPathRel.done (by
+              intro hAllowed
+              exact hDone hAllowed)
+      | ok sourceAfter =>
+          cases targetDone with
+          | error targetErr =>
+              exact OpenExternal.OpenResultPathRel.done (by
+                intro hAllowed
+                exact hDone hAllowed)
+          | ok targetAfter =>
+              rcases targetAfter with ⟨sourceOutcome, ctxAfter⟩
+              exact OpenExternal.OpenResultPathRel.done (by
+                intro hAllowed
+                exact
+                  SourceResultKontOutcomeRel.restrictStoreTo_of_scope_contains
+                    (cfg := cfg) (layout := layout)
+                    (konts := konts)
+                    (terminalRel := terminalRel) (revertRel := revertRel)
+                    (ctx := ctx) (scope := source.store)
+                    (sourceResult := .ok sourceAfter)
+                    (sourceOutcome := sourceOutcome)
+                    hScopeLayout
+                    (hSupported hAllowed)
+                    hWithin
+                    (hDone hAllowed))) (by
+      intro sourceCall targetCall response hResponse
+      exact hResponse)
+
+/--
+Project typed finite-trace sequence soundness through source `.Block` cleanup
+to a concrete target outcome for arbitrary caller continuations.
+-/
+theorem sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_target_block_result_supported
+    {cfg : StateRelConfig} {layout : List Name}
+    {konts : SourceModeKontLayouts}
+    {terminalRel :
+      Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
+    {revertRel : State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {sourceFuel : Nat} {sourceStmts : List AstStmt}
+    {codeOverride : Option AstContract} {lowerBlock : Functions.Block}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {compiler : Objects.Source.State}
+    {trace : OpenExternal.OpenTrace}
+    {sourceResult : Except Exception State}
+    (hSound :
+      SourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx cfg layout konts
+        terminalRel revertRel prim program ctx sourceFuel sourceStmts
+        codeOverride lowerBlock
+        (fun result => restrictSourceResultTo store result = sourceResult))
+    (hInitial :
+      SourceStateExactRel cfg layout (.Ok shared store) compiler)
+    (hResolveBlock :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel.succ (.Block sourceStmts)
+            codeOverride (.Ok shared store)))
+        trace sourceResult)
+    (hSupported :
+      SourceResultModeKontSupported ctx layout konts sourceResult)
+    (hWithin : SourceModeKontLayouts.ControlWithin layout konts)
+    (hResponses : SourceOpenTraceResponsesAdmissible cfg trace)
+    (minimumTargetFuel : Nat) :
+    ∃ targetFuel outcome ctxAfter,
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultResolves
+        (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx targetFuel
+          lowerBlock compiler)
+        trace (.ok (outcome, ctxAfter)) ∧
+      SourceResultKontOutcomeRel cfg konts terminalRel revertRel sourceResult
+        outcome := by
+  have hBlockResolve := hResolveBlock
+  rw [yulOpen_toOpenResult_exec_block_succ_eq_bind_execSeq
+    (fuel := sourceFuel) (body := sourceStmts)
+    (codeOverride := codeOverride)
+    (state := (.Ok shared store : State))] at hBlockResolve
+  have hScopeLayout :
+      ∀ name : Name, name ∈ layout →
+        ((.Ok shared store : State).store.lookup name).isSome = true := by
+    intro name hMem
+    simpa using
+      SourceStateExactRel.stateStoreContains hInitial name hMem
+  rcases OpenExternal.OpenResultResolves.bind_inv hBlockResolve with
+    hError | hOk
+  · rcases hError with ⟨err, hResolveSeq, hResult⟩
+    subst sourceResult
+    rcases
+        hSound hInitial hResolveSeq rfl hResponses minimumTargetFuel with
+      ⟨targetFuel, hMinimum, hSeqPath⟩
+    have hBlockPath :
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel
+            (fun result =>
+              result = (.error err : Except Exception State)))
+          trace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec sourceFuel.succ (.Block sourceStmts)
+              codeOverride (.Ok shared store)))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel lowerBlock compiler) := by
+      exact
+        sourceOpenResultSeqKontPathRel_exec_block_succ_of_seq_supported
+          (cfg := cfg) (layout := layout) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel) (ctx := ctx)
+          (fuel := sourceFuel) (body := sourceStmts)
+          (codeOverride := codeOverride)
+          (source := (.Ok shared store : State))
+          (target :=
+            CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              targetFuel lowerBlock compiler)
+          (trace := trace)
+          (allowed :=
+            fun result =>
+              result = (.error err : Except Exception State))
+          hScopeLayout
+          (by
+            intro sourceResult hAllowed
+            cases hAllowed
+            exact hSupported)
+          hWithin hSeqPath
+    rcases
+        SourceOpenResultSeqKontDoneRel.path_target_ok_of_source
+          (cfg := cfg) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed :=
+            fun result =>
+              result = (.error err : Except Exception State))
+          hBlockPath hResolveBlock rfl with
+      ⟨outcome, ctxAfter, hTarget, hRel⟩
+    exact ⟨targetFuel, outcome, ctxAfter, hMinimum, hTarget, hRel⟩
+  · rcases hOk with
+      ⟨seqTrace, cleanupTrace, seqState, hTrace, hResolveSeq,
+        hResolveCleanup⟩
+    generalize hClean :
+      EvmYul.Yul.State.restrictStoreTo
+        ((.Ok shared store : State).store) seqState = cleanedState at hResolveCleanup
+    change
+      OpenExternal.OpenResultResolves
+        (OpenExternal.OpenResult.ok (ε := Exception) cleanedState)
+        cleanupTrace sourceResult
+        at hResolveCleanup
+    cases hResolveCleanup
+    simp only [List.append_nil] at hTrace
+    subst trace
+    have hSeqAllowed :
+        restrictSourceResultTo store (.ok seqState) =
+          (.ok cleanedState : Except Exception State) := by
+      simpa [restrictSourceResultTo] using hClean
+    rcases
+        hSound hInitial hResolveSeq hSeqAllowed hResponses
+          minimumTargetFuel with
+      ⟨targetFuel, hMinimum, hSeqPath⟩
+    have hBlockPath :
+        OpenExternal.OpenResultPathRel
+          (SourceOpenTraceCallResponseRel cfg)
+          (SourceOpenResultSeqKontDoneRel cfg konts terminalRel revertRel
+            (fun result =>
+              result = (.ok cleanedState : Except Exception State)))
+          seqTrace
+          (OpenExternal.YulOpenResult.toOpenResult
+            (OpenExternal.YulOpen.exec sourceFuel.succ (.Block sourceStmts)
+              codeOverride (.Ok shared store)))
+          (CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+            targetFuel lowerBlock compiler) := by
+      exact
+        sourceOpenResultSeqKontPathRel_exec_block_succ_of_seq_supported
+          (cfg := cfg) (layout := layout) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel) (ctx := ctx)
+          (fuel := sourceFuel) (body := sourceStmts)
+          (codeOverride := codeOverride)
+          (source := (.Ok shared store : State))
+          (target :=
+            CompilerOpen.FunctionsOpen.Block.runOpen prim program ctx
+              targetFuel lowerBlock compiler)
+          (trace := seqTrace)
+          (allowed :=
+            fun result =>
+              result = (.ok cleanedState : Except Exception State))
+          hScopeLayout
+          (by
+            intro selected hAllowed
+            cases hAllowed
+            exact hSupported)
+          hWithin hSeqPath
+    rcases
+        SourceOpenResultSeqKontDoneRel.path_target_ok_of_source
+          (cfg := cfg) (konts := konts)
+          (terminalRel := terminalRel) (revertRel := revertRel)
+          (allowed :=
+            fun result =>
+              result = (.ok cleanedState : Except Exception State))
+          hBlockPath hResolveBlock rfl with
+      ⟨outcome, ctxAfter, hTarget, hRel⟩
+    exact ⟨targetFuel, outcome, ctxAfter, hMinimum, hTarget, hRel⟩
 
 /--
 Project typed finite-trace sequence soundness through source `.Block` cleanup
