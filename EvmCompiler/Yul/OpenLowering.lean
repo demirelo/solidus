@@ -2339,6 +2339,286 @@ theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_of_he
         subst trace
         simpa [List.append_assoc] using hFull
 
+theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallthrough_of_head_tail
+    {prim : Objects.Source.PrimitiveSemantics}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {left right : Nat}
+    {head : Locals.Expr left}
+    {tail : Locals.ExprSeq right}
+    (stackPrefix : List Word)
+    (program : Assembly.Program)
+    (finalTailFuel tailFuel seqFuel : Nat)
+    (headFallthroughPc tailStartPc finalFallthroughPc : Word)
+    (hHeadToTail : headFallthroughPc = tailStartPc)
+    (hHeadSound :
+      ∀ {headTrace : OpenExternal.OpenTrace}
+        {compilerAfterHead : Objects.Source.State}
+        {headValues : List Word},
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+            prim head compiler)
+          headTrace (.ok (compilerAfterHead, headValues)) →
+        ∃ evmAfterHead : EvmYul.EVM.State,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+            (headValues.reverse ++ stackPrefix) evmAfterHead ∧
+          evmAfterHead.pc = headFallthroughPc ∧
+          ∀ {tailTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              tailTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program seqFuel state)
+              (headTrace ++ tailTrace) result)
+    (hTailSound :
+      ∀ {compilerAfterHead compilerAfterTail : Objects.Source.State}
+        {headValues tailValues : List Word}
+        {evmAfterHead : EvmYul.EVM.State}
+        {tailTrace : OpenExternal.OpenTrace},
+        Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+          (headValues.reverse ++ stackPrefix) evmAfterHead →
+        evmAfterHead.pc = tailStartPc →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim tail compilerAfterHead)
+          tailTrace (.ok (compilerAfterTail, tailValues)) →
+        ∃ evmAfterTail : EvmYul.EVM.State,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterTail
+            (tailValues.reverse ++ headValues.reverse ++ stackPrefix)
+            evmAfterTail ∧
+          evmAfterTail.pc = finalFallthroughPc ∧
+          ∀ {restTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program finalTailFuel
+                evmAfterTail)
+              restTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              (tailTrace ++ restTrace) result)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+          prim (Locals.ExprSeq.cons head tail) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      evmAfter.pc = finalFallthroughPc ∧
+      ∀ {restTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program finalTailFuel evmAfter)
+          restTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program seqFuel state)
+          (trace ++ restTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hHeadError | hHeadOk
+  · rcases hHeadError with ⟨err, _hHead, hResult⟩
+    cases hResult
+  · rcases hHeadOk with
+      ⟨headTrace, tailAndDoneTrace, headResult, hTrace, hResolveHead,
+        hResolveTailBind⟩
+    rcases headResult with ⟨compilerAfterHead, headValues⟩
+    rcases OpenExternal.OpenResultResolves.bind_inv hResolveTailBind with
+      hTailError | hTailOk
+    · rcases hTailError with ⟨err, _hTail, hResult⟩
+      cases hResult
+    · rcases hTailOk with
+        ⟨tailTrace, doneTrace, tailResult, hTailAndDoneTrace,
+          hResolveTail, hResolveDone⟩
+      rcases tailResult with ⟨compilerAfterTail, tailValues⟩
+      cases hResolveDone
+      rcases hHeadSound hResolveHead with
+        ⟨evmAfterHead, hHeadRel, hHeadPc, hHeadCont⟩
+      have hAtTail : evmAfterHead.pc = tailStartPc := by
+        simpa [hHeadToTail] using hHeadPc
+      rcases hTailSound hHeadRel hAtTail hResolveTail with
+        ⟨evmAfterTail, hTailRel, hTailPc, hTailCont⟩
+      refine ⟨evmAfterTail, ?_, hTailPc, ?_⟩
+      · simpa [List.reverse_append, List.append_assoc] using hTailRel
+      · intro restTrace result hRest
+        have hTailAndRest :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              (tailTrace ++ restTrace) result :=
+          hTailCont hRest
+        have hFull := hHeadCont hTailAndRest
+        subst tailAndDoneTrace
+        subst trace
+        simpa [List.append_assoc] using hFull
+
+theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode_head_tail
+    {prim : Objects.Source.PrimitiveSemantics}
+    {ctx : Locals.Ctx} {offset : Nat}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {left right : Nat}
+    {head : Locals.Expr left}
+    {tail : Locals.ExprSeq right}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx offset
+        (Locals.ExprSeq.cons head tail) = some code)
+    (stackPrefix : List Word)
+    (program : Assembly.Program)
+    (finalTailFuel tailFuel seqFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hHeadSound :
+      ∀ {headCode : Structured.Code},
+        Locals.Expr.compileCode ctx offset head = some headCode →
+        (headSegment :
+          Structured.Preservation.CodeSegment program headCode.toAssembly) →
+        state.pc =
+          Structured.Preservation.CodeSegment.startPc headSegment →
+        ∀ {headTrace : OpenExternal.OpenTrace}
+          {compilerAfterHead : Objects.Source.State}
+          {headValues : List Word},
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+              prim head compiler)
+            headTrace (.ok (compilerAfterHead, headValues)) →
+          ∃ evmAfterHead : EvmYul.EVM.State,
+            Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+              (headValues.reverse ++ stackPrefix) evmAfterHead ∧
+            evmAfterHead.pc =
+              Structured.Preservation.CodeSegment.fallthroughPc
+                headSegment ∧
+            ∀ {tailTrace : OpenExternal.OpenTrace}
+              {result : Except EVMException Assembly.StepResult},
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program tailFuel
+                  evmAfterHead)
+                tailTrace result →
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program seqFuel state)
+                (headTrace ++ tailTrace) result)
+    (hTailSound :
+      ∀ {tailCode : Structured.Code},
+        Locals.ExprSeq.compileCode ctx (offset + left) tail =
+          some tailCode →
+        (tailSegment :
+          Structured.Preservation.CodeSegment program tailCode.toAssembly) →
+        ∀ {compilerAfterHead compilerAfterTail : Objects.Source.State}
+          {headValues tailValues : List Word}
+          {evmAfterHead : EvmYul.EVM.State}
+          {tailTrace : OpenExternal.OpenTrace},
+          evmAfterHead.pc =
+            Structured.Preservation.CodeSegment.startPc tailSegment →
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+            (headValues.reverse ++ stackPrefix) evmAfterHead →
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+              prim tail compilerAfterHead)
+            tailTrace (.ok (compilerAfterTail, tailValues)) →
+          ∃ evmAfterTail : EvmYul.EVM.State,
+            Locals.SourceLowering.StackPrefixRel layout compilerAfterTail
+              (tailValues.reverse ++ headValues.reverse ++ stackPrefix)
+              evmAfterTail ∧
+            evmAfterTail.pc =
+              Structured.Preservation.CodeSegment.fallthroughPc
+                tailSegment ∧
+            ∀ {restTrace : OpenExternal.OpenTrace}
+              {result : Except EVMException Assembly.StepResult},
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program finalTailFuel
+                  evmAfterTail)
+                restTrace result →
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program tailFuel
+                  evmAfterHead)
+                (tailTrace ++ restTrace) result)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+          prim (Locals.ExprSeq.cons head tail) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {restTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program finalTailFuel evmAfter)
+          restTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program seqFuel state)
+          (trace ++ restTrace) result := by
+  rcases localsExprSeq_compileCode_cons_inv hCompile with
+    ⟨headCode, tailCode, hHeadCompile, hTailCompile, hCode⟩
+  have hAssemblyCode :
+      code.toAssembly = headCode.toAssembly ++ tailCode.toAssembly := by
+    simp [hCode, Structured.Code.toAssembly]
+  let appendSegment :
+      Structured.Preservation.CodeSegment program
+        (headCode.toAssembly ++ tailCode.toAssembly) :=
+    Structured.Preservation.CodeSegment.cast_code hAssemblyCode segment
+  let headSegment :
+      Structured.Preservation.CodeSegment program headCode.toAssembly :=
+    Structured.Preservation.CodeSegment.left appendSegment
+  let tailSegment :
+      Structured.Preservation.CodeSegment program tailCode.toAssembly :=
+    Structured.Preservation.CodeSegment.right appendSegment
+  have hHeadPc :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc headSegment := by
+    simpa [headSegment, appendSegment,
+      Structured.Preservation.CodeSegment.left,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc] using hPc
+  have hHeadToTail :
+      Structured.Preservation.CodeSegment.fallthroughPc headSegment =
+        Structured.Preservation.CodeSegment.startPc tailSegment := by
+    exact
+      (codeSegment_right_startPc_eq_left_fallthroughPc
+        appendSegment).symm
+  have hTailFallSegment :
+      Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    simp [tailSegment, appendSegment,
+      Structured.Preservation.CodeSegment.right,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.fallthroughPc,
+      hAssemblyCode, List.append_assoc]
+  rcases
+      compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallthrough_of_head_tail
+        (prim := prim) (layout := layout) (compiler := compiler)
+        (compilerAfter := compilerAfter) (state := state)
+        (left := left) (right := right) (head := head) (tail := tail)
+        stackPrefix program finalTailFuel tailFuel seqFuel
+        (Structured.Preservation.CodeSegment.fallthroughPc headSegment)
+        (Structured.Preservation.CodeSegment.startPc tailSegment)
+        (Structured.Preservation.CodeSegment.fallthroughPc tailSegment)
+        hHeadToTail
+        (fun {headTrace compilerAfterHead headValues} hResolveHead =>
+          hHeadSound hHeadCompile headSegment hHeadPc hResolveHead)
+        (fun {compilerAfterHead compilerAfterTail headValues tailValues
+              evmAfterHead tailTrace}
+            hHeadRel hAtTail hResolveTail =>
+          hTailSound hTailCompile tailSegment hAtTail hHeadRel
+            hResolveTail)
+        hResolve with
+    ⟨evmAfter, hRel, hPcTail, hCont⟩
+  refine ⟨evmAfter, hRel, ?_, hCont⟩
+  simpa [hTailFallSegment] using hPcTail
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)

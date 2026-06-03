@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:29 CEST.
+Last updated: 2026-06-03 04:31 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -173,8 +173,16 @@ Execution order:
    `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`,
    and
    `OpenLowering.compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`.
-   The remaining expression step is the recursive `.prim` and `ExprSeq.cons`
-   assembly using those fallthrough facts.
+   The recursive expression-sequence handoff is now checked too:
+   `OpenLowering.compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallthrough_of_head_tail`
+   composes a head proof whose final PC is the tail start with the recursive
+   tail proof, and
+   `OpenLowering.compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode_head_tail`
+   instantiates that handoff against the actual compiler-generated append
+   segments. The remaining expression step is the recursive `.prim`
+   fallthrough companion, which should prove the primitive dispatcher advances
+   from the generated primitive-instruction segment start to its one-byte
+   fallthrough without widening the route into shape-specific CALL lemmas.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.
