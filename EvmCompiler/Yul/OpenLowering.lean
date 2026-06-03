@@ -11540,7 +11540,7 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
 theorem openRunNResult_callSite_body_regular_then_return_assign_continue
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
     {sourceBeforeCall sourceAfterCall : Objects.Source.State}
-    {base bodyState returned : Locals.RunState}
+    {callSource callerBase bodyState returned : Locals.RunState}
     {program : Structured.Program} {proc : Structured.Proc}
     {bodySupply dispatchSupply : Structured.LabelSupply}
     {sites : List Structured.CallSite} {site : Structured.CallSite}
@@ -11576,17 +11576,17 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
       Structured.Preservation.CodeSegment.startPc assignSegment =
         Structured.Preservation.CodeSegment.fallthroughPc callSeg)
     (hSplit :
-      Structured.StackFrame.splitArgs? proc.argc base.evm.stack =
+      Structured.StackFrame.splitArgs? proc.argc callSource.evm.stack =
         some (args, callerStack))
     (hArgBound : args.length ≤ 16)
     (hPc :
       target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
     (hCallRel :
-      Structured.Preservation.Frame.StateRel base target tokens)
+      Structured.Preservation.Frame.StateRel callSource target tokens)
     (hBodyRun :
       ∀ entryTarget : EvmYul.EVM.State,
         Structured.Preservation.Frame.StateRel
-          ((base.withEVM { base.evm with stack := args }).pushReturn
+          ((callSource.withEVM { callSource.evm with stack := args }).pushReturn
             callerStack proc.retc)
           entryTarget (token :: tokens) →
         entryTarget.pc =
@@ -11631,12 +11631,12 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
         some (assignStmts, assignFinalCtx))
     (hBaseRel :
       Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
-        base)
+        callerBase)
     (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
       Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
         sourceAfterCall values bodyState)
-    (hFrameStack : frame.callerStack = base.evm.stack)
+    (hFrameStack : frame.callerStack = callerBase.evm.stack)
     (hTail :
       ∀ evmAfter suffix,
         StackPrefixSuffixErasedRel layout (sourceAfterCall.withVars store')
@@ -11661,7 +11661,7 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
       (program := program) (proc := proc) (bodySupply := bodySupply)
       (dispatchSupply := dispatchSupply) (sites := sites) (site := site)
       (returnDest := returnDest) (bodyCtx := bodyCtx)
-      (source := base) (bodyState := bodyState) (returned := returned)
+      (source := callSource) (bodyState := bodyState) (returned := returned)
       (target := target) (afterBody := afterBody) (args := args)
       (callerStack := callerStack) (stack := stack) (frame := frame)
       (tokens := tokens) (token := token) (asm := asm)
@@ -11676,7 +11676,7 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
             compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen
               (layout := layout) (hiddenReturns := hiddenReturns)
               (sourceBeforeCall := sourceBeforeCall)
-              (sourceAfterCall := sourceAfterCall) (base := base)
+              (sourceAfterCall := sourceAfterCall) (base := callerBase)
               (bodyState := bodyState) (returned := returned)
               (state := final) (ctx := assignCtx)
               (finalCtx := assignFinalCtx) (targets := targets)
@@ -11700,7 +11700,7 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
 theorem openRunNResult_callSite_body_leave_then_return_assign_continue
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
     {sourceBeforeCall sourceAfterCall : Objects.Source.State}
-    {base bodyState returned : Locals.RunState}
+    {callSource callerBase bodyState returned : Locals.RunState}
     {program : Structured.Program} {proc : Structured.Proc}
     {bodySupply dispatchSupply : Structured.LabelSupply}
     {sites : List Structured.CallSite} {site : Structured.CallSite}
@@ -11736,17 +11736,17 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
       Structured.Preservation.CodeSegment.startPc assignSegment =
         Structured.Preservation.CodeSegment.fallthroughPc callSeg)
     (hSplit :
-      Structured.StackFrame.splitArgs? proc.argc base.evm.stack =
+      Structured.StackFrame.splitArgs? proc.argc callSource.evm.stack =
         some (args, callerStack))
     (hArgBound : args.length ≤ 16)
     (hPc :
       target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
     (hCallRel :
-      Structured.Preservation.Frame.StateRel base target tokens)
+      Structured.Preservation.Frame.StateRel callSource target tokens)
     (hBodyRun :
       ∀ entryTarget : EvmYul.EVM.State,
         Structured.Preservation.Frame.StateRel
-          ((base.withEVM { base.evm with stack := args }).pushReturn
+          ((callSource.withEVM { callSource.evm with stack := args }).pushReturn
             callerStack proc.retc)
           entryTarget (token :: tokens) →
         entryTarget.pc =
@@ -11793,12 +11793,12 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
         some (assignStmts, assignFinalCtx))
     (hBaseRel :
       Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
-        base)
+        callerBase)
     (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
       Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
         sourceAfterCall values bodyState)
-    (hFrameStack : frame.callerStack = base.evm.stack)
+    (hFrameStack : frame.callerStack = callerBase.evm.stack)
     (hTail :
       ∀ evmAfter suffix,
         StackPrefixSuffixErasedRel layout (sourceAfterCall.withVars store')
@@ -11823,7 +11823,7 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
       (program := program) (proc := proc) (bodySupply := bodySupply)
       (dispatchSupply := dispatchSupply) (sites := sites) (site := site)
       (returnDest := returnDest) (bodyCtx := bodyCtx)
-      (source := base) (bodyState := bodyState) (returned := returned)
+      (source := callSource) (bodyState := bodyState) (returned := returned)
       (target := target) (afterBody := afterBody) (args := args)
       (callerStack := callerStack) (stack := stack) (frame := frame)
       (tokens := tokens) (token := token) (asm := asm)
@@ -11839,7 +11839,7 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
             compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen
               (layout := layout) (hiddenReturns := hiddenReturns)
               (sourceBeforeCall := sourceBeforeCall)
-              (sourceAfterCall := sourceAfterCall) (base := base)
+              (sourceAfterCall := sourceAfterCall) (base := callerBase)
               (bodyState := bodyState) (returned := returned)
               (state := final) (ctx := assignCtx)
               (finalCtx := assignFinalCtx) (targets := targets)
