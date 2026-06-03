@@ -834,6 +834,208 @@ end OpenTraceResult
 
 end Compiled
 
+inductive OpenBlockTraceResult
+    (program : Assembly.Program) (target : Assembly.TargetProgram) :
+    Nat → EVMState → OpenExternal.OpenTrace → Assembly.StepResult → Prop where
+  | done (state : EVMState) :
+      OpenBlockTraceResult program target 0 state [] (.running state)
+  | stepRunning
+      {fuel : Nat} {state mid : EVMState}
+      {trace tailTrace : OpenExternal.OpenTrace}
+      {result : Assembly.StepResult}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc program state.pc.toNat =
+          some (pc, instr))
+      (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        OpenExternal.OpenResultResolves
+          (Target.openRunListResult (emitted.map Assembly.LocatedTarget.instr)
+            state)
+          trace (.ok (.running mid)))
+      (hRest : OpenBlockTraceResult program target fuel mid tailTrace result) :
+      OpenBlockTraceResult program target (fuel + 1) state
+        (trace ++ tailTrace) result
+  | stepHalted
+      {fuel : Nat} {state : EVMState}
+      {trace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc program state.pc.toNat =
+          some (pc, instr))
+      (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        OpenExternal.OpenResultResolves
+          (Target.openRunListResult (emitted.map Assembly.LocatedTarget.instr)
+            state)
+          trace (.ok (.halted halt))) :
+      OpenBlockTraceResult program target (fuel + 1) state trace
+        (.halted halt)
+
+namespace OpenBlockTraceResult
+
+theorem emitCurrent?_of_instrAt_emit
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted : List Assembly.LocatedTarget}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted) :
+    Assembly.emitCurrent? program state =
+      some (emitted.map Assembly.LocatedTarget.instr) := by
+  simp [Assembly.emitCurrent?, hAt, hEmit]
+
+theorem openStepResult_resolves_of_emit
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted : List Assembly.LocatedTarget}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+    (hRun :
+      OpenExternal.OpenResultResolves
+        (Target.openRunListResult (emitted.map Assembly.LocatedTarget.instr)
+          state)
+        trace (.ok result)) :
+    OpenExternal.OpenResultResolves
+      (Compiled.openStepResult program state) trace (.ok result) := by
+  have hCurrent := emitCurrent?_of_instrAt_emit hAt hEmit
+  unfold Compiled.openStepResult
+  rw [hCurrent]
+  exact hRun
+
+theorem to_compiled_trace
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hTrace : OpenBlockTraceResult program target fuel state trace result) :
+    Compiled.OpenTraceResult program fuel state trace result := by
+  induction hTrace with
+  | done state =>
+      exact Compiled.OpenTraceResult.done state
+  | stepRunning hAt hEmit _hTargetBlock hRun _hRest ih =>
+      exact
+        Compiled.OpenTraceResult.stepRunning
+          (openStepResult_resolves_of_emit hAt hEmit hRun) ih
+  | stepHalted hAt hEmit _hTargetBlock hRun =>
+      exact
+        Compiled.OpenTraceResult.stepHalted
+          (openStepResult_resolves_of_emit hAt hEmit hRun)
+
+theorem resolves_compiled
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hTrace : OpenBlockTraceResult program target fuel state trace result) :
+    OpenExternal.OpenResultResolves
+      (Compiled.openRunNResult program fuel state)
+      trace (.ok result) :=
+  (to_compiled_trace hTrace).resolves
+
+theorem current_prim_call_continue
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {state : EVMState} {fuel : Nat}
+    {pc : Nat} {op : Assembly.PrimOp}
+    {emitted before after : List Assembly.LocatedTarget}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    {tailTrace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hEmit : Assembly.emitInstr? program pc (.prim op) = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse)
+    (hRest :
+      OpenBlockTraceResult program target fuel
+        (EvmYul.EVM.State.incrPC (call.resume response))
+        tailTrace result) :
+    OpenBlockTraceResult program target (fuel + 1) state
+      ({ site := call.site, response := response } :: tailTrace) result := by
+  have hRun :
+      OpenExternal.OpenResultResolves
+        (Target.openRunListResult
+          (emitted.map Assembly.LocatedTarget.instr) state)
+        [{ site := call.site, response := response }]
+        (.ok (.running
+          (EvmYul.EVM.State.incrPC (call.resume response)))) :=
+    Target.openRunListResult_emitInstr_prim_call
+      hEmit hKind hCall response
+  simpa using
+    OpenBlockTraceResult.stepRunning hAt hEmit hTargetBlock hRun hRest
+
+theorem current_no_call_running_continue
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {state mid : EVMState} {fuel : Nat}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted before after : List Assembly.LocatedTarget}
+    {tailTrace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hRun :
+      Assembly.Target.runListResult
+        (emitted.map Assembly.LocatedTarget.instr) state =
+        .ok (.running mid))
+    (hRest : OpenBlockTraceResult program target fuel mid tailTrace result) :
+    OpenBlockTraceResult program target (fuel + 1) state tailTrace result := by
+  have hCode :
+      Target.codeUsesCallCreate
+        (emitted.map Assembly.LocatedTarget.instr) = false :=
+    Target.codeUsesCallCreate_false_of_emitInstr_no_call hNoInstr hEmit
+  have hOpenRun :
+      OpenExternal.OpenResultResolves
+        (Target.openRunListResult
+          (emitted.map Assembly.LocatedTarget.instr) state)
+        [] (.ok (.running mid)) :=
+    Target.openRunListResult_resolves_closed_of_no_callCreate hCode hRun
+  simpa using
+    OpenBlockTraceResult.stepRunning hAt hEmit hTargetBlock hOpenRun hRest
+
+theorem current_no_call_halted
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {state : EVMState} {fuel : Nat}
+    {pc : Nat} {instr : Assembly.Instr}
+    {emitted before after : List Assembly.LocatedTarget}
+    {halt : Assembly.Halt}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+    (hTargetBlock : target.code = before ++ emitted ++ after)
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hRun :
+      Assembly.Target.runListResult
+        (emitted.map Assembly.LocatedTarget.instr) state =
+        .ok (.halted halt)) :
+    OpenBlockTraceResult program target (fuel + 1) state [] (.halted halt) := by
+  have hCode :
+      Target.codeUsesCallCreate
+        (emitted.map Assembly.LocatedTarget.instr) = false :=
+    Target.codeUsesCallCreate_false_of_emitInstr_no_call hNoInstr hEmit
+  have hOpenRun :
+      OpenExternal.OpenResultResolves
+        (Target.openRunListResult
+          (emitted.map Assembly.LocatedTarget.instr) state)
+        [] (.ok (.halted halt)) :=
+    Target.openRunListResult_resolves_closed_of_no_callCreate hCode hRun
+  exact
+    OpenBlockTraceResult.stepHalted hAt hEmit hTargetBlock hOpenRun
+
+end OpenBlockTraceResult
+
 end OpenAssembly
 end Yul
 end EvmCompiler
