@@ -9884,6 +9884,35 @@ theorem sourceDirect_returnedStackRel_of_shared_eq
   rcases hRel with ⟨hTargetShared, hStack, hReturns⟩
   exact ⟨hTargetShared.trans hShared, hStack, hReturns⟩
 
+theorem sourceDirect_returnedStackRel_attach_parts
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State}
+    {values : List Word} {bodyState : Locals.RunState}
+    {frame : Structured.ReturnDest}
+    (hRel :
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+        source values bodyState)
+    (hLen : values.length = frame.retc) :
+    ∃ returned : Locals.RunState, ∃ stack : EvmYul.Stack Word,
+      stack = values.reverse ++ frame.callerStack ∧
+        Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+          some stack ∧
+        bodyState.returns = frame :: returned.returns ∧
+        bodyState.evm.stack.length = frame.retc := by
+  rcases hRel with ⟨_hShared, hStack, hReturns⟩
+  let returned : Locals.RunState := { bodyState with returns := hiddenReturns }
+  let stack : EvmYul.Stack Word := values.reverse ++ frame.callerStack
+  refine ⟨returned, stack, rfl, ?_, ?_, ?_⟩
+  · cases frame with
+    | mk callerStack retc =>
+        simp [stack, Structured.StackFrame.attachReturns?, hStack, hLen]
+  · simpa [returned] using hReturns
+  · calc
+      bodyState.evm.stack.length = values.reverse.length := by
+        rw [hStack]
+      _ = values.length := by simp
+      _ = frame.retc := hLen
+
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
     {layout : List Name} {source : Objects.Source.State}
     {state : EvmYul.EVM.State}
