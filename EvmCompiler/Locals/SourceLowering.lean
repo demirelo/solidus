@@ -3373,6 +3373,253 @@ theorem mload_mstore_range_slot_value
 
 end ScratchRegionReady
 
+namespace ScratchRange
+
+theorem byteDisjoint_word_slots_of_ne
+    {machine : EvmYul.MachineState} {range : ScratchRange}
+    {left right : Nat}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hLeft : left < range.words)
+    (hRight : right < range.words)
+    (hNe : left ≠ right) :
+    ByteDisjoint (range.word left).toNat 32
+      (range.word right).toNat 32 := by
+  by_cases hLt : left < right
+  · exact Or.inl (by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordSlotEndLeSlotStart
+          hReady hLeft hRight hLt)
+  · have hRightLtLeft : right < left :=
+      Nat.lt_of_le_of_ne (Nat.le_of_not_gt hLt) (Ne.symm hNe)
+    exact Or.inr (by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordSlotEndLeSlotStart
+          hReady hRight hLeft hRightLtLeft)
+
+end ScratchRange
+
+namespace ScratchRegionReady
+
+theorem lookupMemory_mstore_range_other_slot_eq
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {range : ScratchRange}
+    {writeSlot readSlot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hReadSlot : readSlot < range.words)
+    (hNe : readSlot ≠ writeSlot) :
+    (machine.mstore (range.word writeSlot) value).lookupMemory
+        (range.word readSlot) =
+      machine.lookupMemory (range.word readSlot) := by
+  have hWriteAllocated :
+      ScratchWordAllocated machine (range.word writeSlot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordAllocated hReady hWriteSlot
+  have hReadReadable :
+      ScratchWordReadable machine (range.word readSlot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReadable hReady hReadSlot
+  have hStoreReady :
+      ScratchRegionReady
+        (machine.mstore (range.word writeSlot) value)
+        range.base range.words := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hWriteSlot
+  have hReadReadableAfter :
+      ScratchWordReadable
+        (machine.mstore (range.word writeSlot) value)
+        (range.word readSlot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReadable hStoreReady hReadSlot
+  have hDisjoint :
+      ByteDisjoint (range.word readSlot).toNat 32
+        (range.word writeSlot).toNat 32 :=
+    ScratchRange.byteDisjoint_word_slots_of_ne hReady
+      hReadSlot hWriteSlot hNe
+  have hRead :
+      (machine.mstore (range.word writeSlot) value).memory.readWithPadding
+          (range.word readSlot).toNat 32 =
+        machine.memory.readWithPadding (range.word readSlot).toNat 32 := by
+    calc
+      (machine.mstore (range.word writeSlot) value).memory.readWithPadding
+          (range.word readSlot).toNat 32
+          =
+        (value.toByteArray.write 0 machine.memory
+          (range.word writeSlot).toNat 32).readWithPadding
+            (range.word readSlot).toNat 32 := by
+            simp [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+      _ = machine.memory.readWithPadding (range.word readSlot).toNat 32 :=
+            byteArray_readWithPadding_write32_eq_of_byteDisjoint hSpec
+              (hWordBytes value) hWriteAllocated hDisjoint
+  unfold EvmYul.MachineState.lookupMemory
+  rw [if_neg hReadReadableAfter, if_neg hReadReadable, hRead]
+
+theorem mload_mstore_range_other_slot_value
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {range : ScratchRange}
+    {writeSlot readSlot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hReadSlot : readSlot < range.words)
+    (hNe : readSlot ≠ writeSlot) :
+    ((machine.mstore (range.word writeSlot) value).mload
+        (range.word readSlot)).1 =
+      (machine.mload (range.word readSlot)).1 := by
+  simp [EvmYul.MachineState.mload,
+    lookupMemory_mstore_range_other_slot_eq hSpec hWordBytes
+      hReady hWriteSlot hReadSlot hNe]
+
+end ScratchRegionReady
+
+namespace SpillLayout
+
+namespace BindingValueRel
+
+theorem scratch_after_mstore_same
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {name : Name} {slot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hSlot : slot < range.words)
+    (hStore : store name = some value) :
+    BindingValueRel range store
+      (machine.mstore (range.word slot) value) stack
+      (name, LocalLocation.scratch slot) := by
+  refine ⟨value, hStore, ?_⟩
+  exact ScratchRegionReady.mload_mstore_range_slot_value
+    hSpec hWordBytes hReady hSlot
+
+theorem scratch_after_mload_mstore_same
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {name : Name} {slot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hSlot : slot < range.words)
+    (hStore : store name = some value) :
+    BindingValueRel range store
+      ((machine.mstore (range.word slot) value).mload
+        (range.word slot)).2 stack
+      (name, LocalLocation.scratch slot) := by
+  have hStoreReady :
+      ScratchRegionReady
+        (machine.mstore (range.word slot) value)
+        range.base range.words := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hSlot
+  have hReserved :
+      ScratchWordReserved
+        (machine.mstore (range.word slot) value)
+        (range.word slot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReserved hStoreReady hSlot
+  rw [mload_machine_eq hReserved]
+  exact scratch_after_mstore_same hSpec hWordBytes hReady hSlot hStore
+
+theorem scratch_preserved_mstore_other
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {name : Name} {writeSlot readSlot : Nat} {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hReadSlot : readSlot < range.words)
+    (hNe : readSlot ≠ writeSlot)
+    (hValue :
+      BindingValueRel range store machine stack
+        (name, LocalLocation.scratch readSlot)) :
+    BindingValueRel range store
+      (machine.mstore (range.word writeSlot) value) stack
+      (name, LocalLocation.scratch readSlot) := by
+  rcases hValue with ⟨storedValue, hStore, hLoad⟩
+  refine ⟨storedValue, hStore, ?_⟩
+  rw [ScratchRegionReady.mload_mstore_range_other_slot_value
+    hSpec hWordBytes hReady hWriteSlot hReadSlot hNe]
+  exact hLoad
+
+end BindingValueRel
+
+namespace ValueRel
+
+theorem mstore_target_scratch_slot_preserve
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {writeSlot : Nat} {value : Word}
+    (hLayout : WellFormed range sourceScope stackLayout layout)
+    (hValues : ValueRel range store machine stack layout)
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hStoreMatches :
+      ∀ {name : Name},
+        (name, LocalLocation.scratch writeSlot) ∈ layout →
+          store name = some value) :
+    ValueRel range store
+      (machine.mstore (range.word writeSlot) value) stack layout := by
+  intro binding hBinding
+  rcases binding with ⟨name, location⟩
+  cases location with
+  | stack depth =>
+      exact hValues (name, LocalLocation.stack depth) hBinding
+  | scratch slot =>
+      by_cases hEq : slot = writeSlot
+      · subst slot
+        exact BindingValueRel.scratch_after_mstore_same
+          hSpec hWordBytes hReady hWriteSlot
+          (hStoreMatches hBinding)
+      · have hSlot : slot < range.words :=
+          hLayout.scratch_binding hBinding
+        exact BindingValueRel.scratch_preserved_mstore_other
+          hSpec hWordBytes hReady hWriteSlot hSlot hEq
+          (hValues (name, LocalLocation.scratch slot) hBinding)
+
+theorem mload_after_mstore_target_scratch_slot_preserve
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : Layout} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {writeSlot : Nat} {value : Word}
+    (hLayout : WellFormed range sourceScope stackLayout layout)
+    (hValues : ValueRel range store machine stack layout)
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hStoreMatches :
+      ∀ {name : Name},
+        (name, LocalLocation.scratch writeSlot) ∈ layout →
+          store name = some value) :
+    ValueRel range store
+      ((machine.mstore (range.word writeSlot) value).mload
+        (range.word writeSlot)).2 stack layout := by
+  have hStoreReady :
+      ScratchRegionReady
+        (machine.mstore (range.word writeSlot) value)
+        range.base range.words := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hWriteSlot
+  have hReserved :
+      ScratchWordReserved
+        (machine.mstore (range.word writeSlot) value)
+        (range.word writeSlot) := by
+    simpa [ScratchRange.word_eq_scratchRegionWord] using
+      ScratchRegionReady.scratchWordReserved hStoreReady hWriteSlot
+  rw [mload_machine_eq hReserved]
+  exact mstore_target_scratch_slot_preserve hSpec hWordBytes
+    hLayout hValues hReady hWriteSlot hStoreMatches
+
+end ValueRel
+
+end SpillLayout
+
 theorem scratchRegionReady?_mload_slot
     {machine : EvmYul.MachineState} {base count slot : Nat}
     (hReady : scratchRegionReady? machine base count = true)

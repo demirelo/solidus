@@ -1960,6 +1960,40 @@ example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
   Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel.scratch_binding_of_wellFormed
     hLayout hValues hBinding
 
+example
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {sourceScope stackLayout : List Locals.Name}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Locals.Word}
+    {writeSlot : Nat} {value : Locals.Word}
+    (hLayout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.WellFormed
+        range sourceScope stackLayout layout)
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store machine stack layout)
+    (hReady :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady
+        machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hStoreMatches :
+      ∀ {name : Locals.Name},
+        (name,
+          Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.scratch
+            writeSlot) ∈ layout →
+          store name = some value) :
+    Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+      range store
+      ((machine.mstore (range.word writeSlot) value).mload
+        (range.word writeSlot)).2 stack layout :=
+  Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel.mload_after_mstore_target_scratch_slot_preserve
+    hSpec hWordBytes hLayout hValues hReady hWriteSlot hStoreMatches
+
 example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {offset len : Nat}
     (hStart : range.endExclusive ≤ offset) :
@@ -1998,6 +2032,20 @@ example {machine : EvmYul.MachineState}
       (range.word slot).toNat 32 :=
   Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.byteDisjoint_word_slot_of_disjointBytes
     hReady hDisjoint hSlot
+
+example {machine : EvmYul.MachineState}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {left right : Nat}
+    (hReady :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady
+        machine range.base range.words)
+    (hLeft : left < range.words)
+    (hRight : right < range.words)
+    (hNe : left ≠ right) :
+    Locals.SourceLowering.StateRel.SpillScratch.ByteDisjoint
+      (range.word left).toNat 32 (range.word right).toNat 32 :=
+  Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.byteDisjoint_word_slots_of_ne
+    hReady hLeft hRight hNe
 
 example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {machine : EvmYul.MachineState} :
@@ -2580,6 +2628,25 @@ example
       value :=
   Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady.mload_mstore_range_slot_value
     hSpec hWordBytes hReady hSlot
+
+example
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {machine : EvmYul.MachineState}
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {writeSlot readSlot : Nat} {value : Locals.Word}
+    (hReady :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady
+        machine range.base range.words)
+    (hWriteSlot : writeSlot < range.words)
+    (hReadSlot : readSlot < range.words)
+    (hNe : readSlot ≠ writeSlot) :
+    ((machine.mstore (range.word writeSlot) value).mload
+        (range.word readSlot)).1 =
+      (machine.mload (range.word readSlot)).1 :=
+  Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady.mload_mstore_range_other_slot_value
+    hSpec hWordBytes hReady hWriteSlot hReadSlot hNe
 
 example {machine : EvmYul.MachineState} {base count left right : Nat}
     (hReady :
