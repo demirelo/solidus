@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 06:20 CEST.
+Last updated: 2026-06-03 06:26 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -312,10 +312,17 @@ Execution order:
    while
    `CompilerOpen.FunctionsOpen.Block.call_cons_resolves_ok_inv` lifts that split
    to call-headed blocks and threads the recursive tail only after returned
-   regular calls. The next frontier is composing this checked source split with
-   the compiled argument prefix, internal call segment, return assignment
-   segment, and recursive tail at `FunctionsBlockCompiledOpenResultRel`, then
-   extending the same shape to loops, switch/conditionals, and the whole-program
+   regular calls. The callee-body callback boundary is now exposed without
+   hiding the trace:
+   `CompilerOpen.FunctionsOpen.FunDef.runBody_returned_resolves_ok_inv`,
+   `CompilerOpen.FunctionsOpen.FunDef.runBody_halted_resolves_ok_inv`, and
+   `CompilerOpen.FunctionsOpen.Block.call_cons_body_resolves_ok_inv` split the
+   opaque `FunDef.runBody` result into initialized parameter/return storage,
+   strictly smaller body fuel, and the exact `Block.runOpen` body trace. The
+   next frontier is composing this checked source split with the compiled
+   argument prefix, internal call segment, return assignment segment, and
+   recursive tail at `FunctionsBlockCompiledOpenResultRel`, then extending the
+   same shape to loops, switch/conditionals, and the whole-program
    imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.

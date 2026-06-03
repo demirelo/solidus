@@ -755,6 +755,197 @@ mutual
           (Prod.Lex.left _ _ (by omega))
 end
 
+namespace FunDef
+
+theorem runBody_returned_resolves_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args : List Word} {bodyFuel : Nat}
+    {shared sharedAfterCall : EvmYul.SharedState .EVM}
+    {returnValues : List Word} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runBody prim program fn args bodyFuel shared)
+        trace
+          (.ok (Functions.Source.CallResult.returned sharedAfterCall
+            returnValues))) :
+    ∃ fuel paramStore bodyOutcome bodyCtx',
+      bodyFuel = fuel + 1 ∧
+        Functions.Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty =
+          some paramStore ∧
+        OpenExternal.OpenResultResolves
+          (Block.runOpen prim program (Functions.Source.FunDef.bodyCtx fn)
+            fuel fn.body
+            { shared := shared,
+              vars := Functions.Source.Store.initReturns fn.returns
+                paramStore })
+          trace (.ok (bodyOutcome, bodyCtx')) ∧
+        (bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave) ∧
+        Functions.Source.Store.lookupMany fn.returns
+            bodyOutcome.state.vars =
+          some returnValues ∧
+        bodyOutcome.state.shared = sharedAfterCall := by
+  cases bodyFuel with
+  | zero =>
+      rw [runBody] at hResolve
+      simp [invalid] at hResolve
+      cases hResolve
+  | succ fuel =>
+      rw [runBody] at hResolve
+      cases hParams :
+          Functions.Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty with
+      | none =>
+          simp [hParams, invalid] at hResolve
+          cases hResolve
+      | some paramStore =>
+          simp [hParams] at hResolve
+          rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+            hBodyError | hBodyOk
+          · rcases hBodyError with ⟨err, _hBody, hResult⟩
+            cases hResult
+          · rcases hBodyOk with
+              ⟨bodyTrace, finishTrace, bodyResult, hTrace, hBody,
+                hFinish⟩
+            rcases bodyResult with ⟨bodyOutcome, bodyCtx'⟩
+            cases hMode : bodyOutcome.mode with
+            | regular =>
+                simp [hMode] at hFinish
+                cases hLookup :
+                    Functions.Source.Store.lookupMany fn.returns
+                      bodyOutcome.state.vars with
+                | none =>
+                    simp [hLookup, invalid] at hFinish
+                    cases hFinish
+                | some values =>
+                    simp [hLookup] at hFinish
+                    cases hFinish
+                    subst trace
+                    refine
+                      ⟨fuel, paramStore, bodyOutcome, bodyCtx', rfl,
+                        rfl, ?_, Or.inl hMode, ?_, ?_⟩
+                    · simpa [Functions.Source.FunDef.bodyCtx] using hBody
+                    · simpa using hLookup
+                    · rfl
+            | leave =>
+                simp [hMode] at hFinish
+                cases hLookup :
+                    Functions.Source.Store.lookupMany fn.returns
+                      bodyOutcome.state.vars with
+                | none =>
+                    simp [hLookup, invalid] at hFinish
+                    cases hFinish
+                | some values =>
+                    simp [hLookup] at hFinish
+                    cases hFinish
+                    subst trace
+                    refine
+                      ⟨fuel, paramStore, bodyOutcome, bodyCtx', rfl,
+                        rfl, ?_, Or.inr hMode, ?_, ?_⟩
+                    · simpa [Functions.Source.FunDef.bodyCtx] using hBody
+                    · simpa using hLookup
+                    · rfl
+            | brk =>
+                simp [hMode, invalid] at hFinish
+                cases hFinish
+            | cont =>
+                simp [hMode, invalid] at hFinish
+                cases hFinish
+            | halt kind =>
+                simp [hMode] at hFinish
+                cases hFinish
+
+theorem runBody_halted_resolves_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {fn : Functions.FunDef}
+    {args : List Word} {bodyFuel : Nat}
+    {shared : EvmYul.SharedState .EVM}
+    {kind : Assembly.HaltKind} {haltedState : State}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runBody prim program fn args bodyFuel shared)
+        trace (.ok (Functions.Source.CallResult.halted kind haltedState))) :
+    ∃ fuel paramStore bodyCtx',
+      bodyFuel = fuel + 1 ∧
+        Functions.Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty =
+          some paramStore ∧
+        OpenExternal.OpenResultResolves
+          (Block.runOpen prim program (Functions.Source.FunDef.bodyCtx fn)
+            fuel fn.body
+            { shared := shared,
+              vars := Functions.Source.Store.initReturns fn.returns
+                paramStore })
+          trace
+            (.ok (Functions.Source.Outcome.halt kind haltedState,
+              bodyCtx')) := by
+  cases bodyFuel with
+  | zero =>
+      rw [runBody] at hResolve
+      simp [invalid] at hResolve
+      cases hResolve
+  | succ fuel =>
+      rw [runBody] at hResolve
+      cases hParams :
+          Functions.Source.Store.insertMany fn.params args
+            Locals.Source.Store.empty with
+      | none =>
+          simp [hParams, invalid] at hResolve
+          cases hResolve
+      | some paramStore =>
+          simp [hParams] at hResolve
+          rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+            hBodyError | hBodyOk
+          · rcases hBodyError with ⟨err, _hBody, hResult⟩
+            cases hResult
+          · rcases hBodyOk with
+              ⟨bodyTrace, finishTrace, bodyResult, hTrace, hBody,
+                hFinish⟩
+            rcases bodyResult with ⟨bodyOutcome, bodyCtx'⟩
+            cases hMode : bodyOutcome.mode with
+            | regular =>
+                simp [hMode] at hFinish
+                cases hLookup :
+                    Functions.Source.Store.lookupMany fn.returns
+                      bodyOutcome.state.vars with
+                | none =>
+                    simp [hLookup, invalid] at hFinish
+                    cases hFinish
+                | some values =>
+                    simp [hLookup] at hFinish
+                    cases hFinish
+            | leave =>
+                simp [hMode] at hFinish
+                cases hLookup :
+                    Functions.Source.Store.lookupMany fn.returns
+                      bodyOutcome.state.vars with
+                | none =>
+                    simp [hLookup, invalid] at hFinish
+                    cases hFinish
+                | some values =>
+                    simp [hLookup] at hFinish
+                    cases hFinish
+            | brk =>
+                simp [hMode, invalid] at hFinish
+                cases hFinish
+            | cont =>
+                simp [hMode, invalid] at hFinish
+                cases hFinish
+            | halt actualKind =>
+                rcases bodyOutcome with ⟨bodyState, bodyMode⟩
+                simp at hMode
+                subst bodyMode
+                simp at hFinish
+                cases hFinish
+                subst trace
+                refine ⟨fuel, paramStore, bodyCtx', rfl, rfl, ?_⟩
+                simpa [Functions.Source.FunDef.bodyCtx,
+                  Functions.Source.Outcome.halt] using hBody
+
+end FunDef
+
 namespace Stmt
 
 theorem call_resolves_ok_inv
@@ -951,6 +1142,109 @@ theorem call_cons_resolves_ok_inv
           ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn, kind,
             haltedState, ?_, hArgs, hLookup, hBody, rfl, rfl⟩
         simp
+
+end Block
+
+namespace Block
+
+theorem call_cons_body_resolves_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxFinal : Ctx}
+    {bodyFuel : Nat} {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)} {rest : List Functions.Stmt}
+    {state : State} {sourceOutcome : Outcome}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runOpen prim program ctx (bodyFuel + 2)
+          { stmts := .call targets functionName args :: rest } state)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    targets.Nodup ∧
+      ((∃ argTrace bodyTrace tailTrace sourceAfterArgs argValues fn
+          calleeFuel paramStore bodyOutcome bodyCtx'
+          sharedAfterCall returnValues returnStore,
+          trace = argTrace ++ bodyTrace ++ tailTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          bodyFuel = calleeFuel + 1 ∧
+          Functions.Source.Store.insertMany fn.params argValues
+              Locals.Source.Store.empty =
+            some paramStore ∧
+          OpenExternal.OpenResultResolves
+            (runOpen prim program (Functions.Source.FunDef.bodyCtx fn)
+              calleeFuel fn.body
+              { shared := sourceAfterArgs.shared,
+                vars := Functions.Source.Store.initReturns fn.returns
+                  paramStore })
+            bodyTrace (.ok (bodyOutcome, bodyCtx')) ∧
+          (bodyOutcome.mode = .regular ∨ bodyOutcome.mode = .leave) ∧
+          Functions.Source.Store.lookupMany fn.returns
+              bodyOutcome.state.vars =
+            some returnValues ∧
+          bodyOutcome.state.shared = sharedAfterCall ∧
+          Functions.Source.Store.assignMany targets returnValues
+            sourceAfterArgs.vars = some returnStore ∧
+          OpenExternal.OpenResultResolves
+            (runOpen prim program ctx (bodyFuel + 1)
+              { stmts := rest }
+              { shared := sharedAfterCall, vars := returnStore })
+            tailTrace (.ok (sourceOutcome, ctxFinal))) ∨
+        ∃ argTrace bodyTrace sourceAfterArgs argValues fn
+          calleeFuel paramStore bodyCtx' kind haltedState,
+          trace = argTrace ++ bodyTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          bodyFuel = calleeFuel + 1 ∧
+          Functions.Source.Store.insertMany fn.params argValues
+              Locals.Source.Store.empty =
+            some paramStore ∧
+          OpenExternal.OpenResultResolves
+            (runOpen prim program (Functions.Source.FunDef.bodyCtx fn)
+              calleeFuel fn.body
+              { shared := sourceAfterArgs.shared,
+                vars := Functions.Source.Store.initReturns fn.returns
+                  paramStore })
+            bodyTrace
+            (.ok (Functions.Source.Outcome.halt kind haltedState,
+              bodyCtx')) ∧
+          sourceOutcome = Functions.Source.Outcome.halt kind haltedState ∧
+          ctxFinal = ctx) := by
+  rcases call_cons_resolves_ok_inv hResolve with ⟨hTargets, hCall⟩
+  refine ⟨hTargets, ?_⟩
+  cases hCall with
+  | inl hReturned =>
+      rcases hReturned with
+        ⟨argTrace, bodyTrace, tailTrace, sourceAfterArgs, argValues, fn,
+          sharedAfterCall, returnValues, returnStore, hTrace, hArgs,
+          hLookup, hBody, hAssign, hTail⟩
+      rcases FunDef.runBody_returned_resolves_ok_inv hBody with
+        ⟨calleeFuel, paramStore, bodyOutcome, bodyCtx', hFuel,
+          hParams, hBodyOpen, hMode, hLookupReturns, hShared⟩
+      exact
+        Or.inl
+          ⟨argTrace, bodyTrace, tailTrace, sourceAfterArgs, argValues, fn,
+            calleeFuel, paramStore, bodyOutcome, bodyCtx', sharedAfterCall,
+            returnValues, returnStore, hTrace, hArgs, hLookup, hFuel,
+            hParams, hBodyOpen, hMode, hLookupReturns, hShared, hAssign,
+            hTail⟩
+  | inr hHalted =>
+      rcases hHalted with
+        ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn, kind,
+          haltedState, hTrace, hArgs, hLookup, hBody, hOutcome,
+          hCtxFinal⟩
+      rcases FunDef.runBody_halted_resolves_ok_inv hBody with
+        ⟨calleeFuel, paramStore, bodyCtx', hFuel, hParams, hBodyOpen⟩
+      exact
+        Or.inr
+          ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn, calleeFuel,
+            paramStore, bodyCtx', kind, haltedState, hTrace, hArgs, hLookup,
+            hFuel, hParams, hBodyOpen, hOutcome, hCtxFinal⟩
 
 end Block
 
