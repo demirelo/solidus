@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:35 CEST.
+Last updated: 2026-06-03 07:40 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -139,9 +139,14 @@ Execution order:
    table/`forProc` code with arbitrary open continuations.
    `openRunNResult_exit_label_then_dispatch_continue` now adds the procedure
    exit label in front of that table replay and restores the caller
-   `Frame.StateRel` at the return label. The next return-side step is to
-   compose the recursive callee body result into this exit/dispatch bridge, then
-   run returned assignment and syntactic tail. The
+   `Frame.StateRel` at the return label.
+   `openRunNResult_body_regular_then_exit_dispatch_continue` and
+   `openRunNResult_body_leave_then_exit_dispatch_continue` now consume a checked
+   open callee-body run plus its `CompiledOutcomeRel` and continue through the
+   exit-label/return-dispatch bridge for both source-returning body modes. The
+   next return-side step is to feed these lemmas from the actual recursive
+   `FunctionsBlockCompiledOpenResultRel` callee-body theorem and call-site entry
+   bridge, then run returned assignment and syntactic tail. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
