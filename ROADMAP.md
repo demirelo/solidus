@@ -68,9 +68,13 @@ Execution order:
    `Instr.usesCallCreate = false`. `OpenBlockTraceResult` now mirrors the closed
    emitted-block replay proof object while replacing each emitted target block
    run with an open trace resolution, and it resolves back to
-   `Compiled.openRunNResult`. The remaining work is proving the CALL-site
-   preservation bridge from compiler-open/source blocks down to this open block
-   trace object and composing it into the whole-program
+   `Compiled.openRunNResult`. The assembly layer now also has an honest
+   source-open runner: `Source.OpenTraceResult.to_openBlockTrace` proves that
+   an assembled source-open assembly trace replays through emitted target blocks
+   as `OpenBlockTraceResult`, so the lower boundary no longer has to pretend
+   CALL passed through the closed assembly source interpreter. The remaining
+   work is proving open preservation from compiler-source/function blocks down
+   to this assembly source-open layer and composing it into the whole-program
    imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
@@ -137,9 +141,12 @@ let/assign CALL scaffolding, or a concrete external-world model.
   CALL-through-tail fuel composition. The new `OpenBlockTraceResult` wrapper is
   the intended target-side proof object for emitted-block-aware open compiled
   assembly runs, with current-instruction no-CALL wrappers removing the
-  emitted-code classifier side condition for ordinary steps; the remaining
-  public gap is the CALL-site preservation bridge from compiler-open blocks
-  down to that open target semantics.
+  emitted-code classifier side condition for ordinary steps. The assembly
+  source-open runner and `Source.OpenTraceResult.to_openBlockTrace` are now
+  Lean-checked, giving the adjacent assembly source-to-emitted-block open
+  preservation layer. The remaining public gap is open preservation from
+  compiler-open/function blocks down to assembly source-open traces, then the
+  public composition.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
