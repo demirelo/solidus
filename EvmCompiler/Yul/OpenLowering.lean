@@ -90,6 +90,43 @@ theorem compilerPrimitiveOpenCall?_resume_vars
       rcases hCall with rfl
       simp [Locals.Source.State.withShared]
 
+theorem compilerOpenPrimitive_eval_resolves_callKind_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {compiler : Objects.Source.State}
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    {values : List Word}
+    {compilerCall :
+      OpenExternal.OpenCall (Objects.Source.State × List Word)}
+    {trace : OpenExternal.OpenTrace}
+    {result : Objects.Source.State × List Word}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (hCall :
+      Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+          compiler kind values =
+        some compilerCall)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        trace (.ok result)) :
+    ∃ response : OpenExternal.CallResponse,
+      trace = [{ site := compilerCall.site, response := response }] ∧
+        result = compilerCall.resume response := by
+  have hSuspend :
+      Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values =
+        .call
+          { site := compilerCall.site
+            resume := fun response =>
+              .done (.ok (compilerCall.resume response)) } :=
+    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_suspends_of_basicOp
+      hKind hCall
+  rw [hSuspend] at hResolve
+  cases hResolve with
+  | call hTail =>
+      cases hTail
+      exact ⟨_, rfl, rfl⟩
+
 theorem compilerOpenPrimitive_call_stepAtResult
     {prim : Objects.Source.PrimitiveSemantics}
     {compiler : Objects.Source.State}
@@ -780,6 +817,103 @@ theorem compilerOpenPrimitive_callKind_stackPrefix_openRunNResult_continue
   rcases hCont response hRest with
     ⟨hSource, hTarget, _hResultRel⟩
   exact ⟨hSource, hTarget⟩
+
+theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    (op : Structured.BasicOp)
+    (hSupported :
+      op.toPrimOp.isCallCreate = false ∨
+        ∃ kind : OpenExternal.CallKind,
+          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (values : List Word)
+    (hValuesLen :
+      values.length = Expressions.Structured.BasicOp.inputs op)
+    (stackPrefix : List Word)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler
+        (values.reverse ++ stackPrefix) state)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op.toPrimOp))
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
+          (trace ++ tailTrace) result := by
+  cases hKind : OpenExternal.CallKind.ofBasicOp? op with
+  | none =>
+      have hNoCallCreate :
+          op.toPrimOp.isCallCreate = false := by
+        rcases hSupported with hNoCallCreate | ⟨kind, hSome⟩
+        · exact hNoCallCreate
+        · rw [hKind] at hSome
+          cases hSome
+      rw [Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_of_not_callKind
+        hKind] at hResolve
+      cases hEval : prim.eval op compiler.shared values with
+      | error err =>
+          simp [hEval] at hResolve
+          cases hResolve
+      | ok primResult =>
+          rcases primResult with ⟨sharedAfter, valuesAfter'⟩
+          simp [hEval] at hResolve
+          cases hResolve
+          rcases
+              compilerOpenPrimitive_no_callCreate_stackPrefix_openRunNResult_continue
+                (prim := prim) hPrim (layout := layout)
+                (compiler := compiler) (state := state)
+                op hNoCallCreate values stackPrefix hPrefixRel
+                program pc fuel hAt hEval with
+            ⟨evmAfter, _hSource, hAfterPrefix, hCont⟩
+          refine ⟨evmAfter, hAfterPrefix, ?_⟩
+          intro tailTrace result hRest
+          simpa using hCont hRest
+  | some kind =>
+      rcases
+          compilerOpenPrimitive_callKind_stackPrefix_openRunNResult_continue
+            (prim := prim) (layout := layout) (compiler := compiler)
+            (state := state) hKind values hValuesLen stackPrefix
+            hPrefixRel program pc fuel hAt with
+        ⟨operands, compilerCall, evmCall, hValues, hCompilerCall,
+          _hEVMCall, hResponsePrefix, hCont⟩
+      rcases
+          compilerOpenPrimitive_eval_resolves_callKind_ok_inv
+            (prim := prim) (compiler := compiler) hKind hCompilerCall
+            hResolve with
+        ⟨response, hTrace, hResult⟩
+      have hCompilerAfter :
+          compilerAfter = (compilerCall.resume response).1 := by
+        simpa using congrArg Prod.fst hResult
+      have hValuesAfter :
+          valuesAfter = (compilerCall.resume response).2 := by
+        simpa using congrArg Prod.snd hResult
+      refine
+        ⟨EvmYul.EVM.State.incrPC (evmCall.resume response),
+          ?_, ?_⟩
+      · simpa [hCompilerAfter, hValuesAfter] using
+          hResponsePrefix response
+      intro tailTrace result hRest
+      rcases hCont response hRest with
+        ⟨_hSource, hTarget⟩
+      simpa [hTrace] using hTarget
 
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
