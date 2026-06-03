@@ -12891,6 +12891,38 @@ theorem source_regular_running_compiledOutcomeRel
         | halted halt =>
             simp [Structured.Preservation.CompiledOutcomeRel] at hCompiled
 
+theorem source_regular_running_stateRel_compiledOutcomeRel
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {fallthroughPc : Word} {retc : Nat} {returns : List Name}
+    {hiddenReturns : List Structured.ReturnDest} {tokens : List Word}
+    {source : Objects.Source.State} {sourceCtx : Functions.Source.Ctx}
+    {targetCtx : Locals.Ctx} {target : Assembly.StepResult}
+    (hRel :
+      FunctionsBlockCompiledOpenResultRel asm ctx fallthroughPc retc returns
+        hiddenReturns tokens
+        (Functions.Source.Outcome.regular source, sourceCtx) targetCtx
+        target) :
+    ∃ bodyState afterBody,
+      target = .running afterBody ∧
+        Functions.SourceDirect.StateRel targetCtx.layout hiddenReturns source
+          bodyState ∧
+        Structured.Preservation.CompiledOutcomeRel asm ctx fallthroughPc
+          (Structured.Outcome.regular bodyState) (.running afterBody)
+          tokens := by
+  rcases hRel with ⟨direct, hOpen, hCompiled⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.BlockOpenResultRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular] at hOpen
+      · cases target with
+        | running afterBody =>
+            exact ⟨directState, afterBody, rfl, hOpen.1, hCompiled⟩
+        | halted halt =>
+            simp [Structured.Preservation.CompiledOutcomeRel] at hCompiled
+
 theorem source_leave_running_compiledOutcomeRel
     {asm : Assembly.Program} {ctx : Structured.CompileContext}
     {fallthroughPc : Word} {retc : Nat} {returns : List Name}
@@ -12918,6 +12950,47 @@ theorem source_leave_running_compiledOutcomeRel
       · cases target with
         | running afterBody =>
             exact ⟨directState, afterBody, rfl, hCompiled⟩
+        | halted halt =>
+            simp [Structured.Preservation.CompiledOutcomeRel] at hCompiled
+
+theorem source_leave_running_returnedStackRel_compiledOutcomeRel
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {fallthroughPc : Word} {retc : Nat} {returns : List Name}
+    {hiddenReturns : List Structured.ReturnDest} {tokens : List Word}
+    {source : Objects.Source.State} {sourceCtx : Functions.Source.Ctx}
+    {targetCtx : Locals.Ctx} {target : Assembly.StepResult}
+    (hRel :
+      FunctionsBlockCompiledOpenResultRel asm ctx fallthroughPc retc returns
+        hiddenReturns tokens
+        (Functions.Source.Outcome.leave source, sourceCtx) targetCtx
+        target) :
+    ∃ values bodyState afterBody,
+      target = .running afterBody ∧
+        Functions.Source.Store.lookupMany returns source.vars = some values ∧
+        Functions.SourceDirect.ReturnedStackRel hiddenReturns source values
+          bodyState ∧
+        Structured.Preservation.CompiledOutcomeRel asm ctx fallthroughPc
+          (Structured.Outcome.leave bodyState) (.running afterBody)
+          tokens := by
+  rcases hRel with ⟨direct, hOpen, hCompiled⟩
+  rcases
+      Functions.SourceDirect.BlockOpenResultRel.outcomeRel_of_nonregular
+        hOpen
+        (by
+          simp [Functions.Source.Outcome.leave,
+            Locals.Source.Outcome.leave]) with
+    ⟨_outcomeLayout, hOutcome⟩
+  cases direct with
+  | mk directState directMode =>
+      cases directMode <;>
+        simp [Functions.SourceDirect.StmtOutcomeRel,
+          Functions.Source.Outcome.leave,
+          Locals.Source.Outcome.leave] at hOutcome
+      · rcases hOutcome with ⟨values, hLookup, hReturned⟩
+        cases target with
+        | running afterBody =>
+            exact ⟨values, directState, afterBody, rfl, hLookup, hReturned,
+              hCompiled⟩
         | halted halt =>
             simp [Structured.Preservation.CompiledOutcomeRel] at hCompiled
 
