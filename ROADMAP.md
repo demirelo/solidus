@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:02 CEST.
+Last updated: 2026-06-03 05:10 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -220,9 +220,15 @@ Execution order:
    `OpenLowering.compilerOpenFunctionsStmt_let_openRunNResult_continue_fallthrough_of_compileCode`,
    and
    `OpenLowering.compilerOpenFunctionsStmt_assign_openRunNResult_continue_fallthrough_of_compileCode`.
-   The remaining work is lifting these statement heads through statement/block
-   sequencing, function calls, loops, switch/conditionals, and then composing
-   the result into the whole-program imported-Yul-to-open-EVM theorem.
+   These regular heads now also compose through the actual open
+   `FunctionsOpen.Block.runOpen` cons rule with a tail callback:
+   `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail`,
+   `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail`,
+   and
+   `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail`.
+   The remaining work is generalizing this checked sequencing shape to
+   function calls, loops, switch/conditionals, and then composing the result
+   into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
