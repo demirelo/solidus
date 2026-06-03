@@ -947,6 +947,122 @@ theorem structuredCode_runnerSafe_cleanupToPreserving?
     exact structuredCode_runnerSafe_cleanupManyPreserving? hCode
   · simp [hLe] at hCode
 
+theorem localsExprSeq_compileCode_mpr {ctx : Locals.Ctx} {offset : Nat}
+    {n m : Nat} (h : m = n) (exprs : Locals.ExprSeq n) :
+    Locals.ExprSeq.compileCode ctx offset
+        (Eq.mpr (congrArg Locals.ExprSeq h) exprs) =
+      Locals.ExprSeq.compileCode ctx offset exprs := by
+  cases h
+  rfl
+
+theorem structuredCode_frameSafe_returnExprs_compileCode
+    {ctx : Locals.Ctx} {offset : Nat} :
+    ∀ {returns : List Name} {code : Structured.Code},
+      Locals.ExprSeq.compileCode ctx offset
+        (Functions.Lower.returnExprs returns) = some code →
+      Structured.Code.FrameSafe code := by
+  intro returns
+  induction returns generalizing offset with
+  | nil =>
+      intro code hCompile
+      simp [Functions.Lower.returnExprs, Locals.ExprSeq.compileCode]
+        at hCompile
+      cases hCompile
+      exact structuredCode_frameSafe_nil
+  | cons name rest ih =>
+      intro code hCompile
+      unfold Functions.Lower.returnExprs at hCompile
+      let exprs : Locals.ExprSeq (1 + rest.length) :=
+        Locals.ExprSeq.cons (.var name) (Functions.Lower.returnExprs rest)
+      have hLen : rest.length + 1 = 1 + rest.length := by omega
+      change
+        Locals.ExprSeq.compileCode ctx offset
+            (Eq.mpr (congrArg Locals.ExprSeq hLen) exprs) =
+          some code at hCompile
+      rw [localsExprSeq_compileCode_mpr hLen exprs] at hCompile
+      simp [exprs, Locals.ExprSeq.compileCode, Locals.Expr.compileCode]
+        at hCompile
+      cases hDepth : Locals.Layout.lookupDepth? name ctx.layout with
+      | none =>
+          simp [hDepth] at hCompile
+      | some depth =>
+          cases hDup : Locals.StackOp.dup? (offset + depth) with
+          | none =>
+              simp [hDepth, hDup] at hCompile
+          | some op =>
+              cases hTail :
+                  Locals.ExprSeq.compileCode ctx (offset + 1)
+                    (Functions.Lower.returnExprs rest) with
+              | none =>
+                  simp [hDepth, hDup, hTail] at hCompile
+              | some tailCode =>
+                  simp [hDepth, hDup, hTail] at hCompile
+                  cases hCompile
+                  exact
+                    structuredCode_frameSafe_append
+                      (structuredCode_frameSafe_stackOp_dup? hDup)
+                      (ih hTail)
+
+theorem structuredCode_runnerSafe_returnExprs_compileCode
+    {ctx : Locals.Ctx} {offset : Nat} :
+    ∀ {returns : List Name} {code : Structured.Code},
+      Locals.ExprSeq.compileCode ctx offset
+        (Functions.Lower.returnExprs returns) = some code →
+      Structured.Preservation.Code.RunnerSafe code := by
+  intro returns
+  induction returns generalizing offset with
+  | nil =>
+      intro code hCompile
+      simp [Functions.Lower.returnExprs, Locals.ExprSeq.compileCode]
+        at hCompile
+      cases hCompile
+      exact structuredCode_runnerSafe_nil
+  | cons name rest ih =>
+      intro code hCompile
+      unfold Functions.Lower.returnExprs at hCompile
+      let exprs : Locals.ExprSeq (1 + rest.length) :=
+        Locals.ExprSeq.cons (.var name) (Functions.Lower.returnExprs rest)
+      have hLen : rest.length + 1 = 1 + rest.length := by omega
+      change
+        Locals.ExprSeq.compileCode ctx offset
+            (Eq.mpr (congrArg Locals.ExprSeq hLen) exprs) =
+          some code at hCompile
+      rw [localsExprSeq_compileCode_mpr hLen exprs] at hCompile
+      simp [exprs, Locals.ExprSeq.compileCode, Locals.Expr.compileCode]
+        at hCompile
+      cases hDepth : Locals.Layout.lookupDepth? name ctx.layout with
+      | none =>
+          simp [hDepth] at hCompile
+      | some depth =>
+          cases hDup : Locals.StackOp.dup? (offset + depth) with
+          | none =>
+              simp [hDepth, hDup] at hCompile
+          | some op =>
+              cases hTail :
+                  Locals.ExprSeq.compileCode ctx (offset + 1)
+                    (Functions.Lower.returnExprs rest) with
+              | none =>
+                  simp [hDepth, hDup, hTail] at hCompile
+              | some tailCode =>
+                  simp [hDepth, hDup, hTail] at hCompile
+                  cases hCompile
+                  exact
+                    structuredCode_runnerSafe_append
+                      (structuredCode_runnerSafe_stackOp_dup? hDup)
+                      (ih hTail)
+
+theorem structuredCode_noCall_returnExprs_compileCode
+    {ctx : Locals.Ctx} {offset : Nat} {returns : List Name}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx offset
+        (Functions.Lower.returnExprs returns) = some code) :
+    Structured.Code.usesCallCreate code = false :=
+  Locals.CompilerFacts.ExprSeq.compileCode_noCallCreate ctx offset
+    (Functions.Lower.returnExprs returns)
+    (Functions.CompilerFacts.Lower.returnExprs_noCallCreate returns)
+    hCompile
+
 theorem evmOpenCall?_resume_pc
     {state : EvmYul.EVM.State} {kind : OpenExternal.CallKind}
     {call : OpenExternal.OpenCall EvmYul.EVM.State}
