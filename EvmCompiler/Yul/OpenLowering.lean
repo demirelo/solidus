@@ -9759,15 +9759,17 @@ theorem of_frameStateRel_stateRel
 
 theorem of_attached_returnedFrameStateRel_stateRel
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
-    {source : Objects.Source.State}
+    {sourceBeforeCall sourceAfterCall : Objects.Source.State}
     {base bodyState returned : Locals.RunState}
     {target : EvmYul.EVM.State}
     {values tokens stack : List Word} {frame : Structured.ReturnDest}
     (hBaseRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
+        base)
+    (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
-      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns) source
-        values bodyState)
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+        sourceAfterCall values bodyState)
     (hAttach :
       Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
         some stack)
@@ -9777,12 +9779,17 @@ theorem of_attached_returnedFrameStateRel_stateRel
         (returned.withEVM { bodyState.evm with stack := stack })
         target tokens) :
     ∃ suffix,
-      StackPrefixSuffixErasedRel layout source values.reverse suffix target := by
+      StackPrefixSuffixErasedRel layout sourceAfterCall values.reverse suffix
+        target := by
   rcases hBaseRel with ⟨hLowerRel, _hReturns⟩
   rcases hLowerRel with ⟨_hBaseShared, hStoreRel⟩
   rcases hReturned with ⟨hReturnedShared, hReturnedStack, _hReturnedReturns⟩
   rcases hFrameRel.hidden_suffix with
     ⟨suffix, hTargetStack, _hMaterialize⟩
+  have hStoreRelAfter :
+      Locals.SourceLowering.StackStoreRel layout sourceAfterCall.vars
+        base.evm.stack := by
+    simpa [hVars] using hStoreRel
   have hAttachedStack :
       stack = values.reverse ++ base.evm.stack := by
     have hStackEq :=
@@ -9794,7 +9801,7 @@ theorem of_attached_returnedFrameStateRel_stateRel
       _ = values.reverse ++ base.evm.stack := by
             rw [hFrameStack]
   refine ⟨suffix, ?_⟩
-  refine ⟨?_, base.evm.stack, ?_, hStoreRel⟩
+  refine ⟨?_, base.evm.stack, ?_, hStoreRelAfter⟩
   · calc
       Structured.Preservation.eraseControl target =
           Structured.Preservation.eraseControl
@@ -9802,11 +9809,11 @@ theorem of_attached_returnedFrameStateRel_stateRel
                 { bodyState.evm with stack := stack }).evm with
               stack := target.stack } := hFrameRel.dataRel
       _ = Structured.Preservation.eraseControl
-            { target with toSharedState := source.shared } := by
+            { target with toSharedState := sourceAfterCall.shared } := by
           cases target
           cases bodyState
           cases returned
-          cases source
+          cases sourceAfterCall
           cases hReturnedShared
           simp [Structured.RunState.withEVM,
             Structured.Preservation.eraseControl, Assembly.eraseGas]
@@ -11217,7 +11224,7 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_frameStateRel_openRu
 
 theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
-    {source : Objects.Source.State}
+    {sourceBeforeCall sourceAfterCall : Objects.Source.State}
     {base bodyState returned : Locals.RunState}
     {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
     {targets : List Name} {values tokens stack : List Word}
@@ -11234,17 +11241,19 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRe
       ∀ {name : Name}, name ∈ targets →
         ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
     (hAssign :
-      Functions.Source.Store.assignMany targets values source.vars =
+      Functions.Source.Store.assignMany targets values sourceAfterCall.vars =
         some store')
     (hCompileBlock :
       Locals.Block.compileOpen ctx
           { stmts := Functions.Lower.assignReturnedTops targets } =
         some (compiledStmts, finalCtx))
     (hBaseRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
+        base)
+    (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
-      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns) source
-        values bodyState)
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+        sourceAfterCall values bodyState)
     (hAttach :
       Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
         some stack)
@@ -11267,8 +11276,8 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRe
         Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label])) :
     ∃ labelAssignFuel evmAfter suffix,
       labelAssignFuel = 2 * targets.length + 1 ∧
-      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
-        evmAfter ∧
+      StackPrefixSuffixErasedRel layout (sourceAfterCall.withVars store') []
+        suffix evmAfter ∧
       evmAfter.pc =
         Structured.Preservation.CodeSegment.fallthroughPc segment ∧
       ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
@@ -11306,14 +11315,16 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRe
   rcases
       StackPrefixSuffixErasedRel.of_attached_returnedFrameStateRel_stateRel
         (layout := layout) (hiddenReturns := hiddenReturns)
-        (source := source) (base := base) (bodyState := bodyState)
+        (sourceBeforeCall := sourceBeforeCall)
+        (sourceAfterCall := sourceAfterCall)
+        (base := base) (bodyState := bodyState)
         (returned := returned) (target := afterLabel) (values := values)
         (tokens := tokens) (stack := stack) (frame := frame)
-        hBaseRel hReturned hAttach hFrameStack hRelAfterLabel with
+        hBaseRel hVars hReturned hAttach hFrameStack hRelAfterLabel with
     ⟨suffix, hPrefixRel⟩
   rcases
       compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen
-        (layout := layout) (source := source) (state := afterLabel)
+        (layout := layout) (source := sourceAfterCall) (state := afterLabel)
         (ctx := ctx) (finalCtx := finalCtx) (targets := targets)
         (values := values) (suffix := suffix) (store' := store')
         (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
@@ -11338,7 +11349,7 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRe
 
 theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
-    {source : Objects.Source.State}
+    {sourceBeforeCall sourceAfterCall : Objects.Source.State}
     {base bodyState returned : Locals.RunState}
     {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
     {targets : List Name} {values tokens stack : List Word}
@@ -11372,17 +11383,19 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
       ∀ {name : Name}, name ∈ targets →
         ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
     (hAssign :
-      Functions.Source.Store.assignMany targets values source.vars =
+      Functions.Source.Store.assignMany targets values sourceAfterCall.vars =
         some store')
     (hCompileBlock :
       Locals.Block.compileOpen ctx
           { stmts := Functions.Lower.assignReturnedTops targets } =
         some (compiledStmts, finalCtx))
     (hBaseRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
+        base)
+    (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
-      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns) source
-        values bodyState)
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+        sourceAfterCall values bodyState)
     (hAttach :
       Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
         some stack)
@@ -11394,8 +11407,8 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
     (hPc : state.pc = EvmYul.UInt256.ofNat returnDest) :
     ∃ labelAssignFuel evmAfter suffix,
       labelAssignFuel = 2 * targets.length + 1 ∧
-      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
-        evmAfter ∧
+      StackPrefixSuffixErasedRel layout (sourceAfterCall.withVars store') []
+        suffix evmAfter ∧
       evmAfter.pc =
         Structured.Preservation.CodeSegment.fallthroughPc assignSegment ∧
       ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
@@ -11491,7 +11504,9 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
   rcases
       compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
         (layout := layout) (hiddenReturns := hiddenReturns)
-        (source := source) (base := base) (bodyState := bodyState)
+        (sourceBeforeCall := sourceBeforeCall)
+        (sourceAfterCall := sourceAfterCall)
+        (base := base) (bodyState := bodyState)
         (returned := returned) (state := state) (ctx := ctx)
         (finalCtx := finalCtx) (targets := targets) (values := values)
         (tokens := tokens) (stack := stack) (store' := store')
@@ -11499,7 +11514,7 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
         (supply := supply) (frame := frame) (label := site.returnLabel)
         (pre := callSeg.pre ++ jumpCode) (post := callSeg.post)
         hCtxLayout hNoDup hTargetsNoDup hTargets hAssign hCompileBlock
-        hBaseRel hReturned hAttach hFrameStack hFrameRel
+        hBaseRel hVars hReturned hAttach hFrameStack hFrameRel
         (Structured.Preservation.AssemblyProgram.PCFitsFrom.start
           hFitsAfterJump)
         assignSegmentExpanded hPc' hAssignSegmentStart with
@@ -11524,7 +11539,7 @@ theorem compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStat
 
 theorem openRunNResult_callSite_body_regular_then_return_assign_continue
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
-    {sourceAfterCall : Objects.Source.State}
+    {sourceBeforeCall sourceAfterCall : Objects.Source.State}
     {base bodyState returned : Locals.RunState}
     {program : Structured.Program} {proc : Structured.Proc}
     {bodySupply dispatchSupply : Structured.LabelSupply}
@@ -11615,8 +11630,9 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
           { stmts := Functions.Lower.assignReturnedTops targets } =
         some (assignStmts, assignFinalCtx))
     (hBaseRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns sourceAfterCall
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
         base)
+    (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
       Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
         sourceAfterCall values bodyState)
@@ -11659,7 +11675,8 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
         rcases
             compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen
               (layout := layout) (hiddenReturns := hiddenReturns)
-              (source := sourceAfterCall) (base := base)
+              (sourceBeforeCall := sourceBeforeCall)
+              (sourceAfterCall := sourceAfterCall) (base := base)
               (bodyState := bodyState) (returned := returned)
               (state := final) (ctx := assignCtx)
               (finalCtx := assignFinalCtx) (targets := targets)
@@ -11671,7 +11688,7 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
               (asm := asm) (returnDest := returnDest)
               callSeg assignSegment hAssignStart hExact hReturnLabel
               hCtxLayout hLayoutNoDup hTargetsNoDup hTargets hAssign
-              hCompileAssign hBaseRel hReturned hAttach hFrameStack
+              hCompileAssign hBaseRel hVars hReturned hAttach hFrameStack
               hFinalRel hFinalPc with
           ⟨labelAssignFuel, evmAfter, suffix, hFuel, hAfterRel, hAfterPc,
             hCont⟩
@@ -11682,7 +11699,7 @@ theorem openRunNResult_callSite_body_regular_then_return_assign_continue
 
 theorem openRunNResult_callSite_body_leave_then_return_assign_continue
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
-    {sourceAfterCall : Objects.Source.State}
+    {sourceBeforeCall sourceAfterCall : Objects.Source.State}
     {base bodyState returned : Locals.RunState}
     {program : Structured.Program} {proc : Structured.Proc}
     {bodySupply dispatchSupply : Structured.LabelSupply}
@@ -11775,8 +11792,9 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
           { stmts := Functions.Lower.assignReturnedTops targets } =
         some (assignStmts, assignFinalCtx))
     (hBaseRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns sourceAfterCall
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeCall
         base)
+    (hVars : sourceAfterCall.vars = sourceBeforeCall.vars)
     (hReturned :
       Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
         sourceAfterCall values bodyState)
@@ -11820,7 +11838,8 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
         rcases
             compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen
               (layout := layout) (hiddenReturns := hiddenReturns)
-              (source := sourceAfterCall) (base := base)
+              (sourceBeforeCall := sourceBeforeCall)
+              (sourceAfterCall := sourceAfterCall) (base := base)
               (bodyState := bodyState) (returned := returned)
               (state := final) (ctx := assignCtx)
               (finalCtx := assignFinalCtx) (targets := targets)
@@ -11832,7 +11851,7 @@ theorem openRunNResult_callSite_body_leave_then_return_assign_continue
               (asm := asm) (returnDest := returnDest)
               callSeg assignSegment hAssignStart hExact hReturnLabel
               hCtxLayout hLayoutNoDup hTargetsNoDup hTargets hAssign
-              hCompileAssign hBaseRel hReturned hAttach hFrameStack
+              hCompileAssign hBaseRel hVars hReturned hAttach hFrameStack
               hFinalRel hFinalPc with
           ⟨labelAssignFuel, evmAfter, suffix, hFuel, hAfterRel, hAfterPc,
             hCont⟩
