@@ -2538,6 +2538,1039 @@ theorem openRunNResult_sinkTopUnder_source_running_continue
       simpa [Structured.StackShuffle.sinkTopUnder, List.length_append, swap,
         start, hFuel, List.append_assoc] using hFirst
 
+theorem openRunNResult_liftBuriedToTop_source_running_continue
+    {state : EvmYul.EVM.State}
+    {front suffix : List Word} {token : Word}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.StackShuffle.liftBuriedToTop front.length))
+    (hPc :
+      ({ state with stack := front ++ token :: suffix } :
+          EvmYul.EVM.State).pc =
+        Assembly.Program.pcAfter pre)
+    (hBound : front.length ≤ 16)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        final.stack = token :: front ++ suffix →
+        Structured.Preservation.eraseControl final =
+          Structured.Preservation.eraseControl
+            { state with stack := token :: front ++ suffix } →
+        final.pc =
+          Assembly.Program.pcAfter
+            (pre ++ Structured.StackShuffle.liftBuriedToTop front.length) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ Structured.StackShuffle.liftBuriedToTop front.length ++
+              post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ Structured.StackShuffle.liftBuriedToTop front.length ++ post)
+        ((Structured.StackShuffle.liftBuriedToTop front.length).length + fuel)
+        { state with stack := front ++ token :: suffix })
+      tailTrace result := by
+  induction front using List.reverseRecOn generalizing state suffix token pre post fuel with
+  | nil =>
+      have hRestStart :=
+        hRest { state with stack := token :: suffix }
+          (by simp)
+          (by rfl)
+          (by simpa [Structured.StackShuffle.liftBuriedToTop] using hPc)
+      simpa [Structured.StackShuffle.liftBuriedToTop] using hRestStart
+  | append_singleton front last ih =>
+      have hSwapBound : front.length + 1 ≤ 16 := by
+        simpa [List.length_append] using hBound
+      have hFrontBound : front.length ≤ 16 := by omega
+      let swap := Structured.StackShuffle.swapInstr (front.length + 1)
+      have hCodeEq :
+          Structured.StackShuffle.liftBuriedToTop (front ++ [last]).length =
+            Structured.StackShuffle.liftBuriedToTop front.length ++
+              [swap] := by
+        simp [Structured.StackShuffle.liftBuriedToTop, List.length_append,
+          swap]
+      have hCodeLenEq :
+          Structured.StackShuffle.liftBuriedToTop (front.length + 1) =
+            Structured.StackShuffle.liftBuriedToTop front.length ++
+              [swap] := by
+        simpa [List.length_append] using hCodeEq
+      have hFitsAppend :
+          Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+            (Structured.StackShuffle.liftBuriedToTop front.length ++
+              [swap]) := by
+        simpa [hCodeEq] using hFits
+      have hLiftFits :
+          Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+            (Structured.StackShuffle.liftBuriedToTop front.length) :=
+        Structured.Preservation.AssemblyProgram.PCFitsFrom.left hFitsAppend
+      have hSwapFits :
+          Structured.Preservation.AssemblyProgram.PCFitsFrom
+            (pre ++ Structured.StackShuffle.liftBuriedToTop front.length)
+            [swap] :=
+        Structured.Preservation.AssemblyProgram.PCFitsFrom.right hFitsAppend
+      have hSwapLocal :
+          Structured.Preservation.StackShuffle.SourceLocalInstr swap := by
+        exact
+          Structured.Preservation.StackShuffle.swapInstr_sourceLocal
+            (n := front.length + 1) (by omega) hSwapBound
+      have hSwapNoHalt : swap.haltKind? = none := by
+        exact
+          Structured.Preservation.StackShuffle.swapInstr_haltKind?_none
+            (n := front.length + 1) (by omega) hSwapBound
+      have hSwapByte : swap.byteSize = 1 := by
+        exact
+          Structured.Preservation.StackShuffle.swapInstr_byteSize
+            (n := front.length + 1) (by omega) hSwapBound
+      have hSwapNoInstr :
+          Assembly.Instr.usesCallCreate swap = false := by
+        exact
+          stackShuffle_swapInstr_usesCallCreate_false
+            (n := front.length + 1) (by omega) hSwapBound
+      have hRestForIH :
+          ∀ mid : EvmYul.EVM.State,
+            mid.stack = last :: front ++ token :: suffix →
+            Structured.Preservation.eraseControl mid =
+              Structured.Preservation.eraseControl
+                { state with stack := last :: front ++ token :: suffix } →
+            mid.pc =
+              Assembly.Program.pcAfter
+                (pre ++
+                  Structured.StackShuffle.liftBuriedToTop front.length) →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult
+                (pre ++ Structured.StackShuffle.liftBuriedToTop front.length ++
+                  ([swap] ++ post))
+                (fuel + 1) mid)
+              tailTrace result := by
+        intro mid hMidStack hMidErase hMidPc
+        have hMidRecord :
+            { mid with stack := last :: front ++ [token] ++ suffix } = mid := by
+          rw [show last :: front ++ [token] ++ suffix =
+              last :: front ++ token :: suffix by simp [List.append_assoc]]
+          rw [← hMidStack]
+        let finalState : EvmYul.EVM.State :=
+          mid.replaceStackAndIncrPC (token :: front ++ [last] ++ suffix)
+        have hStep :
+            Assembly.Target.stepInstr
+                (Structured.Preservation.StackShuffle.targetInstr swap)
+                mid =
+              .ok finalState := by
+          rw [← hMidRecord]
+          rw [show swap =
+              Structured.StackShuffle.swapInstr (front.length + 1) from rfl]
+          rw [Structured.Preservation.StackShuffle.swapInstr_step_eq_swap
+            (by omega) hSwapBound]
+          exact
+            Structured.Preservation.StackShuffle.swap_snoc
+              (state := mid) (front := front) (suffix := suffix)
+              (top := last) (last := token)
+        have hFinalStack :
+            finalState.stack = token :: front ++ [last] ++ suffix := by
+          simp [finalState, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC, List.append_assoc]
+        have hFinalErase :
+            Structured.Preservation.eraseControl finalState =
+              Structured.Preservation.eraseControl
+                { state with stack := token :: front ++ [last] ++ suffix } := by
+          calc
+            Structured.Preservation.eraseControl finalState =
+                Structured.Preservation.eraseControl
+                  { mid with stack := token :: front ++ [last] ++ suffix } := by
+              simp [finalState, Structured.Preservation.eraseControl,
+                Assembly.eraseGas, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
+            _ =
+                Structured.Preservation.eraseControl
+                  { state with stack := token :: front ++ [last] ++ suffix } := by
+              simpa [Structured.Preservation.eraseControl, Assembly.eraseGas,
+                List.append_assoc] using
+                Structured.Preservation.eraseControl_with_stack_congr
+                  (left := mid)
+                  (right :=
+                    { state with stack := last :: front ++ token :: suffix })
+                  (stack := token :: front ++ [last] ++ suffix)
+                  hMidErase
+        have hFinalPc :
+            finalState.pc =
+              Assembly.Program.pcAfter
+                (pre ++
+                  Structured.StackShuffle.liftBuriedToTop front.length ++
+                  [swap]) := by
+          calc
+            finalState.pc
+                = mid.pc + EvmYul.UInt256.ofNat 1 := by
+                    simp [finalState,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC]
+            _ =
+                Assembly.Program.pcAfter
+                    (pre ++
+                      Structured.StackShuffle.liftBuriedToTop front.length) +
+                  EvmYul.UInt256.ofNat 1 := by
+                    rw [hMidPc]
+            _ =
+                EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength
+                    (pre ++
+                      Structured.StackShuffle.liftBuriedToTop front.length) +
+                    1) := by
+                    rw [Assembly.Program.pcAfter,
+                      Assembly.UInt256_ofNat_add]
+            _ =
+                Assembly.Program.pcAfter
+                  (pre ++
+                    Structured.StackShuffle.liftBuriedToTop front.length ++
+                    [swap]) := by
+                    simp [Assembly.Program.pcAfter,
+                      Assembly.Program.byteLength_append,
+                      Assembly.Program.byteLength, hSwapByte, Nat.add_assoc]
+        have hRestFinal :
+            OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult
+              (pre ++
+                Structured.StackShuffle.liftBuriedToTop (front ++ [last]).length ++
+                post)
+                fuel finalState)
+              tailTrace result := by
+          have hFinalPcFull :
+              finalState.pc =
+                Assembly.Program.pcAfter
+                  (pre ++
+                    Structured.StackShuffle.liftBuriedToTop
+                      (front ++ [last]).length) := by
+            simpa [hCodeEq, List.append_assoc] using hFinalPc
+          have hFinalStackFull :
+              finalState.stack = token :: (front ++ [last]) ++ suffix := by
+            simpa [List.append_assoc] using hFinalStack
+          have hFinalEraseFull :
+              Structured.Preservation.eraseControl finalState =
+                Structured.Preservation.eraseControl
+                  { state with stack := token :: (front ++ [last]) ++ suffix } := by
+            simpa [List.append_assoc] using hFinalErase
+          exact
+            hRest finalState hFinalStackFull hFinalEraseFull hFinalPcFull
+        have hSwapRun :=
+          openRunNResult_source_local_instr_no_call_running_continue
+            hSwapLocal hSwapNoInstr hSwapNoHalt
+            (Structured.Preservation.AssemblyProgram.PCFitsFrom.start
+              hSwapFits)
+            hMidPc hStep
+            (by
+              simpa [hCodeEq, hCodeLenEq, List.append_assoc] using hRestFinal)
+        simpa [List.append_assoc] using hSwapRun
+      have hPcIH :
+          ({ state with stack := front ++ last :: token :: suffix } :
+              EvmYul.EVM.State).pc =
+            Assembly.Program.pcAfter pre := by
+        simpa [List.append_assoc] using hPc
+      have hLiftRun :=
+        ih (state := state) (suffix := token :: suffix) (token := last)
+          (pre := pre) (post := [swap] ++ post) (fuel := fuel + 1)
+          hLiftFits hPcIH hFrontBound hRestForIH
+      have hFuel :
+          (Structured.StackShuffle.liftBuriedToTop front.length).length +
+              (fuel + 1) =
+            (Structured.StackShuffle.liftBuriedToTop
+              (front ++ [last]).length).length + fuel := by
+        simp [hCodeLenEq]
+        omega
+      simpa [hCodeEq, hCodeLenEq, hFuel, List.append_assoc] using hLiftRun
+
+theorem openRunNResult_removeBuriedUnder_source_running_continue
+    {state : EvmYul.EVM.State}
+    {returnValues suffix : List Word} {token : Word}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.StackShuffle.removeBuriedUnder returnValues.length))
+    (hPc :
+      ({ state with stack := returnValues ++ token :: suffix } :
+          EvmYul.EVM.State).pc =
+        Assembly.Program.pcAfter pre)
+    (hBound : returnValues.length ≤ 16)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        final.stack = returnValues ++ suffix →
+        Structured.Preservation.eraseControl final =
+          Structured.Preservation.eraseControl
+            { state with stack := returnValues ++ suffix } →
+        final.pc =
+          Assembly.Program.pcAfter
+            (pre ++ Structured.StackShuffle.removeBuriedUnder
+              returnValues.length) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ Structured.StackShuffle.removeBuriedUnder
+              returnValues.length ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ Structured.StackShuffle.removeBuriedUnder returnValues.length ++
+          post)
+        ((Structured.StackShuffle.removeBuriedUnder returnValues.length).length +
+          fuel)
+        { state with stack := returnValues ++ token :: suffix })
+      tailTrace result := by
+  have hFitsLift :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.StackShuffle.liftBuriedToTop returnValues.length) := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+        (by simpa [Structured.StackShuffle.removeBuriedUnder,
+          List.append_assoc] using hFits)
+  have hFitsPop :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (pre ++ Structured.StackShuffle.liftBuriedToTop returnValues.length)
+        [Assembly.Instr.prim .pop] := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (by simpa [Structured.StackShuffle.removeBuriedUnder,
+          List.append_assoc] using hFits)
+  have hLiftRun :=
+    openRunNResult_liftBuriedToTop_source_running_continue
+      (state := state) (front := returnValues) (suffix := suffix)
+      (token := token) (pre := pre)
+      (post := [Assembly.Instr.prim .pop] ++ post)
+      (fuel := fuel + 1) (tailTrace := tailTrace) (result := result)
+      hFitsLift hPc hBound
+      (by
+        intro mid hMidStack hMidErase hMidPc
+        have hMidRecord :
+            { mid with stack := token :: returnValues ++ suffix } = mid := by
+          rw [← hMidStack]
+        let finalState : EvmYul.EVM.State :=
+          mid.replaceStackAndIncrPC (returnValues ++ suffix)
+        have hPopStep :
+            Assembly.Target.stepInstr
+                (Structured.Preservation.StackShuffle.targetInstr
+                  (Assembly.Instr.prim .pop)) mid =
+              .ok finalState := by
+          rw [← hMidRecord]
+          exact
+            Structured.Preservation.StackShuffle.pop_cons_step
+              (state := mid) (top := token)
+              (suffix := returnValues ++ suffix)
+        have hFinalStack :
+            finalState.stack = returnValues ++ suffix := by
+          simp [finalState, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+        have hFinalErase :
+            Structured.Preservation.eraseControl finalState =
+              Structured.Preservation.eraseControl
+                { state with stack := returnValues ++ suffix } := by
+          calc
+            Structured.Preservation.eraseControl finalState =
+                Structured.Preservation.eraseControl
+                  { mid with stack := returnValues ++ suffix } := by
+              simp [finalState, Structured.Preservation.eraseControl,
+                Assembly.eraseGas, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
+            _ =
+                Structured.Preservation.eraseControl
+                  { state with stack := returnValues ++ suffix } := by
+              exact
+                Structured.Preservation.eraseControl_with_stack_congr
+                  (left := mid)
+                  (right :=
+                    { state with stack := token :: returnValues ++ suffix })
+                  (stack := returnValues ++ suffix)
+                  hMidErase
+        have hFinalPc :
+            finalState.pc =
+              Assembly.Program.pcAfter
+                (pre ++ Structured.StackShuffle.removeBuriedUnder
+                  returnValues.length) := by
+          calc
+            finalState.pc
+                = mid.pc + EvmYul.UInt256.ofNat 1 := by
+                    simp [finalState,
+                      EvmYul.EVM.State.replaceStackAndIncrPC,
+                      EvmYul.EVM.State.incrPC]
+            _ =
+                Assembly.Program.pcAfter
+                    (pre ++
+                      Structured.StackShuffle.liftBuriedToTop
+                        returnValues.length) +
+                  EvmYul.UInt256.ofNat 1 := by
+                    rw [hMidPc]
+            _ =
+                EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength
+                    (pre ++
+                      Structured.StackShuffle.liftBuriedToTop
+                        returnValues.length) +
+                    1) := by
+                    rw [Assembly.Program.pcAfter,
+                      Assembly.UInt256_ofNat_add]
+            _ =
+                Assembly.Program.pcAfter
+                  (pre ++
+                    Structured.StackShuffle.removeBuriedUnder
+                      returnValues.length) := by
+                    simp [Structured.StackShuffle.removeBuriedUnder,
+                      Assembly.Program.pcAfter,
+                      Assembly.Program.byteLength_append,
+                      Assembly.Program.byteLength, Assembly.Instr.byteSize,
+                      Nat.add_assoc]
+        have hRestFinal :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult
+                (pre ++ Structured.StackShuffle.removeBuriedUnder
+                  returnValues.length ++ post)
+                fuel finalState)
+              tailTrace result :=
+          hRest finalState hFinalStack hFinalErase hFinalPc
+        have hPopRun :=
+          openRunNResult_source_local_instr_no_call_running_continue
+            (instr := Assembly.Instr.prim .pop)
+            (pre := pre ++
+              Structured.StackShuffle.liftBuriedToTop returnValues.length)
+            (post := post) (state := mid) (mid := finalState)
+            (fuel := fuel) (tailTrace := tailTrace) (result := result)
+            (by simp [Structured.Preservation.StackShuffle.SourceLocalInstr])
+            (by simp [Assembly.Instr.usesCallCreate,
+              Assembly.PrimOp.isCallCreate])
+            rfl
+            (Structured.Preservation.AssemblyProgram.PCFitsFrom.start
+              hFitsPop)
+            hMidPc hPopStep
+            (by
+              simpa [Structured.StackShuffle.removeBuriedUnder,
+                List.append_assoc] using hRestFinal)
+        simpa [Structured.StackShuffle.removeBuriedUnder, List.append_assoc]
+          using hPopRun)
+  have hFuel :
+      (Structured.StackShuffle.liftBuriedToTop returnValues.length).length +
+          (fuel + 1) =
+        (Structured.StackShuffle.removeBuriedUnder returnValues.length).length +
+          fuel := by
+    simp [Structured.StackShuffle.removeBuriedUnder]
+    omega
+  simpa [Structured.StackShuffle.removeBuriedUnder, hFuel, List.append_assoc]
+    using hLiftRun
+
+theorem openRunNResult_source_returnAttach_after_remove_continue
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length))
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : callee.evm.stack.length ≤ 16)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          { callee with
+            evm :=
+              { callee.evm with
+                stack := callee.evm.stack ++ frame.callerStack }
+            returns := returns }
+          final tokens →
+        final.pc =
+          Assembly.Program.pcAfter
+            (pre ++
+              Structured.StackShuffle.removeBuriedUnder
+                callee.evm.stack.length) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              Structured.StackShuffle.removeBuriedUnder
+                callee.evm.stack.length ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length ++
+          post)
+        ((Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length).length +
+          fuel)
+        target)
+      tailTrace result := by
+  rcases
+      Structured.Preservation.Frame.StateRel.caller_materialization_of_top_return
+        hRel hReturns with
+    ⟨callerTarget, hCaller, hTargetStack⟩
+  have hTargetRecord :
+      { target with stack := callee.evm.stack ++ token :: callerTarget } =
+        target := by
+    rw [← hTargetStack]
+  have hRun :=
+    openRunNResult_removeBuriedUnder_source_running_continue
+      (state := target) (returnValues := callee.evm.stack)
+      (suffix := callerTarget) (token := token) (pre := pre)
+      (post := post) (fuel := fuel) (tailTrace := tailTrace)
+      (result := result) hFits
+      (by simpa [hTargetRecord] using hPc) hBound
+      (by
+        intro final hFinalStack hFinalErase hFinalPc
+        have hRelFinal :
+            Structured.Preservation.Frame.StateRel
+              { callee with
+                evm :=
+                  { callee.evm with
+                    stack := callee.evm.stack ++ frame.callerStack }
+                returns := returns }
+              final tokens := by
+          refine ⟨?_, ?_⟩
+          · rw [hFinalStack]
+            exact
+              Structured.Preservation.Frame.materializeStack_returnAttach
+                hCaller
+          · have hEraseTarget :
+                Structured.Preservation.eraseControl final =
+                  Structured.Preservation.eraseControl
+                    { target with stack := callee.evm.stack ++ callerTarget } :=
+              hFinalErase
+            have hEraseSource :
+                Structured.Preservation.eraseControl
+                    { target with stack := callee.evm.stack ++ callerTarget } =
+                  Structured.Preservation.eraseControl
+                    { callee.evm with
+                      stack := callee.evm.stack ++ callerTarget } :=
+              hRel.dataRel_replace_stack
+                (callee.evm.stack ++ callerTarget)
+            have hEraseFinalSource :
+                Structured.Preservation.eraseControl
+                    { callee.evm with
+                      stack := callee.evm.stack ++ callerTarget } =
+                  Structured.Preservation.eraseControl
+                    { { callee with
+                        evm :=
+                          { callee.evm with
+                            stack := callee.evm.stack ++ frame.callerStack }
+                        returns := returns }.evm with
+                      stack := final.stack } := by
+              simp [hFinalStack]
+            exact hEraseTarget.trans
+              (hEraseSource.trans hEraseFinalSource)
+        exact hRest final hRelFinal hFinalPc)
+  simpa [hTargetRecord] using hRun
+
+theorem openRunNResult_dispatch_case_source_running_continue
+    {caseLabel returnLabel : Assembly.Label}
+    {dest : Nat} {pre post : Assembly.Program}
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        ([Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel]))
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : callee.evm.stack.length ≤ 16)
+    (hReturnLabel :
+      Assembly.Program.labelPc
+        (pre ++ [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel] ++ post)
+        returnLabel = some dest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          { callee with
+            evm :=
+              { callee.evm with
+                stack := callee.evm.stack ++ frame.callerStack }
+            returns := returns }
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat dest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label caseLabel] ++
+              Structured.StackShuffle.removeBuriedUnder
+                callee.evm.stack.length ++
+              [Assembly.Instr.jump returnLabel] ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel] ++ post)
+        (((Structured.StackShuffle.removeBuriedUnder
+              callee.evm.stack.length).length + (fuel + 1)) + 1)
+        target)
+      tailTrace result := by
+  let removeCode :=
+    Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length
+  have hFitsAfterLabel :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (pre ++ [Assembly.Instr.label caseLabel])
+        (removeCode ++ [Assembly.Instr.jump returnLabel]) := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := pre) (first := [Assembly.Instr.label caseLabel])
+        (second := removeCode ++ [Assembly.Instr.jump returnLabel])
+        (by simpa [removeCode, List.append_assoc] using hFits)
+  have hFitsRemove :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (pre ++ [Assembly.Instr.label caseLabel]) removeCode := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+        (pre := pre ++ [Assembly.Instr.label caseLabel])
+        (first := removeCode) (second := [Assembly.Instr.jump returnLabel])
+        hFitsAfterLabel
+  have hFitsAfterRemove :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (pre ++ [Assembly.Instr.label caseLabel] ++ removeCode)
+        [Assembly.Instr.jump returnLabel] := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := pre ++ [Assembly.Instr.label caseLabel])
+        (first := removeCode) (second := [Assembly.Instr.jump returnLabel])
+        hFitsAfterLabel
+  rcases
+      Structured.Preservation.Frame.StateRel.label_stepResult_at
+        (label := caseLabel) (pre := pre)
+        (post := removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+        (source := callee) (target := target)
+        (tokens := token :: tokens)
+        (Structured.Preservation.AssemblyProgram.PCFitsFrom.start hFits)
+        hPc hRel with
+    ⟨afterLabel, hLabelStep, hRelAfter, hPcAfter⟩
+  have hLabelAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.label caseLabel] ++
+            removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+          target.pc.toNat =
+        some (Assembly.Program.byteLength pre,
+          Assembly.Instr.label caseLabel) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, Structured.Preservation.AssemblyProgram.PCFitsFrom.start hFits]
+    simpa [removeCode, List.append_assoc] using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre (removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+        (Assembly.Instr.label caseLabel) 0
+  have hAfterLabelRest :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult
+          (pre ++ [Assembly.Instr.label caseLabel] ++
+            removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+          (removeCode.length + (fuel + 1)) afterLabel)
+        tailTrace result := by
+    have hRemoveRun :=
+      openRunNResult_source_returnAttach_after_remove_continue
+        (callee := callee) (target := afterLabel)
+        (tokens := tokens) (token := token) (frame := frame)
+        (returns := returns)
+        (pre := pre ++ [Assembly.Instr.label caseLabel])
+        (post := [Assembly.Instr.jump returnLabel] ++ post)
+        (fuel := fuel + 1) (tailTrace := tailTrace)
+        (result := result)
+        (by simpa [removeCode] using hFitsRemove)
+        hPcAfter hRelAfter hReturns hBound
+        (by
+          intro afterRemove hRelReturned hPcAfterRemove
+          have hLabelJump :
+              Assembly.Program.labelPc
+                ((pre ++ [Assembly.Instr.label caseLabel] ++
+                    removeCode) ++ [Assembly.Instr.jump returnLabel] ++
+                  post)
+                returnLabel = some dest := by
+            simpa [removeCode, List.append_assoc] using hReturnLabel
+          have hAfterJumpRel :
+              Structured.Preservation.Frame.StateRel
+                { callee with
+                  evm :=
+                    { callee.evm with
+                      stack := callee.evm.stack ++ frame.callerStack }
+                  returns := returns }
+                (Assembly.Source.jumpPc dest afterRemove)
+                tokens := by
+            refine ⟨?_, ?_⟩
+            · simpa [Assembly.Source.jumpPc] using
+                hRelReturned.stackRel
+            · simpa [Assembly.Source.jumpPc,
+                Structured.Preservation.eraseControl_with_pc] using
+                hRelReturned.dataRel
+          have hAfterJumpPc :
+              (Assembly.Source.jumpPc dest afterRemove).pc =
+                EvmYul.UInt256.ofNat dest := by
+            rfl
+          have hJumpRun :=
+            openRunNResult_source_jump_no_call_running_continue
+              (pre := pre ++ [Assembly.Instr.label caseLabel] ++
+                removeCode)
+              (post := post) (label := returnLabel)
+              (state := afterRemove) (dest := dest) (fuel := fuel)
+              (tailTrace := tailTrace) (result := result)
+              (Structured.Preservation.AssemblyProgram.PCFitsFrom.start
+                hFitsAfterRemove)
+              hPcAfterRemove hLabelJump
+              (by
+                simpa [removeCode, List.append_assoc] using
+                  hRest (Assembly.Source.jumpPc dest afterRemove)
+                    hAfterJumpRel hAfterJumpPc)
+          simpa [removeCode, List.append_assoc] using hJumpRun)
+    simpa [removeCode, List.append_assoc] using hRemoveRun
+  have hLabelRun :=
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hLabelAt (by simp [Assembly.Instr.usesCallCreate])
+      (by simpa [List.append_assoc] using hLabelStep)
+      hAfterLabelRest
+  simpa [removeCode, List.append_assoc] using hLabelRun
+
+theorem openRunNResult_dispatch_mismatched_test_source_running_continue
+    {caseLabel : Assembly.Label} {caseDest : Nat}
+    {pre post : Assembly.Program}
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token probe : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hNe : probe ≠ token)
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        [ Structured.StackShuffle.dupInstr (callee.evm.stack.length + 1)
+        , Assembly.Instr.push probe
+        , Assembly.Instr.prim .eq
+        , Assembly.Instr.jumpi caseLabel
+        ])
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : callee.evm.stack.length < 16)
+    (hCaseLabel :
+      Assembly.Program.labelPc
+        (pre ++
+          [ Structured.StackShuffle.dupInstr
+              (callee.evm.stack.length + 1)
+          , Assembly.Instr.push probe
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi caseLabel
+          ] ++ post)
+        caseLabel = some caseDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel callee final (token :: tokens) →
+        final.pc =
+          Assembly.Program.pcAfter
+            (pre ++
+              [ Structured.StackShuffle.dupInstr
+                  (callee.evm.stack.length + 1)
+              , Assembly.Instr.push probe
+              , Assembly.Instr.prim .eq
+              , Assembly.Instr.jumpi caseLabel
+              ]) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              [ Structured.StackShuffle.dupInstr
+                  (callee.evm.stack.length + 1)
+              , Assembly.Instr.push probe
+              , Assembly.Instr.prim .eq
+              , Assembly.Instr.jumpi caseLabel
+              ] ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          [ Structured.StackShuffle.dupInstr
+              (callee.evm.stack.length + 1)
+          , Assembly.Instr.push probe
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi caseLabel
+          ] ++ post)
+        (4 + fuel) target)
+      tailTrace result := by
+  rcases
+      Structured.Preservation.Frame.StateRel.caller_materialization_of_top_return
+        hRel hReturns with
+    ⟨callerTarget, hCaller, hTargetStack⟩
+  have hTargetRecord :
+      { target with stack := callee.evm.stack ++ token :: callerTarget } =
+        target := by
+    rw [← hTargetStack]
+  have hRun :=
+    openRunNResult_dispatchCondition_jumpi_source_running_continue
+      (state := target) (returnValues := callee.evm.stack)
+      (suffix := callerTarget) (token := token) (probe := probe)
+      (label := caseLabel) (dest := caseDest) (pre := pre) (post := post)
+      (fuel := fuel) (tailTrace := tailTrace) (result := result)
+      hFits (by simpa [hTargetRecord] using hPc) hBound hCaseLabel
+      (by
+        intro afterTest hAfterStack hAfterErase hAfterPc
+        have hRelAfterTest :
+            Structured.Preservation.Frame.StateRel callee afterTest
+              (token :: tokens) := by
+          refine ⟨?_, ?_⟩
+          · rw [hReturns]
+            simp [Structured.Preservation.Frame.materializeStack,
+              hCaller, hAfterStack]
+          · calc
+              Structured.Preservation.eraseControl afterTest =
+                  Structured.Preservation.eraseControl
+                    { target with
+                      stack := callee.evm.stack ++ token :: callerTarget } :=
+                hAfterErase
+              _ =
+                  Structured.Preservation.eraseControl
+                    { callee.evm with
+                      stack := callee.evm.stack ++ token :: callerTarget } :=
+                hRel.dataRel_replace_stack
+                  (callee.evm.stack ++ token :: callerTarget)
+              _ =
+                  Structured.Preservation.eraseControl
+                    { callee.evm with stack := afterTest.stack } := by
+                rw [hAfterStack]
+        have hPcAfter :
+            afterTest.pc =
+              Assembly.Program.pcAfter
+                (pre ++
+                  [ Structured.StackShuffle.dupInstr
+                      (callee.evm.stack.length + 1)
+                  , Assembly.Instr.push probe
+                  , Assembly.Instr.prim .eq
+                  , Assembly.Instr.jumpi caseLabel
+                  ]) := by
+          simpa [hNe] using hAfterPc
+        exact hRest afterTest hRelAfterTest hPcAfter)
+  simpa [hTargetRecord] using hRun
+
+theorem openRunNResult_dispatch_selected_site_source_running_continue
+    {caseLabel returnLabel : Assembly.Label} {returnDest : Nat}
+    {pre between post : Assembly.Program}
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        ([ Structured.StackShuffle.dupInstr (callee.evm.stack.length + 1)
+         , Assembly.Instr.push token
+         , Assembly.Instr.prim .eq
+         , Assembly.Instr.jumpi caseLabel
+         ] ++ between ++
+          [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel]))
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : callee.evm.stack.length < 16)
+    (hExact :
+      Structured.Preservation.ExactLabels
+        (pre ++
+          [ Structured.StackShuffle.dupInstr
+              (callee.evm.stack.length + 1)
+          , Assembly.Instr.push token
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi caseLabel
+          ] ++ between ++
+          [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel] ++ post))
+    (hReturnLabel :
+      Assembly.Program.labelPc
+        (pre ++
+          [ Structured.StackShuffle.dupInstr
+              (callee.evm.stack.length + 1)
+          , Assembly.Instr.push token
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi caseLabel
+          ] ++ between ++
+          [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel] ++ post)
+        returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          { callee with
+            evm :=
+              { callee.evm with
+                stack := callee.evm.stack ++ frame.callerStack }
+            returns := returns }
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              [ Structured.StackShuffle.dupInstr
+                  (callee.evm.stack.length + 1)
+              , Assembly.Instr.push token
+              , Assembly.Instr.prim .eq
+              , Assembly.Instr.jumpi caseLabel
+              ] ++ between ++
+              [Assembly.Instr.label caseLabel] ++
+              Structured.StackShuffle.removeBuriedUnder
+                callee.evm.stack.length ++
+              [Assembly.Instr.jump returnLabel] ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          [ Structured.StackShuffle.dupInstr
+              (callee.evm.stack.length + 1)
+          , Assembly.Instr.push token
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi caseLabel
+          ] ++ between ++
+          [Assembly.Instr.label caseLabel] ++
+          Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length ++
+          [Assembly.Instr.jump returnLabel] ++ post)
+        (4 +
+          (((Structured.StackShuffle.removeBuriedUnder
+                callee.evm.stack.length).length + (fuel + 1)) + 1))
+        target)
+      tailTrace result := by
+  let testCode : Assembly.Program :=
+    [ Structured.StackShuffle.dupInstr (callee.evm.stack.length + 1)
+    , Assembly.Instr.push token
+    , Assembly.Instr.prim .eq
+    , Assembly.Instr.jumpi caseLabel
+    ]
+  let removeCode :=
+    Structured.StackShuffle.removeBuriedUnder callee.evm.stack.length
+  let casePre := pre ++ testCode ++ between
+  let fullProgram :=
+    pre ++ testCode ++ between ++ [Assembly.Instr.label caseLabel] ++
+      removeCode ++ [Assembly.Instr.jump returnLabel] ++ post
+  rcases
+      Structured.Preservation.Frame.StateRel.caller_materialization_of_top_return
+        hRel hReturns with
+    ⟨callerTarget, hCaller, hTargetStack⟩
+  have hTargetRecord :
+      { target with stack := callee.evm.stack ++ token :: callerTarget } =
+        target := by
+    rw [← hTargetStack]
+  have hExactFull :
+      Structured.Preservation.ExactLabels fullProgram := by
+    simpa [fullProgram, testCode, removeCode, List.append_assoc] using hExact
+  have hFitsTest :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre testCode := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+        (pre := pre) (first := testCode)
+        (second := between ++ [Assembly.Instr.label caseLabel] ++
+          removeCode ++ [Assembly.Instr.jump returnLabel])
+        (by simpa [testCode, removeCode, List.append_assoc] using hFits)
+  have hFitsCase :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom casePre
+        ([Assembly.Instr.label caseLabel] ++ removeCode ++
+          [Assembly.Instr.jump returnLabel]) := by
+    simpa [casePre, List.append_assoc] using
+      (Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := pre) (first := testCode ++ between)
+        (second :=
+          [Assembly.Instr.label caseLabel] ++ removeCode ++
+            [Assembly.Instr.jump returnLabel])
+        (by simpa [testCode, removeCode, List.append_assoc] using hFits))
+  have hCaseLabel :
+      Assembly.Program.labelPc fullProgram caseLabel =
+        some (Assembly.Program.byteLength casePre) := by
+    have hHere :=
+      hExactFull.labelPc_at casePre caseLabel
+        (removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+        (by simp [fullProgram, casePre, testCode, removeCode,
+          List.append_assoc])
+    simpa [fullProgram] using hHere
+  have hTestRun :=
+    openRunNResult_dispatchCondition_jumpi_source_running_continue
+      (state := target) (returnValues := callee.evm.stack)
+      (suffix := callerTarget) (token := token) (probe := token)
+      (label := caseLabel) (dest := Assembly.Program.byteLength casePre)
+      (pre := pre)
+      (post := between ++ [Assembly.Instr.label caseLabel] ++
+        removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+      (fuel :=
+        ((Structured.StackShuffle.removeBuriedUnder
+            callee.evm.stack.length).length + (fuel + 1)) + 1)
+      (tailTrace := tailTrace) (result := result)
+      (by simpa [testCode] using hFitsTest)
+      (by simpa [hTargetRecord] using hPc)
+      hBound
+      (by simpa [fullProgram, testCode, removeCode, List.append_assoc] using
+        hCaseLabel)
+      (by
+        intro afterTest hAfterStack hAfterErase hAfterPc
+        have hRelAfterTest :
+            Structured.Preservation.Frame.StateRel callee afterTest
+              (token :: tokens) := by
+          refine ⟨?_, ?_⟩
+          · simpa [hTargetStack, hAfterStack] using hRel.stackRel
+          · calc
+              Structured.Preservation.eraseControl afterTest =
+                  Structured.Preservation.eraseControl
+                    { target with
+                      stack := callee.evm.stack ++ token :: callerTarget } :=
+                hAfterErase
+              _ =
+                  Structured.Preservation.eraseControl
+                    { callee.evm with
+                      stack := callee.evm.stack ++ token :: callerTarget } :=
+                hRel.dataRel_replace_stack
+                  (callee.evm.stack ++ token :: callerTarget)
+              _ =
+                  Structured.Preservation.eraseControl
+                    { callee.evm with stack := afterTest.stack } := by
+                rw [hAfterStack]
+        have hPcCase :
+            afterTest.pc = Assembly.Program.pcAfter casePre := by
+          have hPcNat :
+              afterTest.pc =
+                EvmYul.UInt256.ofNat
+                  (Assembly.Program.byteLength casePre) := by
+            simpa [casePre, testCode] using hAfterPc
+          simpa [Assembly.Program.pcAfter] using hPcNat
+        have hReturnLabelCase :
+            Assembly.Program.labelPc
+              (casePre ++ [Assembly.Instr.label caseLabel] ++
+                removeCode ++ [Assembly.Instr.jump returnLabel] ++ post)
+              returnLabel = some returnDest := by
+          simpa [fullProgram, casePre, testCode, removeCode,
+            List.append_assoc] using hReturnLabel
+        have hCaseRun :=
+          openRunNResult_dispatch_case_source_running_continue
+            (caseLabel := caseLabel) (returnLabel := returnLabel)
+            (dest := returnDest) (pre := casePre) (post := post)
+            (callee := callee) (target := afterTest)
+            (tokens := tokens) (token := token) (frame := frame)
+            (returns := returns) (fuel := fuel)
+            (tailTrace := tailTrace) (result := result)
+            (by simpa [removeCode] using hFitsCase)
+            hPcCase hRelAfterTest hReturns (by omega)
+            hReturnLabelCase
+            (by
+              intro final hRelFinal hPcFinal
+              simpa [fullProgram, casePre, testCode, removeCode,
+                List.append_assoc] using hRest final hRelFinal hPcFinal)
+        simpa [fullProgram, casePre, testCode, removeCode, List.append_assoc]
+          using hCaseRun)
+  simpa [testCode, removeCode, fullProgram, hTargetRecord, List.append_assoc]
+    using hTestRun
+
 theorem openRunNResult_callPrologue_source_running_continue
     {state : EvmYul.EVM.State}
     {args suffix : List Word} {token : Word}

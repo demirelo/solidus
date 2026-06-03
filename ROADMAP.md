@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:16 CEST.
+Last updated: 2026-06-03 07:27 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -118,7 +118,22 @@ Execution order:
    `openRunNResult_dispatchCondition_jumpi_source_running_continue` replay the
    `dup`/`push`/`eq`/`jumpi` return-token test while preserving selected-branch
    or fallthrough PC, again without assuming the whole assembly program is
-   no-CALL. The
+   no-CALL. The return-token removal and first dispatch compositions are now
+   local-open too:
+   `openRunNResult_liftBuriedToTop_source_running_continue` and
+   `openRunNResult_removeBuriedUnder_source_running_continue` replay the
+   generated return-token stack shuffle with arbitrary open continuations;
+   `openRunNResult_source_returnAttach_after_remove_continue` lifts that shuffle
+   back to the caller `Frame.StateRel`;
+   `openRunNResult_dispatch_case_source_running_continue` replays a selected
+   dispatch case through its label, return-token removal, and return jump;
+   `openRunNResult_dispatch_selected_site_source_running_continue` composes the
+   selected token test with that case; and
+   `openRunNResult_dispatch_mismatched_test_source_running_continue` covers the
+   fallthrough branch needed for recursive dispatch-table replay. The next
+   return-side step is to assemble these atoms into the full generated
+   dispatch-table/`forProc` replay and then compose callee body result, returned
+   assignment, and syntactic tail. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
