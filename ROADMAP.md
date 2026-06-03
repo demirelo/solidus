@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:25 CEST.
+Last updated: 2026-06-03 03:29 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -81,9 +81,12 @@ Execution order:
    `FunctionsBlockToAssemblySourceOpenSoundAt` is the compiler-open
    function-block to assembly source-open theorem we still have to prove, while
    its checked `.to_compiled` wrapper shows that theorem immediately composes
-   through the existing assembly compile proof. The remaining work is proving
-   that open preservation theorem and composing it into the whole-program
-   imported-Yul-to-open-EVM theorem.
+   through the existing assembly compile proof. Closed no-CALL assembly source
+   runs now also embed into this open target tower with the empty trace through
+   `Source.openRunNResult_resolves_closed_of_no_callCreate` and the direct
+   no-CALL compile wrappers. The remaining work is proving the open compiler
+   preservation theorem for traces that may contain CALL, then composing it into
+   the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -155,8 +158,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   assembly source-to-emitted-block open preservation layer. `Yul.OpenLowering`
   now names the exact remaining compiler-open/function-block to assembly
   source-open theorem and proves its composition into the compiled open runner.
-  The remaining public gap is proving that theorem, then composing the public
-  imported-Yul dispatcher result through it.
+  Closed no-CALL assembly source runs now resolve through the open target tower
+  on the empty trace, so the old no-CALL preservation route can be reused for
+  non-CALL branches inside the future open proof. The remaining public gap is
+  proving the CALL-capable compiler-open/function-block theorem, then composing
+  the public imported-Yul dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL

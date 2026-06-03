@@ -519,6 +519,41 @@ end Target
 
 namespace Source
 
+theorem instr_usesCallCreate_false_of_instrAtPcFrom
+    {program : Assembly.Program} {base query pc : Nat}
+    {instr : Assembly.Instr}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hAt :
+      Assembly.Program.instrAtPcFrom program base query =
+        some (pc, instr)) :
+    Assembly.Instr.usesCallCreate instr = false := by
+  induction program generalizing base with
+  | nil =>
+      simp [Assembly.Program.instrAtPcFrom] at hAt
+  | cons head rest ih =>
+      have hSplit :
+          Assembly.Instr.usesCallCreate head = false ∧
+            Assembly.Program.usesCallCreate rest = false := by
+        simpa [Assembly.Program.usesCallCreate] using hNoCallCreate
+      by_cases hQuery : query = base
+      · simp [Assembly.Program.instrAtPcFrom, hQuery] at hAt
+        have hPair : (base, head) = (pc, instr) := by
+          simpa using hAt
+        cases hPair
+        exact hSplit.1
+      · simp [Assembly.Program.instrAtPcFrom, hQuery] at hAt
+        exact ih hSplit.2 hAt
+
+theorem instr_usesCallCreate_false_of_instrAtPc
+    {program : Assembly.Program} {query pc : Nat}
+    {instr : Assembly.Instr}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hAt :
+      Assembly.Program.instrAtPc program query =
+        some (pc, instr)) :
+    Assembly.Instr.usesCallCreate instr = false :=
+  instr_usesCallCreate_false_of_instrAtPcFrom hNoCallCreate hAt
+
 def stepResultAfter (instr : Assembly.Instr) (state : EVMState) :
     Assembly.StepResult :=
   match instr.haltKind? with
@@ -731,6 +766,47 @@ theorem openStepResult_current_prim_call
   rw [hAt]
   exact openStepAtResult_resolves_prim_call hKind hCall response
 
+theorem openStepResult_resolves_closed_of_no_callCreate
+    {program : Assembly.Program} {state : EVMState}
+    {result : Assembly.StepResult}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hStep : Assembly.Source.stepResult program state = .ok result) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      [] (.ok result) := by
+  unfold openStepResult
+  unfold Assembly.Source.stepResult at hStep
+  cases hAt : Assembly.Program.instrAtPc program state.pc.toNat with
+  | none =>
+      simp [hAt] at hStep
+  | some current =>
+      rcases current with ⟨pc, instr⟩
+      simp [hAt] at hStep ⊢
+      cases instr with
+      | label name =>
+          exact
+            openStepAtResult_resolves_closed_of_non_prim
+              (by intro op h; cases h) hStep
+      | prim op =>
+          have hNoInstr :
+              op.isCallCreate = false := by
+            simpa [Assembly.Instr.usesCallCreate] using
+              instr_usesCallCreate_false_of_instrAtPc hNoCallCreate hAt
+          exact
+            openStepAtResult_resolves_closed_of_prim_no_callCreate
+              hNoInstr hStep
+      | push value =>
+          exact
+            openStepAtResult_resolves_closed_of_non_prim
+              (by intro op h; cases h) hStep
+      | jump target =>
+          exact
+            openStepAtResult_resolves_closed_of_non_prim
+              (by intro op h; cases h) hStep
+      | jumpi target =>
+          exact
+            openStepAtResult_resolves_closed_of_non_prim
+              (by intro op h; cases h) hStep
+
 theorem openRunNResult_resolves_step_running
     {program : Assembly.Program} {fuel : Nat} {state mid : EVMState}
     {headTrace tailTrace : OpenExternal.OpenTrace}
@@ -804,6 +880,73 @@ theorem openRunNResult_current_prim_call_continue
   simpa using
     openRunNResult_resolves_step_running
       (fuel := fuel) hStep hRest
+
+theorem openRunNResult_resolves_closed_of_no_callCreate
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {result : Assembly.StepResult}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hRun :
+      Assembly.Source.runNResult program fuel state = .ok result) :
+    OpenExternal.OpenResultResolves (openRunNResult program fuel state)
+      [] (.ok result) := by
+  induction fuel generalizing state result with
+  | zero =>
+      simp [Assembly.Source.runNResult, openRunNResult] at hRun ⊢
+      cases hRun
+      exact OpenExternal.OpenResultResolves.done
+  | succ fuel ih =>
+      rw [openRunNResult_succ]
+      unfold Assembly.Source.runNResult at hRun
+      cases hStep : Assembly.Source.stepResult program state with
+      | error err =>
+          simp [hStep] at hRun
+      | ok stepResult =>
+          have hOpenStep :
+              OpenExternal.OpenResultResolves
+                (openStepResult program state) [] (.ok stepResult) :=
+            openStepResult_resolves_closed_of_no_callCreate
+              hNoCallCreate hStep
+          cases stepResult with
+          | running mid =>
+              simp [hStep] at hRun
+              have hRest :
+                  OpenExternal.OpenResultResolves
+                    (openRunNResult program fuel mid) [] (.ok result) :=
+                ih hRun
+              simpa using
+                OpenExternal.OpenResultResolves.bind_ok
+                  (source := openStepResult program state)
+                  (next := fun stepResult =>
+                    match stepResult with
+                    | .running state' => openRunNResult program fuel state'
+                    | .halted halt => .done (.ok (.halted halt)))
+                  (left := []) (right := [])
+                  (value := Assembly.StepResult.running mid)
+                  (result := (.ok result :
+                    Except EVMException Assembly.StepResult))
+                  hOpenStep hRest
+          | halted halt =>
+              simp [hStep] at hRun
+              cases hRun
+              have hDone :
+                  OpenExternal.OpenResultResolves
+                    ((.done (.ok (Assembly.StepResult.halted halt))) :
+                      OpenExternal.OpenResult EVMException
+                        Assembly.StepResult)
+                    [] (.ok (.halted halt)) :=
+                OpenExternal.OpenResultResolves.done
+              simpa using
+                OpenExternal.OpenResultResolves.bind_ok
+                  (source := openStepResult program state)
+                  (next := fun stepResult =>
+                    match stepResult with
+                    | .running state' => openRunNResult program fuel state'
+                    | .halted halt => .done (.ok (.halted halt)))
+                  (left := []) (right := [])
+                  (value := Assembly.StepResult.halted halt)
+                  (result := (.ok (.halted halt) :
+                    Except EVMException Assembly.StepResult))
+                  hOpenStep hDone
 
 theorem openStepAtResult_prim_eq_target
     {program : Assembly.Program} {pc : Nat} {op : Assembly.PrimOp}
@@ -1065,6 +1208,16 @@ theorem of_resolves
             cases hRest
             subst trace
             simpa using OpenTraceResult.stepHalted hStep
+
+theorem of_closed_no_callCreate
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {result : Assembly.StepResult}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hRun :
+      Assembly.Source.runNResult program fuel state = .ok result) :
+    OpenTraceResult program fuel state [] result :=
+  of_resolves
+    (openRunNResult_resolves_closed_of_no_callCreate hNoCallCreate hRun)
 
 theorem current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}
@@ -1700,6 +1853,33 @@ theorem compile_openRunN_result_compiled_sound
   rcases compile_openRunN_result_openBlockTrace_sound hCompile hRun with
     ⟨hAccepted, hTrace⟩
   exact ⟨hAccepted, hTrace.resolves_compiled⟩
+
+theorem compile_closed_no_callCreate_runN_result_openBlockTrace_sound
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hCompile : Assembly.compile? program = some target)
+    (hRun :
+      Assembly.Source.runNResult program fuel state = .ok result) :
+    Assembly.Accepted program ∧
+      OpenBlockTraceResult program target fuel state [] result :=
+  compile_openRunN_result_openBlockTrace_sound hCompile
+    (Source.openRunNResult_resolves_closed_of_no_callCreate
+      hNoCallCreate hRun)
+
+theorem compile_closed_no_callCreate_runN_result_compiled_sound
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hNoCallCreate : Assembly.Program.usesCallCreate program = false)
+    (hCompile : Assembly.compile? program = some target)
+    (hRun :
+      Assembly.Source.runNResult program fuel state = .ok result) :
+    Assembly.Accepted program ∧
+      OpenExternal.OpenResultResolves
+        (Compiled.openRunNResult program fuel state) [] (.ok result) :=
+  compile_openRunN_result_compiled_sound hCompile
+    (Source.openRunNResult_resolves_closed_of_no_callCreate
+      hNoCallCreate hRun)
 
 end OpenAssembly
 end Yul
