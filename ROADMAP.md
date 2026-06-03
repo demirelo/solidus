@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:27 CEST.
+Last updated: 2026-06-03 07:32 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -130,10 +130,15 @@ Execution order:
    `openRunNResult_dispatch_selected_site_source_running_continue` composes the
    selected token test with that case; and
    `openRunNResult_dispatch_mismatched_test_source_running_continue` covers the
-   fallthrough branch needed for recursive dispatch-table replay. The next
-   return-side step is to assemble these atoms into the full generated
-   dispatch-table/`forProc` replay and then compose callee body result, returned
-   assignment, and syntactic tail. The
+   fallthrough branch needed for recursive dispatch-table replay. The full
+   generated table route is now checked too:
+   `returnDispatchSelectedTableFuel`,
+   `openRunNResult_selected_table_source_running_continue`, and
+   `openRunNResult_forProc_selected_source_running_continue` recurse through
+   generated return-dispatch tests and replay the selected procedure return
+   table/`forProc` code with arbitrary open continuations. The next return-side
+   step is to compose the callee body result through this dispatch replay, then
+   run returned assignment and syntactic tail. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in

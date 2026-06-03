@@ -3571,6 +3571,484 @@ theorem openRunNResult_dispatch_selected_site_source_running_continue
   simpa [testCode, removeCode, fullProgram, hTargetRecord, List.append_assoc]
     using hTestRun
 
+def returnDispatchSelectedTableFuel (retc : Nat)
+    (sites : List Structured.CallSite) (site : Structured.CallSite)
+    (tailFuel : Nat) : Nat :=
+  match sites with
+  | [] => tailFuel
+  | head :: rest =>
+      if head.token = site.token then
+        4 + (((Structured.StackShuffle.removeBuriedUnder retc).length +
+          (tailFuel + 1)) + 1)
+      else
+        4 + returnDispatchSelectedTableFuel retc rest site tailFuel
+
+set_option maxHeartbeats 1000000 in
+theorem openRunNResult_selected_table_source_running_continue
+    {base : Structured.LabelSupply} {retc idx : Nat}
+    {casePrefix post pre : Assembly.Program}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {returnDest : Nat}
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hMem : site ∈ sites)
+    (hNoDup : (sites.map Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hRetc : callee.evm.stack.length = retc)
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.Preservation.DispatchPreservation.tableCode
+          base retc idx casePrefix sites))
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : retc < 16)
+    (hExact :
+      Structured.Preservation.ExactLabels
+        (pre ++
+          Structured.Preservation.DispatchPreservation.tableCode
+            base retc idx casePrefix sites ++ post))
+    (hReturnLabel :
+      Assembly.Program.labelPc
+        (pre ++
+          Structured.Preservation.DispatchPreservation.tableCode
+            base retc idx casePrefix sites ++ post)
+        site.returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          { callee with
+            evm :=
+              { callee.evm with
+                stack := callee.evm.stack ++ frame.callerStack }
+            returns := returns }
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              Structured.Preservation.DispatchPreservation.tableCode
+                base retc idx casePrefix sites ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          Structured.Preservation.DispatchPreservation.tableCode
+            base retc idx casePrefix sites ++ post)
+        (returnDispatchSelectedTableFuel retc sites site fuel) target)
+      tailTrace result := by
+  induction sites generalizing pre idx casePrefix target with
+  | nil =>
+      cases hMem
+  | cons head rest ih =>
+      have hHeadNotIn : head.token ∉ rest.map Structured.CallSite.token := by
+        exact (List.nodup_cons.mp (by simpa using hNoDup)).1
+      have hNoDupRest :
+          (rest.map Structured.CallSite.token).Nodup := by
+        exact (List.nodup_cons.mp (by simpa using hNoDup)).2
+      let headTest :=
+        Structured.Preservation.DispatchPreservation.testCode base retc idx head
+      let headCase :=
+        Structured.Preservation.DispatchPreservation.caseCode base retc idx head
+      let testsRest :=
+        Structured.Dispatch.testsForRetc base retc (idx + 1) rest
+      let casesRest :=
+        Structured.Dispatch.casesForRetc base retc (idx + 1) rest
+      have hMemCons : site = head ∨ site ∈ rest := by
+        simpa using hMem
+      rcases hMemCons with hEq | hMemRest
+      · subst head
+        have hFitsSelected :
+            Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+              ([ Structured.StackShuffle.dupInstr
+                    (callee.evm.stack.length + 1)
+               , Assembly.Instr.push token
+               , Assembly.Instr.prim .eq
+               , Assembly.Instr.jumpi
+                  (Structured.LabelSupply.label base idx)
+               ] ++
+                (testsRest ++ [Assembly.Instr.prim .invalid] ++
+                  casePrefix) ++
+                [Assembly.Instr.label
+                  (Structured.LabelSupply.label base idx)] ++
+                Structured.StackShuffle.removeBuriedUnder
+                  callee.evm.stack.length ++
+                [Assembly.Instr.jump site.returnLabel]) := by
+          exact
+            Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+              (pre := pre)
+              (first :=
+                [ Structured.StackShuffle.dupInstr
+                    (callee.evm.stack.length + 1)
+                , Assembly.Instr.push token
+                , Assembly.Instr.prim .eq
+                , Assembly.Instr.jumpi
+                    (Structured.LabelSupply.label base idx)
+                ] ++
+                (testsRest ++ [Assembly.Instr.prim .invalid] ++
+                  casePrefix) ++
+                [Assembly.Instr.label
+                  (Structured.LabelSupply.label base idx)] ++
+                Structured.StackShuffle.removeBuriedUnder
+                  callee.evm.stack.length ++
+                [Assembly.Instr.jump site.returnLabel])
+              (second := casesRest)
+              (by
+                simpa [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headTest, headCase, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  hRetc, hToken, List.append_assoc] using hFits)
+        have hExactSelected :
+            Structured.Preservation.ExactLabels
+              (pre ++
+                [ Structured.StackShuffle.dupInstr
+                    (callee.evm.stack.length + 1)
+                , Assembly.Instr.push token
+                , Assembly.Instr.prim .eq
+                , Assembly.Instr.jumpi
+                    (Structured.LabelSupply.label base idx)
+                ] ++
+                (testsRest ++ [Assembly.Instr.prim .invalid] ++
+                  casePrefix) ++
+                [Assembly.Instr.label
+                  (Structured.LabelSupply.label base idx)] ++
+                Structured.StackShuffle.removeBuriedUnder
+                  callee.evm.stack.length ++
+                [Assembly.Instr.jump site.returnLabel] ++
+                casesRest ++ post) := by
+          simpa [
+            Structured.Preservation.DispatchPreservation.tableCode,
+            headTest, headCase, testsRest, casesRest,
+            Structured.Preservation.DispatchPreservation.testCode,
+            Structured.Preservation.DispatchPreservation.caseCode,
+            hRetc, hToken, List.append_assoc] using hExact
+        have hReturnSelected :
+            Assembly.Program.labelPc
+              (pre ++
+                [ Structured.StackShuffle.dupInstr
+                    (callee.evm.stack.length + 1)
+                , Assembly.Instr.push token
+                , Assembly.Instr.prim .eq
+                , Assembly.Instr.jumpi
+                    (Structured.LabelSupply.label base idx)
+                ] ++
+                (testsRest ++ [Assembly.Instr.prim .invalid] ++
+                  casePrefix) ++
+                [Assembly.Instr.label
+                  (Structured.LabelSupply.label base idx)] ++
+                Structured.StackShuffle.removeBuriedUnder
+                  callee.evm.stack.length ++
+                [Assembly.Instr.jump site.returnLabel] ++
+                casesRest ++ post)
+              site.returnLabel = some returnDest := by
+          simpa [
+            Structured.Preservation.DispatchPreservation.tableCode,
+            headTest, headCase, testsRest, casesRest,
+            Structured.Preservation.DispatchPreservation.testCode,
+            Structured.Preservation.DispatchPreservation.caseCode,
+            hRetc, hToken, List.append_assoc] using hReturnLabel
+        have hRun :=
+          openRunNResult_dispatch_selected_site_source_running_continue
+            (caseLabel := Structured.LabelSupply.label base idx)
+            (returnLabel := site.returnLabel) (returnDest := returnDest)
+            (pre := pre)
+            (between :=
+              testsRest ++ [Assembly.Instr.prim .invalid] ++ casePrefix)
+            (post := casesRest ++ post)
+            (callee := callee) (target := target) (tokens := tokens)
+            (token := token) (frame := frame) (returns := returns)
+            (fuel := fuel) (tailTrace := tailTrace) (result := result)
+            hFitsSelected hPc hRel hReturns (by omega)
+            (by simpa [List.append_assoc] using hExactSelected)
+            (by simpa [List.append_assoc] using hReturnSelected)
+            (by
+              intro final hRelFinal hPcFinal
+              simpa [
+                Structured.Preservation.DispatchPreservation.tableCode,
+                headTest, headCase, testsRest, casesRest,
+                Structured.Preservation.DispatchPreservation.testCode,
+                Structured.Preservation.DispatchPreservation.caseCode,
+                hRetc, hToken, List.append_assoc] using
+                hRest final hRelFinal hPcFinal)
+        simpa [
+          returnDispatchSelectedTableFuel,
+          Structured.Preservation.DispatchPreservation.tableCode,
+          headTest, headCase, testsRest, casesRest,
+          Structured.Preservation.DispatchPreservation.testCode,
+          Structured.Preservation.DispatchPreservation.caseCode,
+          hRetc, hToken, List.append_assoc] using hRun
+      ·
+        have hNe : head.token ≠ token := by
+          intro hEq
+          have hSiteTokenMem : site.token ∈ rest.map Structured.CallSite.token :=
+            List.mem_map_of_mem (f := Structured.CallSite.token) hMemRest
+          apply hHeadNotIn
+          simpa [hEq, hToken] using hSiteTokenMem
+        have hHeadTokenNeSite : head.token ≠ site.token := by
+          intro hEq
+          exact hNe (by simpa [hToken] using hEq)
+        let headCasePre :=
+          pre ++ headTest ++ testsRest ++ [Assembly.Instr.prim .invalid] ++
+            casePrefix
+        have hHeadCaseLabel :
+            Assembly.Program.labelPc
+              (pre ++
+                Structured.Preservation.DispatchPreservation.tableCode
+                  base retc idx casePrefix (head :: rest) ++ post)
+              (Structured.LabelSupply.label base idx) =
+                some (Assembly.Program.byteLength headCasePre) := by
+          have hHere :=
+            hExact.labelPc_at headCasePre
+              (Structured.LabelSupply.label base idx)
+              (Structured.StackShuffle.removeBuriedUnder retc ++
+                [Assembly.Instr.jump head.returnLabel] ++ casesRest ++ post)
+              (by
+                simp [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headCasePre, headTest, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  List.append_assoc])
+          simpa [headCasePre] using hHere
+        have hFitsHead :
+            Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+              [ Structured.StackShuffle.dupInstr
+                  (callee.evm.stack.length + 1)
+              , Assembly.Instr.push head.token
+              , Assembly.Instr.prim .eq
+              , Assembly.Instr.jumpi
+                  (Structured.LabelSupply.label base idx)
+              ] := by
+          have hHead :
+              Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+                headTest :=
+            Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+              (pre := pre) (first := headTest)
+              (second :=
+                testsRest ++ [Assembly.Instr.prim .invalid] ++
+                  casePrefix ++ headCase ++ casesRest)
+              (by
+                simpa [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headTest, headCase, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  List.append_assoc] using hFits)
+          simpa [
+            headTest, Structured.Preservation.DispatchPreservation.testCode,
+            hRetc] using hHead
+        have hRunHead :=
+          openRunNResult_dispatch_mismatched_test_source_running_continue
+            (caseLabel := Structured.LabelSupply.label base idx)
+            (caseDest := Assembly.Program.byteLength headCasePre)
+            (pre := pre)
+            (post :=
+              testsRest ++ [Assembly.Instr.prim .invalid] ++ casePrefix ++
+                headCase ++ casesRest ++ post)
+            (callee := callee) (target := target) (tokens := tokens)
+            (token := token) (probe := head.token)
+            (frame := frame) (returns := returns)
+            (fuel := returnDispatchSelectedTableFuel retc rest site fuel)
+            (tailTrace := tailTrace) (result := result)
+            hNe hFitsHead hPc hRel hReturns (by omega)
+            (by
+              simpa [
+                Structured.Preservation.DispatchPreservation.tableCode,
+                headTest, headCase, testsRest, casesRest,
+                Structured.Preservation.DispatchPreservation.testCode,
+                Structured.Preservation.DispatchPreservation.caseCode,
+                hRetc, headCasePre, List.append_assoc]
+                using hHeadCaseLabel)
+            (by
+              intro afterHead hRelAfterHead hPcAfterHead
+              have hFitsRest :
+                  Structured.Preservation.AssemblyProgram.PCFitsFrom
+                    (pre ++ headTest)
+                    (Structured.Preservation.DispatchPreservation.tableCode
+                      base retc (idx + 1) (casePrefix ++ headCase) rest) := by
+                simpa [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headTest, headCase, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  List.append_assoc] using
+                  (Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+                    (pre := pre) (first := headTest)
+                    (second :=
+                      testsRest ++ [Assembly.Instr.prim .invalid] ++
+                        casePrefix ++ headCase ++ casesRest)
+                    (by
+                      simpa [
+                        Structured.Preservation.DispatchPreservation.tableCode,
+                        headTest, headCase, testsRest, casesRest,
+                        Structured.Preservation.DispatchPreservation.testCode,
+                        Structured.Preservation.DispatchPreservation.caseCode,
+                        List.append_assoc] using hFits))
+              have hExactRest :
+                  Structured.Preservation.ExactLabels
+                    ((pre ++ headTest) ++
+                      Structured.Preservation.DispatchPreservation.tableCode
+                        base retc (idx + 1) (casePrefix ++ headCase) rest ++
+                      post) := by
+                simpa [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headTest, headCase, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  List.append_assoc] using hExact
+              have hReturnRest :
+                  Assembly.Program.labelPc
+                    ((pre ++ headTest) ++
+                      Structured.Preservation.DispatchPreservation.tableCode
+                        base retc (idx + 1) (casePrefix ++ headCase) rest ++
+                      post)
+                    site.returnLabel = some returnDest := by
+                simpa [
+                  Structured.Preservation.DispatchPreservation.tableCode,
+                  headTest, headCase, testsRest, casesRest,
+                  Structured.Preservation.DispatchPreservation.testCode,
+                  Structured.Preservation.DispatchPreservation.caseCode,
+                  List.append_assoc] using hReturnLabel
+              simpa [
+                Structured.Preservation.DispatchPreservation.tableCode,
+                headTest, headCase, testsRest, casesRest,
+                Structured.Preservation.DispatchPreservation.testCode,
+                Structured.Preservation.DispatchPreservation.caseCode,
+                hRetc, List.append_assoc] using
+                (ih (pre := pre ++ headTest) (idx := idx + 1)
+                  (casePrefix := casePrefix ++ headCase)
+                  (target := afterHead)
+                  hMemRest hNoDupRest hFitsRest
+                  (by
+                    simpa [headTest,
+                      Structured.Preservation.DispatchPreservation.testCode,
+                      hRetc] using hPcAfterHead)
+                  hRelAfterHead hExactRest hReturnRest
+                  (by
+                    intro final hRelFinal hPcFinal
+                    simpa [
+                      Structured.Preservation.DispatchPreservation.tableCode,
+                      headTest, headCase, testsRest, casesRest,
+                      Structured.Preservation.DispatchPreservation.testCode,
+                      Structured.Preservation.DispatchPreservation.caseCode,
+                      hRetc, List.append_assoc] using
+                      hRest final hRelFinal hPcFinal)))
+        simpa [
+          returnDispatchSelectedTableFuel, hHeadTokenNeSite,
+          Structured.Preservation.DispatchPreservation.tableCode,
+          headTest, headCase, testsRest, casesRest,
+          Structured.Preservation.DispatchPreservation.testCode,
+          Structured.Preservation.DispatchPreservation.caseCode,
+          hRetc, List.append_assoc] using hRunHead
+
+theorem openRunNResult_forProc_selected_source_running_continue
+    {proc : Structured.Proc} {sites : List Structured.CallSite}
+    {supply : Structured.LabelSupply}
+    {site : Structured.CallSite} {returnDest : Nat}
+    {pre post : Assembly.Program}
+    {callee : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {token : Word}
+    {frame : Structured.ReturnDest} {returns : List Structured.ReturnDest}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hMem :
+      site ∈ (sites.filter (Structured.CallSite.forProc proc.name)))
+    (hNoDup :
+      (((sites.filter (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token)).Nodup)
+    (hToken : site.token = token)
+    (hRetc : callee.evm.stack.length = proc.retc)
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.Dispatch.forProc proc sites supply).code)
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel callee target (token :: tokens))
+    (hReturns : callee.returns = frame :: returns)
+    (hBound : proc.retc < 16)
+    (hExact :
+      Structured.Preservation.ExactLabels
+        (pre ++ (Structured.Dispatch.forProc proc sites supply).code ++ post))
+    (hReturnLabel :
+      Assembly.Program.labelPc
+        (pre ++ (Structured.Dispatch.forProc proc sites supply).code ++ post)
+        site.returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          { callee with
+            evm :=
+              { callee.evm with
+                stack := callee.evm.stack ++ frame.callerStack }
+            returns := returns }
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              (Structured.Dispatch.forProc proc sites supply).code ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ (Structured.Dispatch.forProc proc sites supply).code ++ post)
+        (returnDispatchSelectedTableFuel proc.retc
+          (sites.filter (Structured.CallSite.forProc proc.name)) site fuel)
+        target)
+      tailTrace result := by
+  let procSites := sites.filter (Structured.CallSite.forProc proc.name)
+  have hFitsTable :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        (Structured.Preservation.DispatchPreservation.tableCode
+          supply proc.retc 0 [] procSites) := by
+    simpa [Structured.Dispatch.forProc,
+      Structured.Preservation.DispatchPreservation.tableCode, procSites,
+      List.append_assoc] using hFits
+  have hExactTable :
+      Structured.Preservation.ExactLabels
+        (pre ++
+          Structured.Preservation.DispatchPreservation.tableCode
+            supply proc.retc 0 [] procSites ++ post) := by
+    simpa [Structured.Dispatch.forProc,
+      Structured.Preservation.DispatchPreservation.tableCode, procSites,
+      List.append_assoc] using hExact
+  have hReturnTable :
+      Assembly.Program.labelPc
+        (pre ++
+          Structured.Preservation.DispatchPreservation.tableCode
+            supply proc.retc 0 [] procSites ++ post)
+        site.returnLabel = some returnDest := by
+    simpa [Structured.Dispatch.forProc,
+      Structured.Preservation.DispatchPreservation.tableCode, procSites,
+      List.append_assoc] using hReturnLabel
+  have hRun :=
+    openRunNResult_selected_table_source_running_continue
+      (base := supply) (retc := proc.retc) (idx := 0)
+      (casePrefix := []) (post := post) (pre := pre)
+      (sites := procSites) (site := site) (returnDest := returnDest)
+      (callee := callee) (target := target) (tokens := tokens)
+      (token := token) (frame := frame) (returns := returns)
+      (fuel := fuel) (tailTrace := tailTrace) (result := result)
+      (by simpa [procSites] using hMem)
+      (by simpa [procSites] using hNoDup)
+      hToken hRetc hFitsTable hPc hRel hReturns hBound hExactTable
+      hReturnTable
+      (by
+        intro final hRelFinal hPcFinal
+        simpa [Structured.Dispatch.forProc,
+          Structured.Preservation.DispatchPreservation.tableCode, procSites,
+          List.append_assoc] using hRest final hRelFinal hPcFinal)
+  simpa [Structured.Dispatch.forProc,
+    Structured.Preservation.DispatchPreservation.tableCode, procSites,
+    List.append_assoc] using hRun
+
 theorem openRunNResult_callPrologue_source_running_continue
     {state : EvmYul.EVM.State}
     {args suffix : List Word} {token : Word}
