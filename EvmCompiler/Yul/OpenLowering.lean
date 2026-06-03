@@ -4710,6 +4710,64 @@ theorem openRunNResult_proc_entry_label_continue
   simpa [hAsm, entryCode, exitCode, bodyCode, dispatchCode, List.append_assoc]
     using hRun
 
+theorem openRunNResult_structured_callSite_body_continue
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {source : Structured.RunState} {target : EvmYul.EVM.State}
+    {args callerStack : EvmYul.Stack Word}
+    {tokens : List Word} {token : Word}
+    {asm : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (callSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites))
+    (hSplit :
+      Structured.StackFrame.splitArgs? proc.argc source.evm.stack =
+        some (args, callerStack))
+    (hArgBound : args.length ≤ 16)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hExact : Structured.Preservation.ExactLabels asm)
+    (hRest :
+      ∀ afterEntry : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          ((source.withEVM { source.evm with stack := args }).pushReturn
+            callerStack proc.retc)
+          afterEntry (token :: tokens) →
+        afterEntry.pc =
+          Structured.Preservation.CodeSegment.startPc
+            (codeSegment_procSegment_bodyCode procSeg) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm fuel afterEntry)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult asm
+        ((Structured.Preservation.ProcedurePreservation.callJumpCode
+          proc args token).length + (fuel + 1)) target)
+      tailTrace result := by
+  exact
+    openRunNResult_structured_callSite_callEntry_continue
+      (program := program) (proc := proc) (bodySupply := bodySupply)
+      (dispatchSupply := dispatchSupply) (sites := sites) (site := site)
+      (source := source) (target := target) (args := args)
+      (callerStack := callerStack) (tokens := tokens) (token := token)
+      (asm := asm) (fuel := fuel + 1) (tailTrace := tailTrace)
+      (result := result) callSeg procSeg hSplit hArgBound hPc hRel hExact
+      (by
+        intro afterJump hAfterRel hAfterPc
+        exact
+          openRunNResult_proc_entry_label_continue
+            (procSeg := procSeg) hAfterPc hAfterRel hRest)
+
 theorem openRunNResult_exit_label_then_dispatch_continue
     {proc : Structured.Proc}
     {dispatchSupply : Structured.LabelSupply}
