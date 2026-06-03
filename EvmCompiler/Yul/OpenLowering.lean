@@ -2401,6 +2401,145 @@ theorem openRunNResult_source_callEntry_after_prologue_and_jump_continue
     omega
   simpa [prologue, hFuel, List.append_assoc] using hPrologueRun
 
+theorem openRunNResult_structured_callSite_callEntry_continue
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {source : Structured.RunState} {target : EvmYul.EVM.State}
+    {args callerStack : EvmYul.Stack Word}
+    {tokens : List Word} {token : Word}
+    {asm : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (callSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites))
+    (hSplit :
+      Structured.StackFrame.splitArgs? proc.argc source.evm.stack =
+        some (args, callerStack))
+    (hArgBound : args.length ≤ 16)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hExact : Structured.Preservation.ExactLabels asm)
+    (hRest :
+      ∀ afterJump : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          ((source.withEVM { source.evm with stack := args }).pushReturn
+            callerStack proc.retc)
+          afterJump (token :: tokens) →
+        afterJump.pc =
+          Structured.Preservation.CodeSegment.startPc procSeg →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm fuel afterJump)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult asm
+        ((Structured.Preservation.ProcedurePreservation.callJumpCode
+          proc args token).length + fuel) target)
+      tailTrace result := by
+  let jumpCode :=
+    Structured.Preservation.ProcedurePreservation.callJumpCode
+      proc args token
+  let returnCode : Assembly.Program :=
+    [Assembly.Instr.label site.returnLabel]
+  let procCode :=
+    Structured.Preservation.ProcedurePreservation.procSegment program proc
+      bodySupply dispatchSupply sites
+  have hCallAsm :
+      asm = callSeg.pre ++ jumpCode ++ returnCode ++ callSeg.post := by
+    calc
+      asm =
+          callSeg.pre ++
+            Structured.Preservation.ProcedurePreservation.callSiteCode
+              proc args token site.returnLabel ++
+            callSeg.post := callSeg.hAsm
+      _ = callSeg.pre ++ jumpCode ++ returnCode ++ callSeg.post := by
+            simp [jumpCode, returnCode,
+              Structured.Preservation.ProcedurePreservation.callSiteCode,
+              List.append_assoc]
+  have hProcAsm :
+      asm = procSeg.pre ++ procCode ++ procSeg.post := by
+    simpa [procCode] using procSeg.hAsm
+  have hCallFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom callSeg.pre
+        (jumpCode ++ returnCode) := by
+    simpa [jumpCode, returnCode,
+      Structured.Preservation.ProcedurePreservation.callSiteCode,
+      List.append_assoc] using callSeg.hFits
+  have hFitsJump :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom callSeg.pre
+        jumpCode := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+        (pre := callSeg.pre) (first := jumpCode) (second := returnCode)
+        hCallFits
+  have hEntryPcAsm :
+      Assembly.Program.labelPc asm (Structured.ProcLabel.entry proc.name) =
+        some (Assembly.Program.byteLength procSeg.pre) := by
+    have hHere :=
+      hExact.labelPc_at procSeg.pre (Structured.ProcLabel.entry proc.name)
+        (Structured.Preservation.ProcedurePreservation.bodyCode program proc
+            bodySupply ++
+          [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)] ++
+          Structured.Preservation.ProcedurePreservation.dispatchCode proc
+            sites dispatchSupply ++
+          procSeg.post)
+        (by
+          simpa [procCode,
+            Structured.Preservation.ProcedurePreservation.procSegment,
+            Structured.Preservation.ProcedurePreservation.bodyCode,
+            Structured.Preservation.ProcedurePreservation.dispatchCode,
+            List.append_assoc] using procSeg.hAsm)
+    simpa using hHere
+  have hEntryPcCall :
+      Assembly.Program.labelPc
+        (callSeg.pre ++ jumpCode ++ returnCode ++ callSeg.post)
+        (Structured.ProcLabel.entry proc.name) =
+        some (Assembly.Program.byteLength procSeg.pre) := by
+    rw [← hCallAsm]
+    exact hEntryPcAsm
+  have hRun :=
+    openRunNResult_source_callEntry_after_prologue_and_jump_continue
+      (source := source) (target := target) (tokens := tokens)
+      (argc := proc.argc) (retc := proc.retc) (args := args)
+      (callerStack := callerStack) (token := token)
+      (entryLabel := Structured.ProcLabel.entry proc.name)
+      (entryDest := Assembly.Program.byteLength procSeg.pre)
+      (pre := callSeg.pre) (post := returnCode ++ callSeg.post)
+      (fuel := fuel) (tailTrace := tailTrace) (result := result)
+      (by
+        simpa [jumpCode,
+          Structured.Preservation.ProcedurePreservation.callJumpCode,
+          List.append_assoc] using hFitsJump)
+      (by simpa [Structured.Preservation.CodeSegment.startPc] using hPc)
+      hRel hSplit hArgBound
+      (by
+        simpa [jumpCode, returnCode,
+          Structured.Preservation.ProcedurePreservation.callSiteCode,
+          Structured.Preservation.ProcedurePreservation.callJumpCode,
+          List.append_assoc] using hEntryPcCall)
+      (by
+        intro afterJump hAfterRel hAfterPc
+        have hAfterPc' :
+            afterJump.pc =
+              Structured.Preservation.CodeSegment.startPc procSeg := by
+          simpa [Structured.Preservation.CodeSegment.startPc,
+            Assembly.Program.pcAfter] using hAfterPc
+        simpa [hCallAsm, jumpCode,
+          Structured.Preservation.ProcedurePreservation.callJumpCode,
+          List.append_assoc] using hRest afterJump hAfterRel hAfterPc')
+  simpa [hCallAsm, jumpCode, returnCode,
+    Structured.Preservation.ProcedurePreservation.callJumpCode,
+    Structured.Preservation.ProcedurePreservation.callSiteCode,
+    List.append_assoc] using hRun
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :

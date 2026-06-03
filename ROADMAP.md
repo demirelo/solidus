@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:01 CEST.
+Last updated: 2026-06-03 07:04 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -102,7 +102,11 @@ Execution order:
    `PUSH`, and
    `openRunNResult_source_callEntry_after_prologue_and_jump_continue` reaches
    the callee entry PC while re-establishing `Frame.StateRel` for the recursive
-   callee-body continuation. The
+   callee-body continuation. This now consumes actual emitted procedure-call
+   segments as well:
+   `openRunNResult_structured_callSite_callEntry_continue` combines the
+   `callSiteCode` segment, the procedure segment, and exact-label evidence to
+   hand the recursive callee-body continuation the real callee-entry PC. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
