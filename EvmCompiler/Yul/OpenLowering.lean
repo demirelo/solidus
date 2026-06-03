@@ -59,6 +59,116 @@ theorem basicOp_toPrimOp_haltKind?_none (op : Structured.BasicOp) :
     (Assembly.Instr.prim op.toPrimOp).haltKind? = none := by
   cases op <;> rfl
 
+theorem codeSegment_instrAtPc_start_cons
+    {asm : Assembly.Program} {instr : Assembly.Instr}
+    {suffix : Assembly.Program}
+    (segment :
+      Structured.Preservation.CodeSegment asm (instr :: suffix)) :
+    Assembly.Program.instrAtPc asm
+      (Structured.Preservation.CodeSegment.startPc segment).toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc segment).toNat,
+            instr) := by
+  rcases segment with ⟨pre, post, hAsm, hFits⟩
+  subst asm
+  have hFitsStart :
+      (Assembly.Program.pcAfter pre).toNat =
+        Assembly.Program.byteLength pre :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.start hFits
+  unfold Structured.Preservation.CodeSegment.startPc
+  unfold Assembly.Program.instrAtPc
+  rw [hFitsStart]
+  simpa [List.append_assoc] using
+    Assembly.Program.instrAtPcFrom_append_boundary_cons
+      pre (suffix ++ post) instr 0
+
+theorem codeSegment_right_startPc_eq_left_fallthroughPc
+    {asm first second : Assembly.Program}
+    (segment :
+      Structured.Preservation.CodeSegment asm (first ++ second)) :
+    Structured.Preservation.CodeSegment.startPc
+        (Structured.Preservation.CodeSegment.right segment) =
+      Structured.Preservation.CodeSegment.fallthroughPc
+        (Structured.Preservation.CodeSegment.left segment) := by
+  rfl
+
+theorem localsExpr_compileCode_lit_eq
+    {ctx : Locals.Ctx} {offset : Nat} {value : Word}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.Expr.compileCode ctx offset (.lit value) = some code) :
+    code = [Structured.BasicInstr.push value] := by
+  simpa [Locals.Expr.compileCode] using hCompile.symm
+
+theorem localsExpr_compileCode_var_inv
+    {ctx : Locals.Ctx} {offset : Nat} {name : Name}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.Expr.compileCode ctx offset (.var name) = some code) :
+    ∃ depth op,
+      Locals.Layout.lookupDepth? name ctx.layout = some depth ∧
+      Locals.StackOp.dup? (offset + depth) = some op ∧
+      code = [Structured.BasicInstr.op op] := by
+  unfold Locals.Expr.compileCode at hCompile
+  cases hDepth : Locals.Layout.lookupDepth? name ctx.layout with
+  | none =>
+      simp [hDepth] at hCompile
+  | some depth =>
+      cases hDup : Locals.StackOp.dup? (offset + depth) with
+      | none =>
+          simp [hDepth, hDup] at hCompile
+      | some op =>
+          simp [hDepth, hDup] at hCompile
+          exact ⟨depth, op, rfl, hDup, hCompile.symm⟩
+
+theorem localsExpr_compileCode_prim_inv
+    {ctx : Locals.Ctx} {offset : Nat}
+    {op : Structured.BasicOp}
+    {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.Expr.compileCode ctx offset (.prim op args) = some code) :
+    ∃ argsCode,
+      Locals.ExprSeq.compileCode ctx offset args = some argsCode ∧
+      code = argsCode ++ [Structured.BasicInstr.op op] := by
+  unfold Locals.Expr.compileCode at hCompile
+  cases hArgs : Locals.ExprSeq.compileCode ctx offset args with
+  | none =>
+      simp [hArgs] at hCompile
+  | some argsCode =>
+      simp [hArgs] at hCompile
+      exact ⟨argsCode, rfl, hCompile.symm⟩
+
+theorem localsExprSeq_compileCode_nil_eq
+    {ctx : Locals.Ctx} {offset : Nat} {code : Structured.Code}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx offset Locals.ExprSeq.nil = some code) :
+    code = [] := by
+  simpa [Locals.ExprSeq.compileCode] using hCompile.symm
+
+theorem localsExprSeq_compileCode_cons_inv
+    {ctx : Locals.Ctx} {offset left right : Nat}
+    {head : Locals.Expr left} {tail : Locals.ExprSeq right}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx offset
+        (Locals.ExprSeq.cons head tail) = some code) :
+    ∃ headCode tailCode,
+      Locals.Expr.compileCode ctx offset head = some headCode ∧
+      Locals.ExprSeq.compileCode ctx (offset + left) tail = some tailCode ∧
+      code = headCode ++ tailCode := by
+  unfold Locals.ExprSeq.compileCode at hCompile
+  cases hHead : Locals.Expr.compileCode ctx offset head with
+  | none =>
+      simp [hHead] at hCompile
+  | some headCode =>
+      cases hTail : Locals.ExprSeq.compileCode ctx (offset + left) tail with
+      | none =>
+          simp [hHead, hTail] at hCompile
+      | some tailCode =>
+          simp [hHead, hTail] at hCompile
+          exact ⟨headCode, tailCode, rfl, rfl, hCompile.symm⟩
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
@@ -1331,6 +1441,72 @@ theorem compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue
         (mid := evmAfter) (pc := pc) (instr := .push value)
         hAt hOpenStep hRest
 
+theorem compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    {ctx : Locals.Ctx} {offset : Nat}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {value : Word}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.Expr.compileCode ctx offset (.lit value) = some code)
+    (stackPrefix : List Word)
+    (program : Assembly.Program) (fuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.lit value) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
+          (trace ++ tailTrace) result := by
+  have hCode :
+      code = [Structured.BasicInstr.push value] :=
+    localsExpr_compileCode_lit_eq hCompile
+  have hAssemblyCode :
+      code.toAssembly = [Assembly.Instr.push value] := by
+    simp [hCode, Structured.Code.toAssembly,
+      Structured.BasicInstr.toAssembly]
+  let pushSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.push value] :=
+    Structured.Preservation.CodeSegment.cast_code hAssemblyCode segment
+  have hPcPush :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc pushSegment := by
+    simpa [pushSegment, Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc] using hPc
+  have hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc pushSegment).toNat,
+            Assembly.Instr.push value) := by
+    simpa [hPcPush] using codeSegment_instrAtPc_start_cons pushSegment
+  exact
+    compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue
+      (prim := prim) (layout := layout) (compiler := compiler)
+      (compilerAfter := compilerAfter) (state := state) value stackPrefix
+      program
+      ((Structured.Preservation.CodeSegment.startPc pushSegment).toNat)
+      fuel hPrefixRel hAt hResolve
+
 theorem compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue
     {prim : Objects.Source.PrimitiveSemantics}
     {layout : List Name}
@@ -1447,6 +1623,87 @@ theorem compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue
             (program := program) (fuel := fuel) (state := state)
             (mid := evmAfter) (pc := pc) (instr := .prim op.toPrimOp)
             hAt hOpenStep hRest
+
+theorem compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    {ctx : Locals.Ctx} {offset : Nat}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {name : Name}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.Expr.compileCode ctx offset (.var name) = some code)
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout offset
+      (.var name))
+    (stackPrefix : List Word)
+    (hPrefixLen : stackPrefix.length = offset)
+    (program : Assembly.Program) (fuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.var name) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
+          (trace ++ tailTrace) result := by
+  rcases localsExpr_compileCode_var_inv hCompile with
+    ⟨depth, op, hDepth, hDup, hCode⟩
+  rcases hAccess with ⟨idx, hName, hBound⟩
+  have hDepthIdx :
+      Locals.Layout.lookupDepth? name ctx.layout = some (idx + 1) := by
+    simpa [hCtxLayout] using
+      (Locals.Layout.lookupDepth?_of_get?_nodup hName hNoDup)
+  rw [hDepthIdx] at hDepth
+  cases hDepth
+  have hDupIdx :
+      Locals.StackOp.dup? (offset + idx + 1) = some op := by
+    simpa [Nat.add_assoc] using hDup
+  have hAssemblyCode :
+      code.toAssembly = [Assembly.Instr.prim op.toPrimOp] := by
+    simp [hCode, Structured.Code.toAssembly,
+      Structured.BasicInstr.toAssembly]
+  let opSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.prim op.toPrimOp] :=
+    Structured.Preservation.CodeSegment.cast_code hAssemblyCode segment
+  have hPcOp :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc opSegment := by
+    simpa [opSegment, Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc] using hPc
+  have hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc opSegment).toNat,
+            Assembly.Instr.prim op.toPrimOp) := by
+    simpa [hPcOp] using codeSegment_instrAtPc_start_cons opSegment
+  exact
+    compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue
+      (prim := prim) (layout := layout) (compiler := compiler)
+      (compilerAfter := compilerAfter) (state := state) (name := name)
+      (idx := idx) (offset := offset) (op := op) hName stackPrefix
+      hPrefixLen hBound hDupIdx program
+      ((Structured.Preservation.CodeSegment.startPc opSegment).toNat)
+      fuel hPrefixRel hAt hResolve
 
 theorem compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue
     {prim : Objects.Source.PrimitiveSemantics}

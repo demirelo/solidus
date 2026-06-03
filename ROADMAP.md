@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:15 CEST.
+Last updated: 2026-06-03 04:22 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -144,7 +144,17 @@ Execution order:
    and the source-owned `.prim` wrapper
    `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_sourceOwned_args`;
    this removes the ad hoc argument-length callback from the route the mutual
-   theorem should consume.
+   theorem should consume. The first compiler-generated-code segment interface
+   is now checked as well: `OpenLowering.codeSegment_instrAtPc_start_cons`,
+   `OpenLowering.codeSegment_right_startPc_eq_left_fallthroughPc`, the
+   `compileCode` inversion lemmas for expression/sequence constructors, and
+   the lit/var wrappers
+   `OpenLowering.compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue_of_compileCode`
+   and
+   `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_of_compileCode`.
+   This means the remaining mutual expression proof can consume actual
+   compiler-generated `CodeSegment`s for the non-recursive bases instead of
+   assuming arbitrary current instructions.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.
