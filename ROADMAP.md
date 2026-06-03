@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:40 CEST.
+Last updated: 2026-06-03 05:47 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -266,10 +266,18 @@ Execution order:
    context and segment fallthrough PC. The empty compiled block base case is
    checked by
    `OpenLowering.compilerOpenFunctionsBlock_nil_openRunNResult_of_compileOpen`.
-   The remaining work is instantiating regular-head tails with this invariant,
-   then generalizing the checked sequencing shape to function calls, loops,
-   switch/conditionals, and composing the result into the whole-program
-   imported-Yul-to-open-EVM theorem.
+   The assembly source-open runner now also has the generic fuel-composition
+   lemma
+   `OpenAssembly.Source.openRunNResult_resolves_running_continue`, so a checked
+   prefix run that reaches `.running mid` can continue with tail fuel produced
+   existentially by a recursive proof. Using that, the internal compiled-outcome
+   invariant now composes through layout-stable regular heads:
+   `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_compiledOutcomeRel_of_compileOpen_tail`
+   and
+   `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOutcomeRel_of_compileOpen_tail`.
+   The next architectural step is the context-aware/open-result relation needed
+   for `let` and then the same recursive shape for calls, loops,
+   switch/conditionals, and the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 

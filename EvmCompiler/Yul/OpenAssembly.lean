@@ -871,6 +871,53 @@ theorem openRunNResult_resolves_step_halted
         Except EVMException Assembly.StepResult))
       hStep hDone)
 
+theorem openRunNResult_resolves_running_continue
+    {program : Assembly.Program} {prefixFuel tailFuel : Nat}
+    {state mid : EVMState}
+    {prefixTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hPrefix :
+      OpenExternal.OpenResultResolves
+        (openRunNResult program prefixFuel state)
+        prefixTrace (.ok (.running mid)))
+    (hTail :
+      OpenExternal.OpenResultResolves
+        (openRunNResult program tailFuel mid)
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (prefixFuel + tailFuel) state)
+      (prefixTrace ++ tailTrace) result := by
+  induction prefixFuel generalizing state mid prefixTrace with
+  | zero =>
+      rw [openRunNResult_zero] at hPrefix
+      cases hPrefix
+      simpa using hTail
+  | succ fuel ih =>
+      rw [openRunNResult_succ] at hPrefix
+      rcases OpenExternal.OpenResultResolves.bind_inv hPrefix with
+        hStepError | hStepOk
+      · rcases hStepError with ⟨err, _hStep, hResult⟩
+        cases hResult
+      · rcases hStepOk with
+          ⟨headTrace, restTrace, stepResult, hTrace, hStep, hRest⟩
+        cases stepResult with
+        | running next =>
+            subst prefixTrace
+            have hRestAndTail :=
+              ih hRest hTail
+            have hCombined :
+                OpenExternal.OpenResultResolves
+                  (openRunNResult program ((fuel + tailFuel) + 1) state)
+                  (headTrace ++ (restTrace ++ tailTrace)) result :=
+              openRunNResult_resolves_step_running
+                (fuel := fuel + tailFuel) hStep hRestAndTail
+            have hFuel :
+                (fuel + tailFuel) + 1 = fuel + 1 + tailFuel := by
+              omega
+            simpa [hFuel, List.append_assoc] using hCombined
+        | halted halt =>
+            cases hRest
+
 theorem openRunNResult_current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}
     {fuel : Nat} {pc : Nat} {op : Assembly.PrimOp}
