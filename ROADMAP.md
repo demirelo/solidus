@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:03 CEST.
+Last updated: 2026-06-03 03:05 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -63,7 +63,9 @@ Execution order:
    needed for later instructions and later CALLs. `Compiled.OpenTraceResult`
    now packages multi-step open compiled-assembly traces with constructors for
    CALL, no-CALL running, and no-CALL halted current blocks, plus a resolver back
-   to `Compiled.openRunNResult`. The remaining work is proving the CALL-site
+   to `Compiled.openRunNResult`; the no-CALL constructors can now derive their
+   emitted-code no-CALL fact directly from the current assembly instruction's
+   `Instr.usesCallCreate = false`. The remaining work is proving the CALL-site
    preservation bridge from compiler-open blocks down to these open
    target runners and composing it into the whole-program
    imported-Yul-to-open-EVM theorem.
@@ -131,9 +133,10 @@ let/assign CALL scaffolding, or a concrete external-world model.
   instruction lists, emitted/current primitive CALL bridge lemmas, and
   CALL-through-tail fuel composition. The new
   `Compiled.OpenTraceResult` wrapper is the intended target-side proof object
-  for multi-step open compiled-assembly runs; the remaining public gap is the
-  CALL-site preservation bridge from compiler-open blocks down to that open
-  target semantics.
+  for multi-step open compiled-assembly runs, with current-instruction no-CALL
+  wrappers removing the emitted-code classifier side condition for ordinary
+  steps; the remaining public gap is the CALL-site preservation bridge from
+  compiler-open blocks down to that open target semantics.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL

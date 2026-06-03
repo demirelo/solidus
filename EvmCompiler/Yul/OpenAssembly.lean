@@ -128,6 +128,42 @@ def instrUsesCallCreate : Assembly.TargetInstr → Bool
 def codeUsesCallCreate (code : List Assembly.TargetInstr) : Bool :=
   code.any instrUsesCallCreate
 
+theorem codeUsesCallCreate_false_of_emitInstr_no_call
+    {program : Assembly.Program} {pc : Nat} {instr : Assembly.Instr}
+    {emitted : List Assembly.LocatedTarget}
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hEmit : Assembly.emitInstr? program pc instr = some emitted) :
+    codeUsesCallCreate (emitted.map Assembly.LocatedTarget.instr) = false := by
+  cases instr with
+  | label name =>
+      simp [Assembly.emitInstr?] at hEmit
+      subst emitted
+      simp [codeUsesCallCreate, instrUsesCallCreate]
+  | prim op =>
+      simp [Assembly.emitInstr?, Assembly.Instr.usesCallCreate] at hEmit hNoInstr
+      subst emitted
+      simp [codeUsesCallCreate, instrUsesCallCreate, hNoInstr]
+  | push value =>
+      simp [Assembly.emitInstr?] at hEmit
+      subst emitted
+      simp [codeUsesCallCreate, instrUsesCallCreate]
+  | jump target =>
+      cases hDest : Assembly.Program.labelPc program target with
+      | none =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+          subst emitted
+          simp [codeUsesCallCreate, instrUsesCallCreate]
+  | jumpi target =>
+      cases hDest : Assembly.Program.labelPc program target with
+      | none =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+      | some dest =>
+          simp [Assembly.emitInstr?, hDest] at hEmit
+          subst emitted
+          simp [codeUsesCallCreate, instrUsesCallCreate]
+
 def openStepInstr (instr : Assembly.TargetInstr) (state : EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
   match instr with
@@ -574,6 +610,26 @@ theorem openStepResult_resolves_closed_of_emitCurrent_no_callCreate
   rw [hEmit] at hStep
   exact Target.openRunListResult_resolves_closed_of_no_callCreate hCode hStep
 
+theorem codeUsesCallCreate_false_of_current_no_call
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {instr : Assembly.Instr} {code : List Assembly.TargetInstr}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat = some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hEmit : Assembly.emitCurrent? program state = some code) :
+    Target.codeUsesCallCreate code = false := by
+  unfold Assembly.emitCurrent? at hEmit
+  rw [hAt] at hEmit
+  cases hEmitInstr : Assembly.emitInstr? program pc instr with
+  | none =>
+      simp [hEmitInstr] at hEmit
+  | some emitted =>
+      simp [hEmitInstr] at hEmit
+      subst code
+      exact
+        Target.codeUsesCallCreate_false_of_emitInstr_no_call
+          hNoInstr hEmitInstr
+
 theorem openStepResult_emitCurrent_single_prim_call
     {program : Assembly.Program} {state : EVMState} {op : Assembly.PrimOp}
     {kind : OpenExternal.CallKind}
@@ -728,6 +784,51 @@ theorem current_no_call_halted
     openStepResult_resolves_closed_of_emitCurrent_no_callCreate
       hEmit hCode hStep
   exact OpenTraceResult.stepHalted hOpenStep
+
+theorem current_no_call_running_continue_of_current_instr
+    {program : Assembly.Program} {state mid : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr}
+    {tailTrace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hStep :
+      Assembly.Compiled.stepResult program state = .ok (.running mid))
+    (hRest : OpenTraceResult program fuel mid tailTrace result) :
+    OpenTraceResult program (fuel + 1) state tailTrace result := by
+  cases hEmit : Assembly.emitCurrent? program state with
+  | none =>
+      unfold Assembly.Compiled.stepResult at hStep
+      rw [hEmit] at hStep
+      cases hStep
+  | some code =>
+      have hCode :
+          Target.codeUsesCallCreate code = false :=
+        codeUsesCallCreate_false_of_current_no_call hAt hNoInstr hEmit
+      exact
+        current_no_call_running_continue hEmit hCode hStep hRest
+
+theorem current_no_call_halted_of_current_instr
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr} {halt : Assembly.Halt}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hStep :
+      Assembly.Compiled.stepResult program state = .ok (.halted halt)) :
+    OpenTraceResult program (fuel + 1) state [] (.halted halt) := by
+  cases hEmit : Assembly.emitCurrent? program state with
+  | none =>
+      unfold Assembly.Compiled.stepResult at hStep
+      rw [hEmit] at hStep
+      cases hStep
+  | some code =>
+      have hCode :
+          Target.codeUsesCallCreate code = false :=
+        codeUsesCallCreate_false_of_current_no_call hAt hNoInstr hEmit
+      exact current_no_call_halted hEmit hCode hStep
 
 end OpenTraceResult
 
