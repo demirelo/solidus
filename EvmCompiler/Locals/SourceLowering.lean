@@ -4047,6 +4047,82 @@ theorem run_spillTopReloadCode_target_scratch_slot_of_ready?
   run_spillTopReloadCode_target_scratch_slot hSpec hWordBytes hRel
     (ScratchRange.ready?_sound hReady) hSlot
 
+theorem run_spillTopReloadCode_target_scratch_slot_valueRel
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source : EvmYul.MachineState} {target : EVMState}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target.toMachineState)
+    (hLayout : SpillLayout.WellFormed range sourceScope stackLayout layout)
+    (hValues :
+      SpillLayout.ValueRel range store
+        target.toMachineState target.stack layout)
+    (hReady : ScratchRegionReady target.toMachineState range.base range.words)
+    (hSlot : slot < range.words)
+    (hStoreMatches :
+      ∀ {name : Name},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          store name = some value) :
+    ∃ final,
+      Structured.Code.run (spillTopReloadCode (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      MemoryByteEqOutsideScratch range source final.toMachineState ∧
+      SpillLayout.ValueRel range store final.toMachineState
+        target.stack layout := by
+  rcases run_spillTopReloadCode target target.stack
+      (range.word slot) value with
+    ⟨final, hRun, hStack, hMachine⟩
+  have hMacro :=
+    mload_after_mstore_target_scratch_slot hSpec hWordBytes
+      (value := value) hRel hReady hSlot
+  have hValuesFinal :
+      SpillLayout.ValueRel range store final.toMachineState
+        target.stack layout := by
+    rw [hMachine]
+    exact
+      SpillLayout.ValueRel.mload_after_mstore_target_scratch_slot_preserve
+        hSpec hWordBytes hLayout hValues hReady hSlot hStoreMatches
+  refine ⟨final, hRun, ?_, ?_, hValuesFinal⟩
+  · rw [hStack, hMacro.1]
+  · rw [hMachine]
+    exact hMacro.2
+
+theorem run_spillTopReloadCode_target_scratch_slot_valueRel_of_ready?
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source : EvmYul.MachineState} {target : EVMState}
+    {sourceScope stackLayout : List Name}
+    {layout : SpillLayout.Layout} {store : Source.Store}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target.toMachineState)
+    (hLayout : SpillLayout.WellFormed range sourceScope stackLayout layout)
+    (hValues :
+      SpillLayout.ValueRel range store
+        target.toMachineState target.stack layout)
+    (hReady : ScratchRange.ready? target.toMachineState range = true)
+    (hSlot : slot < range.words)
+    (hStoreMatches :
+      ∀ {name : Name},
+        (name, SpillLayout.LocalLocation.scratch slot) ∈ layout →
+          store name = some value) :
+    ∃ final,
+      Structured.Code.run (spillTopReloadCode (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      MemoryByteEqOutsideScratch range source final.toMachineState ∧
+      SpillLayout.ValueRel range store final.toMachineState
+        target.stack layout :=
+  run_spillTopReloadCode_target_scratch_slot_valueRel hSpec hWordBytes
+    hRel hLayout hValues (ScratchRange.ready?_sound hReady)
+    hSlot hStoreMatches
+
 end MemoryByteEqOutsideScratch
 
 theorem mstore_scratch_reserved {machine : EvmYul.MachineState}

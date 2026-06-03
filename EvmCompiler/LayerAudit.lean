@@ -2584,6 +2584,94 @@ example
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
     (hWordBytes :
       Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {source : EvmYul.MachineState} {target : Locals.EVMState}
+    {sourceScope stackLayout : List Locals.Name}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    {store : Locals.Source.Store}
+    {slot : Nat} {value : Locals.Word}
+    (hRel :
+      Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch
+        range source target.toMachineState)
+    (hLayout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.WellFormed
+        range sourceScope stackLayout layout)
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store target.toMachineState target.stack layout)
+    (hReady :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRegionReady
+        target.toMachineState range.base range.words)
+    (hSlot : slot < range.words)
+    (hStoreMatches :
+      ∀ {name : Locals.Name},
+        (name,
+          Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.scratch
+            slot) ∈ layout →
+          store name = some value) :
+    ∃ final,
+      Structured.Code.run
+          (Locals.SourceLowering.StateRel.SpillScratch.spillTopReloadCode
+            (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch
+        range source final.toMachineState ∧
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store final.toMachineState target.stack layout :=
+  Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch.run_spillTopReloadCode_target_scratch_slot_valueRel
+    hSpec hWordBytes hRel hLayout hValues hReady hSlot hStoreMatches
+
+example
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
+    {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {source : EvmYul.MachineState} {target : Locals.EVMState}
+    {sourceScope stackLayout : List Locals.Name}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    {store : Locals.Source.Store}
+    {slot : Nat} {value : Locals.Word}
+    (hRel :
+      Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch
+        range source target.toMachineState)
+    (hLayout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.WellFormed
+        range sourceScope stackLayout layout)
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store target.toMachineState target.stack layout)
+    (hReady :
+      Locals.SourceLowering.StateRel.SpillScratch.ScratchRange.ready?
+        target.toMachineState range = true)
+    (hSlot : slot < range.words)
+    (hStoreMatches :
+      ∀ {name : Locals.Name},
+        (name,
+          Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.scratch
+            slot) ∈ layout →
+          store name = some value) :
+    ∃ final,
+      Structured.Code.run
+          (Locals.SourceLowering.StateRel.SpillScratch.spillTopReloadCode
+            (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch
+        range source final.toMachineState ∧
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store final.toMachineState target.stack layout :=
+  Locals.SourceLowering.StateRel.SpillScratch.MemoryByteEqOutsideScratch.run_spillTopReloadCode_target_scratch_slot_valueRel_of_ready?
+    hSpec hWordBytes hRel hLayout hValues hReady hSlot hStoreMatches
+
+example
+    (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
+    (hWordBytes :
+      Locals.SourceLowering.StateRel.SpillScratch.WordByteEncodingSpec)
     {machine : EvmYul.MachineState} {offset value : Locals.Word}
     (hAllocated :
       Locals.SourceLowering.StateRel.SpillScratch.ScratchWordAllocated
