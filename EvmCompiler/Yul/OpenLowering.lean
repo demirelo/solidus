@@ -47,6 +47,10 @@ theorem callKind_ofEVMOperation_toBasicOp_toPrimOp
       kind.toBasicOp.toPrimOp.toEVM = some kind := by
   cases kind <;> rfl
 
+theorem basicOp_toPrimOp_haltKind?_none (op : Structured.BasicOp) :
+    (Assembly.Instr.prim op.toPrimOp).haltKind? = none := by
+  cases op <;> rfl
+
 theorem compilerOpenPrimitive_call_stepAtResult
     {prim : Objects.Source.PrimitiveSemantics}
     {compiler : Objects.Source.State}
@@ -147,6 +151,144 @@ theorem compilerOpenPrimitive_call_stepAtResult
   exact
     ⟨hSource, hTarget,
       CompilerPrimitiveEVMInstructionResultRel.running_incrPC hResponseRel⟩
+
+theorem compilerOpenPrimitive_no_callCreate_stepAtResult
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hShared : evmState.toSharedState = compiler.shared)
+    (op : Structured.BasicOp)
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false)
+    (values : List Word)
+    (baseStack : OpenExternal.Stack)
+    (program : Assembly.Program) (pc : Nat)
+    {sharedAfter : EvmYul.SharedState .EVM}
+    {valuesAfter : List Word}
+    (hEval :
+      prim.eval op compiler.shared values = .ok (sharedAfter, valuesAfter)) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        [] (.ok (compiler.withShared sharedAfter, valuesAfter)) ∧
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program pc (.prim op.toPrimOp)
+          ({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State))
+        [] (.ok (.running evmAfter)) ∧
+      CompilerPrimitiveEVMInstructionResultRel baseStack
+        (compiler.withShared sharedAfter, valuesAfter)
+        (.running evmAfter) := by
+  let state : EvmYul.EVM.State :=
+    { evmState with stack := values.reverse ++ baseStack }
+  have hStateShared : state.toSharedState = compiler.shared := by
+    simpa [state] using hShared
+  have hStateStack : state.stack = values.reverse ++ baseStack := by
+    simp [state]
+  rcases
+      hPrim.eval_step_exists
+        (op := op) (shared := compiler.shared)
+        (shared' := sharedAfter) (values := values)
+        (values' := valuesAfter) (evm := state)
+        (baseStack := baseStack) hEval hStateShared hStateStack with
+    ⟨evmAfter, hStep, hAfterShared, hAfterStack⟩
+  have hSource :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        [] (.ok (compiler.withShared sharedAfter, valuesAfter)) :=
+    Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval_resolves_closed_ok_of_not_callKind
+      (Reference.SourceBridgeFacts.CompilerOpen.Primitive.callKind_none_of_no_callCreate
+        hNoCallCreate)
+      hEval
+  have hTargetStep :
+      Assembly.Source.stepAtResult program pc (.prim op.toPrimOp) state =
+        .ok (.running evmAfter) := by
+    have hTargetInstr :
+        Assembly.Target.stepInstr
+          (Assembly.TargetInstr.prim op.toPrimOp) state =
+          .ok evmAfter := by
+      simpa [Structured.BasicOp.step] using hStep
+    simp [Assembly.Source.stepAtResult, Assembly.Source.stepAt,
+      hTargetInstr, basicOp_toPrimOp_haltKind?_none op]
+  have hTarget :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program pc (.prim op.toPrimOp)
+          ({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State))
+        [] (.ok (.running evmAfter)) := by
+    simpa [state] using
+      OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+        (program := program) (pc := pc) (op := op.toPrimOp)
+        (state := state) hNoCallCreate hTargetStep
+  have hRel :
+      Reference.SourceBridgeFacts.SourceStateRel.CompilerPrimitiveEVMResultRel
+        baseStack (compiler.withShared sharedAfter, valuesAfter) evmAfter := by
+    exact
+      ⟨by simpa [Locals.Source.State.withShared] using hAfterShared,
+        hAfterStack⟩
+  exact ⟨evmAfter, hSource, hTarget, hRel⟩
+
+theorem compilerOpenPrimitive_no_callCreate_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hShared : evmState.toSharedState = compiler.shared)
+    (op : Structured.BasicOp)
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false)
+    (values : List Word)
+    (baseStack : OpenExternal.Stack)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hAt :
+      Assembly.Program.instrAtPc program
+          (({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State).pc.toNat) =
+        some (pc, Assembly.Instr.prim op.toPrimOp))
+    {sharedAfter : EvmYul.SharedState .EVM}
+    {valuesAfter : List Word}
+    (hEval :
+      prim.eval op compiler.shared values = .ok (sharedAfter, valuesAfter)) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        [] (.ok (compiler.withShared sharedAfter, valuesAfter)) ∧
+      CompilerPrimitiveEVMInstructionResultRel baseStack
+        (compiler.withShared sharedAfter, valuesAfter)
+        (.running evmAfter) ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1)
+            ({ evmState with stack := values.reverse ++ baseStack }
+              : EvmYul.EVM.State))
+          tailTrace result := by
+  rcases
+      compilerOpenPrimitive_no_callCreate_stepAtResult
+        (prim := prim) hPrim (compiler := compiler)
+        (evmState := evmState) hShared op hNoCallCreate values baseStack
+        program pc hEval with
+    ⟨evmAfter, hSource, hTargetStep, hRel⟩
+  refine ⟨evmAfter, hSource, hRel, ?_⟩
+  intro tailTrace result hRest
+  have hTargetRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program (fuel + 1)
+          ({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State))
+        ([] ++ tailTrace) result :=
+    OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+      (program := program) (fuel := fuel)
+      (state := ({ evmState with stack := values.reverse ++ baseStack }
+        : EvmYul.EVM.State))
+      (mid := evmAfter) (pc := pc) (instr := .prim op.toPrimOp)
+      hAt hTargetStep hRest
+  simpa using hTargetRun
 
 theorem compilerOpenPrimitive_call_openRunNResult_continue
     {prim : Objects.Source.PrimitiveSemantics}
