@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:07 CEST.
+Last updated: 2026-06-03 04:09 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -131,9 +131,12 @@ Execution order:
    `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue`,
    and
    `OpenLowering.compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue`.
-   The next adjacent expression proof step is the generic `ExprSeq.cons`
-   composition theorem that threads the checked head continuation into the
-   recursive tail continuation.
+   The generic `ExprSeq.cons` composition theorem is now checked in
+   `OpenLowering.compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_of_head_tail`,
+   threading the checked head continuation into the recursive tail
+   continuation without inspecting where CALLs occur. The next adjacent
+   expression proof step is assembling these lemmas into the mutual
+   expression/expression-sequence lowering theorem.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.

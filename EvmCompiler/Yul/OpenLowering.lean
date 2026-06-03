@@ -1228,6 +1228,116 @@ theorem compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue
   · intro tailTrace result hRest
     simpa using hRest
 
+theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_of_head_tail
+    {prim : Objects.Source.PrimitiveSemantics}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {left right : Nat}
+    {head : Locals.Expr left}
+    {tail : Locals.ExprSeq right}
+    (stackPrefix : List Word)
+    (program : Assembly.Program)
+    (finalTailFuel tailFuel seqFuel : Nat)
+    (hHeadSound :
+      ∀ {headTrace : OpenExternal.OpenTrace}
+        {compilerAfterHead : Objects.Source.State}
+        {headValues : List Word},
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+            prim head compiler)
+          headTrace (.ok (compilerAfterHead, headValues)) →
+        ∃ evmAfterHead : EvmYul.EVM.State,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+            (headValues.reverse ++ stackPrefix) evmAfterHead ∧
+          ∀ {tailTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              tailTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program seqFuel state)
+              (headTrace ++ tailTrace) result)
+    (hTailSound :
+      ∀ {compilerAfterHead compilerAfterTail : Objects.Source.State}
+        {headValues tailValues : List Word}
+        {evmAfterHead : EvmYul.EVM.State}
+        {tailTrace : OpenExternal.OpenTrace},
+        Locals.SourceLowering.StackPrefixRel layout compilerAfterHead
+          (headValues.reverse ++ stackPrefix) evmAfterHead →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim tail compilerAfterHead)
+          tailTrace (.ok (compilerAfterTail, tailValues)) →
+        ∃ evmAfterTail : EvmYul.EVM.State,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterTail
+            (tailValues.reverse ++ headValues.reverse ++ stackPrefix)
+            evmAfterTail ∧
+          ∀ {restTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program finalTailFuel
+                evmAfterTail)
+              restTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              (tailTrace ++ restTrace) result)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+          prim (Locals.ExprSeq.cons head tail) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {restTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program finalTailFuel evmAfter)
+          restTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program seqFuel state)
+          (trace ++ restTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hHeadError | hHeadOk
+  · rcases hHeadError with ⟨err, _hHead, hResult⟩
+    cases hResult
+  · rcases hHeadOk with
+      ⟨headTrace, tailAndDoneTrace, headResult, hTrace, hResolveHead,
+        hResolveTailBind⟩
+    rcases headResult with ⟨compilerAfterHead, headValues⟩
+    rcases OpenExternal.OpenResultResolves.bind_inv hResolveTailBind with
+      hTailError | hTailOk
+    · rcases hTailError with ⟨err, _hTail, hResult⟩
+      cases hResult
+    · rcases hTailOk with
+        ⟨tailTrace, doneTrace, tailResult, hTailAndDoneTrace,
+          hResolveTail, hResolveDone⟩
+      rcases tailResult with ⟨compilerAfterTail, tailValues⟩
+      cases hResolveDone
+      rcases hHeadSound hResolveHead with
+        ⟨evmAfterHead, hHeadRel, hHeadCont⟩
+      rcases hTailSound hHeadRel hResolveTail with
+        ⟨evmAfterTail, hTailRel, hTailCont⟩
+      refine ⟨evmAfterTail, ?_, ?_⟩
+      · simpa [List.reverse_append, List.append_assoc] using hTailRel
+      · intro restTrace result hRest
+        have hTailAndRest :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program tailFuel
+                evmAfterHead)
+              (tailTrace ++ restTrace) result :=
+          hTailCont hRest
+        have hFull := hHeadCont hTailAndRest
+        subst tailAndDoneTrace
+        subst trace
+        simpa [List.append_assoc] using hFull
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)
