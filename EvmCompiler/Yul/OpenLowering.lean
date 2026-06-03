@@ -2197,6 +2197,62 @@ theorem structuredCode_run_of_runState
       cases hRunState
       simp [Structured.RunState.withEVM]
 
+theorem functionsDirect_pushReturns_runState_of_returnExprs_compileCode
+    {ctx : Locals.Ctx} {name : Name} {rest : List Name}
+    {code : Structured.Code} {state final : Locals.RunState}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx 0
+        (Functions.Lower.returnExprs (name :: rest)) = some code)
+    (hRun :
+      Functions.Direct.pushReturns ctx (name :: rest) state = .ok final) :
+    Structured.Code.runState code state = .ok final := by
+  simp [Functions.Direct.pushReturns] at hRun
+  rw [Locals.Direct.Expr.ExprSeq.runCode_eq_compileCode_zero
+    ctx (Functions.Lower.returnExprs (name :: rest)) code state.evm
+    hCompile] at hRun
+  unfold Structured.Code.runState
+  cases hCodeRun : Structured.Code.run code state.evm with
+  | error err =>
+      simp [hCodeRun] at hRun
+  | ok evmAfter =>
+      simp [hCodeRun] at hRun
+      cases hRun
+      simp [Structured.RunState.withEVM]
+
+theorem functionsLower_pushReturns_compileOpen_parts
+    {ctx finalCtx : Locals.Ctx} {returns : List Name}
+    {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+        { stmts := Functions.Lower.pushReturns returns } =
+        some (stmts, finalCtx)) :
+    (returns = [] ∧ stmts = [] ∧ finalCtx = ctx) ∨
+      ∃ name rest code,
+        returns = name :: rest ∧
+          Locals.ExprSeq.compileCode ctx 0
+            (Functions.Lower.returnExprs (name :: rest)) = some code ∧
+          stmts = Locals.codeStmt code ∧ finalCtx = ctx := by
+  cases returns with
+  | nil =>
+      simp [Functions.Lower.pushReturns, Locals.Block.compileOpen]
+        at hCompile
+      rcases hCompile with ⟨hStmts, hCtx⟩
+      exact Or.inl ⟨rfl, hStmts, hCtx.symm⟩
+  | cons name rest =>
+      simp [Functions.Lower.pushReturns, Locals.Block.compileOpen]
+        at hCompile
+      cases hCode :
+          Locals.ExprSeq.compileCode ctx 0
+            (Functions.Lower.returnExprs (name :: rest)) with
+      | none =>
+          simp [Locals.Stmt.compile, hCode] at hCompile
+      | some code =>
+          simp [Locals.Stmt.compile, hCode] at hCompile
+          rcases hCompile with ⟨hStmts, hCtx⟩
+          exact
+            Or.inr
+              ⟨name, rest, code, rfl, hCode, hStmts.symm, hCtx.symm⟩
+
 theorem compilerOpenFunctionsArgList_compileOpen_structured_next
     {args : List (Functions.Expr 1)}
     {localsCtx finalLocalsCtx : Locals.Ctx}
