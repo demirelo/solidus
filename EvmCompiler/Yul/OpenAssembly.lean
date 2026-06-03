@@ -1037,6 +1037,35 @@ theorem resolves
   | stepHalted hStep =>
       exact openRunNResult_resolves_step_halted hStep
 
+theorem of_resolves
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hResolve :
+      OpenExternal.OpenResultResolves (openRunNResult program fuel state)
+        trace (.ok result)) :
+    OpenTraceResult program fuel state trace result := by
+  induction fuel generalizing state trace result with
+  | zero =>
+      simp [openRunNResult] at hResolve
+      cases hResolve
+      exact OpenTraceResult.done state
+  | succ fuel ih =>
+      rw [openRunNResult_succ] at hResolve
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+        hError | hOk
+      · rcases hError with ⟨err, _hStep, hResult⟩
+        cases hResult
+      · rcases hOk with
+          ⟨headTrace, tailTrace, stepResult, hTrace, hStep, hRest⟩
+        cases stepResult with
+        | running mid =>
+            subst trace
+            exact OpenTraceResult.stepRunning hStep (ih hRest)
+        | halted halt =>
+            cases hRest
+            subst trace
+            simpa using OpenTraceResult.stepHalted hStep
+
 theorem current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}
     {fuel : Nat} {pc : Nat} {op : Assembly.PrimOp}
@@ -1618,8 +1647,59 @@ theorem resolves_compiled_of_assemble
       trace (.ok result) :=
   (to_openBlockTrace hAsm hTrace).resolves_compiled
 
+theorem to_openBlockTrace_of_compile
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hTrace : OpenTraceResult program fuel state trace result) :
+    OpenBlockTraceResult program target fuel state trace result :=
+  to_openBlockTrace (Assembly.Preservation.compile?_some_assemble hCompile)
+    hTrace
+
+theorem resolves_compiled_of_compile
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hTrace : OpenTraceResult program fuel state trace result) :
+    OpenExternal.OpenResultResolves
+      (Compiled.openRunNResult program fuel state)
+      trace (.ok result) :=
+  (to_openBlockTrace_of_compile hCompile hTrace).resolves_compiled
+
 end OpenTraceResult
 end Source
+
+theorem compile_openRunN_result_openBlockTrace_sound
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hRun :
+      OpenExternal.OpenResultResolves
+        (Source.openRunNResult program fuel state) trace (.ok result)) :
+    Assembly.Accepted program ∧
+      OpenBlockTraceResult program target fuel state trace result := by
+  exact
+    ⟨Assembly.Preservation.compile?_some_accepted hCompile,
+      Source.OpenTraceResult.to_openBlockTrace_of_compile hCompile
+        (Source.OpenTraceResult.of_resolves hRun)⟩
+
+theorem compile_openRunN_result_compiled_sound
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {fuel : Nat} {state : EVMState} {trace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hRun :
+      OpenExternal.OpenResultResolves
+        (Source.openRunNResult program fuel state) trace (.ok result)) :
+    Assembly.Accepted program ∧
+      OpenExternal.OpenResultResolves
+        (Compiled.openRunNResult program fuel state) trace (.ok result) := by
+  rcases compile_openRunN_result_openBlockTrace_sound hCompile hRun with
+    ⟨hAccepted, hTrace⟩
+  exact ⟨hAccepted, hTrace.resolves_compiled⟩
 
 end OpenAssembly
 end Yul

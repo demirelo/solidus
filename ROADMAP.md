@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:05 CEST.
+Last updated: 2026-06-03 03:18 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -72,10 +72,14 @@ Execution order:
    source-open runner: `Source.OpenTraceResult.to_openBlockTrace` proves that
    an assembled source-open assembly trace replays through emitted target blocks
    as `OpenBlockTraceResult`, so the lower boundary no longer has to pretend
-   CALL passed through the closed assembly source interpreter. The remaining
-   work is proving open preservation from compiler-source/function blocks down
-   to this assembly source-open layer and composing it into the whole-program
-   imported-Yul-to-open-EVM theorem.
+   CALL passed through the closed assembly source interpreter.
+   `Source.OpenTraceResult.of_resolves`,
+   `compile_openRunN_result_openBlockTrace_sound`, and
+   `compile_openRunN_result_compiled_sound` now give the direct open analogue
+   of the closed assembly compile theorem from the real `Assembly.compile?`
+   success fact. The remaining work is proving open preservation from
+   compiler-source/function blocks down to this assembly source-open layer and
+   composing it into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -142,11 +146,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   the intended target-side proof object for emitted-block-aware open compiled
   assembly runs, with current-instruction no-CALL wrappers removing the
   emitted-code classifier side condition for ordinary steps. The assembly
-  source-open runner and `Source.OpenTraceResult.to_openBlockTrace` are now
-  Lean-checked, giving the adjacent assembly source-to-emitted-block open
-  preservation layer. The remaining public gap is open preservation from
-  compiler-open/function blocks down to assembly source-open traces, then the
-  public composition.
+  source-open runner, `Source.OpenTraceResult.to_openBlockTrace`, and the direct
+  `Assembly.compile?` wrappers are now Lean-checked, giving the adjacent
+  assembly source-to-emitted-block open preservation layer. The remaining
+  public gap is open preservation from compiler-open/function blocks down to
+  assembly source-open traces, then the public composition.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
