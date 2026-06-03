@@ -766,6 +766,23 @@ theorem openStepResult_current_prim_call
   rw [hAt]
   exact openStepAtResult_resolves_prim_call hKind hCall response
 
+theorem openStepResult_current_stepAt
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {instr : Assembly.Instr}
+    {trace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hStep :
+      OpenExternal.OpenResultResolves
+        (openStepAtResult program pc instr state) trace result) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      trace result := by
+  unfold openStepResult
+  rw [hAt]
+  exact hStep
+
 theorem openStepResult_resolves_closed_of_no_callCreate
     {program : Assembly.Program} {state : EVMState}
     {result : Assembly.StepResult}
@@ -880,6 +897,44 @@ theorem openRunNResult_current_prim_call_continue
   simpa using
     openRunNResult_resolves_step_running
       (fuel := fuel) hStep hRest
+
+theorem openRunNResult_current_stepAt_running_continue
+    {program : Assembly.Program} {fuel : Nat}
+    {state mid : EVMState} {pc : Nat} {instr : Assembly.Instr}
+    {headTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hStep :
+      OpenExternal.OpenResultResolves
+        (openStepAtResult program pc instr state)
+        headTrace (.ok (.running mid)))
+    (hRest :
+      OpenExternal.OpenResultResolves (openRunNResult program fuel mid)
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      (headTrace ++ tailTrace) result :=
+  openRunNResult_resolves_step_running
+    (fuel := fuel) (openStepResult_current_stepAt hAt hStep) hRest
+
+theorem openRunNResult_current_stepAt_halted
+    {program : Assembly.Program} {fuel : Nat}
+    {state : EVMState} {pc : Nat} {instr : Assembly.Instr}
+    {headTrace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hStep :
+      OpenExternal.OpenResultResolves
+        (openStepAtResult program pc instr state)
+        headTrace (.ok (.halted halt))) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      headTrace (.ok (.halted halt)) :=
+  openRunNResult_resolves_step_halted
+    (fuel := fuel) (openStepResult_current_stepAt hAt hStep)
 
 theorem openRunNResult_resolves_closed_of_no_callCreate
     {program : Assembly.Program} {fuel : Nat} {state : EVMState}
@@ -1218,6 +1273,38 @@ theorem of_closed_no_callCreate
     OpenTraceResult program fuel state [] result :=
   of_resolves
     (openRunNResult_resolves_closed_of_no_callCreate hNoCallCreate hRun)
+
+theorem current_stepAt_running_continue
+    {program : Assembly.Program} {state mid : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr}
+    {headTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hStep :
+      OpenExternal.OpenResultResolves
+        (openStepAtResult program pc instr state)
+        headTrace (.ok (.running mid)))
+    (hRest : OpenTraceResult program fuel mid tailTrace result) :
+    OpenTraceResult program (fuel + 1) state
+      (headTrace ++ tailTrace) result :=
+  OpenTraceResult.stepRunning (openStepResult_current_stepAt hAt hStep)
+    hRest
+
+theorem current_stepAt_halted
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr}
+    {headTrace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hStep :
+      OpenExternal.OpenResultResolves
+        (openStepAtResult program pc instr state)
+        headTrace (.ok (.halted halt))) :
+    OpenTraceResult program (fuel + 1) state headTrace (.halted halt) :=
+  OpenTraceResult.stepHalted (openStepResult_current_stepAt hAt hStep)
 
 theorem current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}

@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:34 CEST.
+Last updated: 2026-06-03 03:39 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -91,8 +91,12 @@ Execution order:
    primitive suspension and assembly source-open primitive instruction stepping
    resolve the same selected one-event trace, and responses preserve the
    compiler/EVM primitive result relation after the EVM instruction `incrPC`.
-   The remaining work is lifting these primitive atoms through expressions,
-   blocks, calls, and control constructs, then composing the result into the
+   `OpenAssembly.Source.openRunNResult_current_stepAt_running_continue` and
+   `OpenLowering.compilerOpenPrimitive_call_openRunNResult_continue` now lift
+   an explicit current assembly step, including the primitive CALL bridge, into
+   the source-open assembly fuel runner with an arbitrary tail trace. The
+   remaining work is lifting these primitive atoms through expressions, blocks,
+   calls, and control constructs, then composing the result into the
    whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
@@ -170,9 +174,12 @@ let/assign CALL scaffolding, or a concrete external-world model.
   non-CALL branches inside the future open proof. `CompilerOpen.Primitive` now
   exposes matching source-side non-CALL/no-CALL empty-trace atoms, and
   `OpenLowering.compilerOpenPrimitive_call_stepAtResult` exposes the checked
-  one-event CALL primitive bridge. The remaining public gap is proving the
-  CALL-capable compiler-open/function-block theorem, then composing the public
-  imported-Yul dispatcher result through it.
+  one-event CALL primitive bridge. Explicit current assembly steps, including
+  CALL, now compose with arbitrary open tail traces through
+  `OpenAssembly.Source.openRunNResult_current_stepAt_running_continue` and
+  `OpenLowering.compilerOpenPrimitive_call_openRunNResult_continue`. The
+  remaining public gap is proving the CALL-capable compiler-open/function-block
+  theorem, then composing the public imported-Yul dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL

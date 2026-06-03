@@ -148,6 +148,89 @@ theorem compilerOpenPrimitive_call_stepAtResult
     ⟨hSource, hTarget,
       CompilerPrimitiveEVMInstructionResultRel.running_incrPC hResponseRel⟩
 
+theorem compilerOpenPrimitive_call_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hShared : evmState.toSharedState = compiler.shared)
+    (kind : OpenExternal.CallKind)
+    (operands : OpenExternal.CallOperands)
+    (baseStack : OpenExternal.Stack)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hAt :
+      Assembly.Program.instrAtPc program
+          (({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State).pc.toNat) =
+        some (pc, Assembly.Instr.prim kind.toBasicOp.toPrimOp)) :
+    ∃ compilerCall :
+        OpenExternal.OpenCall (Objects.Source.State × List Word),
+    ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+      Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+          compiler kind (kind.args operands).reverse =
+        some compilerCall ∧
+      OpenExternal.CallKind.evmOpenCall?
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenExternal.OpenCallRel
+        (fun _ => True)
+        (Reference.SourceBridgeFacts.SourceStateRel.CompilerPrimitiveEVMResultRel
+          baseStack) compilerCall evmCall ∧
+      ∀ (response : OpenExternal.CallResponse)
+        {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel
+            (EvmYul.EVM.State.incrPC (evmCall.resume response)))
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+            prim kind.toBasicOp compiler (kind.args operands).reverse)
+          [{ site := compilerCall.site, response := response }]
+          (.ok (compilerCall.resume response)) ∧
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1)
+            ({ evmState with stack := kind.args operands ++ baseStack }
+              : EvmYul.EVM.State))
+          ({ site := compilerCall.site, response := response } :: tailTrace)
+          result ∧
+        CompilerPrimitiveEVMInstructionResultRel baseStack
+          (compilerCall.resume response)
+          (.running (EvmYul.EVM.State.incrPC
+            (evmCall.resume response))) := by
+  rcases
+      compilerOpenPrimitive_call_stepAtResult
+        (prim := prim) (compiler := compiler) (evmState := evmState)
+        hShared kind operands baseStack program pc with
+    ⟨compilerCall, evmCall, hCompilerCall, hEVMCall, hCallRel, hStep⟩
+  refine ⟨compilerCall, evmCall, hCompilerCall, hEVMCall, hCallRel, ?_⟩
+  intro response tailTrace result hRest
+  rcases hStep response with ⟨hSource, _hStepTarget, hResultRel⟩
+  have hTargetRaw :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program (fuel + 1)
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State))
+        ({ site := evmCall.site, response := response } :: tailTrace)
+        result :=
+    OpenAssembly.Source.openRunNResult_current_prim_call_continue
+      (program := program)
+      (state := ({ evmState with stack := kind.args operands ++ baseStack }
+        : EvmYul.EVM.State))
+      (fuel := fuel) (pc := pc) (op := kind.toBasicOp.toPrimOp)
+      (kind := kind) (call := evmCall)
+      hAt (callKind_ofEVMOperation_toBasicOp_toPrimOp kind) hEVMCall
+      response hRest
+  have hTarget :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program (fuel + 1)
+          ({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State))
+        ({ site := compilerCall.site, response := response } :: tailTrace)
+        result := by
+    simpa [hCallRel.sameSite] using hTargetRaw
+  exact ⟨hSource, hTarget, hResultRel⟩
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)
