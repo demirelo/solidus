@@ -4541,6 +4541,54 @@ theorem openRunNResult_structured_callSite_callEntry_continue
     Structured.Preservation.ProcedurePreservation.callSiteCode,
     List.append_assoc] using hRun
 
+def codeSegment_procSegment_bodyCode
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite}
+    {asm : Assembly.Program}
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites)) :
+    Structured.Preservation.CodeSegment asm
+      (Structured.Preservation.ProcedurePreservation.bodyCode program proc
+        bodySupply) := by
+  let bodyCode :=
+    Structured.Preservation.ProcedurePreservation.bodyCode program proc
+      bodySupply
+  let dispatchCode :=
+    Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+      dispatchSupply
+  let entryCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.entry proc.name)]
+  let exitCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)]
+  have hFitsFull :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom procSeg.pre
+        (entryCode ++ bodyCode ++ exitCode ++ dispatchCode) := by
+    simpa [entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hFits
+  have hFitsAfterEntry :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (procSeg.pre ++ entryCode)
+        (bodyCode ++ (exitCode ++ dispatchCode)) := by
+    simpa [List.append_assoc] using
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := procSeg.pre) (first := entryCode)
+        (second := bodyCode ++ exitCode ++ dispatchCode) hFitsFull
+  exact
+    { pre := procSeg.pre ++ entryCode
+      post := exitCode ++ dispatchCode ++ procSeg.post
+      hAsm := by
+        simpa [entryCode, exitCode, bodyCode, dispatchCode,
+          Structured.Preservation.ProcedurePreservation.procSegment,
+          List.append_assoc] using procSeg.hAsm
+      hFits :=
+        Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+          (pre := procSeg.pre ++ entryCode) (first := bodyCode)
+          (second := exitCode ++ dispatchCode) hFitsAfterEntry }
+
 theorem structured_dispatch_forProc_usesCallCreate_false
     (proc : Structured.Proc) (sites : List Structured.CallSite)
     (supply : Structured.LabelSupply) :
@@ -4589,6 +4637,78 @@ theorem openRunNResult_source_label_running_continue
     OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
       hAt (by simp [Assembly.Instr.usesCallCreate]) hStep
       (hRest afterLabel hRelAfter hPcAfter)
+
+theorem openRunNResult_proc_entry_label_continue
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite}
+    {source : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word}
+    {asm : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites))
+    (hPc : target.pc = Structured.Preservation.CodeSegment.startPc procSeg)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hRest :
+      ∀ afterEntry : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel source afterEntry tokens →
+        afterEntry.pc =
+          Structured.Preservation.CodeSegment.startPc
+            (codeSegment_procSegment_bodyCode procSeg) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm fuel afterEntry)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult asm (fuel + 1) target)
+      tailTrace result := by
+  let bodyCode :=
+    Structured.Preservation.ProcedurePreservation.bodyCode program proc
+      bodySupply
+  let dispatchCode :=
+    Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+      dispatchSupply
+  let entryCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.entry proc.name)]
+  let exitCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)]
+  have hAsm :
+      asm =
+        procSeg.pre ++ entryCode ++ bodyCode ++ exitCode ++ dispatchCode ++
+          procSeg.post := by
+    simpa [entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hAsm
+  have hFitsEntry :
+      Structured.Preservation.PCFits procSeg.pre :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.start procSeg.hFits
+  have hRun :=
+    openRunNResult_source_label_running_continue
+      (source := source) (target := target) (tokens := tokens)
+      (label := Structured.ProcLabel.entry proc.name)
+      (pre := procSeg.pre)
+      (post := bodyCode ++ exitCode ++ dispatchCode ++ procSeg.post)
+      (fuel := fuel) (tailTrace := tailTrace) (result := result)
+      hFitsEntry
+      (by simpa [Structured.Preservation.CodeSegment.startPc] using hPc)
+      hRel
+      (by
+        intro afterEntry hRelAfter hPcAfter
+        have hPcAfter' :
+            afterEntry.pc =
+              Structured.Preservation.CodeSegment.startPc
+                (codeSegment_procSegment_bodyCode procSeg) := by
+          simpa [codeSegment_procSegment_bodyCode,
+            Structured.Preservation.CodeSegment.startPc, entryCode,
+            bodyCode, dispatchCode, exitCode] using hPcAfter
+        simpa [hAsm, entryCode, exitCode, bodyCode, dispatchCode,
+          List.append_assoc] using hRest afterEntry hRelAfter hPcAfter')
+  simpa [hAsm, entryCode, exitCode, bodyCode, dispatchCode, List.append_assoc]
+    using hRun
 
 theorem openRunNResult_exit_label_then_dispatch_continue
     {proc : Structured.Proc}
