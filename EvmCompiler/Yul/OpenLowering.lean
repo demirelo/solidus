@@ -229,6 +229,15 @@ theorem codeSegment_right_startPc_eq_left_fallthroughPc
         (Structured.Preservation.CodeSegment.left segment) := by
   rfl
 
+theorem codeSegment_fallthroughPc_empty
+    {asm : Assembly.Program}
+    (segment : Structured.Preservation.CodeSegment asm []) :
+    Structured.Preservation.CodeSegment.fallthroughPc segment =
+      Structured.Preservation.CodeSegment.startPc segment := by
+  rcases segment with ⟨pre, post, hAsm, hFits⟩
+  simp [Structured.Preservation.CodeSegment.fallthroughPc,
+    Structured.Preservation.CodeSegment.startPc]
+
 theorem structuredBlock_compileFromCtx_code_cons_code_eq
     (ctx : Structured.CompileContext) (supply : Structured.LabelSupply)
     (code : Structured.Code) (rest : List Structured.Stmt) :
@@ -5742,6 +5751,160 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tai
       hPrim hOwned hSupported hAccess hValue hCtxLayout hNoDup hName
       hBound hSwap program tailFuel headSegment hHeadPc hPrefixRel
       hTailForHead hResolve
+
+def FunctionsBlockCompiledOutcomeRel
+    (asm : Assembly.Program) (ctx : Structured.CompileContext)
+    (fallthroughPc : Word) (returns layout : List Name)
+    (hiddenReturns : List Structured.ReturnDest) (tokens : List Word)
+    (source : Functions.Source.Outcome)
+    (target : Assembly.StepResult) : Prop :=
+  ∃ direct : Locals.Outcome,
+    Functions.SourceDirect.BlockScopedOutcomeRel returns layout hiddenReturns
+      source direct ∧
+    Structured.Preservation.CompiledOutcomeRel asm ctx fallthroughPc direct
+      target tokens
+
+namespace FunctionsBlockCompiledOutcomeRel
+
+theorem regular_nil
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {fallthroughPc : Word} {returns layout : List Name}
+    {source : Objects.Source.State} {target : EvmYul.EVM.State}
+    (hRel :
+      Locals.SourceLowering.StackPrefixRel layout source [] target)
+    (hPc : target.pc = fallthroughPc) :
+    FunctionsBlockCompiledOutcomeRel asm ctx fallthroughPc returns layout
+      [] [] (Functions.Source.Outcome.regular source)
+      (.running target) := by
+  let directState : Structured.RunState := Structured.RunState.initial target
+  have hLocal :
+      Locals.SourceLowering.StateRel layout source directState := by
+    exact
+      Locals.SourceLowering.StackPrefixRel.to_stateRel_nil
+        (target := directState)
+        (by simpa [directState, Structured.RunState.initial] using hRel)
+  have hDirectState :
+      Functions.SourceDirect.StateRel layout [] source directState := by
+    exact ⟨hLocal, rfl⟩
+  refine
+    ⟨Locals.Outcome.regular directState,
+      Functions.SourceDirect.BlockScopedOutcomeRel.regular hDirectState,
+      ?_⟩
+  exact
+    Structured.Preservation.CompiledOutcomeRel.regular
+      (Structured.Preservation.Frame.stateRel_initial target) hPc
+
+end FunctionsBlockCompiledOutcomeRel
+
+theorem functionsBlock_toLocals_compileOpen_nil_inv
+    {returns : List Name} {ctx finalCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          (Functions.Block.toLocals returns { stmts := [] }) =
+        some (compiledStmts, finalCtx)) :
+    compiledStmts = [] ∧ finalCtx = ctx := by
+  have h :
+      compiledStmts = [] ∧ ctx = finalCtx := by
+    simpa [Functions.Block.toLocals, Functions.StmtList.toLocals,
+      Locals.Block.compileOpen] using hCompile
+  exact ⟨h.1, h.2.symm⟩
+
+theorem compilerOpenFunctionsBlock_nil_openRunNResult_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    {programSource : Functions.Program}
+    {sourceCtx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {returns : List Name}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns { stmts := [] }) =
+        some (compiledStmts, finalLocalsCtx))
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx sourceFuel { stmts := [] } compiler)
+        trace (.ok (sourceOutcome, ctxAfter))) :
+    ∃ targetFuel targetResult,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program targetFuel state)
+        trace (.ok targetResult) ∧
+      FunctionsBlockCompiledOutcomeRel program structuredCtx
+        (Structured.Preservation.CodeSegment.fallthroughPc segment)
+        returns layout [] [] sourceOutcome targetResult := by
+  rcases functionsBlock_toLocals_compileOpen_nil_inv hCompileBlock with
+    ⟨hCompiledStmts, _hFinalCtx⟩
+  cases sourceFuel with
+  | zero =>
+      rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+        at hResolve
+      cases hResolve
+  | succ sourceFuel' =>
+      rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+        at hResolve
+      cases hResolve
+      have hFallthrough :
+          state.pc =
+            Structured.Preservation.CodeSegment.fallthroughPc segment := by
+        have hSegmentCode :
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured compiledStmts }
+              structuredCtx supply).code = [] := by
+          simp [hCompiledStmts, Expressions.StmtList.toStructured,
+            Structured.Block.compileFromCtx]
+        let emptySegment :
+            Structured.Preservation.CodeSegment program [] :=
+          Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+        have hEmpty :
+            Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+              Structured.Preservation.CodeSegment.startPc emptySegment :=
+          codeSegment_fallthroughPc_empty emptySegment
+        have hStart :
+            Structured.Preservation.CodeSegment.startPc emptySegment =
+              Structured.Preservation.CodeSegment.startPc segment := by
+          simp [emptySegment, Structured.Preservation.CodeSegment.cast_code,
+            Structured.Preservation.CodeSegment.startPc]
+        have hFall :
+            Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+              Structured.Preservation.CodeSegment.fallthroughPc segment := by
+          cases segment with
+          | mk pre post hAsm hFits =>
+              simp [emptySegment,
+                Structured.Preservation.CodeSegment.cast_code,
+                Structured.Preservation.CodeSegment.fallthroughPc,
+                hSegmentCode]
+        calc
+          state.pc = Structured.Preservation.CodeSegment.startPc segment := hPc
+          _ = Structured.Preservation.CodeSegment.startPc emptySegment :=
+            hStart.symm
+          _ = Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+            hEmpty.symm
+          _ = Structured.Preservation.CodeSegment.fallthroughPc segment :=
+            hFall
+      refine ⟨0, .running state, ?_, ?_⟩
+      · exact OpenExternal.OpenResultResolves.done
+      · exact
+          FunctionsBlockCompiledOutcomeRel.regular_nil
+            (asm := program) (ctx := structuredCtx) (returns := returns)
+            (layout := layout) hPrefixRel hFallthrough
 
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
