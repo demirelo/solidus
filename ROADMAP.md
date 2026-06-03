@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:59 CEST.
+Last updated: 2026-06-03 04:07 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -125,6 +125,15 @@ Execution order:
    recursive argument-sequence lowering reaches the primitive instruction, the
    primitive dispatcher handles the source open resolution, and the target
    trace composes as argument trace plus primitive trace plus arbitrary tail.
+   The non-recursive expression bases and empty expression-sequence base are
+   now checked too:
+   `OpenLowering.compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue`,
+   `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue`,
+   and
+   `OpenLowering.compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue`.
+   The next adjacent expression proof step is the generic `ExprSeq.cons`
+   composition theorem that threads the checked head continuation into the
+   recursive tail continuation.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.

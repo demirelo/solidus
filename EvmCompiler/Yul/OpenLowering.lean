@@ -1013,6 +1013,221 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
     subst trace
     simpa [List.append_assoc] using hFull
 
+theorem compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    (value : Word)
+    (stackPrefix : List Word)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.push value))
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.lit value) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
+          (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+  cases hResolve
+  rcases hPrefixRel with ⟨hShared, baseStack, hStack, hStackRel⟩
+  let evmAfter :=
+    state.replaceStackAndIncrPC (state.stack.push value) (pcΔ := 33)
+  have hStep :
+      Assembly.Source.stepAtResult program pc (.push value) state =
+        .ok (.running evmAfter) := by
+    simp [Assembly.Source.stepAtResult, Assembly.Source.stepAt,
+      Assembly.Instr.haltKind?, Assembly.Target.stepInstr, evmAfter]
+  have hOpenStep :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program pc (.push value) state)
+        [] (.ok (.running evmAfter)) :=
+    OpenAssembly.Source.openStepAtResult_resolves_closed_of_non_prim
+      (program := program) (pc := pc) (instr := .push value)
+      (state := state) (result := .running evmAfter)
+      (by intro op hEq; cases hEq) hStep
+  refine ⟨evmAfter, ?_, ?_⟩
+  · constructor
+    · simpa [evmAfter, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] using hShared
+    · refine ⟨baseStack, ?_, hStackRel⟩
+      simp [evmAfter, hStack, EvmYul.Stack.push,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC]
+  · intro tailTrace result hRest
+    simpa using
+      OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+        (program := program) (fuel := fuel) (state := state)
+        (mid := evmAfter) (pc := pc) (instr := .push value)
+        hAt hOpenStep hRest
+
+theorem compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {name : Name} {idx offset : Nat} {op : Structured.BasicOp}
+    (hName : layout[idx]? = some name)
+    (stackPrefix : List Word)
+    (hPrefixLen : stackPrefix.length = offset)
+    (hBound : offset + idx + 1 ≤ 16)
+    (hDup : Locals.StackOp.dup? (offset + idx + 1) = some op)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op.toPrimOp))
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.var name) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1) state)
+          (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+  cases hLookup : compiler.vars name with
+  | none =>
+      simp [hLookup, Reference.SourceBridgeFacts.CompilerOpen.invalid] at hResolve
+      cases hResolve
+  | some value =>
+      simp [hLookup] at hResolve
+      cases hResolve
+      rcases hPrefixRel with ⟨hShared, baseStack, hStack, hStackRel⟩
+      have hBaseAt : baseStack[idx]? = some value := by
+        have hLookupBase := hStackRel.2 hName
+        simpa [hLookup] using hLookupBase
+      subst offset
+      have hStackAt :
+          state.stack[stackPrefix.length + idx]? = some value := by
+        rw [hStack]
+        rw [List.getElem?_append_right]
+        · simpa using hBaseAt
+        · simp
+      let evmAfter := state.replaceStackAndIncrPC (value :: state.stack)
+      let depth := stackPrefix.length + (idx + 1)
+      have hDupDepth : Locals.StackOp.dup? depth = some op := by
+        simpa [depth, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+          hDup
+      have hNoCallCreate : op.toPrimOp.isCallCreate = false :=
+        Locals.CompilerFacts.StackOp.dup?_not_callCreate depth hDupDepth
+      have hDupValue :
+          EvmYul.dup depth state = .ok evmAfter := by
+        have hDupValue' :=
+          Locals.Direct.evm_dup_succ_get? (state := state)
+            (idx := stackPrefix.length + idx) hStackAt
+        simpa [depth, evmAfter, Nat.add_assoc, Nat.add_comm,
+          Nat.add_left_comm] using hDupValue'
+      have hStepOp : Structured.BasicOp.step op state = .ok evmAfter := by
+        have hOne : 1 ≤ depth := by
+          unfold depth
+          omega
+        have hDepthBound : depth ≤ 16 := by
+          simpa [depth, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+            hBound
+        rcases
+            Locals.Direct.stackOp_dup?_step_eq_dup
+              (n := depth) hOne hDepthBound state with
+          ⟨op', hDup', hStepEq⟩
+        have hOp : op = op' := by
+          rw [hDupDepth] at hDup'
+          cases hDup'
+          rfl
+        rw [hOp, hStepEq]
+        exact hDupValue
+      have hStepAt :
+          Assembly.Source.stepAt program pc (.prim op.toPrimOp) state =
+            .ok evmAfter := by
+        simpa [Assembly.Source.stepAt, Structured.BasicOp.step] using hStepOp
+      have hStepResult :
+          Assembly.Source.stepAtResult program pc (.prim op.toPrimOp) state =
+            .ok (.running evmAfter) := by
+        simp [Assembly.Source.stepAtResult, hStepAt,
+          basicOp_toPrimOp_haltKind?_none op]
+      have hOpenStep :
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openStepAtResult program pc
+              (.prim op.toPrimOp) state)
+            [] (.ok (.running evmAfter)) :=
+        OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+          (program := program) (pc := pc) (op := op.toPrimOp)
+          (state := state) (result := .running evmAfter)
+          hNoCallCreate hStepResult
+      refine ⟨evmAfter, ?_, ?_⟩
+      · constructor
+        · simpa [evmAfter, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC] using hShared
+        · refine ⟨baseStack, ?_, hStackRel⟩
+          simp [evmAfter, hStack, EvmYul.EVM.State.replaceStackAndIncrPC,
+            EvmYul.EVM.State.incrPC]
+      · intro tailTrace result hRest
+        simpa using
+          OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+            (program := program) (fuel := fuel) (state := state)
+            (mid := evmAfter) (pc := pc) (instr := .prim op.toPrimOp)
+            hAt hOpenStep hRest
+
+theorem compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    (stackPrefix : List Word)
+    (program : Assembly.Program) (fuel : Nat)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+          prim Locals.ExprSeq.nil compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel state)
+          (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+  cases hResolve
+  refine ⟨state, ?_, ?_⟩
+  · simpa using hPrefixRel
+  · intro tailTrace result hRest
+    simpa using hRest
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)
