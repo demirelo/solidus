@@ -274571,6 +274571,165 @@ theorem sourceOpenDispatcherBodyPath_canonical
     (hChecked hCovers hLowerBody hInitial hResolves hDone hAdmissible
       minimumTargetFuel)
 
+/--
+Selected dispatcher-block result from the CALL top package.
+
+This is the public source-to-compiler-open boundary currently available for
+CALL: the imported Yul dispatcher block and the compiler-open root dispatcher
+body follow the same selected finite external-response trace and end in related
+source outcomes.  The remaining public wiring gap is below this theorem, at the
+Assembly/EVM open execution layer.
+-/
+theorem sourceOpenDispatcherBlockResult_canonical
+    {cfg : Reference.StateRelConfig}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {trace : OpenExternal.OpenTrace}
+    {sourceResult : Except Reference.Exception Reference.State}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured outcomeRel program asm
+        target shared store sourceFuel initial referenceResult)
+    (hBodyFuelAdequate :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo
+        cfg program.contract sourceFuel)
+    (hResolveDispatcher :
+      OpenExternal.OpenResultResolves
+        (OpenExternal.YulOpenResult.toOpenResult
+          (OpenExternal.YulOpen.exec sourceFuel.succ
+            (.Block [program.contract.dispatcher]) (some program.contract)
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore))))
+        trace sourceResult)
+    (hRelatable :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable
+        sourceResult)
+    (hSupported :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported
+        Functions.Source.Ctx.initial [] [] sourceResult)
+    (hResponses :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceOpenTraceResponsesAdmissible
+        cfg trace)
+    (minimumTargetFuel : Nat) :
+    ∃ functionProgram : Functions.Program,
+    ∃ targetFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ ctxAfter : Functions.Source.Ctx,
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] } ∧
+      minimumTargetFuel ≤ targetFuel ∧
+      OpenExternal.OpenResultResolves
+        (EvmCompiler.Yul.Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          Locals.Source.PrimitiveSemantics.structured functionProgram
+          Functions.Source.Ctx.initial targetFuel functionProgram.body
+          (Functions.Source.Program.initialState initial.toSharedState))
+        trace (.ok (sourceOutcome, ctxAfter)) ∧
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg []
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        sourceResult sourceOutcome := by
+  let installedShared : EvmYul.SharedState .Yul :=
+    { shared with
+      executionEnv :=
+        { shared.executionEnv with code := program.contract } }
+  let sourceInitial : Objects.Source.State :=
+    Functions.Source.Program.initialState initial.toSharedState
+  have hInitialRel :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (.Ok installedShared (default : EvmYul.Yul.VarStore))
+        sourceInitial := by
+    exact
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceStateRel.ok
+        hTop.initialShared
+        (by
+          intro name hMem
+          cases hMem)
+  have hInitialExact :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceStateExactRel cfg []
+        (.Ok installedShared (default : EvmYul.Yul.VarStore))
+        sourceInitial :=
+    EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceStateExactRel.of_initial_scope_default
+      (by rfl) hInitialRel
+  let selectedAllowed :
+      Except Reference.Exception Reference.State → Prop :=
+    fun candidate =>
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.restrictSourceResultTo
+        (default : EvmYul.Yul.VarStore) candidate = sourceResult
+  have hAllowedSelected :
+      ∀ {candidate}, selectedAllowed candidate →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable
+          candidate := by
+    intro candidate hCandidate
+    apply
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable.of_restrictStoreTo
+        (scope := (default : EvmYul.Yul.VarStore))
+    change
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable
+        (EvmCompiler.Yul.Reference.SourceBridgeFacts.restrictSourceResultTo
+          (default : EvmYul.Yul.VarStore) candidate)
+    have hEq :
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.restrictSourceResultTo
+          (default : EvmYul.Yul.VarStore) candidate = sourceResult := by
+      simpa [selectedAllowed] using hCandidate
+    rw [hEq]
+    exact hRelatable
+  have hSupportedSelected :
+      ∀ {candidate}, selectedAllowed candidate →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported
+          Functions.Source.Ctx.initial [] [] candidate := by
+    intro candidate hCandidate
+    apply
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported.of_restrictStoreTo
+        (scope := (default : EvmYul.Yul.VarStore))
+    change
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported
+        Functions.Source.Ctx.initial [] []
+        (EvmCompiler.Yul.Reference.SourceBridgeFacts.restrictSourceResultTo
+          (default : EvmYul.Yul.VarStore) candidate)
+    have hEq :
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.restrictSourceResultTo
+          (default : EvmYul.Yul.VarStore) candidate = sourceResult := by
+      simpa [selectedAllowed] using hCandidate
+    rw [hEq]
+    exact hSupported
+  rcases
+      hTop.sourceOpenDispatcherBodyPath_canonical
+        hBodyFuelAdequate hAllowedSelected hSupportedSelected with
+    ⟨functionProgram, hToObjects, hSound⟩
+  rcases
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_target_block_result
+        (cfg := cfg) (layout := []) (outcomeLayout := [])
+        (terminalRel :=
+          RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (revertRel :=
+          RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        (prim := Locals.Source.PrimitiveSemantics.structured)
+        (program := functionProgram) (ctx := Functions.Source.Ctx.initial)
+        (sourceFuel := sourceFuel)
+        (sourceStmts := [program.contract.dispatcher])
+        (codeOverride := some program.contract)
+        (lowerBlock := functionProgram.body)
+        (shared := installedShared)
+        (store := (default : EvmYul.Yul.VarStore))
+        (compiler := sourceInitial) (trace := trace)
+        (sourceResult := sourceResult) hSound hInitialExact
+        (by simpa [installedShared] using hResolveDispatcher) hSupported
+        hResponses minimumTargetFuel with
+    ⟨targetFuel, sourceOutcome, ctxAfter, hMinimum, hTarget, hOutcome⟩
+  exact
+    ⟨functionProgram, targetFuel, sourceOutcome, ctxAfter, hToObjects,
+      hMinimum, by simpa [sourceInitial] using hTarget, hOutcome⟩
+
 end RecursiveBridgeCALLTopAssumptions
 
 /--

@@ -49,8 +49,10 @@ Execution order:
 4. [ ] Wire the CALL-capable frontier into the preferred public compiler theorem.
    The top CALL assumption package now exposes
    `RecursiveBridgeCALLTopAssumptions.callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical`;
-   the remaining work is composing that frontier into the whole-program
-   imported-Yul-to-open-EVM theorem.
+   the source-to-compiler-open dispatcher boundary is now exposed by
+   `RecursiveBridgeCALLTopAssumptions.sourceOpenDispatcherBlockResult_canonical`.
+   The remaining work is composing that boundary below the compiler-open layer
+   into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -109,6 +111,8 @@ let/assign CALL scaffolding, or a concrete external-world model.
   canonical open frontiers without a public callee oracle.
 - [ ] Wire the preferred public Yul preservation theorem to the CALL-capable
   frontier, while leaving the no-CALL theorem only as a fallback/special case.
+  The source-to-compiler-open dispatcher-block result is now wired; the
+  remaining public gap is the Assembly/EVM open target execution layer.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
