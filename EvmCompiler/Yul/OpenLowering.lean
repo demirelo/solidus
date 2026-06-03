@@ -1134,6 +1134,45 @@ theorem functionsBlock_toLocals_compileOpen_call_cons_parts_inv
                 assignStmts ++ restStmts := by
             simp [List.append_assoc]⟩
 
+theorem functionsProgram_toExpressions?_structured_proc_lookup
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    {name : Name} {fn : Functions.FunDef}
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (hFind :
+      Functions.FunList.find? name programSource.functions = some fn) :
+    ∃ exprProc,
+      Expressions.ProcList.lookup? name lower.procs = some exprProc ∧
+        (Functions.FunDef.toLocalsProc fn).toExpressions? = some exprProc ∧
+        Structured.ProcList.lookup? name lower.toStructured.procs =
+          some exprProc.toStructured := by
+  have hLowerLocals :
+      (Functions.Program.toLocals programSource).toExpressions? =
+        some lower := by
+    simpa [Functions.Program.toExpressions?] using hLower
+  have hLowerProcs :
+      Locals.ProcList.toExpressions?
+          (Functions.Program.toLocals programSource).procs =
+        some lower.procs :=
+    Locals.Program.procs_toExpressions_of_toExpressions? hLowerLocals
+  have hLocalLookup :
+      Locals.Direct.ProcList.lookup? name
+          (Functions.Program.toLocals programSource).procs =
+        some (Functions.FunDef.toLocalsProc fn) := by
+    simpa [Functions.Program.toLocals] using
+      Functions.FunList.lookup_toLocals
+        (name := name) (functions := programSource.functions) hFind
+  rcases
+      Locals.Direct.ProcList.lookup?_toExpressions?
+        hLowerProcs hLocalLookup with
+    ⟨exprProc, hExprLookup, hProcLower⟩
+  have hStructuredLookup :
+      Structured.ProcList.lookup? name lower.toStructured.procs =
+        some exprProc.toStructured := by
+    have hLookupMap :=
+      Expressions.ProcList.lookup?_toStructured name lower.procs
+    simpa [Expressions.Program.toStructured, hExprLookup] using hLookupMap
+  exact ⟨exprProc, hExprLookup, hProcLower, hStructuredLookup⟩
+
 theorem compilerOpenFunctionsArgList_compileOpen_structured_next
     {args : List (Functions.Expr 1)}
     {localsCtx finalLocalsCtx : Locals.Ctx}
