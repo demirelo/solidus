@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 06:46 CEST.
+Last updated: 2026-06-03 06:52 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -89,7 +89,12 @@ Execution order:
    `Source.openRunNResult_current_no_call_running_continue_of_current_instr`
    and `Source.openRunNResult_current_no_call_halted_of_current_instr`, which
    let internal procedure-call prologue/return-site instructions compose on the
-   empty trace without requiring the whole assembly program to be no-CALL. The
+   empty trace without requiring the whole assembly program to be no-CALL.
+   `Yul.OpenLowering` now also has checked structured-lowering adapters
+   `openRunNResult_source_local_instr_no_call_running_continue` and
+   `openRunNResult_source_jump_no_call_running_continue`, preparing the
+   generated procedure-call `PUSH`/stack-shuffle/`JUMP` prologue to replay on
+   the empty trace before the recursive open callee-body proof. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in

@@ -1732,6 +1732,100 @@ theorem codeSegment_structured_call_compile_callSiteCode_of_lookup
           Structured.Preservation.CodeSegment.cast_code,
           Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
 
+theorem openRunNResult_source_local_instr_no_call_running_continue
+    {pre post : Assembly.Program} {instr : Assembly.Instr}
+    {state mid : EvmYul.EVM.State}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hLocal :
+      Structured.Preservation.StackShuffle.SourceLocalInstr instr)
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hNoHalt : instr.haltKind? = none)
+    (hFit : Structured.Preservation.PCFits pre)
+    (hPc : state.pc = Assembly.Program.pcAfter pre)
+    (hStep :
+      Assembly.Target.stepInstr
+        (Structured.Preservation.StackShuffle.targetInstr instr) state =
+        .ok mid)
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult
+          (pre ++ [instr] ++ post) fuel mid)
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ [instr] ++ post) (fuel + 1) state)
+      tailTrace result := by
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [instr] ++ post) state.pc.toNat =
+        some (Assembly.Program.byteLength pre, instr) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons pre post instr 0
+  have hClosed :
+      Assembly.Source.stepResult (pre ++ [instr] ++ post) state =
+        .ok (.running mid) :=
+    Structured.Preservation.StackShuffle.source_stepResult_local
+      hLocal hNoHalt hFit hPc hStep
+  exact
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt hNoInstr hClosed hRest
+
+theorem openRunNResult_source_jump_no_call_running_continue
+    {pre post : Assembly.Program} {label : Assembly.Label}
+    {state : EvmYul.EVM.State} {dest : Nat}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFit : Structured.Preservation.PCFits pre)
+    (hPc : state.pc = Assembly.Program.pcAfter pre)
+    (hLabel :
+      Assembly.Program.labelPc
+        (pre ++ [Assembly.Instr.jump label] ++ post) label = some dest)
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult
+          (pre ++ [Assembly.Instr.jump label] ++ post) fuel
+          (Assembly.Source.jumpPc dest state))
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ [Assembly.Instr.jump label] ++ post) (fuel + 1) state)
+      tailTrace result := by
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.jump label] ++ post)
+          state.pc.toNat =
+        some (Assembly.Program.byteLength pre,
+          Assembly.Instr.jump label) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre post (Assembly.Instr.jump label) 0
+  have hClosed :
+      Assembly.Source.stepResult
+          (pre ++ [Assembly.Instr.jump label] ++ post) state =
+        .ok (.running (Assembly.Source.jumpPc dest state)) := by
+    unfold Assembly.Source.stepResult
+    rw [hAt]
+    unfold Assembly.Source.stepAtResult Assembly.Source.stepAt
+    have hLabel' :
+        Assembly.Program.labelPc
+            (pre ++ Assembly.Instr.jump label :: post) label =
+          some dest := by
+      simpa using hLabel
+    simp [hLabel', Assembly.Source.invalid, Bind.bind, Except.bind,
+      Assembly.Instr.haltKind?]
+    rfl
+  have hNoInstr :
+      Assembly.Instr.usesCallCreate (Assembly.Instr.jump label) = false := by
+    simp [Assembly.Instr.usesCallCreate]
+  exact
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt hNoInstr hClosed hRest
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
