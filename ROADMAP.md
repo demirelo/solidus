@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:53 CEST.
+Last updated: 2026-06-03 04:59 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -207,8 +207,14 @@ Execution order:
    source-open `evalOne` bind into the generic expression trace, and
    `OpenLowering.compilerOpenLocalsExpr_evalOne_insert_openRunNResult_continue_fallthrough_of_compileCode`
    turns a one-result expression into a fresh source binding without adding a
-   CALL-specific let lemma. The remaining work is lifting this statement
-   boundary through assignment slot updates, statement/block sequencing,
+   CALL-specific let lemma. Assignment slot updates are now checked as the
+   same kind of generic composition:
+   `OpenLowering.compilerOpenAssignTail_stackPrefix_openRunNResult_continue_fallthrough`
+   runs the target-only `SWAPn`/`POP` tail on the empty trace and updates the
+   source-layout store relation, while
+   `OpenLowering.compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode`
+   composes that tail after a one-result RHS expression trace. The remaining
+   work is lifting this statement boundary through statement/block sequencing,
    function calls, loops, switch/conditionals, and then composing the result
    into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
