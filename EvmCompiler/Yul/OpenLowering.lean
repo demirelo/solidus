@@ -9871,6 +9871,19 @@ theorem sourceDirect_prefixedStateRel_splitArgs_callerBase
     · simpa [callerBase, Structured.RunState.withEVM] using hReturns
   exact ⟨callerBase, hSplit, hBaseRel, by simpa [hCallerStack] using hStack⟩
 
+theorem sourceDirect_returnedStackRel_of_shared_eq
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Objects.Source.State}
+    {values : List Word} {target : Locals.RunState}
+    (hRel :
+      Functions.SourceDirect.ReturnedStackRel hiddenReturns source values
+        target)
+    (hShared : source.shared = source'.shared) :
+    Functions.SourceDirect.ReturnedStackRel hiddenReturns source' values
+      target := by
+  rcases hRel with ⟨hTargetShared, hStack, hReturns⟩
+  exact ⟨hTargetShared.trans hShared, hStack, hReturns⟩
+
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
     {layout : List Name} {source : Objects.Source.State}
     {state : EvmYul.EVM.State}
