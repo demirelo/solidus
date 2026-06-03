@@ -47,6 +47,14 @@ theorem callKind_ofEVMOperation_toBasicOp_toPrimOp
       kind.toBasicOp.toPrimOp.toEVM = some kind := by
   cases kind <;> rfl
 
+theorem basicOp_eq_toBasicOp_of_callKind
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = some kind) :
+    op = kind.toBasicOp := by
+  cases op <;> cases kind <;>
+    simp [OpenExternal.CallKind.ofBasicOp?,
+      OpenExternal.CallKind.toBasicOp] at hKind ⊢
+
 theorem basicOp_toPrimOp_haltKind?_none (op : Structured.BasicOp) :
     (Assembly.Instr.prim op.toPrimOp).haltKind? = none := by
   cases op <;> rfl
@@ -372,6 +380,93 @@ theorem compilerOpenPrimitive_call_openRunNResult_continue
         result := by
     simpa [hCallRel.sameSite] using hTargetRaw
   exact ⟨hSource, hTarget, hResultRel⟩
+
+theorem compilerOpenPrimitive_callKind_openRunNResult_continue
+    {prim : Objects.Source.PrimitiveSemantics}
+    {compiler : Objects.Source.State}
+    {evmState : EvmYul.EVM.State}
+    (hShared : evmState.toSharedState = compiler.shared)
+    {op : Structured.BasicOp} {kind : OpenExternal.CallKind}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (values : List Word)
+    (hValuesLen :
+      values.length = Expressions.Structured.BasicOp.inputs op)
+    (baseStack : OpenExternal.Stack)
+    (program : Assembly.Program) (pc fuel : Nat)
+    (hAt :
+      Assembly.Program.instrAtPc program
+          (({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State).pc.toNat) =
+        some (pc, Assembly.Instr.prim op.toPrimOp)) :
+    ∃ operands : OpenExternal.CallOperands,
+    ∃ compilerCall :
+        OpenExternal.OpenCall (Objects.Source.State × List Word),
+    ∃ evmCall : OpenExternal.OpenCall EvmYul.EVM.State,
+      values = (kind.args operands).reverse ∧
+      Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+          compiler kind values =
+        some compilerCall ∧
+      OpenExternal.CallKind.evmOpenCall?
+          ({ evmState with stack := values.reverse ++ baseStack }
+            : EvmYul.EVM.State) kind =
+        some evmCall ∧
+      OpenExternal.OpenCallRel
+        (fun _ => True)
+        (Reference.SourceBridgeFacts.SourceStateRel.CompilerPrimitiveEVMResultRel
+          baseStack) compilerCall evmCall ∧
+      ∀ (response : OpenExternal.CallResponse)
+        {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel
+            (EvmYul.EVM.State.incrPC (evmCall.resume response)))
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+            prim op compiler values)
+          [{ site := compilerCall.site, response := response }]
+          (.ok (compilerCall.resume response)) ∧
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (fuel + 1)
+            ({ evmState with stack := values.reverse ++ baseStack }
+              : EvmYul.EVM.State))
+          ({ site := compilerCall.site, response := response } :: tailTrace)
+          result ∧
+        CompilerPrimitiveEVMInstructionResultRel baseStack
+          (compilerCall.resume response)
+          (.running (EvmYul.EVM.State.incrPC
+            (evmCall.resume response))) := by
+  have hOp : op = kind.toBasicOp :=
+    basicOp_eq_toBasicOp_of_callKind hKind
+  subst op
+  have hLen : values.length = kind.inputArity := by
+    simpa using hValuesLen
+  rcases
+      OpenExternal.CallKind.exists_operands_of_reverse_args_length
+        kind hLen with
+    ⟨operands, hValues⟩
+  subst values
+  have hAtCall :
+      Assembly.Program.instrAtPc program
+          (({ evmState with stack := kind.args operands ++ baseStack }
+            : EvmYul.EVM.State).pc.toNat) =
+        some (pc, Assembly.Instr.prim kind.toBasicOp.toPrimOp) := by
+    simpa [List.reverse_reverse] using hAt
+  rcases
+      compilerOpenPrimitive_call_openRunNResult_continue
+        (prim := prim) (compiler := compiler) (evmState := evmState)
+        hShared kind operands baseStack program pc fuel hAtCall with
+    ⟨compilerCall, evmCall, hCompilerCall, hEVMCall, hCallRel, hCont⟩
+  refine
+    ⟨operands, compilerCall, evmCall, rfl, ?_, ?_, hCallRel, ?_⟩
+  · simpa using hCompilerCall
+  · simpa [List.reverse_reverse] using hEVMCall
+  · intro response tailTrace result hRest
+    rcases hCont response hRest with
+      ⟨hSource, hTarget, hResultRel⟩
+    exact
+      ⟨hSource, by simpa [List.reverse_reverse] using hTarget,
+        hResultRel⟩
 
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)

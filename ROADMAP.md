@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:42 CEST.
+Last updated: 2026-06-03 03:47 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -100,9 +100,15 @@ Execution order:
    `OpenLowering.compilerOpenPrimitive_no_callCreate_openRunNResult_continue`
    consume the existing `Locals.SourceLowering.PrimitiveSound` contract to run
    no-CALL primitives on the empty trace and continue through the assembly
-   source-open fuel runner. The remaining work is lifting these primitive atoms
-   through expressions, blocks, calls, and control constructs, then composing
-   the result into the whole-program imported-Yul-to-open-EVM theorem.
+   source-open fuel runner. The first expression-facing CALL primitive lift is
+   now checked in
+   `OpenLowering.compilerOpenPrimitive_callKind_openRunNResult_continue`: from
+   the operator-level fact `CallKind.ofBasicOp? op = some kind` plus evaluated
+   argument arity, it derives concrete `CallOperands`, exposes the same
+   compiler/EVM open call, and continues through the assembly source-open fuel
+   runner. The remaining work is lifting these primitive atoms through full
+   expressions, blocks, calls, and control constructs, then composing the result
+   into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -186,7 +192,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   no-CALL primitive head companion is checked through
   `OpenLowering.compilerOpenPrimitive_no_callCreate_openRunNResult_continue`,
   using the existing primitive soundness contract rather than a new primitive
-  semantics. The remaining public gap is proving the CALL-capable
+  semantics. The CALL primitive branch can now be consumed from expression
+  lowering's natural `op`/`values` view via
+  `OpenLowering.compilerOpenPrimitive_callKind_openRunNResult_continue`, which
+  derives operands from the arity fact instead of requiring them as a caller
+  premise. The remaining public gap is proving the CALL-capable
   compiler-open/function-block theorem, then composing the public imported-Yul
   dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
