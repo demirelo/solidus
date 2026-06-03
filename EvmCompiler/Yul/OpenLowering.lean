@@ -14262,6 +14262,60 @@ theorem source_regular_running_stateRel_compiledOutcomeRel
         | halted halt =>
             simp [Structured.Preservation.CompiledOutcomeRel] at hCompiled
 
+theorem source_regular_running_return_cleanup_parts
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {fallthroughPc : Word} {retc : Nat} {returns : List Name}
+    {hiddenReturns : List Structured.ReturnDest} {tokens : List Word}
+    {source : Objects.Source.State} {sourceCtx : Functions.Source.Ctx}
+    {targetCtx : Locals.Ctx} {target : Assembly.StepResult}
+    {values : List Word}
+    (hRel :
+      FunctionsBlockCompiledOpenResultRel asm ctx fallthroughPc retc returns
+        hiddenReturns tokens
+        (Functions.Source.Outcome.regular source, sourceCtx) targetCtx
+        target)
+    (hAccess :
+      Functions.SourceDirect.ReturnValuesRel.Accessible targetCtx.layout 0
+        returns)
+    (hLookup :
+      Functions.Source.Store.lookupMany returns source.vars = some values)
+    (hNoDup : targetCtx.layout.Nodup)
+    (hReturnsLen : returns.length = targetCtx.leaveRetc)
+    (hRetcBound : targetCtx.leaveRetc ≤ 16) :
+    ∃ bodyState afterBody stateAfterReturns returnedState,
+      target = .running afterBody ∧
+        Functions.SourceDirect.StateRel targetCtx.layout hiddenReturns source
+          bodyState ∧
+        Functions.SourceDirect.ReturnValuesRel targetCtx.layout source
+          bodyState returns values ∧
+        Functions.Direct.pushReturns targetCtx returns bodyState =
+          .ok stateAfterReturns ∧
+        Locals.Direct.Ctx.runCleanupToPreserving targetCtx
+          targetCtx.leaveRetc 0 stateAfterReturns =
+          .ok returnedState ∧
+        Functions.SourceDirect.ReturnedStackRel hiddenReturns source values
+          returnedState ∧
+        Structured.Preservation.CompiledOutcomeRel asm ctx fallthroughPc
+          (Structured.Outcome.regular bodyState) (.running afterBody)
+          tokens := by
+  rcases source_regular_running_stateRel_compiledOutcomeRel hRel with
+    ⟨bodyState, afterBody, hTarget, hStateRel, hCompiled⟩
+  have hValues :
+      Functions.SourceDirect.ReturnValuesRel targetCtx.layout source
+        bodyState returns values :=
+    Functions.SourceDirect.ReturnValuesRel.of_stateRel_lookupMany_accessible
+      hAccess hLookup hStateRel
+  rcases
+      Functions.SourceDirect.ReturnValuesRel.pushCleanup_returnedStack
+        (layout := targetCtx.layout) (hiddenReturns := hiddenReturns)
+        (source := source) (target := bodyState) (ctx := targetCtx)
+        (returns := returns) (values := values)
+        rfl hNoDup hReturnsLen hRetcBound hValues hStateRel with
+    ⟨stateAfterReturns, returnedState, hPush, hCleanup, hReturned⟩
+  exact
+    ⟨bodyState, afterBody, stateAfterReturns, returnedState, hTarget,
+      hStateRel, hValues, hPush, hCleanup, hReturned, hCompiled⟩
+
 theorem source_leave_running_compiledOutcomeRel
     {asm : Assembly.Program} {ctx : Structured.CompileContext}
     {fallthroughPc : Word} {retc : Nat} {returns : List Name}
