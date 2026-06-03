@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:29 CEST.
+Last updated: 2026-06-03 03:32 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -84,9 +84,12 @@ Execution order:
    through the existing assembly compile proof. Closed no-CALL assembly source
    runs now also embed into this open target tower with the empty trace through
    `Source.openRunNResult_resolves_closed_of_no_callCreate` and the direct
-   no-CALL compile wrappers. The remaining work is proving the open compiler
-   preservation theorem for traces that may contain CALL, then composing it into
-   the whole-program imported-Yul-to-open-EVM theorem.
+   no-CALL compile wrappers. The compiler-open source side now also has
+   primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
+   resolutions. The remaining work is proving the open compiler preservation
+   theorem for expressions, blocks, calls, and control constructs whose traces
+   may contain CALL, then composing it into the whole-program
+   imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -160,9 +163,10 @@ let/assign CALL scaffolding, or a concrete external-world model.
   source-open theorem and proves its composition into the compiled open runner.
   Closed no-CALL assembly source runs now resolve through the open target tower
   on the empty trace, so the old no-CALL preservation route can be reused for
-  non-CALL branches inside the future open proof. The remaining public gap is
-  proving the CALL-capable compiler-open/function-block theorem, then composing
-  the public imported-Yul dispatcher result through it.
+  non-CALL branches inside the future open proof. `CompilerOpen.Primitive` now
+  exposes matching source-side non-CALL/no-CALL empty-trace atoms. The remaining
+  public gap is proving the CALL-capable compiler-open/function-block theorem,
+  then composing the public imported-Yul dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL

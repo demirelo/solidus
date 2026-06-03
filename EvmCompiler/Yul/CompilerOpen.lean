@@ -59,6 +59,77 @@ def eval (prim : Objects.Source.PrimitiveSemantics)
           .ok (state.withShared sharedAfter, valuesAfter)
       | .error err => .error err
 
+theorem openCall?_none_of_not_callKind
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = none) :
+    openCall? state op values = none := by
+  simp [openCall?, hKind]
+
+theorem eval_of_not_callKind
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = none) :
+    eval prim op state values =
+      match prim.eval op state.shared values with
+      | .ok (sharedAfter, valuesAfter) =>
+          .ok (state.withShared sharedAfter, valuesAfter)
+      | .error err => .error err := by
+  simp [eval, openCall?_none_of_not_callKind hKind]
+
+theorem eval_resolves_closed_ok_of_not_callKind
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values valuesAfter : List Word}
+    {sharedAfter : EvmYul.SharedState .EVM}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hEval : prim.eval op state.shared values =
+      .ok (sharedAfter, valuesAfter)) :
+    OpenExternal.OpenResultResolves (eval prim op state values) []
+      (.ok (state.withShared sharedAfter, valuesAfter)) := by
+  rw [eval_of_not_callKind hKind, hEval]
+  exact OpenExternal.OpenResultResolves.done
+
+theorem eval_resolves_closed_error_of_not_callKind
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word} {err : Functions.EVMException}
+    (hKind : OpenExternal.CallKind.ofBasicOp? op = none)
+    (hEval : prim.eval op state.shared values = .error err) :
+    OpenExternal.OpenResultResolves (eval prim op state values) []
+      (.error err) := by
+  rw [eval_of_not_callKind hKind, hEval]
+  exact OpenExternal.OpenResultResolves.done
+
+theorem callKind_none_of_no_callCreate
+    {op : Structured.BasicOp}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    OpenExternal.CallKind.ofBasicOp? op = none := by
+  cases op <;>
+    simp [OpenExternal.CallKind.ofBasicOp?, Structured.BasicOp.toPrimOp,
+      Assembly.PrimOp.isCallCreate] at hNoCallCreate ⊢
+
+theorem openCall?_none_of_no_callCreate
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    openCall? state op values = none :=
+  openCall?_none_of_not_callKind
+    (callKind_none_of_no_callCreate hNoCallCreate)
+
+theorem eval_of_no_callCreate
+    {prim : Objects.Source.PrimitiveSemantics}
+    {state : Objects.Source.State} {op : Structured.BasicOp}
+    {values : List Word}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    eval prim op state values =
+      match prim.eval op state.shared values with
+      | .ok (sharedAfter, valuesAfter) =>
+          .ok (state.withShared sharedAfter, valuesAfter)
+      | .error err => .error err :=
+  eval_of_not_callKind (callKind_none_of_no_callCreate hNoCallCreate)
+
 theorem openCall?_of_basicOp
     {state : Objects.Source.State} {op : Structured.BasicOp}
     {kind : OpenExternal.CallKind} {values : List Word}
