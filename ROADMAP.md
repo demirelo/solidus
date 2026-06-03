@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:18 CEST.
+Last updated: 2026-06-03 03:25 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -77,9 +77,13 @@ Execution order:
    `compile_openRunN_result_openBlockTrace_sound`, and
    `compile_openRunN_result_compiled_sound` now give the direct open analogue
    of the closed assembly compile theorem from the real `Assembly.compile?`
-   success fact. The remaining work is proving open preservation from
-   compiler-source/function blocks down to this assembly source-open layer and
-   composing it into the whole-program imported-Yul-to-open-EVM theorem.
+   success fact. `Yul.OpenLowering` now pins the next adjacent proof boundary:
+   `FunctionsBlockToAssemblySourceOpenSoundAt` is the compiler-open
+   function-block to assembly source-open theorem we still have to prove, while
+   its checked `.to_compiled` wrapper shows that theorem immediately composes
+   through the existing assembly compile proof. The remaining work is proving
+   that open preservation theorem and composing it into the whole-program
+   imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -148,9 +152,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   emitted-code classifier side condition for ordinary steps. The assembly
   source-open runner, `Source.OpenTraceResult.to_openBlockTrace`, and the direct
   `Assembly.compile?` wrappers are now Lean-checked, giving the adjacent
-  assembly source-to-emitted-block open preservation layer. The remaining
-  public gap is open preservation from compiler-open/function blocks down to
-  assembly source-open traces, then the public composition.
+  assembly source-to-emitted-block open preservation layer. `Yul.OpenLowering`
+  now names the exact remaining compiler-open/function-block to assembly
+  source-open theorem and proves its composition into the compiled open runner.
+  The remaining public gap is proving that theorem, then composing the public
+  imported-Yul dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
