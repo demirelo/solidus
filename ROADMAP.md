@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:04 CEST.
+Last updated: 2026-06-03 07:10 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -106,7 +106,13 @@ Execution order:
    segments as well:
    `openRunNResult_structured_callSite_callEntry_continue` combines the
    `callSiteCode` segment, the procedure segment, and exact-label evidence to
-   hand the recursive callee-body continuation the real callee-entry PC. The
+   hand the recursive callee-body continuation the real callee-entry PC. On the
+   return side, the proof must stay instruction-/segment-local rather than use a
+   whole-program no-CALL adapter, because the surrounding assembly can contain
+   external CALLs elsewhere; the first checked return atom is now
+   `openRunNResult_source_label_running_continue`, which replays a generated
+   label instruction on the empty trace and continues through the source-open
+   runner. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in

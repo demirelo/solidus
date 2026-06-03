@@ -2540,6 +2540,55 @@ theorem openRunNResult_structured_callSite_callEntry_continue
     Structured.Preservation.ProcedurePreservation.callSiteCode,
     List.append_assoc] using hRun
 
+theorem structured_dispatch_forProc_usesCallCreate_false
+    (proc : Structured.Proc) (sites : List Structured.CallSite)
+    (supply : Structured.LabelSupply) :
+    Assembly.Program.usesCallCreate
+      (Structured.Dispatch.forProc proc sites supply).code = false :=
+  Structured.CompilerFacts.dispatch_forProc_noCallCreate proc sites supply
+
+theorem openRunNResult_source_label_running_continue
+    {source : Structured.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word} {label : Assembly.Label}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFit : Structured.Preservation.PCFits pre)
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel : Structured.Preservation.Frame.StateRel source target tokens)
+    (hRest :
+      ∀ afterLabel : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel source afterLabel tokens →
+        afterLabel.pc =
+          Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label]) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label label] ++ post) fuel afterLabel)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ [Assembly.Instr.label label] ++ post) (fuel + 1) target)
+      tailTrace result := by
+  rcases
+      Structured.Preservation.Frame.StateRel.label_stepResult_at
+        (label := label) (pre := pre) (post := post)
+        (source := source) (target := target) (tokens := tokens)
+        hFit hPc hRel with
+    ⟨afterLabel, hStep, hRelAfter, hPcAfter⟩
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.label label] ++ post) target.pc.toNat =
+        some (Assembly.Program.byteLength pre, Assembly.Instr.label label) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre post (Assembly.Instr.label label) 0
+  exact
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt (by simp [Assembly.Instr.usesCallCreate]) hStep
+      (hRest afterLabel hRelAfter hPcAfter)
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
