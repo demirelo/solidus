@@ -3207,6 +3207,320 @@ theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_fallt
   refine ⟨evmAfter, hRel, ?_, hCont⟩
   simpa [hTailFallSegment] using hPcTail
 
+mutual
+  theorem compilerOpenLocalsExpr_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+      {prim : Objects.Source.PrimitiveSemantics}
+      (hPrim : Locals.SourceLowering.PrimitiveSound prim) :
+      ∀ {results : Nat} {expr : Locals.Expr results}
+        {ctx : Locals.Ctx} {offset : Nat} {layout : List Name}
+        {compiler compilerAfter : Objects.Source.State}
+        {state : EvmYul.EVM.State} {code : Structured.Code},
+        Locals.Source.Expr.SourceOwned expr →
+        LocalsExprOpenSupported expr →
+        Locals.SourceLowering.Expr.Accessible layout offset expr →
+        Locals.Expr.compileCode ctx offset expr = some code →
+        ctx.layout = layout →
+        layout.Nodup →
+        (stackPrefix : List Word) →
+        stackPrefix.length = offset →
+        (program : Assembly.Program) →
+        (tailFuel : Nat) →
+        (segment :
+          Structured.Preservation.CodeSegment program code.toAssembly) →
+        state.pc = Structured.Preservation.CodeSegment.startPc segment →
+        Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix
+          state →
+        ∀ {valuesAfter : List Word} {trace : OpenExternal.OpenTrace},
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+              prim expr compiler)
+            trace (.ok (compilerAfter, valuesAfter)) →
+          ∃ evmAfter : EvmYul.EVM.State,
+            Locals.SourceLowering.StackPrefixRel layout compilerAfter
+              (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+            evmAfter.pc =
+              Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+            ∀ {tailTrace : OpenExternal.OpenTrace}
+              {result : Except EVMException Assembly.StepResult},
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program tailFuel
+                  evmAfter)
+                tailTrace result →
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program
+                  (code.length + tailFuel) state)
+                (trace ++ tailTrace) result := by
+    intro results expr
+    cases expr with
+    | lit value =>
+        intro ctx offset layout compiler compilerAfter state code
+          _hOwned _hSupported _hAccess hCompile _hCtxLayout _hNoDup
+          stackPrefix _hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        rcases
+            compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+              (prim := prim) (ctx := ctx) (offset := offset)
+              (layout := layout) (compiler := compiler)
+              (compilerAfter := compilerAfter) (state := state)
+              (value := value) hCompile stackPrefix program tailFuel
+              segment hPc hPrefixRel hResolve with
+          ⟨evmAfter, hRel, hAfterPc, hCont⟩
+        refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+        intro tailTrace result hRest
+        have hCode :
+            code = [Structured.BasicInstr.push value] :=
+          localsExpr_compileCode_lit_eq hCompile
+        have hFuel : tailFuel + 1 = code.length + tailFuel := by
+          simp [hCode, Nat.add_comm]
+        simpa [hFuel] using hCont hRest
+    | var name =>
+        intro ctx offset layout compiler compilerAfter state code
+          _hOwned _hSupported hAccess hCompile hCtxLayout hNoDup
+          stackPrefix hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        rcases
+            compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+              (prim := prim) (ctx := ctx) (offset := offset)
+              (layout := layout) (compiler := compiler)
+              (compilerAfter := compilerAfter) (state := state)
+              (name := name) hCompile hCtxLayout hNoDup hAccess
+              stackPrefix hPrefixLen program tailFuel segment hPc
+              hPrefixRel hResolve with
+          ⟨evmAfter, hRel, hAfterPc, hCont⟩
+        refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+        intro tailTrace result hRest
+        rcases localsExpr_compileCode_var_inv hCompile with
+          ⟨depth, op, _hDepth, _hDup, hCode⟩
+        have hFuel : tailFuel + 1 = code.length + tailFuel := by
+          simp [hCode, Nat.add_comm]
+        simpa [hFuel] using hCont hRest
+    | code code' =>
+        intro ctx offset layout compiler compilerAfter state code
+          hOwned _hSupported _hAccess _hCompile _hCtxLayout _hNoDup
+          stackPrefix _hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        simp [Locals.Source.Expr.SourceOwned] at hOwned
+    | prim op args =>
+        intro ctx offset layout compiler compilerAfter state code
+          hOwned hSupported hAccess hCompile hCtxLayout hNoDup
+          stackPrefix hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        have hArgsOwned : Locals.Source.ExprSeq.SourceOwned args := by
+          simpa [Locals.Source.Expr.SourceOwned] using hOwned
+        simp [LocalsExprOpenSupported] at hSupported
+        rcases hSupported with ⟨hArgsSupported, hOpSupported⟩
+        rcases
+            compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode_args
+              (prim := prim) hPrim (ctx := ctx) (offset := offset)
+              (layout := layout) (compiler := compiler)
+              (compilerAfter := compilerAfter) (state := state)
+              (op := op) (args := args) hCompile hArgsOwned hOpSupported
+              stackPrefix program tailFuel (code.length + tailFuel)
+              segment hPc
+              (fun {argsCode} hArgsCompile argsSegment hArgsPc
+                  {argsTrace compilerAfterArgs argValues}
+                  hResolveArgs => by
+                rcases
+                    compilerOpenLocalsExprSeq_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+                      hPrim hArgsOwned hArgsSupported hAccess
+                      hArgsCompile hCtxLayout hNoDup stackPrefix
+                      hPrefixLen program (tailFuel + 1) argsSegment
+                      hArgsPc hPrefixRel hResolveArgs with
+                  ⟨evmAfterArgs, hArgsRel, hArgsAfterPc, hArgsCont⟩
+                refine ⟨evmAfterArgs, hArgsRel, hArgsAfterPc, ?_⟩
+                intro tailTrace result hRest
+                have hFuel :
+                    argsCode.length + (tailFuel + 1) =
+                      code.length + tailFuel := by
+                  rcases localsExpr_compileCode_prim_inv hCompile with
+                    ⟨argsCode', hArgsCompile', hCode⟩
+                  rw [hArgsCompile] at hArgsCompile'
+                  cases hArgsCompile'
+                  simp [hCode, Nat.add_comm, Nat.add_left_comm]
+                simpa [hFuel] using hArgsCont hRest)
+              hResolve with
+          ⟨evmAfter, hRel, hAfterPc, hCont⟩
+        exact ⟨evmAfter, hRel, hAfterPc, hCont⟩
+
+  theorem compilerOpenLocalsExprSeq_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+      {prim : Objects.Source.PrimitiveSemantics}
+      (hPrim : Locals.SourceLowering.PrimitiveSound prim) :
+      ∀ {results : Nat} {exprs : Locals.ExprSeq results}
+        {ctx : Locals.Ctx} {offset : Nat} {layout : List Name}
+        {compiler compilerAfter : Objects.Source.State}
+        {state : EvmYul.EVM.State} {code : Structured.Code},
+        Locals.Source.ExprSeq.SourceOwned exprs →
+        LocalsExprSeqOpenSupported exprs →
+        Locals.SourceLowering.ExprSeq.Accessible layout offset exprs →
+        Locals.ExprSeq.compileCode ctx offset exprs = some code →
+        ctx.layout = layout →
+        layout.Nodup →
+        (stackPrefix : List Word) →
+        stackPrefix.length = offset →
+        (program : Assembly.Program) →
+        (tailFuel : Nat) →
+        (segment :
+          Structured.Preservation.CodeSegment program code.toAssembly) →
+        state.pc = Structured.Preservation.CodeSegment.startPc segment →
+        Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix
+          state →
+        ∀ {valuesAfter : List Word} {trace : OpenExternal.OpenTrace},
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+              prim exprs compiler)
+            trace (.ok (compilerAfter, valuesAfter)) →
+          ∃ evmAfter : EvmYul.EVM.State,
+            Locals.SourceLowering.StackPrefixRel layout compilerAfter
+              (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+            evmAfter.pc =
+              Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+            ∀ {tailTrace : OpenExternal.OpenTrace}
+              {result : Except EVMException Assembly.StepResult},
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program tailFuel
+                  evmAfter)
+                tailTrace result →
+              OpenExternal.OpenResultResolves
+                (OpenAssembly.Source.openRunNResult program
+                  (code.length + tailFuel) state)
+                (trace ++ tailTrace) result := by
+    intro results exprs
+    cases exprs with
+    | nil =>
+        intro ctx offset layout compiler compilerAfter state code
+          _hOwned _hSupported _hAccess hCompile _hCtxLayout _hNoDup
+          stackPrefix _hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        rcases
+            compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+              (prim := prim) (ctx := ctx) (offset := offset)
+              (layout := layout) (compiler := compiler)
+              (compilerAfter := compilerAfter) (state := state)
+              hCompile stackPrefix program tailFuel segment hPc hPrefixRel
+              hResolve with
+          ⟨evmAfter, hRel, hAfterPc, hCont⟩
+        refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+        intro tailTrace result hRest
+        have hCode : code = [] :=
+          localsExprSeq_compileCode_nil_eq hCompile
+        simpa [hCode] using hCont hRest
+    | @cons left right head tail =>
+        intro ctx offset layout compiler compilerAfter state code
+          hOwned hSupported hAccess hCompile hCtxLayout hNoDup
+          stackPrefix hPrefixLen program tailFuel segment hPc hPrefixRel
+          valuesAfter trace hResolve
+        simp [Locals.Source.ExprSeq.SourceOwned] at hOwned
+        rcases hOwned with ⟨hHeadOwned, hTailOwned⟩
+        simp [LocalsExprSeqOpenSupported] at hSupported
+        rcases hSupported with ⟨hHeadSupported, hTailSupported⟩
+        simp [Locals.SourceLowering.ExprSeq.Accessible] at hAccess
+        rcases hAccess with ⟨hHeadAccess, hTailAccess⟩
+        rcases localsExprSeq_compileCode_cons_inv hCompile with
+          ⟨headCode, tailCode, hHeadCompile, hTailCompile, hCode⟩
+        have hAssemblyCode :
+            code.toAssembly =
+              headCode.toAssembly ++ tailCode.toAssembly := by
+          simp [hCode, Structured.Code.toAssembly]
+        let appendSegment :
+            Structured.Preservation.CodeSegment program
+              (headCode.toAssembly ++ tailCode.toAssembly) :=
+          Structured.Preservation.CodeSegment.cast_code hAssemblyCode segment
+        let headSegment :
+            Structured.Preservation.CodeSegment program
+              headCode.toAssembly :=
+          Structured.Preservation.CodeSegment.left appendSegment
+        let tailSegment :
+            Structured.Preservation.CodeSegment program
+              tailCode.toAssembly :=
+          Structured.Preservation.CodeSegment.right appendSegment
+        have hHeadPc :
+            state.pc =
+              Structured.Preservation.CodeSegment.startPc headSegment := by
+          simpa [headSegment, appendSegment,
+            Structured.Preservation.CodeSegment.left,
+            Structured.Preservation.CodeSegment.cast_code,
+            Structured.Preservation.CodeSegment.startPc] using hPc
+        have hHeadToTail :
+            Structured.Preservation.CodeSegment.fallthroughPc headSegment =
+              Structured.Preservation.CodeSegment.startPc tailSegment :=
+          (codeSegment_right_startPc_eq_left_fallthroughPc appendSegment).symm
+        have hTailFallSegment :
+            Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+              Structured.Preservation.CodeSegment.fallthroughPc segment := by
+          simp [tailSegment, appendSegment,
+            Structured.Preservation.CodeSegment.right,
+            Structured.Preservation.CodeSegment.cast_code,
+            Structured.Preservation.CodeSegment.fallthroughPc,
+            hAssemblyCode, List.append_assoc]
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+        rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+          hHeadError | hHeadOk
+        · rcases hHeadError with ⟨err, _hHead, hResult⟩
+          cases hResult
+        · rcases hHeadOk with
+            ⟨headTrace, tailAndDoneTrace, headResult, hTrace,
+              hResolveHead, hResolveTailBind⟩
+          rcases headResult with ⟨compilerAfterHead, headValues⟩
+          rcases OpenExternal.OpenResultResolves.bind_inv
+              hResolveTailBind with
+            hTailError | hTailOk
+          · rcases hTailError with ⟨err, _hTail, hResult⟩
+            cases hResult
+          · rcases hTailOk with
+              ⟨tailTrace, doneTrace, tailResult, hTailAndDoneTrace,
+                hResolveTail, hResolveDone⟩
+            rcases tailResult with ⟨compilerAfterTail, tailValues⟩
+            cases hResolveDone
+            rcases
+                compilerOpenLocalsExpr_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+                  hPrim hHeadOwned hHeadSupported hHeadAccess
+                  hHeadCompile hCtxLayout hNoDup stackPrefix hPrefixLen
+                  program (tailCode.length + tailFuel) headSegment
+                  hHeadPc hPrefixRel hResolveHead with
+              ⟨evmAfterHead, hHeadRel, hHeadAfterPc, hHeadCont⟩
+            have hHeadLen :
+                headValues.length = left :=
+              compilerOpenLocalsExpr_eval_resolves_ok_length_of_sourceOwned
+                hPrim hHeadOwned hResolveHead
+            have hTailPrefixLen :
+                (headValues.reverse ++ stackPrefix).length =
+                  offset + left := by
+              simp [List.length_reverse, hHeadLen, hPrefixLen,
+                Nat.add_comm]
+            have hTailPc :
+                evmAfterHead.pc =
+                  Structured.Preservation.CodeSegment.startPc tailSegment := by
+              rw [hHeadAfterPc]
+              exact hHeadToTail
+            rcases
+                compilerOpenLocalsExprSeq_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+                  hPrim hTailOwned hTailSupported hTailAccess
+                  hTailCompile hCtxLayout hNoDup
+                  (headValues.reverse ++ stackPrefix) hTailPrefixLen
+                  program tailFuel tailSegment hTailPc hHeadRel
+                  hResolveTail with
+              ⟨evmAfterTail, hTailRel, hTailAfterPc, hTailCont⟩
+            refine ⟨evmAfterTail, ?_, ?_, ?_⟩
+            · simpa [List.reverse_append, List.append_assoc] using
+                hTailRel
+            · simpa [hTailFallSegment] using hTailAfterPc
+            · intro restTrace result hRest
+              have hTailAndRest :
+                  OpenExternal.OpenResultResolves
+                    (OpenAssembly.Source.openRunNResult program
+                      (tailCode.length + tailFuel) evmAfterHead)
+                    (tailTrace ++ restTrace) result :=
+                hTailCont hRest
+              have hFull := hHeadCont hTailAndRest
+              have hFuel :
+                  headCode.length + (tailCode.length + tailFuel) =
+                    code.length + tailFuel := by
+                simp [hCode, Nat.add_assoc]
+              subst tailAndDoneTrace
+              subst trace
+              simpa [List.append_assoc, hFuel] using hFull
+end
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)

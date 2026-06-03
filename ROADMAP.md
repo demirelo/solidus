@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:42 CEST.
+Last updated: 2026-06-03 04:46 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -189,9 +189,16 @@ Execution order:
    `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode_args`
    then proves actual compiled `.prim` expressions finish at their generated
    segment fallthrough once the recursive argument-sequence proof reaches the
-   primitive singleton segment. The remaining expression step is assembling the
-   mutual expression/expression-sequence theorem from the checked lit/var/nil,
-   `.prim`, and `ExprSeq.cons` generated-code cases.
+   primitive singleton segment. The mutual expression/expression-sequence
+   theorem is now checked in
+   `OpenLowering.compilerOpenLocalsExpr_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`
+   and
+   `OpenLowering.compilerOpenLocalsExprSeq_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`:
+   source-owned, accessible, open-supported compiled expressions run through
+   the assembly source-open runner under arbitrary target suffix fuel, preserve
+   `StackPrefixRel`, and land at the generated `CodeSegment` fallthrough. This
+   is the generic expression-level CALL route for nested CALLs in arguments and
+   compound expression contexts.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.
