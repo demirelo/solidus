@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:25 CEST.
+Last updated: 2026-06-03 04:29 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -166,7 +166,15 @@ Execution order:
    expression/sequence lowering should return `evmAfter.pc =
    CodeSegment.fallthroughPc segment`. That is the missing invariant that lets
    `.prim` prove recursive argument lowering ended at the primitive instruction
-   and `ExprSeq.cons` prove the head ended at the tail segment.
+   and `ExprSeq.cons` prove the head ended at the tail segment. The
+   non-recursive generated-code bases now have that strengthened postcondition:
+   `OpenLowering.codeSegment_fallthroughPc_singleton`,
+   `OpenLowering.compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`,
+   `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`,
+   and
+   `OpenLowering.compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`.
+   The remaining expression step is the recursive `.prim` and `ExprSeq.cons`
+   assembly using those fallthrough facts.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.
