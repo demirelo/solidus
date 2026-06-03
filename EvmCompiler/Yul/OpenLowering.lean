@@ -17406,6 +17406,171 @@ theorem openRunNResult_functionsFunDef_body_regular_compiledOutcomeRel
       (source := source) (sourceCtx := sourceCtx) (target := target)
       (bodyTrace := bodyTrace) hCompile' segment hRaw
 
+theorem compiledOutcomeRel_leave_cast_fallthrough
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {pc₁ pc₂ : Word} {source : Locals.RunState}
+    {target : Assembly.StepResult} {tokens : List Word}
+    (hRel :
+      Structured.Preservation.CompiledOutcomeRel asm ctx pc₁
+        (Structured.Outcome.leave source) target tokens) :
+    Structured.Preservation.CompiledOutcomeRel asm ctx pc₂
+      (Structured.Outcome.leave source) target tokens := by
+  cases target with
+  | running targetState =>
+      simpa [Structured.Preservation.CompiledOutcomeRel,
+        Structured.Outcome.leave] using hRel
+  | halted halt =>
+      simp [Structured.Preservation.CompiledOutcomeRel,
+        Structured.Outcome.leave] at hRel
+
+theorem openRunNResult_compileToPreserving_append_pushReturns_leave_compiledOutcomeRel
+    {program : Assembly.Program}
+    {ctx : Locals.Ctx} {raw : List Locals.Stmt}
+    {returns : List Name} {lower : Expressions.Block}
+    {structuredCtx rawCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {retc : Nat}
+    {hiddenReturns : List Structured.ReturnDest} {tokens : List Word}
+    {source : Objects.Source.State} {sourceCtx : Functions.Source.Ctx}
+    {target : EvmYul.EVM.State}
+    {bodyTrace : OpenExternal.OpenTrace}
+    (hCompile :
+      Locals.Block.compileToPreserving ctx returns.length 0
+        { stmts := raw ++ Functions.Lower.pushReturns returns } =
+        some lower)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.stmts }
+          structuredCtx supply).code)
+    (hRaw :
+      ∀ rawStmts pushCtx,
+        ∀ rawSegment :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured rawStmts }
+              structuredCtx supply).code,
+          Locals.Block.compileOpen ctx { stmts := raw } =
+            some (rawStmts, pushCtx) →
+          Structured.Preservation.CodeSegment.startPc rawSegment =
+            Structured.Preservation.CodeSegment.startPc segment →
+          ∃ rawFuel afterRaw,
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program rawFuel target)
+              bodyTrace (.ok (.running afterRaw)) ∧
+              FunctionsBlockCompiledOpenResultRel program rawCtx
+                (Structured.Preservation.CodeSegment.fallthroughPc rawSegment)
+                retc returns hiddenReturns tokens
+                (Functions.Source.Outcome.leave source, sourceCtx) pushCtx
+                (.running afterRaw)) :
+    ∃ bodyFuel targetFinal returnedState values,
+      Functions.SourceDirect.ReturnedStackRel hiddenReturns source values
+        returnedState ∧
+        Structured.Preservation.CompiledOutcomeRel program rawCtx
+          (Structured.Preservation.CodeSegment.fallthroughPc segment)
+          (Structured.Outcome.leave returnedState) (.running targetFinal)
+          tokens ∧
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program bodyFuel target)
+          bodyTrace (.ok (.running targetFinal)) := by
+  rcases
+      codeSegment_localsBlock_compileToPreserving_append_pushReturns_split
+        hCompile segment with
+    ⟨rawStmts, pushCtx, _pushStmts, _finalCtx, _cleanup, hRawOpen,
+      _hPushOpen, _hCleanup, rawSegment, _returnTailSegment, hRawStart,
+      _hReturnStart, _hTailFall⟩
+  rcases hRaw rawStmts pushCtx rawSegment hRawOpen hRawStart with
+    ⟨rawFuel, afterRaw, hRawRun, hRawRel⟩
+  rcases
+      FunctionsBlockCompiledOpenResultRel.source_leave_running_returnedStackRel_compiledOutcomeRel
+        hRawRel with
+    ⟨values, bodyState, afterBody, hTarget, _hLookup, hReturned,
+      hCompiled⟩
+  cases hTarget
+  refine ⟨rawFuel, afterRaw, bodyState, values, hReturned, ?_, hRawRun⟩
+  exact compiledOutcomeRel_leave_cast_fallthrough hCompiled
+
+theorem openRunNResult_functionsFunDef_body_leave_compiledOutcomeRel
+    {program : Assembly.Program}
+    {fn : Functions.FunDef} {lower : Expressions.Block}
+    {structuredCtx rawCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {retc : Nat}
+    {hiddenReturns : List Structured.ReturnDest} {tokens : List Word}
+    {source : Objects.Source.State} {sourceCtx : Functions.Source.Ctx}
+    {target : EvmYul.EVM.State}
+    {bodyTrace : OpenExternal.OpenTrace}
+    (hCompile :
+      Locals.Block.compileToPreserving
+        (Locals.Ctx.procEntryWithLayoutAndRetc
+          fn.params.reverse fn.returns.length)
+        fn.returns.length 0 (Functions.FunDef.toLocalsProc fn).body =
+        some lower)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.stmts }
+          structuredCtx supply).code)
+    (hRaw :
+      ∀ rawStmts pushCtx,
+        ∀ rawSegment :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured rawStmts }
+              structuredCtx supply).code,
+          Locals.Block.compileOpen
+              (Locals.Ctx.procEntryWithLayoutAndRetc
+                fn.params.reverse fn.returns.length)
+              { stmts :=
+                  Functions.Lower.initReturns fn.returns ++
+                    Functions.StmtList.toLocals fn.returns fn.body.stmts } =
+            some (rawStmts, pushCtx) →
+          Structured.Preservation.CodeSegment.startPc rawSegment =
+            Structured.Preservation.CodeSegment.startPc segment →
+          ∃ rawFuel afterRaw,
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program rawFuel target)
+              bodyTrace (.ok (.running afterRaw)) ∧
+              FunctionsBlockCompiledOpenResultRel program rawCtx
+                (Structured.Preservation.CodeSegment.fallthroughPc rawSegment)
+                retc fn.returns hiddenReturns tokens
+                (Functions.Source.Outcome.leave source, sourceCtx) pushCtx
+                (.running afterRaw)) :
+    ∃ bodyFuel targetFinal returnedState values,
+      Functions.SourceDirect.ReturnedStackRel hiddenReturns source values
+        returnedState ∧
+        Structured.Preservation.CompiledOutcomeRel program rawCtx
+          (Structured.Preservation.CodeSegment.fallthroughPc segment)
+          (Structured.Outcome.leave returnedState) (.running targetFinal)
+          tokens ∧
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program bodyFuel target)
+          bodyTrace (.ok (.running targetFinal)) := by
+  have hCompile' :
+      Locals.Block.compileToPreserving
+        (Locals.Ctx.procEntryWithLayoutAndRetc
+          fn.params.reverse fn.returns.length)
+        fn.returns.length 0
+        { stmts :=
+            (Functions.Lower.initReturns fn.returns ++
+              Functions.StmtList.toLocals fn.returns fn.body.stmts) ++
+              Functions.Lower.pushReturns fn.returns } =
+        some lower := by
+    simpa [Functions.FunDef.toLocalsProc, List.append_assoc] using hCompile
+  exact
+    openRunNResult_compileToPreserving_append_pushReturns_leave_compiledOutcomeRel
+      (ctx :=
+        Locals.Ctx.procEntryWithLayoutAndRetc
+          fn.params.reverse fn.returns.length)
+      (raw :=
+        Functions.Lower.initReturns fn.returns ++
+          Functions.StmtList.toLocals fn.returns fn.body.stmts)
+      (returns := fn.returns) (structuredCtx := structuredCtx)
+      (rawCtx := rawCtx) (supply := supply) (retc := retc)
+      (hiddenReturns := hiddenReturns) (tokens := tokens)
+      (source := source) (sourceCtx := sourceCtx) (target := target)
+      (bodyTrace := bodyTrace) hCompile' segment hRaw
+
 theorem compilerOpenFunctionsBlock_nil_openRunNResult_openResultRel_of_compileOpen
     {prim : Objects.Source.PrimitiveSemantics}
     {programSource : Functions.Program}
