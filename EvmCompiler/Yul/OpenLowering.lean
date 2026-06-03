@@ -103,6 +103,402 @@ theorem basicOp_no_callCreate_step_pc
       hStep
   exact primStep_run_pc hRun
 
+theorem structuredCode_frameSafe_append
+    {left right : Structured.Code}
+    (hLeft : Structured.Code.FrameSafe left)
+    (hRight : Structured.Code.FrameSafe right) :
+    Structured.Code.FrameSafe (left ++ right) := by
+  intro state final hidden hRun
+  rw [Locals.SourceLowering.Assignment.structuredCode_run_append] at hRun ⊢
+  cases hLeftRun : Structured.Code.run left state with
+  | error err =>
+      simp [hLeftRun] at hRun
+  | ok mid =>
+      simp [hLeftRun] at hRun
+      have hLeftHidden := hLeft state mid hidden hLeftRun
+      rw [hLeftHidden]
+      exact hRight mid final hidden hRun
+
+theorem structuredCode_frameSafe_push (value : Word) :
+    Structured.Code.FrameSafe [Structured.BasicInstr.push value] := by
+  intro state final hidden hRun
+  unfold Structured.Code.run at hRun ⊢
+  simp [Structured.BasicInstr.step, Assembly.Target.stepInstr] at hRun ⊢
+  cases hRun
+  simp [Structured.Code.run, EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC, EvmYul.Stack.push]
+
+theorem structuredCode_frameSafe_nil :
+    Structured.Code.FrameSafe [] := by
+  intro state final hidden hRun
+  simp [Structured.Code.run] at hRun ⊢
+  cases hRun
+  simp
+
+theorem evmYul_dup_append_hidden
+    {n : Nat} {state final : EvmYul.EVM.State}
+    {hidden : EvmYul.Stack Word}
+    (hRun : EvmYul.dup n state = .ok final) :
+    EvmYul.dup n { state with stack := state.stack ++ hidden } =
+      .ok { final with stack := final.stack ++ hidden } := by
+  unfold EvmYul.dup at hRun ⊢
+  by_cases hLe : n ≤ state.stack.length
+  · have hLen : (state.stack.take n).length = n := by
+      simp [List.length_take, Nat.min_eq_left hLe]
+    have hTakeAppend :
+        (state.stack ++ hidden).take n = state.stack.take n :=
+      List.take_append_of_le_length hLe
+    have hLenAppend :
+        ((state.stack ++ hidden).take n).length = n := by
+      simp [hTakeAppend, hLen]
+    simp [hLen, hTakeAppend] at hRun ⊢
+    cases hRun
+    simp [
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC]
+  · have hLen : ¬ (state.stack.take n).length = n := by
+      have hLt : state.stack.length < n := Nat.lt_of_not_ge hLe
+      simp [List.length_take, Nat.min_eq_right (Nat.le_of_lt hLt)]
+      omega
+    simp [hLe] at hRun
+
+theorem evmYul_swap_append_hidden
+    {n : Nat} {state final : EvmYul.EVM.State}
+    {hidden : EvmYul.Stack Word}
+    (hRun : EvmYul.swap n state = .ok final) :
+    EvmYul.swap n { state with stack := state.stack ++ hidden } =
+      .ok { final with stack := final.stack ++ hidden } := by
+  unfold EvmYul.swap at hRun ⊢
+  by_cases hLe : n + 1 ≤ state.stack.length
+  · have hLen : (state.stack.take (n + 1)).length = n + 1 := by
+      simp [List.length_take, Nat.min_eq_left hLe]
+    have hTakeAppend :
+        (state.stack ++ hidden).take (n + 1) =
+          state.stack.take (n + 1) :=
+      List.take_append_of_le_length hLe
+    have hDropAppend :
+        (state.stack ++ hidden).drop (n + 1) =
+          state.stack.drop (n + 1) ++ hidden :=
+      List.drop_append_of_le_length hLe
+    have hLenAppend :
+        ((state.stack ++ hidden).take (n + 1)).length = n + 1 := by
+      simp [hTakeAppend, hLen]
+    simp [hLen, hTakeAppend, hDropAppend] at hRun ⊢
+    cases hRun
+    simp [
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  · have hLen : ¬ (state.stack.take (n + 1)).length = n + 1 := by
+      have hLt : state.stack.length < n + 1 := Nat.lt_of_not_ge hLe
+      simp [List.length_take, Nat.min_eq_right (Nat.le_of_lt hLt)]
+      omega
+    simp [hLe] at hRun
+
+theorem structuredCode_frameSafe_basicOp_dup
+    {op : Structured.BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.dup n)) :
+    Structured.Code.FrameSafe [Structured.BasicInstr.op op] := by
+  intro state final hidden hRun
+  have hRunBind :
+      (do
+        let state' ← EvmYul.dup n state
+        Except.ok state') = .ok final := by
+    simpa [Structured.Code.run, Structured.BasicInstr.step,
+      Structured.BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hRun
+  have hRunDup : EvmYul.dup n state = .ok final := by
+    cases hDup : EvmYul.dup n state with
+    | error err =>
+        simp [hDup] at hRunBind
+    | ok mid =>
+        simp [hDup] at hRunBind
+        cases hRunBind
+        rfl
+  have hHidden := evmYul_dup_append_hidden (hidden := hidden) hRunDup
+  have hHiddenBind :
+      (do
+        let state' ← EvmYul.dup n { state with stack := state.stack ++ hidden }
+        Except.ok state') =
+        .ok { final with stack := final.stack ++ hidden } := by
+    simp [hHidden]
+  simpa [Structured.Code.run, Structured.BasicInstr.step,
+    Structured.BasicOp.step, Assembly.Target.stepInstr,
+    Assembly.PrimOp.step_eq_continuingStep_run hStep,
+    Assembly.PrimStep.run] using hHiddenBind
+
+theorem structuredCode_frameSafe_basicOp_swap
+    {op : Structured.BasicOp} {n : Nat}
+    (hStep : op.toPrimOp.continuingStep? = some (.swap n)) :
+    Structured.Code.FrameSafe [Structured.BasicInstr.op op] := by
+  intro state final hidden hRun
+  have hRunBind :
+      (do
+        let state' ← EvmYul.swap n state
+        Except.ok state') = .ok final := by
+    simpa [Structured.Code.run, Structured.BasicInstr.step,
+      Structured.BasicOp.step, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step_eq_continuingStep_run hStep,
+      Assembly.PrimStep.run] using hRun
+  have hRunSwap : EvmYul.swap n state = .ok final := by
+    cases hSwap : EvmYul.swap n state with
+    | error err =>
+        simp [hSwap] at hRunBind
+    | ok mid =>
+        simp [hSwap] at hRunBind
+        cases hRunBind
+        rfl
+  have hHidden := evmYul_swap_append_hidden (hidden := hidden) hRunSwap
+  have hHiddenBind :
+      (do
+        let state' ← EvmYul.swap n { state with stack := state.stack ++ hidden }
+        Except.ok state') =
+        .ok { final with stack := final.stack ++ hidden } := by
+    simp [hHidden]
+  simpa [Structured.Code.run, Structured.BasicInstr.step,
+    Structured.BasicOp.step, Assembly.Target.stepInstr,
+    Assembly.PrimOp.step_eq_continuingStep_run hStep,
+    Assembly.PrimStep.run] using hHiddenBind
+
+theorem structuredCode_frameSafe_stackOp_dup?
+    {n : Nat} {op : Structured.BasicOp}
+    (hDup : Locals.StackOp.dup? n = some op) :
+    Structured.Code.FrameSafe [Structured.BasicInstr.op op] := by
+  match n with
+  | 0 =>
+      simp [Locals.StackOp.dup?] at hDup
+  | 1 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 2 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 3 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 4 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 5 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 6 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 7 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 8 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 9 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 10 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 11 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 12 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 13 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 14 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 15 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | 16 =>
+      simp [Locals.StackOp.dup?] at hDup
+      cases hDup
+      exact structuredCode_frameSafe_basicOp_dup (by rfl)
+  | k + 17 =>
+      simp [Locals.StackOp.dup?] at hDup
+
+theorem structuredCode_frameSafe_stackOp_swap?
+    {n : Nat} {op : Structured.BasicOp}
+    (hSwap : Locals.StackOp.swap? n = some op) :
+    Structured.Code.FrameSafe [Structured.BasicInstr.op op] := by
+  match n with
+  | 0 =>
+      simp [Locals.StackOp.swap?] at hSwap
+  | 1 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 2 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 3 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 4 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 5 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 6 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 7 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 8 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 9 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 10 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 11 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 12 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 13 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 14 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 15 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | 16 =>
+      simp [Locals.StackOp.swap?] at hSwap
+      cases hSwap
+      exact structuredCode_frameSafe_basicOp_swap (by rfl)
+  | k + 17 =>
+      simp [Locals.StackOp.swap?] at hSwap
+
+theorem structuredCode_frameSafe_swapRestoreUpTo?
+    {n : Nat} {code : Structured.Code}
+    (hCode : Locals.Ctx.swapRestoreUpTo? n = some code) :
+    Structured.Code.FrameSafe code := by
+  induction n generalizing code with
+  | zero =>
+      simp [Locals.Ctx.swapRestoreUpTo?] at hCode
+      cases hCode
+      exact structuredCode_frameSafe_nil
+  | succ n ih =>
+      simp [Locals.Ctx.swapRestoreUpTo?] at hCode
+      cases hRest : Locals.Ctx.swapRestoreUpTo? n with
+      | none =>
+          simp [hRest] at hCode
+      | some rest =>
+          cases hSwap : Locals.StackOp.swap? (n + 1) with
+          | none =>
+              simp [hRest, hSwap] at hCode
+          | some op =>
+              simp [hRest, hSwap] at hCode
+              cases hCode
+              exact
+                structuredCode_frameSafe_append
+                  (ih hRest)
+                  (structuredCode_frameSafe_stackOp_swap? hSwap)
+
+theorem structuredCode_frameSafe_cleanupOnePreserving?
+    {temps : Nat} {code : Structured.Code}
+    (hCode : Locals.Ctx.cleanupOnePreserving? temps = some code) :
+    Structured.Code.FrameSafe code := by
+  cases temps with
+  | zero =>
+      simp [Locals.Ctx.cleanupOnePreserving?] at hCode
+      cases hCode
+      exact Structured.Preservation.Code.pop_frameSafe
+  | succ temps =>
+      simp [Locals.Ctx.cleanupOnePreserving?] at hCode
+      cases hSwap : Locals.StackOp.swap? (temps + 1) with
+      | none =>
+          simp [hSwap] at hCode
+      | some op =>
+          cases hRestore : Locals.Ctx.swapRestoreUpTo? temps with
+          | none =>
+              simp [hSwap, hRestore] at hCode
+          | some restore =>
+              simp [hSwap, hRestore] at hCode
+              cases hCode
+              exact
+                structuredCode_frameSafe_append
+                  (structuredCode_frameSafe_append
+                    (structuredCode_frameSafe_stackOp_swap? hSwap)
+                    Structured.Preservation.Code.pop_frameSafe)
+                  (structuredCode_frameSafe_swapRestoreUpTo? hRestore)
+
+theorem structuredCode_frameSafe_cleanupManyPreserving?
+    {count temps : Nat} {code : Structured.Code}
+    (hCode : Locals.Ctx.cleanupManyPreserving? count temps = some code) :
+    Structured.Code.FrameSafe code := by
+  induction count generalizing code with
+  | zero =>
+      simp [Locals.Ctx.cleanupManyPreserving?] at hCode
+      cases hCode
+      exact structuredCode_frameSafe_nil
+  | succ count ih =>
+      simp [Locals.Ctx.cleanupManyPreserving?] at hCode
+      cases hHead : Locals.Ctx.cleanupOnePreserving? temps with
+      | none =>
+          simp [hHead] at hCode
+      | some head =>
+          cases hTail : Locals.Ctx.cleanupManyPreserving? count temps with
+          | none =>
+              simp [hHead, hTail] at hCode
+          | some tail =>
+              simp [hHead, hTail] at hCode
+              cases hCode
+              exact
+                structuredCode_frameSafe_append
+                  (structuredCode_frameSafe_cleanupOnePreserving? hHead)
+                  (ih hTail)
+
+theorem structuredCode_frameSafe_cleanupToPreserving?
+    {ctx : Locals.Ctx} {preserve targetDepth : Nat}
+    {code : Structured.Code}
+    (hCode : ctx.cleanupToPreserving? preserve targetDepth = some code) :
+    Structured.Code.FrameSafe code := by
+  unfold Locals.Ctx.cleanupToPreserving? at hCode
+  by_cases hLe : targetDepth ≤ ctx.layout.length
+  · simp [hLe] at hCode
+    exact structuredCode_frameSafe_cleanupManyPreserving? hCode
+  · simp [hLe] at hCode
+
 theorem evmOpenCall?_resume_pc
     {state : EvmYul.EVM.State} {kind : OpenExternal.CallKind}
     {call : OpenExternal.OpenCall EvmYul.EVM.State}
@@ -2356,6 +2752,80 @@ theorem openRunNResult_source_code_no_call_running_continue
               (by simpa [List.append_assoc] using hRestOpen)
           simpa [Structured.Code.toAssembly, List.append_assoc,
             Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hCurrent
+
+theorem structuredCode_run_no_call_fallthrough_pc
+    {pre : Assembly.Program} {code : Structured.Code}
+    {state final : EvmYul.EVM.State}
+    (hNoCall : Structured.Code.usesCallCreate code = false)
+    (hFits : Structured.Preservation.Code.PCFitsFrom pre code)
+    (hPc : state.pc = Assembly.Program.pcAfter pre)
+    (hRun : Structured.Code.run code state = .ok final) :
+    final.pc = Assembly.Program.pcAfter (pre ++ code.toAssembly) := by
+  induction code generalizing pre state with
+  | nil =>
+      simp [Structured.Code.run] at hRun
+      cases hRun
+      simpa [Structured.Code.toAssembly] using hPc
+  | cons instr rest ih =>
+      unfold Structured.Code.run at hRun
+      cases hStep : instr.step state with
+      | error err =>
+          rw [hStep] at hRun
+          cases hRun
+      | ok mid =>
+          rw [hStep] at hRun
+          have hNoParts :
+              instr.usesCallCreate = false ∧
+                Structured.Code.usesCallCreate rest = false := by
+            simpa [Structured.Code.usesCallCreate] using hNoCall
+          rcases hFits with ⟨hFitHere, hFitsRest⟩
+          have hStepPc :
+              mid.pc =
+                state.pc + EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
+            cases instr with
+            | push value =>
+                exact Structured.Preservation.BasicInstr.push_stepPC value hStep
+            | op op =>
+                simpa [Structured.BasicInstr.toAssembly,
+                  Assembly.Instr.byteSize] using
+                  basicOp_no_callCreate_step_pc
+                    (op := op) hNoParts.1 hStep
+          have hMidPc :
+              mid.pc =
+                Assembly.Program.pcAfter (pre ++ [instr.toAssembly]) := by
+            calc
+              mid.pc =
+                  state.pc +
+                    EvmYul.UInt256.ofNat instr.toAssembly.byteSize :=
+                hStepPc
+              _ =
+                  Assembly.Program.pcAfter pre +
+                    EvmYul.UInt256.ofNat instr.toAssembly.byteSize := by
+                rw [hPc]
+              _ = Assembly.Program.pcAfter (pre ++ [instr.toAssembly]) := by
+                simp [Assembly.Program.pcAfter,
+                  Assembly.Program.byteLength_append,
+                  Assembly.Program.byteLength, Assembly.UInt256_ofNat_add]
+          have hFinalPc :=
+            ih hNoParts.2 hFitsRest hMidPc hRun
+          simpa [Structured.Code.toAssembly, List.append_assoc] using hFinalPc
+
+theorem structuredCode_run_codeSegment_no_call_fallthroughPc
+    {program : Assembly.Program} {code : Structured.Code}
+    {state final : EvmYul.EVM.State}
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hNoCall : Structured.Code.usesCallCreate code = false)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hRun : Structured.Code.run code state = .ok final) :
+    final.pc = Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  rcases segment with ⟨pre, post, hAsm, hFits⟩
+  subst program
+  have hCodeFits :
+      Structured.Preservation.Code.PCFitsFrom pre code :=
+    Structured.Preservation.Code.PCFitsFrom.of_assembly hFits
+  exact structuredCode_run_no_call_fallthrough_pc hNoCall hCodeFits hPc hRun
 
 theorem openRunNResult_codeSegment_no_call_running_continue
     {program : Assembly.Program} {code : Structured.Code}
