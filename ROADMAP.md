@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:09 CEST.
+Last updated: 2026-06-03 04:15 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -136,7 +136,15 @@ Execution order:
    threading the checked head continuation into the recursive tail
    continuation without inspecting where CALLs occur. The next adjacent
    expression proof step is assembling these lemmas into the mutual
-   expression/expression-sequence lowering theorem.
+   expression/expression-sequence lowering theorem. The open source-side arity
+   facts are now checked too:
+   `OpenLowering.compilerOpenPrimitive_eval_resolves_ok_length`,
+   `OpenLowering.compilerOpenLocalsExpr_eval_resolves_ok_length_of_sourceOwned`,
+   `OpenLowering.compilerOpenLocalsExprSeq_eval_resolves_ok_length_of_sourceOwned`,
+   and the source-owned `.prim` wrapper
+   `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_sourceOwned_args`;
+   this removes the ad hoc argument-length callback from the route the mutual
+   theorem should consume.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.

@@ -915,6 +915,193 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
         ⟨_hSource, hTarget⟩
       simpa [hTrace] using hTarget
 
+theorem compilerOpenPrimitive_eval_resolves_ok_length
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {compiler compilerAfter : Objects.Source.State}
+    {op : Structured.BasicOp} {values valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval
+          prim op compiler values)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    valuesAfter.length = Expressions.Structured.BasicOp.outputs op := by
+  unfold Reference.SourceBridgeFacts.CompilerOpen.Primitive.eval at hResolve
+  cases hOpen :
+      Reference.SourceBridgeFacts.CompilerOpen.Primitive.openCall?
+        compiler op values with
+  | none =>
+      simp [hOpen] at hResolve
+      cases hEval : prim.eval op compiler.shared values with
+      | error err =>
+          simp [hEval] at hResolve
+          cases hResolve
+      | ok primResult =>
+          rcases primResult with ⟨sharedAfter, valuesAfter'⟩
+          simp [hEval] at hResolve
+          cases hResolve
+          exact hPrim.eval_length hEval
+  | some call =>
+      simp [hOpen] at hResolve
+      cases hResolve with
+      | @call call' response _trace _result hTail =>
+          cases hCallResult : call.resume response with
+          | error err =>
+              simp [hCallResult] at hTail
+              cases hTail
+          | ok resultPair =>
+              rcases resultPair with ⟨compilerAfter', valuesAfter'⟩
+              simp [hCallResult] at hTail
+              cases hTail
+              unfold
+                Reference.SourceBridgeFacts.CompilerOpen.Primitive.openCall?
+                at hOpen
+              cases hKind : OpenExternal.CallKind.ofBasicOp? op with
+              | none =>
+                  simp [hKind] at hOpen
+              | some kind =>
+                  cases hCompilerCall :
+                      Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+                        compiler kind values with
+                  | none =>
+                      simp [hKind, hCompilerCall] at hOpen
+                  | some compilerCall =>
+                      simp [hKind, hCompilerCall] at hOpen
+                      rcases hOpen with rfl
+                      have hOp : op = kind.toBasicOp :=
+                        basicOp_eq_toBasicOp_of_callKind hKind
+                      cases hOp
+                      have hPairEq :
+                          compilerCall.resume response =
+                            (compilerAfter, valuesAfter) :=
+                        Except.ok.inj hCallResult
+                      have hResumeLen :
+                          (compilerCall.resume response).2.length = 1 := by
+                        unfold
+                          Reference.SourceBridgeFacts.SourceStateRel.compilerPrimitiveOpenCall?
+                          at hCompilerCall
+                        cases hPrimitiveCall :
+                            OpenExternal.CallKind.primitiveSharedOpenCall?
+                              compiler.shared kind values with
+                        | none =>
+                            simp [hPrimitiveCall] at hCompilerCall
+                        | some primitiveCall =>
+                            simp [hPrimitiveCall] at hCompilerCall
+                            rcases hCompilerCall with rfl
+                            unfold
+                              OpenExternal.CallKind.primitiveSharedOpenCall?
+                              at hPrimitiveCall
+                            cases hSite :
+                                OpenExternal.CallKind.primitiveCallSite?
+                                  compiler.shared kind values with
+                            | none =>
+                                simp [hSite] at hPrimitiveCall
+                            | some site =>
+                                simp [hSite] at hPrimitiveCall
+                                rcases hPrimitiveCall with rfl
+                                simp
+                      simpa [hPairEq,
+                        OpenExternal.CallKind.outputs_toBasicOp] using
+                        hResumeLen
+
+mutual
+  theorem compilerOpenLocalsExpr_eval_resolves_ok_length_of_sourceOwned
+      {prim : Objects.Source.PrimitiveSemantics}
+      (hPrim : Locals.SourceLowering.PrimitiveSound prim) :
+      ∀ {results : Nat} {expr : Locals.Expr results}
+        {compiler compilerAfter : Objects.Source.State}
+        {valuesAfter : List Word} {trace : OpenExternal.OpenTrace},
+        Locals.Source.Expr.SourceOwned expr →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+            prim expr compiler)
+          trace (.ok (compilerAfter, valuesAfter)) →
+        valuesAfter.length = results := by
+    intro results expr compiler compilerAfter valuesAfter trace hOwned hResolve
+    cases expr with
+    | lit value =>
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+        cases hResolve
+        simp
+    | var name =>
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+        cases hLookup : compiler.vars name with
+        | none =>
+            simp [hLookup, Reference.SourceBridgeFacts.CompilerOpen.invalid]
+              at hResolve
+            cases hResolve
+        | some value =>
+            simp [hLookup] at hResolve
+            cases hResolve
+            simp
+    | code code =>
+        simp [Locals.Source.Expr.SourceOwned] at hOwned
+    | prim op args =>
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+        simp [Locals.Source.Expr.SourceOwned] at hOwned
+        rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+          hArgsError | hArgsOk
+        · rcases hArgsError with ⟨err, _hArgs, hResult⟩
+          cases hResult
+        · rcases hArgsOk with
+            ⟨argsTrace, primTrace, argResult, _hTrace, _hResolveArgs,
+              hResolvePrim⟩
+          rcases argResult with ⟨compilerAfterArgs, argValues⟩
+          exact
+            compilerOpenPrimitive_eval_resolves_ok_length
+              (prim := prim) hPrim hResolvePrim
+
+  theorem compilerOpenLocalsExprSeq_eval_resolves_ok_length_of_sourceOwned
+      {prim : Objects.Source.PrimitiveSemantics}
+      (hPrim : Locals.SourceLowering.PrimitiveSound prim) :
+      ∀ {results : Nat} {exprs : Locals.ExprSeq results}
+        {compiler compilerAfter : Objects.Source.State}
+        {valuesAfter : List Word} {trace : OpenExternal.OpenTrace},
+        Locals.Source.ExprSeq.SourceOwned exprs →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim exprs compiler)
+          trace (.ok (compilerAfter, valuesAfter)) →
+        valuesAfter.length = results := by
+    intro results exprs compiler compilerAfter valuesAfter trace hOwned hResolve
+    cases exprs with
+    | nil =>
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+        cases hResolve
+        simp
+    | @cons left right head tail =>
+        simp [Locals.Source.ExprSeq.SourceOwned] at hOwned
+        rcases hOwned with ⟨hHeadOwned, hTailOwned⟩
+        rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq] at hResolve
+        rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+          hHeadError | hHeadOk
+        · rcases hHeadError with ⟨err, _hHead, hResult⟩
+          cases hResult
+        · rcases hHeadOk with
+            ⟨headTrace, tailAndDoneTrace, headResult, _hTrace,
+              hResolveHead, hResolveTailBind⟩
+          rcases headResult with ⟨compilerAfterHead, headValues⟩
+          rcases OpenExternal.OpenResultResolves.bind_inv hResolveTailBind with
+            hTailError | hTailOk
+          · rcases hTailError with ⟨err, _hTail, hResult⟩
+            cases hResult
+          · rcases hTailOk with
+              ⟨tailTrace, doneTrace, tailResult, _hTailAndDoneTrace,
+                hResolveTail, hResolveDone⟩
+            rcases tailResult with ⟨compilerAfterTail, tailValues⟩
+            cases hResolveDone
+            have hHeadLen :
+                headValues.length = left :=
+              compilerOpenLocalsExpr_eval_resolves_ok_length_of_sourceOwned
+                hPrim hHeadOwned hResolveHead
+            have hTailLen :
+                tailValues.length = right :=
+              compilerOpenLocalsExprSeq_eval_resolves_ok_length_of_sourceOwned
+                hPrim hTailOwned hResolveTail
+            simp [hHeadLen, hTailLen]
+end
+
 theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -1012,6 +1199,73 @@ theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
     have hFull := hArgsCont hPrimitiveAndTail
     subst trace
     simpa [List.append_assoc] using hFull
+
+theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_sourceOwned_args
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {op : Structured.BasicOp}
+    {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hArgsOwned : Locals.Source.ExprSeq.SourceOwned args)
+    (hSupported :
+      op.toPrimOp.isCallCreate = false ∨
+        ∃ kind : OpenExternal.CallKind,
+          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (stackPrefix : List Word)
+    (program : Assembly.Program)
+    (primitiveTailFuel expressionFuel : Nat)
+    (hArgsSound :
+      ∀ {argsTrace : OpenExternal.OpenTrace}
+        {compilerAfterArgs : Objects.Source.State} {argValues : List Word},
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim args compiler)
+          argsTrace (.ok (compilerAfterArgs, argValues)) →
+        ∃ evmAfterArgs : EvmYul.EVM.State,
+        ∃ pc : Nat,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterArgs
+            (argValues.reverse ++ stackPrefix) evmAfterArgs ∧
+          Assembly.Program.instrAtPc program evmAfterArgs.pc.toNat =
+            some (pc, Assembly.Instr.prim op.toPrimOp) ∧
+          ∀ {tailTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program
+                (primitiveTailFuel + 1) evmAfterArgs)
+              tailTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program expressionFuel state)
+              (argsTrace ++ tailTrace) result)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.prim op args) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program primitiveTailFuel
+            evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program expressionFuel state)
+          (trace ++ tailTrace) result :=
+  compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
+    (prim := prim) hPrim (layout := layout) (compiler := compiler)
+    (compilerAfter := compilerAfter) (state := state) (op := op)
+    (args := args) hSupported stackPrefix program primitiveTailFuel
+    expressionFuel
+    (fun hResolveArgs =>
+      compilerOpenLocalsExprSeq_eval_resolves_ok_length_of_sourceOwned
+        hPrim hArgsOwned hResolveArgs)
+    hArgsSound hResolve
 
 theorem compilerOpenLocalsExpr_lit_stackPrefix_openRunNResult_continue
     {prim : Objects.Source.PrimitiveSemantics}
