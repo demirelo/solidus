@@ -7548,6 +7548,79 @@ def codeSegment_procSegment_bodyCode
           (pre := procSeg.pre ++ entryCode) (first := bodyCode)
           (second := exitCode ++ dispatchCode) hFitsAfterEntry }
 
+theorem codeSegment_functionsFunDef_toLocalsProc_bodyCode_of_toExpressions?
+    {program : Structured.Program} {fn : Functions.FunDef}
+    {exprProc : Expressions.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {asm : Assembly.Program}
+    (hProcLower :
+      (Functions.FunDef.toLocalsProc fn).toExpressions? = some exprProc)
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          exprProc.toStructured bodySupply dispatchSupply sites)) :
+    ∃ bodySegment :
+        Structured.Preservation.CodeSegment asm
+          (Structured.Block.compileFromCtx
+            { stmts :=
+                Expressions.StmtList.toStructured exprProc.body.stmts }
+            (Structured.Preservation.ProcedurePreservation.bodyCtx program
+              exprProc.toStructured)
+            bodySupply).code,
+      Locals.Block.compileToPreserving
+          (Locals.Ctx.procEntryWithLayoutAndRetc
+            fn.params.reverse fn.returns.length)
+          fn.returns.length 0 (Functions.FunDef.toLocalsProc fn).body =
+        some exprProc.body ∧
+      Structured.Preservation.CodeSegment.startPc bodySegment =
+        Structured.Preservation.CodeSegment.startPc
+          (codeSegment_procSegment_bodyCode procSeg) ∧
+      Structured.Preservation.CodeSegment.fallthroughPc bodySegment =
+        Structured.Preservation.CodeSegment.fallthroughPc
+          (codeSegment_procSegment_bodyCode procSeg) := by
+  rcases Locals.Direct.Proc.toExpressions?_body hProcLower with
+    ⟨hBody, _hName, _hArgc, _hRetc⟩
+  have hCompileBody :
+      Locals.Block.compileToPreserving
+          (Locals.Ctx.procEntryWithLayoutAndRetc
+            fn.params.reverse fn.returns.length)
+          fn.returns.length 0 (Functions.FunDef.toLocalsProc fn).body =
+        some exprProc.body := by
+    simpa [Functions.FunDef.toLocalsProc] using hBody
+  let rawBodySegment := codeSegment_procSegment_bodyCode procSeg
+  have hCodeEq :
+      Structured.Preservation.ProcedurePreservation.bodyCode program
+          exprProc.toStructured bodySupply =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured exprProc.body.stmts }
+          (Structured.Preservation.ProcedurePreservation.bodyCtx program
+            exprProc.toStructured)
+          bodySupply).code := by
+    cases exprProc with
+    | mk name argc retc body =>
+        cases body
+        simp [Structured.Preservation.ProcedurePreservation.bodyCode,
+          Expressions.Proc.toStructured, Expressions.Block.toStructured]
+  let bodySegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured exprProc.body.stmts }
+          (Structured.Preservation.ProcedurePreservation.bodyCtx program
+            exprProc.toStructured)
+          bodySupply).code :=
+    Structured.Preservation.CodeSegment.cast_code hCodeEq rawBodySegment
+  refine ⟨bodySegment, hCompileBody, ?_, ?_⟩
+  · simp [bodySegment, rawBodySegment,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  · cases rawBodySegment with
+    | mk pre post hAsm hFits =>
+        simp [bodySegment, rawBodySegment,
+          Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
+
 theorem structured_dispatch_forProc_usesCallCreate_false
     (proc : Structured.Proc) (sites : List Structured.CallSite)
     (supply : Structured.LabelSupply) :
