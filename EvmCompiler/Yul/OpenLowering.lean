@@ -1826,6 +1826,496 @@ theorem openRunNResult_source_jump_no_call_running_continue
     OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
       hAt hNoInstr hClosed hRest
 
+theorem openRunNResult_source_jumpi_no_call_running_continue
+    {pre post : Assembly.Program} {label : Assembly.Label}
+    {state afterPop : EvmYul.EVM.State} {condTrue : Bool}
+    {dest : Nat}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFit : Structured.Preservation.PCFits pre)
+    (hPc : state.pc = Assembly.Program.pcAfter pre)
+    (hLabel :
+      Assembly.Program.labelPc
+        (pre ++ [Assembly.Instr.jumpi label] ++ post) label = some dest)
+    (hPop : Structured.Code.popCondition state = .ok (afterPop, condTrue))
+    (hRest :
+      ∀ afterJump : EvmYul.EVM.State,
+        Structured.Preservation.RelAt
+          (if condTrue then
+            EvmYul.UInt256.ofNat dest
+          else
+            Assembly.Program.pcAfter (pre ++ [Assembly.Instr.jumpi label]))
+          afterJump afterPop →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.jumpi label] ++ post) fuel afterJump)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ [Assembly.Instr.jumpi label] ++ post) (fuel + 1) state)
+      tailTrace result := by
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.jumpi label] ++ post) state.pc.toNat =
+        some (Assembly.Program.byteLength pre, Assembly.Instr.jumpi label) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre post (Assembly.Instr.jumpi label) 0
+  have hRelAt :
+      Structured.Preservation.RelAt (Assembly.Program.pcAfter pre)
+        state state := by
+    exact ⟨hPc, rfl⟩
+  rcases
+      Structured.Preservation.AssemblyControl.jumpi_stepResult_ctx_relAt_of_popCondition
+        (label := label) (dest := dest) (pre := pre) (post := post)
+        (source := state) (target := state) (source' := afterPop)
+        (condTrue := condTrue) hFit hRelAt hLabel hPop with
+    ⟨afterJump, hStep, hRelAfter⟩
+  have hNoInstr :
+      Assembly.Instr.usesCallCreate (Assembly.Instr.jumpi label) = false := by
+    simp [Assembly.Instr.usesCallCreate]
+  exact
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt hNoInstr hStep (hRest afterJump hRelAfter)
+
+theorem openRunNResult_dispatchCondition_source_running_continue
+    {state : EvmYul.EVM.State}
+    {returnValues suffix : List Word} {token probe : Word}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+        , Assembly.Instr.push probe
+        , Assembly.Instr.prim .eq
+        ])
+    (hPc :
+      ({ state with stack := returnValues ++ token :: suffix }).pc =
+        Assembly.Program.pcAfter pre)
+    (hBound : returnValues.length < 16)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        final.stack =
+          EvmYul.UInt256.eq probe token ::
+            returnValues ++ token :: suffix →
+        Structured.Preservation.eraseControl final =
+          Structured.Preservation.eraseControl
+            { state with stack :=
+                EvmYul.UInt256.eq probe token ::
+                  returnValues ++ token :: suffix } →
+        final.pc =
+          Assembly.Program.pcAfter
+            (pre ++
+              [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+              , Assembly.Instr.push probe
+              , Assembly.Instr.prim .eq
+              ]) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+              , Assembly.Instr.push probe
+              , Assembly.Instr.prim .eq
+              ] ++ post) fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+          , Assembly.Instr.push probe
+          , Assembly.Instr.prim .eq
+          ] ++ post) (3 + fuel)
+        { state with stack := returnValues ++ token :: suffix })
+      tailTrace result := by
+  let dupInstr := Structured.StackShuffle.dupInstr (returnValues.length + 1)
+  let fullProgram : Assembly.Program :=
+    pre ++ [dupInstr, Assembly.Instr.push probe, Assembly.Instr.prim .eq] ++
+      post
+  let start : EvmYul.EVM.State :=
+    { state with stack := returnValues ++ token :: suffix }
+  let afterDup : EvmYul.EVM.State :=
+    EvmYul.EVM.State.replaceStackAndIncrPC start
+      (token :: returnValues ++ token :: suffix)
+  let afterPush : EvmYul.EVM.State :=
+    afterDup.replaceStackAndIncrPC
+      (probe :: token :: returnValues ++ token :: suffix) (pcΔ := 33)
+  let finalState : EvmYul.EVM.State :=
+    afterPush.replaceStackAndIncrPC
+      (EvmYul.UInt256.eq probe token ::
+        returnValues ++ token :: suffix)
+  have hDupStep :
+      Assembly.Target.stepInstr
+          (Structured.Preservation.StackShuffle.targetInstr dupInstr)
+          start =
+        .ok afterDup := by
+    rw [show dupInstr =
+      Structured.StackShuffle.dupInstr (returnValues.length + 1) from rfl]
+    rw [Structured.Preservation.StackShuffle.dupInstr_step_eq_dup
+      (by omega) (by omega)]
+    simpa [afterDup, start, List.append_assoc] using
+      (Structured.Preservation.StackShuffle.dup_append_token
+        (state := state) (front := returnValues)
+        (suffix := suffix) (token := token))
+  have hPushStep :
+      Assembly.Target.stepInstr
+          (Structured.Preservation.StackShuffle.targetInstr
+            (Assembly.Instr.push probe)) afterDup =
+        .ok afterPush := by
+    simp [Structured.Preservation.StackShuffle.targetInstr, afterPush,
+      afterDup, Assembly.Target.stepInstr, EvmYul.Stack.push,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC]
+  have hEqStep :
+      Assembly.Target.stepInstr
+          (Structured.Preservation.StackShuffle.targetInstr
+            (Assembly.Instr.prim .eq)) afterPush =
+        .ok finalState := by
+    simp [Structured.Preservation.StackShuffle.targetInstr, finalState,
+      afterPush, afterDup, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+      Assembly.PrimStep.run, EvmYul.EVM.execBinOp, EvmYul.Stack.push,
+      EvmYul.Stack.pop2, EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, Id.run]
+  have hDupByte : dupInstr.byteSize = 1 := by
+    exact
+      Structured.Preservation.StackShuffle.dupInstr_byteSize
+        (n := returnValues.length + 1) (by omega) (by omega)
+  have hAfterDupPc :
+      afterDup.pc = Assembly.Program.pcAfter (pre ++ [dupInstr]) := by
+    have hPcState : state.pc = Assembly.Program.pcAfter pre := by
+      simpa [start] using hPc
+    calc
+      afterDup.pc
+          = state.pc + EvmYul.UInt256.ofNat 1 := by
+              simp [afterDup, start, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
+      _ = Assembly.Program.pcAfter pre + EvmYul.UInt256.ofNat 1 := by
+              rw [hPcState]
+      _ = EvmYul.UInt256.ofNat (Assembly.Program.byteLength pre + 1) := by
+              rw [Assembly.Program.pcAfter, Assembly.UInt256_ofNat_add]
+      _ = Assembly.Program.pcAfter (pre ++ [dupInstr]) := by
+              simp [Assembly.Program.pcAfter,
+                Assembly.Program.byteLength_append,
+                Assembly.Program.byteLength, hDupByte]
+  have hAfterPushPc :
+      afterPush.pc =
+        Assembly.Program.pcAfter
+          (pre ++ [dupInstr, Assembly.Instr.push probe]) := by
+    calc
+      afterPush.pc
+          = afterDup.pc + EvmYul.UInt256.ofNat 33 := by
+              simp [afterPush, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
+      _ =
+        Assembly.Program.pcAfter (pre ++ [dupInstr]) +
+          EvmYul.UInt256.ofNat 33 := by
+              rw [hAfterDupPc]
+      _ =
+        EvmYul.UInt256.ofNat
+          (Assembly.Program.byteLength (pre ++ [dupInstr]) + 33) := by
+              rw [Assembly.Program.pcAfter, Assembly.UInt256_ofNat_add]
+      _ =
+        Assembly.Program.pcAfter
+          (pre ++ [dupInstr, Assembly.Instr.push probe]) := by
+              simp [Assembly.Program.pcAfter,
+                Assembly.Program.byteLength_append,
+                Assembly.Program.byteLength, Assembly.Instr.byteSize,
+                Assembly.Instr.push32Size, Nat.add_assoc]
+  have hEqFit :
+      Structured.Preservation.PCFits
+        (pre ++ [dupInstr, Assembly.Instr.push probe]) := by
+    simpa [dupInstr] using hFits.2.2.1
+  have hFinalStack :
+      finalState.stack =
+        EvmYul.UInt256.eq probe token ::
+          returnValues ++ token :: suffix := by
+    simp [finalState, afterPush, afterDup,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC]
+  have hFinalErase :
+      Structured.Preservation.eraseControl finalState =
+        Structured.Preservation.eraseControl
+          { state with stack :=
+              EvmYul.UInt256.eq probe token ::
+                returnValues ++ token :: suffix } := by
+    simp [finalState, afterPush, afterDup, start,
+      Structured.Preservation.eraseControl, Assembly.eraseGas,
+      EvmYul.EVM.State.replaceStackAndIncrPC, EvmYul.EVM.State.incrPC]
+  have hFinalPc :
+      finalState.pc =
+        Assembly.Program.pcAfter
+          (pre ++ [dupInstr, Assembly.Instr.push probe,
+            Assembly.Instr.prim .eq]) := by
+    calc
+      finalState.pc
+          = afterPush.pc + EvmYul.UInt256.ofNat 1 := by
+              simp [finalState, EvmYul.EVM.State.replaceStackAndIncrPC,
+                EvmYul.EVM.State.incrPC]
+      _ =
+        Assembly.Program.pcAfter
+            (pre ++ [dupInstr, Assembly.Instr.push probe]) +
+          EvmYul.UInt256.ofNat 1 := by
+              rw [hAfterPushPc]
+      _ =
+        EvmYul.UInt256.ofNat
+          (Assembly.Program.byteLength
+            (pre ++ [dupInstr, Assembly.Instr.push probe]) + 1) := by
+              rw [Assembly.Program.pcAfter, Assembly.UInt256_ofNat_add]
+      _ =
+        Assembly.Program.pcAfter
+          (pre ++ [dupInstr, Assembly.Instr.push probe,
+            Assembly.Instr.prim .eq]) := by
+              simp [Assembly.Program.pcAfter,
+                Assembly.Program.byteLength_append, Assembly.Program.byteLength,
+                Assembly.Instr.byteSize, Nat.add_assoc]
+  have hRestFinal :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult fullProgram fuel finalState)
+        tailTrace result := by
+    simpa [fullProgram, dupInstr] using
+      hRest finalState hFinalStack hFinalErase hFinalPc
+  have hEqRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult fullProgram (fuel + 1)
+          afterPush)
+        tailTrace result := by
+    have hRun :=
+      openRunNResult_source_local_instr_no_call_running_continue
+        (instr := Assembly.Instr.prim .eq)
+        (pre := pre ++ [dupInstr, Assembly.Instr.push probe])
+        (post := post) (state := afterPush) (mid := finalState)
+        (fuel := fuel) (tailTrace := tailTrace) (result := result)
+        (by simp [Structured.Preservation.StackShuffle.SourceLocalInstr])
+        (by simp [Assembly.Instr.usesCallCreate, Assembly.PrimOp.isCallCreate])
+        rfl hEqFit hAfterPushPc hEqStep
+        (by simpa [fullProgram, List.append_assoc] using hRestFinal)
+    simpa [fullProgram, List.append_assoc] using hRun
+  have hPushRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult fullProgram ((fuel + 1) + 1)
+          afterDup)
+        tailTrace result := by
+    have hRun :=
+      openRunNResult_source_local_instr_no_call_running_continue
+        (instr := Assembly.Instr.push probe)
+        (pre := pre ++ [dupInstr])
+        (post := [Assembly.Instr.prim .eq] ++ post)
+        (state := afterDup) (mid := afterPush)
+        (fuel := fuel + 1) (tailTrace := tailTrace) (result := result)
+        (by simp [Structured.Preservation.StackShuffle.SourceLocalInstr])
+        (by simp [Assembly.Instr.usesCallCreate])
+        rfl hFits.2.1 hAfterDupPc hPushStep
+        (by simpa [fullProgram, List.append_assoc] using hEqRun)
+    simpa [fullProgram, List.append_assoc] using hRun
+  have hDupRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult fullProgram
+          (((fuel + 1) + 1) + 1) start)
+        tailTrace result := by
+    have hRun :=
+      openRunNResult_source_local_instr_no_call_running_continue
+        (instr := dupInstr) (pre := pre)
+        (post := [Assembly.Instr.push probe, Assembly.Instr.prim .eq] ++ post)
+        (state := start) (mid := afterDup)
+        (fuel := (fuel + 1) + 1) (tailTrace := tailTrace)
+        (result := result)
+        (Structured.Preservation.StackShuffle.dupInstr_sourceLocal
+          (n := returnValues.length + 1) (by omega) (by omega))
+        (by
+          simpa [dupInstr] using
+            Structured.CompilerFacts.GeneratedNoCallCreate.dupInstr
+              (returnValues.length + 1))
+        (Structured.Preservation.StackShuffle.dupInstr_haltKind?_none
+          (n := returnValues.length + 1) (by omega) (by omega))
+        hFits.1 (by simpa [start] using hPc) hDupStep
+        (by simpa [fullProgram, List.append_assoc] using hPushRun)
+    simpa [fullProgram, List.append_assoc] using hRun
+  have hFuel : ((fuel + 1) + 1) + 1 = 3 + fuel := by
+    omega
+  simpa [fullProgram, dupInstr, start, hFuel] using hDupRun
+
+theorem openRunNResult_dispatchCondition_jumpi_source_running_continue
+    {state : EvmYul.EVM.State}
+    {returnValues suffix : List Word} {token probe : Word}
+    {label : Assembly.Label} {dest : Nat}
+    {pre post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hFits :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+        , Assembly.Instr.push probe
+        , Assembly.Instr.prim .eq
+        , Assembly.Instr.jumpi label
+        ])
+    (hPc :
+      ({ state with stack := returnValues ++ token :: suffix }).pc =
+        Assembly.Program.pcAfter pre)
+    (hBound : returnValues.length < 16)
+    (hLabel :
+      Assembly.Program.labelPc
+        (pre ++
+          [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+          , Assembly.Instr.push probe
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi label
+          ] ++ post)
+        label = some dest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        final.stack = returnValues ++ token :: suffix →
+        Structured.Preservation.eraseControl final =
+          Structured.Preservation.eraseControl
+            { state with stack := returnValues ++ token :: suffix } →
+        (final.pc =
+          (if probe = token then
+              EvmYul.UInt256.ofNat dest
+            else
+              Assembly.Program.pcAfter
+                (pre ++
+                  [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+                  , Assembly.Instr.push probe
+                  , Assembly.Instr.prim .eq
+                  , Assembly.Instr.jumpi label
+                  ]))) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++
+              [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+              , Assembly.Instr.push probe
+              , Assembly.Instr.prim .eq
+              , Assembly.Instr.jumpi label
+              ] ++ post) fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++
+          [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+          , Assembly.Instr.push probe
+          , Assembly.Instr.prim .eq
+          , Assembly.Instr.jumpi label
+          ] ++ post) (4 + fuel)
+        { state with stack := returnValues ++ token :: suffix })
+      tailTrace result := by
+  let conditionCode : Assembly.Program :=
+    [ Structured.StackShuffle.dupInstr (returnValues.length + 1)
+    , Assembly.Instr.push probe
+    , Assembly.Instr.prim .eq
+    ]
+  have hFitsCond :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom pre
+        conditionCode := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.left
+        (pre := pre) (first := conditionCode)
+        (second := [Assembly.Instr.jumpi label])
+        (by simpa [conditionCode] using hFits)
+  have hFitsJump :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (pre ++ conditionCode) [Assembly.Instr.jumpi label] := by
+    exact
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := pre) (first := conditionCode)
+        (second := [Assembly.Instr.jumpi label])
+        (by simpa [conditionCode] using hFits)
+  have hLabelJump :
+      Assembly.Program.labelPc
+        ((pre ++ conditionCode) ++ [Assembly.Instr.jumpi label] ++ post)
+        label = some dest := by
+    simpa [conditionCode, List.append_assoc] using hLabel
+  have hConditionRun :=
+    openRunNResult_dispatchCondition_source_running_continue
+      (state := state) (returnValues := returnValues) (suffix := suffix)
+      (token := token) (probe := probe) (pre := pre)
+      (post := [Assembly.Instr.jumpi label] ++ post)
+      (fuel := fuel + 1) (tailTrace := tailTrace) (result := result)
+      (by simpa [conditionCode] using hFitsCond) hPc hBound
+      (by
+        intro mid hMidStack hMidErase hMidPc
+        let afterPop : EvmYul.EVM.State :=
+          { mid with stack := returnValues ++ token :: suffix }
+        have hPop :
+            Structured.Code.popCondition mid = .ok (afterPop, probe = token) := by
+          unfold Structured.Code.popCondition
+          rw [hMidStack]
+          simp [EvmYul.Stack.pop, afterPop,
+            Structured.Preservation.uint256_eq_ne_zero]
+        have hJumpRun :=
+          openRunNResult_source_jumpi_no_call_running_continue
+            (label := label) (dest := dest)
+            (pre := pre ++ conditionCode) (post := post)
+            (state := mid) (afterPop := afterPop)
+            (condTrue := probe = token)
+            (fuel := fuel) (tailTrace := tailTrace) (result := result)
+            (Structured.Preservation.AssemblyProgram.PCFitsFrom.start
+              hFitsJump)
+            (by simpa [conditionCode] using hMidPc)
+            hLabelJump hPop
+            (by
+              intro afterJump hRelAfter
+              have hStack :
+                  afterJump.stack = returnValues ++ token :: suffix := by
+                have hStackEq :=
+                  Structured.Preservation.stack_eq_of_eraseControl_eq
+                    hRelAfter.sameData
+                simpa [afterPop] using hStackEq
+              have hErase :
+                  Structured.Preservation.eraseControl afterJump =
+                    Structured.Preservation.eraseControl
+                      { state with stack := returnValues ++ token :: suffix } := by
+                calc
+                  Structured.Preservation.eraseControl afterJump =
+                      Structured.Preservation.eraseControl afterPop :=
+                    hRelAfter.sameData
+                  _ =
+                      Structured.Preservation.eraseControl
+                        { mid with stack := returnValues ++ token :: suffix } := by
+                    rfl
+                  _ =
+                      Structured.Preservation.eraseControl
+                        { { state with
+                            stack :=
+                              EvmYul.UInt256.eq probe token ::
+                                returnValues ++ token :: suffix } with
+                          stack := returnValues ++ token :: suffix } := by
+                    exact
+                      Structured.Preservation.eraseControl_with_stack_congr
+                        (left := mid)
+                        (right :=
+                          { state with
+                            stack :=
+                              EvmYul.UInt256.eq probe token ::
+                                returnValues ++ token :: suffix })
+                        (stack := returnValues ++ token :: suffix)
+                        hMidErase
+                  _ =
+                      Structured.Preservation.eraseControl
+                        { state with stack := returnValues ++ token :: suffix } := by
+                    simp [Structured.Preservation.eraseControl,
+                      Assembly.eraseGas]
+              have hPcFinal :
+                  afterJump.pc =
+                    (if probe = token then
+                        EvmYul.UInt256.ofNat dest
+                      else
+                        Assembly.Program.pcAfter
+                          (pre ++
+                            [ Structured.StackShuffle.dupInstr
+                                (returnValues.length + 1)
+                            , Assembly.Instr.push probe
+                            , Assembly.Instr.prim .eq
+                            , Assembly.Instr.jumpi label
+                            ])) := by
+                simpa [conditionCode, List.append_assoc] using
+                  hRelAfter.pc_eq
+              simpa [conditionCode, List.append_assoc] using
+                hRest afterJump hStack hErase hPcFinal)
+        simpa [conditionCode, List.append_assoc] using hJumpRun)
+  have hFuel : 3 + (fuel + 1) = 4 + fuel := by
+    omega
+  simpa [conditionCode, hFuel, List.append_assoc] using hConditionRun
+
 theorem stackShuffle_swapInstr_usesCallCreate_false {n : Nat}
     (hOne : 1 ≤ n) (hBound : n ≤ 16) :
     Assembly.Instr.usesCallCreate (Structured.StackShuffle.swapInstr n) =

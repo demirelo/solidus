@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:10 CEST.
+Last updated: 2026-06-03 07:16 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -112,7 +112,13 @@ Execution order:
    external CALLs elsewhere; the first checked return atom is now
    `openRunNResult_source_label_running_continue`, which replays a generated
    label instruction on the empty trace and continues through the source-open
-   runner. The
+   runner. The generated dispatch test is now local-open too:
+   `openRunNResult_source_jumpi_no_call_running_continue`,
+   `openRunNResult_dispatchCondition_source_running_continue`, and
+   `openRunNResult_dispatchCondition_jumpi_source_running_continue` replay the
+   `dup`/`push`/`eq`/`jumpi` return-token test while preserving selected-branch
+   or fallthrough PC, again without assuming the whole assembly program is
+   no-CALL. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
