@@ -274469,6 +274469,108 @@ theorem checkedOpenDispatcherSeqPath_canonical
       hSafeStmts hScopedStmts hOkStmts hSourceScoped hReserved hAllowed
       hSupported hScopeContains
 
+/--
+Root dispatcher-body specialization of the canonical open CALL frontier.
+
+This consumes the checked dispatcher-sequence facade at the actual block
+compiled into `functionProgram.body`, so public callers no longer need to carry
+the singleton dispatcher lowering step themselves.
+-/
+theorem sourceOpenDispatcherBodyPath_canonical
+    {cfg : Reference.StateRelConfig}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {allowed : Except Reference.Exception Reference.State → Prop}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured outcomeRel program asm
+        target shared store sourceFuel initial referenceResult)
+    (hBodyFuelAdequate :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo
+        cfg program.contract sourceFuel)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable
+          sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported
+          Functions.Source.Ctx.initial [] [] sourceResult) :
+    ∃ functionProgram : Functions.Program,
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] } ∧
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceOpenResultSeqPathSoundWhenAtExactHiddenCtx
+          cfg [] []
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          Locals.Source.PrimitiveSemantics.structured functionProgram
+          Functions.Source.Ctx.initial sourceFuel
+          [program.contract.dispatcher] (some program.contract)
+          functionProgram.body allowed := by
+  rcases
+      hTop.checkedOpenDispatcherSeqPath_canonical
+        (compileFuel := Stmt.List.fuel [program.contract.dispatcher])
+        hBodyFuelAdequate hAllowed hSupported with
+    ⟨functionProgram, hToObjects, hChecked⟩
+  rcases
+      Reference.BridgeFacts.toObjects?_dispatcher_body
+        (program := program) (functionProgram := functionProgram)
+        hToObjects with
+    ⟨stateAfterDispatcher, hLowerStmt⟩
+  have hCovers :
+      Reference.SourceBridgeFacts.FreshCoversLayout
+        (Stmt.names program.contract.dispatcher ++ ([] : List Name))
+        (Fresh.initial (Contract.names program.contract)) := by
+    simpa [Functions.Source.Ctx.initial] using
+      Reference.SourceBridgeFacts.freshCoversDispatcherNames_initial_rootLayout
+        program.contract
+  rcases hBody : functionProgram.body with ⟨bodyStmts⟩
+  have hLowerFuel :
+      Stmt.toFunctionsListFuel? (Stmt.fuel program.contract.dispatcher)
+          (Fresh.initial (Contract.names program.contract))
+          program.contract.dispatcher =
+        some (bodyStmts, stateAfterDispatcher) := by
+    simpa [hBody, Stmt.toFunctionsList?] using hLowerStmt
+  have hLowerHigh :
+      Stmt.toFunctionsListFuel? (Stmt.fuel program.contract.dispatcher).succ
+          (Fresh.initial (Contract.names program.contract))
+          program.contract.dispatcher =
+        some (bodyStmts, stateAfterDispatcher) :=
+    Reference.SourceBridgeFacts.LoweringFuel.stmt_toFunctionsListFuel?_of_some_high
+      program.contract.dispatcher (by omega) hLowerFuel
+  have hLowerBlockLow :
+      Stmt.List.toBlockFuel? (Stmt.fuel program.contract.dispatcher).succ.succ.succ
+          (Fresh.initial (Contract.names program.contract))
+          [program.contract.dispatcher] =
+        some ({ stmts := bodyStmts }, stateAfterDispatcher) := by
+    simp [Stmt.List.toBlockFuel?, Stmt.List.toFunctionsFuel?, hLowerHigh]
+  have hLowerBlock :
+      Stmt.List.toBlock? (Fresh.initial (Contract.names program.contract))
+          [program.contract.dispatcher] =
+        some ({ stmts := bodyStmts }, stateAfterDispatcher) := by
+    simpa [Stmt.List.toBlock?] using
+      (Reference.SourceBridgeFacts.LoweringFuel.list_toBlockFuel?_of_some_high
+        [program.contract.dispatcher] (Nat.le_refl _) hLowerBlockLow)
+  have hLowerBody :
+      Stmt.List.toBlockFuel? (Stmt.List.fuel [program.contract.dispatcher])
+          (Fresh.initial (Contract.names program.contract))
+          [program.contract.dispatcher] =
+        some ({ stmts := bodyStmts }, stateAfterDispatcher) := by
+    simpa [Stmt.List.toBlock?] using hLowerBlock
+  refine ⟨functionProgram, hToObjects, ?_⟩
+  intro source compiler trace sourceDone hInitial hResolves hDone hAdmissible
+    minimumTargetFuel
+  simpa [hBody] using
+    (hChecked hCovers hLowerBody hInitial hResolves hDone hAdmissible
+      minimumTargetFuel)
+
 end RecursiveBridgeCALLTopAssumptions
 
 /--
