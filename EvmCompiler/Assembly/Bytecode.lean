@@ -269,10 +269,9 @@ theorem extract_push32_payload (value : Word) :
     ((ofList
           (EvmYul.EVM.serializeInstr EvmYul.Operation.PUSH32 ::
             encodeWord32 value)).extract' 1 33).data.toList =
-      encodeWord32 value := by
-  unfold ByteArray.extract' ByteArray.extract ByteArray.copySlice
-    ByteArray.empty ByteArray.emptyWithCapacity ofList
-  simp [encodeWord32_length]
+  encodeWord32 value := by
+  unfold ByteArray.extract'
+  simp [ofList, ByteArray.data_extract, encodeWord32_length]
 
 theorem uint256Of_extract_push32_payload (value : Word) :
     EvmYul.uInt256OfByteArray
@@ -356,13 +355,8 @@ theorem extract_push32_payload_after_prefix
               encodeWord32 value) ++
             suffix)).extract' (pre.length + 1) (pre.length + 33)).data.toList =
       encodeWord32 value := by
-  unfold ByteArray.extract' ByteArray.extract ByteArray.copySlice
-    ByteArray.empty ByteArray.emptyWithCapacity ofList
-  have h :
-      pre.length + 1 < 18446744073709551616 ∧
-        pre.length + 33 < 18446744073709551616 :=
-    ⟨hStart, hEnd⟩
-  simp [h, encodeWord32_length]
+  unfold ByteArray.extract'
+  simp [hStart, hEnd, ofList, ByteArray.data_extract, encodeWord32_length]
 
 theorem uint256Of_extract_push32_payload_after_prefix
     (pre suffix : List UInt8) (value : Word)

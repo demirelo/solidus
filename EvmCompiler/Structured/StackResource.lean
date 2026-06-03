@@ -741,7 +741,7 @@ theorem primStep_run_pc {step : Assembly.PrimStep} {state mid : EVMState}
       EvmYul.EVM.State.incrPC] at hRun
   all_goals
     first
-    | exact False.elim (Except.noConfusion hRun)
+    | contradiction
     | cases hRun
       rfl
 namespace AssemblyInstr
@@ -1439,7 +1439,7 @@ theorem stepAtResult_running_pc_mem_successors?
                 (Except.error EvmYul.EVM.ExecutionException.StackUnderflow :
                   Except EVMException Assembly.StepResult) =
                   .ok (.running mid) at hStep
-              exact False.elim (Except.noConfusion hStep)
+              cases hStep
           | some popped =>
               rcases popped with ⟨stack, cond⟩
               simp [hPop] at hStep

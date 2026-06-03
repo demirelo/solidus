@@ -79,7 +79,7 @@ theorem primStep_run_pc
       EvmYul.EVM.State.incrPC] at hRun
   all_goals
     first
-    | exact False.elim (Except.noConfusion hRun)
+    | contradiction
     | cases hRun
       rfl
 

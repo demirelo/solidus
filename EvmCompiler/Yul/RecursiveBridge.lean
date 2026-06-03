@@ -728,7 +728,7 @@ theorem sourceArgEvalRegular_singleton_var
               (fuel := argFuel) (codeOverride := codeOverride)
               (shared := shared) (store := store) (name := name) hLookup
           rw [hEvalArgsErr] at hImpEval
-          exact Except.noConfusion hImpEval
+          cases hImpEval
       | some value =>
           have hEvalArgsOk :
               EvmYul.Yul.evalArgs argFuel.succ.succ.succ [.Var name]
