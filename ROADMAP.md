@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:46 CEST.
+Last updated: 2026-06-03 04:53 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -198,10 +198,19 @@ Execution order:
    the assembly source-open runner under arbitrary target suffix fuel, preserve
    `StackPrefixRel`, and land at the generated `CodeSegment` fallthrough. This
    is the generic expression-level CALL route for nested CALLs in arguments and
-   compound expression contexts.
-   The remaining work is lifting these stack-prefix primitive atoms through
-   full expressions, blocks, calls, and control constructs, then composing the
-   result into the whole-program imported-Yul-to-open-EVM theorem.
+   compound expression contexts. The first statement-boundary adapters are now
+   checked too:
+   `OpenLowering.compilerOpenLocalsExpr_zero_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode`
+   discards successful zero-result expression code back to the original
+   source-layout stack relation,
+   `OpenLowering.compilerOpenLocalsExpr_evalOne_resolves_ok_inv` inverts the
+   source-open `evalOne` bind into the generic expression trace, and
+   `OpenLowering.compilerOpenLocalsExpr_evalOne_insert_openRunNResult_continue_fallthrough_of_compileCode`
+   turns a one-result expression into a fresh source binding without adding a
+   CALL-specific let lemma. The remaining work is lifting this statement
+   boundary through assignment slot updates, statement/block sequencing,
+   function calls, loops, switch/conditionals, and then composing the result
+   into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
