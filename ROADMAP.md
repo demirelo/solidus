@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:47 CEST.
+Last updated: 2026-06-03 05:54 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -275,9 +275,22 @@ Execution order:
    `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_compiledOutcomeRel_of_compileOpen_tail`
    and
    `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOutcomeRel_of_compileOpen_tail`.
-   The next architectural step is the context-aware/open-result relation needed
-   for `let` and then the same recursive shape for calls, loops,
-   switch/conditionals, and the whole-program imported-Yul-to-open-EVM theorem.
+   The context-aware open recursion invariant is now also checked as
+   `OpenLowering.FunctionsBlockCompiledOpenResultRel`: it relates
+   `(sourceOutcome, ctxAfter)` to the final locals context and the compiled
+   assembly result, and projects back down to the scoped compiled-outcome
+   relation when a caller wants the final target layout. Its empty-block base is
+   `OpenLowering.compilerOpenFunctionsBlock_nil_openRunNResult_openResultRel_of_compileOpen`.
+   The three regular heads now compose recursively under this context-aware
+   invariant:
+   `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail`,
+   `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail`,
+   and
+   `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail`.
+   The next step is to assemble these cases into the ordinary-block structural
+   recursion theorem, then extend the same open-result shape to function calls,
+   loops, switch/conditionals, and the whole-program imported-Yul-to-open-EVM
+   theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
