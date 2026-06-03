@@ -503,6 +503,167 @@ def outputArity : PrimStep → Nat
   | .swap n => n + 1
   | _ => 0
 
+theorem run_inputArity_le
+    {step : Assembly.PrimStep}
+    {state evm' : EvmYul.EVM.State}
+    (hRun : step.run state = .ok evm') :
+    inputArity step ≤ state.stack.length := by
+  cases step
+  case invalid =>
+    simp [PrimStep.run] at hRun
+  all_goals
+    simp [PrimStep.run, inputArity, EvmYul.EVM.execBinOp,
+      EvmYul.EVM.execUnOp, EvmYul.EVM.execTriOp,
+      EvmYul.EVM.executionEnvOp, EvmYul.EVM.machineStateOp,
+      EvmYul.EVM.stateOp, EvmYul.EVM.unaryExecutionEnvOp,
+      EvmYul.EVM.unaryStateOp, EvmYul.EVM.binaryStateOp,
+      EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.binaryMachineStateOp',
+      EvmYul.EVM.ternaryMachineStateOp,
+      EvmYul.EVM.ternaryCopyOp, EvmYul.EVM.quaternaryCopyOp]
+      at hRun ⊢
+  case bin f =>
+    cases hPop : state.stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b⟩
+        have hLen := Stack.length_of_pop2_some hPop
+        omega
+  case un f =>
+    cases hPop : state.stack.pop with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a⟩
+        have hLen := Stack.length_of_pop_some hPop
+        omega
+  case tri f =>
+    cases hPop : state.stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c⟩
+        have hLen := Stack.length_of_pop3_some hPop
+        omega
+  case unaryExecutionEnv f =>
+    cases hPop : state.stack.pop with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a⟩
+        have hLen := Stack.length_of_pop_some hPop
+        omega
+  case unaryState f =>
+    cases hPop : state.stack.pop with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a⟩
+        have hLen := Stack.length_of_pop_some hPop
+        omega
+  case binaryMachineState f =>
+    cases hPop : state.stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b⟩
+        have hLen := Stack.length_of_pop2_some hPop
+        omega
+  case binaryMachineStateWithResult f =>
+    cases hPop : state.stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b⟩
+        have hLen := Stack.length_of_pop2_some hPop
+        omega
+  case ternaryMachineState f =>
+    cases hPop : state.stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c⟩
+        have hLen := Stack.length_of_pop3_some hPop
+        omega
+  case binaryState f =>
+    cases hPop : state.stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b⟩
+        have hLen := Stack.length_of_pop2_some hPop
+        omega
+  case ternaryCopy f =>
+    cases hPop : state.stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c⟩
+        have hLen := Stack.length_of_pop3_some hPop
+        omega
+  case quaternaryCopy f =>
+    cases hPop : state.stack.pop4 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c, d⟩
+        have hLen := Stack.length_of_pop4_some hPop
+        omega
+  case pop =>
+    cases hPop : state.stack.pop with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a⟩
+        have hLen := Stack.length_of_pop_some hPop
+        omega
+  case mload =>
+    cases hPop : state.stack.pop with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a⟩
+        have hLen := Stack.length_of_pop_some hPop
+        omega
+  case returndatacopy =>
+    cases hPop : state.stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c⟩
+        have hLen := Stack.length_of_pop3_some hPop
+        omega
+  case dup n =>
+    by_cases hLen : n ≤ state.stack.length
+    · exact hLen
+    · simp [EvmYul.dup, hLen] at hRun
+  case swap n =>
+    by_cases hLen : n + 1 ≤ state.stack.length
+    · exact hLen
+    · simp [EvmYul.swap, hLen] at hRun
+  case log0 =>
+    cases hPop : state.stack.pop2 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b⟩
+        have hLen := Stack.length_of_pop2_some hPop
+        omega
+  case log1 =>
+    cases hPop : state.stack.pop3 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c⟩
+        have hLen := Stack.length_of_pop3_some hPop
+        omega
+  case log2 =>
+    cases hPop : state.stack.pop4 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c, d⟩
+        have hLen := Stack.length_of_pop4_some hPop
+        omega
+  case log3 =>
+    cases hPop : state.stack.pop5 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c, d, e⟩
+        have hLen := Stack.length_of_pop5_some hPop
+        omega
+  case log4 =>
+    cases hPop : state.stack.pop6 with
+    | none => simp [hPop] at hRun
+    | some popped =>
+        rcases popped with ⟨rest, a, b, c, d, e, f⟩
+        have hLen := Stack.length_of_pop6_some hPop
+        omega
+
 theorem run_isolated_length_safe
     {step : Assembly.PrimStep}
     {shared : EvmYul.SharedState .EVM}

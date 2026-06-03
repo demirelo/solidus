@@ -36,6 +36,8 @@ mutual
     | assign (name : Name) (value : Expr 1)
     | assignTop (name : Name)
     | assignTopWithOffset (offset : Nat) (name : Name)
+    | promoteName (name : Name)
+    | cleanupTo (targetLayout : Layout)
     | block (body : Block)
     | if_ (cond : Expr 1) (body : Block)
     | switch (scrutinee : Expr 1) (cases : List (Word × Block))
@@ -90,6 +92,11 @@ mutual
         {offset : Nat} {name : Name} :
         Stmt.WF canBreak canContinue canLeave
           (.assignTopWithOffset offset name)
+    | promoteName {canBreak canContinue canLeave : Bool} {name : Name} :
+        Stmt.WF canBreak canContinue canLeave (.promoteName name)
+    | cleanupTo {canBreak canContinue canLeave : Bool}
+        {targetLayout : Layout} :
+        Stmt.WF canBreak canContinue canLeave (.cleanupTo targetLayout)
     | block {canBreak canContinue canLeave : Bool} {body : Block}
         (hBody : Block.WF canBreak canContinue canLeave body) :
         Stmt.WF canBreak canContinue canLeave (.block body)
@@ -208,6 +215,8 @@ mutual
     | .assign name value => Contains env name ∧ ExprScoped env value
     | .assignTop name => Contains env name
     | .assignTopWithOffset _offset name => Contains env name
+    | .promoteName name => Contains env name
+    | .cleanupTo _targetLayout => False
     | .block body => Block.Scoped env body
     | .if_ cond body => ExprScoped env cond ∧ Block.Scoped env body
     | .switch scrutinee cases defaultBody =>
@@ -324,6 +333,8 @@ mutual
     | .assign name value => Scope.Contains env name ∧ ExprScoped env value
     | .assignTop name => Scope.Contains env name
     | .assignTopWithOffset _offset name => Scope.Contains env name
+    | .promoteName name => Scope.Contains env name
+    | .cleanupTo _targetLayout => False
     | .block body => BlockScoped env body
     | .if_ cond body => ExprScoped env cond ∧ BlockScoped env body
     | .switch scrutinee cases defaultBody =>

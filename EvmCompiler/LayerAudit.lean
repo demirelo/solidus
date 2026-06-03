@@ -6136,7 +6136,7 @@ example {program : Locals.Program} {protectedDepth : Nat}
 
 example {prim : Functions.Source.PrimitiveSemantics}
     {sourceProgram : Functions.Program} {targetProgram : Locals.Program}
-    {returns : List Functions.Name} {retc fuel : Nat}
+    {returns : List Functions.Name} {protectedDepth retc fuel : Nat}
     {sourceCtx : Functions.Source.Ctx} {targetCtx : Locals.Ctx}
     {hiddenReturns : List Structured.ReturnDest}
     {stmt : Functions.Stmt} {rest : List Functions.Stmt}

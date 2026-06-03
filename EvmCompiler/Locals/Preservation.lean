@@ -1984,6 +1984,99 @@ mutual
                               [Structured.BasicInstr.op swapOp,
                                 Structured.BasicInstr.op .pop]
                               state (state.withEVM evmAfterPop) hCodeRun
+    | promoteName name =>
+        unfold Locals.Stmt.compile at hCompile
+        cases hPromote : ctx.promoteNameStackOnly? name with
+        | none =>
+            simp [hPromote] at hCompile
+        | some promoteResult =>
+            rcases promoteResult with ⟨promoteCode, promoted⟩
+            simp [hPromote] at hCompile
+            rcases hCompile with ⟨rfl, rfl⟩
+            rcases CompilerFacts.Ctx.promoteNameStackOnly?_eq_some hPromote with
+              ⟨depth, idx, hDepth, hIdx, hBound, hCode, hPromoted⟩
+            have hDepthBound : depth ≤ 17 := by omega
+            have hCodeDepth :
+                Ctx.swapRestoreUpTo? (depth - 1) = some promoteCode := by
+              rw [← hIdx]
+              exact hCode
+            have hPromotedDepth :
+                Layout.promoteAt (depth - 1) ctx.layout = promoted := by
+              rw [← hIdx]
+              exact hPromoted.symm
+            unfold Stmt.run at hRun
+            simp [Stmt.run, hDepth, hDepthBound, hCodeDepth, hPromotedDepth]
+              at hRun
+            cases hRunCode :
+                Structured.Code.run promoteCode state.evm with
+            | error err =>
+                simp [hRunCode] at hRun
+            | ok evmAfterPromote =>
+                simp [hRunCode] at hRun
+                cases hRun
+                subst outcome
+                subst runCtx
+                have hCodeRunState :
+                    Structured.Code.runState promoteCode state =
+                      .ok (state.withEVM evmAfterPromote) := by
+                  unfold Structured.Code.runState
+                  simp [hRunCode]
+                constructor
+                · intro _h
+                  rfl
+                · simpa using
+                    codeStmt_run_exists lower promoteCode state
+                      (state.withEVM evmAfterPromote) hCodeRunState
+    | cleanupTo targetLayout =>
+        unfold Locals.Stmt.compile at hCompile
+        by_cases hTarget :
+            targetLayout =
+              ctx.layout.drop (ctx.layout.length - targetLayout.length)
+        · rw [if_pos hTarget] at hCompile
+          cases hCleanup : ctx.cleanupTo? targetLayout.length with
+          | none =>
+              simp [hCleanup] at hCompile
+          | some cleanup =>
+              simp [hCleanup] at hCompile
+              cases hCompile
+              subst code
+              subst compileCtx
+              cases fuel
+              all_goals
+                unfold Stmt.run at hRun
+                change
+                  (if targetLayout =
+                      ctx.layout.drop
+                        (ctx.layout.length - targetLayout.length) then
+                    (do
+                      let stateAfterCleanup ←
+                        Ctx.runCleanupTo ctx targetLayout.length state
+                      .ok (Outcome.regular stateAfterCleanup,
+                        ctx.withLayout targetLayout))
+                  else invalid) = .ok (outcome, runCtx) at hRun
+                rw [if_pos hTarget] at hRun
+                cases hCleanupRun :
+                    Ctx.runCleanupTo ctx targetLayout.length state with
+                | error err =>
+                    simp [hCleanupRun] at hRun
+                | ok cleaned =>
+                    simp [hCleanupRun] at hRun
+                    cases hRun
+                    subst outcome
+                    subst runCtx
+                    have hCleanupCode :
+                        Structured.Code.runState cleanup state = .ok cleaned := by
+                      unfold Ctx.runCleanupTo at hCleanupRun
+                      simp [hCleanup] at hCleanupRun
+                      exact hCleanupRun
+                    constructor
+                    · intro _hRegular
+                      rfl
+                    · simpa using
+                        codeStmt_run_exists lower cleanup state cleaned
+                          hCleanupCode
+        · rw [if_neg hTarget] at hCompile
+          simp at hCompile
     | block body =>
         unfold Locals.Stmt.compile at hCompile
         cases hOpen : Locals.Block.compileOpen ctx body with
@@ -3071,6 +3164,24 @@ theorem compile_preserves {program : Program} {lower : Expressions.Program}
   exact
     Expressions.Program.compile_preserves hCompile hInitialPc hLowerRun
 
+theorem compile_preserves_endPc {program : Program}
+    {lower : Expressions.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {outcome : Outcome}
+    (hLower : program.toExpressions? = some lower)
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        lower.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases run_toExpressions_exists hLower hRun with ⟨lowerFuel, hLowerRun⟩
+  exact
+    Expressions.Program.compile_preserves_endPc hCompile hInitialPc hLowerRun
+
 theorem compile_preserves_checked {program : Program} {asm : Assembly.Program}
     {fuel : Nat} {initial : EVMState} {outcome : Outcome}
     (hCompile : compileChecked? program = some asm)
@@ -3085,6 +3196,24 @@ theorem compile_preserves_checked {program : Program} {asm : Assembly.Program}
   rcases run_toExpressions_exists hLower hRun with ⟨lowerFuel, hLowerRun⟩
   exact
     Expressions.Program.compile_preserves_of_compileChecked
+      hLowerCompile hInitialPc hLowerRun
+
+theorem compile_preserves_checked_endPc {program : Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Outcome}
+    (hCompile : compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hLowerCompile⟩
+  rcases run_toExpressions_exists hLower hRun with ⟨lowerFuel, hLowerRun⟩
+  exact
+    Expressions.Program.compile_preserves_of_compileChecked_endPc
       hLowerCompile hInitialPc hLowerRun
 
 end Program

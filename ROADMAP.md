@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 12:02 CEST.
+Last updated: 2026-06-03 12:35 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -191,9 +191,53 @@ Execution order:
    also has checked `FrameSafe`, `RunnerSafe`, and no-CALL facts:
    `structuredCode_frameSafe_returnExprs_compileCode`,
    `structuredCode_runnerSafe_returnExprs_compileCode`, and
-   `structuredCode_noCall_returnExprs_compileCode`. The next missing atom is
-   the local-open replay wrapper for generated `pushReturns` under
-   `Frame.StateRel`, then composition of pushReturns plus cleanup.
+   `structuredCode_noCall_returnExprs_compileCode`. The generated
+   `pushReturns` replay is now checked too:
+   `openRunNResult_codeSegment_no_call_frameStateRel_running_continue` gives
+   the reusable segment-level no-CALL replay bridge under `Frame.StateRel`,
+   `openRunNResult_pushReturns_frameStateRel_continue_of_compileOpen` replays
+   generated `Lower.pushReturns`, and
+   `openRunNResult_pushReturns_cleanup_frameStateRel_continue_of_compileOpen`
+   composes generated `pushReturns` with preserving cleanup before an arbitrary
+   open tail. The final-state version of that generated tail is now checked
+   too: `openRunNResult_source_code_no_call_relAt_running_exists`,
+   `openRunNResult_source_code_no_call_frameStateRel_running_exists`, and
+   `openRunNResult_codeSegment_no_call_frameStateRel_running_exists` expose a
+   named target final state after runner-safe no-CALL generated code, while
+   `openRunNResult_pushReturns_frameStateRel_running_of_compileOpen` and
+   `openRunNResult_pushReturns_cleanup_frameStateRel_running_of_compileOpen`
+   specialize that to the generated return tail. The emitted procedure-body
+   split for this composition is now checked too:
+   `codeSegment_localsBlock_compileToPreserving_append_pushReturns_split`
+   exposes a preserving-compiled locals block of the form
+   `raw ++ Lower.pushReturns returns` as the raw compiled segment followed by
+   the generated `pushReturns ++ cleanup` segment, with exact `compileOpen`,
+   `cleanupToPreserving?`, start-PC, handoff-PC, and fallthrough-PC facts. The
+   raw-body composition atom is now checked too:
+   `openRunNResult_body_regular_then_pushReturns_cleanup_running` combines a
+   raw regular body replay and its `CompiledOutcomeRel` with the generated
+   return-tail replay, producing a cleaned returned-state target at the
+   return-tail fallthrough with the same open body trace. The emitted-body
+   wrapper is now checked too:
+   `codeSegment_functionsFunDef_toLocalsProc_returnTail_split` specializes the
+   split to actual `FunDef.toLocalsProc` bodies,
+   `openRunNResult_body_regular_openResultRel_then_pushReturns_cleanup_running`
+   extracts the source/direct return plumbing from a regular raw-body
+   `FunctionsBlockCompiledOpenResultRel`, and
+   `openRunNResult_compileToPreserving_append_pushReturns_regular_openResultRel_running`
+   consumes the actual preserving-compiled body segment and returns the cleaned
+   returned-state target at the full segment fallthrough. Its
+   `CompiledOutcomeRel` form is now checked too:
+   `openRunNResult_compileToPreserving_append_pushReturns_regular_compiledOutcomeRel`
+   packages the same result as the `CompiledOutcomeRel.regular` expected by the
+   existing call-site return-dispatch/assignment corridor. The actual function
+   body specialization is now checked too:
+   `openRunNResult_functionsFunDef_body_regular_compiledOutcomeRel` consumes
+   the real `Functions.FunDef.toLocalsProc` preserving-compiled body segment,
+   so the call case no longer has to restate the body lowering as
+   `initReturns ++ source-body ++ pushReturns`. The next missing atom is a
+   returned-call cons theorem that composes argument evaluation, the specialized
+   body wrapper, call-site replay, returned assignment, and the source tail.
    On the
    return side, the proof must stay instruction-/segment-local rather than use a
    whole-program no-CALL adapter, because the surrounding assembly can contain

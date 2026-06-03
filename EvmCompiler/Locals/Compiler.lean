@@ -27,6 +27,8 @@ mutual
     | .assign _name value => value.usesCallCreate
     | .assignTop _name => false
     | .assignTopWithOffset _offset _name => false
+    | .promoteName _name => false
+    | .cleanupTo _targetLayout => false
     | .block body => body.usesCallCreate
     | .if_ cond body => cond.usesCallCreate || body.usesCallCreate
     | .switch scrutinee cases defaultBody =>
@@ -86,6 +88,11 @@ def lookupDepthFrom (name : Name) : Nat → Layout → Option Nat
 
 def lookupDepth? (name : Name) (layout : Layout) : Option Nat :=
   lookupDepthFrom name 1 layout
+
+def promoteAt (idx : Nat) (layout : Layout) : Layout :=
+  match layout[idx]? with
+  | none => layout
+  | some name => name :: layout.take idx ++ layout.drop (idx + 1)
 
 end Layout
 
@@ -177,6 +184,16 @@ def swapRestoreUpTo? : Nat → Option Structured.Code
       let rest ← swapRestoreUpTo? n
       let op ← StackOp.swap? (n + 1)
       some (rest ++ [Structured.BasicInstr.op op])
+
+def promoteNameStackOnly? (ctx : Ctx) (name : Name) :
+    Option (Structured.Code × Layout) := do
+  let depth ← Layout.lookupDepth? name ctx.layout
+  let idx := depth - 1
+  if idx ≤ 16 then
+    let code ← swapRestoreUpTo? idx
+    some (code, Layout.promoteAt idx ctx.layout)
+  else
+    none
 
 def cleanupOnePreserving? : Nat → Option Structured.Code
   | 0 => some [Structured.BasicInstr.op .pop]
@@ -301,6 +318,16 @@ mutual
         let swapOp ← StackOp.swap? (offset + depth)
         let code := [Structured.BasicInstr.op swapOp, Structured.BasicInstr.op .pop]
         some (codeStmt code, ctx)
+    | .promoteName name => do
+        let (code, promoted) ← ctx.promoteNameStackOnly? name
+        some (codeStmt code, ctx.withLayout promoted)
+    | .cleanupTo targetLayout => do
+        if targetLayout =
+            ctx.layout.drop (ctx.layout.length - targetLayout.length) then
+          let cleanup ← ctx.cleanupTo? targetLayout.length
+          some (codeStmt cleanup, ctx.withLayout targetLayout)
+        else
+          none
     | .block body => do
         let (bodyCode, bodyCtx) ← Block.compileOpen ctx body
         let lowerBlock ← finishScoped ctx bodyCtx bodyCode
@@ -537,6 +564,43 @@ theorem Ctx.swapRestoreUpTo?_noCallCreate :
               simp [Structured.Code.usesCallCreate,
                 Structured.BasicInstr.usesCallCreate, hRestNo, hOpNo]
               exact hRestAll
+
+theorem Ctx.promoteNameStackOnly?_eq_some {ctx : Ctx} {name : Name}
+    {code : Structured.Code} {promoted : Layout}
+    (hPromote :
+      ctx.promoteNameStackOnly? name = some (code, promoted)) :
+    ∃ depth idx,
+      Layout.lookupDepth? name ctx.layout = some depth ∧
+        idx = depth - 1 ∧
+        idx ≤ 16 ∧
+        Ctx.swapRestoreUpTo? idx = some code ∧
+        promoted = Layout.promoteAt idx ctx.layout := by
+  unfold Ctx.promoteNameStackOnly? at hPromote
+  cases hDepth : Layout.lookupDepth? name ctx.layout with
+  | none =>
+      simp [hDepth] at hPromote
+  | some depth =>
+      by_cases hDepthBound : depth ≤ 17
+      · have hBound : depth - 1 ≤ 16 := by omega
+        simp [hDepth, hDepthBound] at hPromote
+        cases hCode : Ctx.swapRestoreUpTo? (depth - 1) with
+        | none =>
+            simp [hCode] at hPromote
+        | some promoteCode =>
+            simp [hCode] at hPromote
+            rcases hPromote with ⟨rfl, rfl⟩
+            exact
+              ⟨depth, depth - 1, rfl, rfl, hBound, hCode, rfl⟩
+      · simp [hDepth, hDepthBound] at hPromote
+
+theorem Ctx.promoteNameStackOnly?_noCallCreate {ctx : Ctx} {name : Name}
+    {code : Structured.Code} {promoted : Layout}
+    (hPromote :
+      ctx.promoteNameStackOnly? name = some (code, promoted)) :
+    code.usesCallCreate = false := by
+  rcases Ctx.promoteNameStackOnly?_eq_some hPromote with
+    ⟨_depth, idx, _hDepth, _hIdx, _hBound, hCode, _hPromoted⟩
+  exact Ctx.swapRestoreUpTo?_noCallCreate (depth := idx) hCode
 
 theorem Ctx.cleanupOnePreserving?_noCallCreate {temps : Nat}
     {code : Structured.Code}
@@ -958,6 +1022,33 @@ mutual
                 exact codeStmt_noCallCreate
                   (Structured.Code.swapPop_noCallCreate
                     (StackOp.swap?_not_callCreate (offset + depth) hSwap))
+    | promoteName name =>
+        simp [Stmt.compile] at hCompile
+        cases hPromote : ctx.promoteNameStackOnly? name with
+        | none =>
+            simp [hPromote] at hCompile
+        | some promoteResult =>
+            rcases promoteResult with ⟨promoteCode, promoted⟩
+            simp [hPromote] at hCompile
+            rcases hCompile with ⟨rfl, rfl⟩
+            exact codeStmt_noCallCreate
+              (Ctx.promoteNameStackOnly?_noCallCreate hPromote)
+    | cleanupTo targetLayout =>
+        by_cases hTarget :
+            targetLayout =
+              ctx.layout.drop (ctx.layout.length - targetLayout.length)
+        · simp only [Stmt.compile, if_pos hTarget] at hCompile
+          cases hCleanup : ctx.cleanupTo? targetLayout.length with
+          | none =>
+              simp [hCleanup] at hCompile
+          | some cleanup =>
+              simp [hCleanup] at hCompile
+              cases hCompile
+              try subst stmts
+              exact codeStmt_noCallCreate
+                (Ctx.cleanupTo?_noCallCreate hCleanup)
+        · simp only [Stmt.compile, if_neg hTarget] at hCompile
+          simp at hCompile
     | block body =>
         have hBody : body.usesCallCreate = false := by
           simpa [Stmt.usesCallCreate] using hStmt

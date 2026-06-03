@@ -1595,6 +1595,8 @@ mutual
           some
             (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
+    | _fuel + 1, _state, .Let [_name] (some (.Call (.inr _functionName) _args)) =>
+        none
     | _fuel + 1, state, .Let [name] (some value) => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
         some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
@@ -1630,6 +1632,8 @@ mutual
               Expr.List.lowerBound1? state args
           some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
             state')
+    | _fuel + 1, _state, .Assign [_name] (.Call (.inr _functionName) _args) =>
+        none
     | _fuel + 1, state, .Assign [name] value => do
         let (preValue, lowerValue, state') ← Expr.lower1? state value
         some (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],

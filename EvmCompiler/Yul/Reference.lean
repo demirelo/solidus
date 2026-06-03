@@ -2519,11 +2519,7 @@ theorem objectBuiltin_toFunctionsListFuel?_let_user_call_eq
             some
               (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
                 state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
-            state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -2568,12 +2564,7 @@ theorem objectBuiltin_toFunctionsListFuel?_assign_user_call_eq
                 Expr.List.lowerBound1? state args
             some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some
-            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
-              state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -26969,11 +26960,7 @@ theorem toFunctionsListFuel?_let_user_call_eq
             some
               (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
                 state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some (preValue ++ [Functions.Stmt.let_ (identName name) lowerValue],
-            state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -27220,12 +27207,7 @@ theorem toFunctionsListFuel?_assign_user_call_eq
                 Expr.List.lowerBound1? state args
             some (preArgs ++ [Functions.Stmt.call [] functionName lowerArgs],
               state')
-      | [name] => do
-          let (preValue, lowerValue, state') ←
-            Expr.lower1? state (.Call (.inr functionName) args)
-          some
-            (preValue ++ [Functions.Stmt.assign (identName name) lowerValue],
-              state')
+      | [_name] => none
       | name :: next :: rest =>
           if ObjectBuiltin.unsupported? functionName then
             none
@@ -77032,6 +77014,134 @@ theorem compile_preserves_with_source_run_of_dispatcher_source_result_block_brid
       hReferenceRun, hSourceRunForInitial, hTargetRun, hReferenceRunBody.2,
       hWholeRel⟩
 
+theorem compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_liveNoInternalCallChecked
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {stateRel : Reference.StateRel}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {asm : Assembly.Program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSourceAccepted : Program.SourceAccepted program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hInitialRel :
+      stateRel (Program.installContract program (.Ok shared store))
+        sourceInitial)
+    (hBridge :
+      Reference.SourceBridgeFacts.SourceResultBlockRunBridge (cfg := cfg)
+        layout terminalRel revertRel prim functionProgram
+        Functions.Source.Ctx.initial sourceFuel [program.contract.dispatcher]
+        (some program.contract)
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial functionProgram.body)
+    (hReferenceOk :
+      ∀ sourceResult sourceOutcome targetFuel,
+        EvmYul.Yul.exec sourceFuel (.Block [program.contract.dispatcher])
+            (some program.contract)
+            (.Ok
+              { shared with
+                executionEnv :=
+                  { shared.executionEnv with code := program.contract } }
+              (default : EvmYul.Yul.VarStore)) =
+          sourceResult →
+        SourceLowered.runState prim targetFuel program sourceInitial =
+          .ok sourceOutcome →
+        Reference.SourceBridgeFacts.SourceResultOutcomeRel cfg layout
+          terminalRel revertRel sourceResult sourceOutcome →
+        Reference.Imported.dispatcherRunResultOfBody program
+            (.Ok shared store) sourceResult = .ok referenceResult ∧
+          outcomeRel referenceResult sourceOutcome)
+    (hCompile : compileLiveNoInternalCallChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome := by
+  rcases
+      sourceLowered_runState_of_root_source_result_block_bridge
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) (program := program)
+        (functionProgram := functionProgram) (sourceFuel := sourceFuel)
+        (sourceStmts := [program.contract.dispatcher])
+        (codeOverride := some program.contract)
+        (source :=
+          .Ok
+            { shared with
+              executionEnv :=
+                { shared.executionEnv with code := program.contract } }
+            (default : EvmYul.Yul.VarStore))
+        (sourceInitial := sourceInitial) hToObjects hBridge with
+    ⟨sourceResult, sourceOutcome, sourceTargetFuel, hSource, hSourceRun,
+      hRel⟩
+  have hDispatcherExec :
+      EvmYul.Yul.exec sourceFuel
+          (.Block
+            (Reference.Imported.dispatcherBody
+              (Program.installContract program (.Ok shared store))))
+          (some program.contract)
+          (Reference.Imported.dispatcherCallState
+            (Program.installContract program (.Ok shared store))) =
+        sourceResult := by
+    simpa [Reference.Imported.dispatcherBody_installContract_ok,
+      Reference.Imported.dispatcherCallState_installContract_ok] using hSource
+  have hReferenceRunBody :
+      Reference.Imported.dispatcherRunResultOfBody program
+          (.Ok shared store) sourceResult = .ok referenceResult ∧
+        outcomeRel referenceResult sourceOutcome := by
+    exact hReferenceOk sourceResult sourceOutcome sourceTargetFuel hSource
+      hSourceRun hRel
+  have hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult := by
+    rw [Reference.Imported.runResult_succ_of_exec_dispatcher
+      sourceFuel program (.Ok shared store) hDispatcherExec]
+    exact hReferenceRunBody.1
+  have hSourceRunForInitial :
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome := by
+    simpa [SourceLowered.run, SourceLowered.runState, hToObjects,
+      Objects.Source.Program.run, Objects.Source.Program.runState,
+      Objects.Source.Object.run, Objects.Source.Object.runState,
+      Objects.Program.toFunctions, Objects.Object.toFunctions,
+      Functions.Source.Program.run, hSourceInitial] using hSourceRun
+  rcases
+      compile_live_noInternalCall_source_preserves_checked_anyFuel
+        (prim := prim) hPrim (program := program) (asm := asm)
+        (fuel := sourceTargetFuel) (initial := initial)
+        (sourceOutcome := sourceOutcome) hCompile
+        hSourceAccepted
+        hInitialPc hInitialStack hSourceRunForInitial with
+    ⟨targetFuel, targetOutcome, hTargetRun, hWholeRel⟩
+  exact
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRunForInitial, hTargetRun, hReferenceRunBody.2,
+      hWholeRel⟩
+
 theorem compile_preserves_of_dispatcher_source_result_block_sound_compileAccepted
     {cfg : Reference.StateRelConfig} {layout : List Name}
     {terminalRel :
@@ -80717,6 +80827,121 @@ theorem compile_whole_program_result_sound_with_source_run_of_checked_recursive_
           sourceResult hBodyResult' sourceOutcome targetFuel hSourceRun hRel)
     hCompile hAssemble hRuntime hCompileAccepted hInitialPc hInitialStack
     hSourceInitial
+
+theorem compile_whole_program_result_sound_with_source_run_of_checked_recursive_dispatcher_run_bridge_liveNoInternalCallChecked
+    {cfg : Reference.StateRelConfig} {layout : List Name}
+    {terminalRel :
+      Assembly.HaltKind → Word → Reference.State →
+        Objects.Source.State → Prop}
+    {revertRel : Reference.State → Objects.Source.State → Prop}
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {stateRel : Reference.StateRel}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program} {functionProgram : Functions.Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceInitial : Objects.Source.State}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hSourceAccepted : Program.SourceAccepted program)
+    (hToObjects :
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] })
+    (hInitialRel :
+      stateRel (Program.installContract program (.Ok shared store))
+        sourceInitial)
+    (hReferenceRun :
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult)
+    (hBridge :
+      CheckedRecursiveDispatcherRunBridge cfg layout terminalRel revertRel
+        prim outcomeRel program functionProgram shared store sourceInitial
+        sourceFuel)
+    (hCompile : compileLiveNoInternalCallChecked? program = some asm)
+    (hAssemble : Assembly.compile? asm = some target)
+    (hRuntime : Assembly.RuntimeAssumptions asm target initial)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceInitial :
+      sourceInitial =
+        Functions.Source.Program.initialState initial.toSharedState) :
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ sourceTargetFuel targetFuel targetOutcome,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      SourceLowered.run prim sourceTargetFuel program initial =
+        .ok sourceOutcome ∧
+      outcomeRel referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm initial ∧
+                  Assembly.CurrentContractProjectionAssumption asm initial ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel initial targetOutcome := by
+  rcases
+      compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_liveNoInternalCallChecked
+        (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+        (revertRel := revertRel) (prim := prim) hPrim
+        (stateRel := stateRel) (outcomeRel := outcomeRel)
+        (program := program) (functionProgram := functionProgram)
+        (asm := asm) (shared := shared) (store := store)
+        (sourceInitial := sourceInitial) (sourceFuel := sourceFuel)
+        (initial := initial) (referenceResult := referenceResult)
+        hSourceAccepted hToObjects hInitialRel hBridge.runBridge
+        (fun sourceResult sourceOutcome targetFuel hSource hSourceRun hRel => by
+          rcases
+              Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok
+                sourceFuel program (.Ok shared store) hReferenceRun with
+            ⟨sourceResultFromRun, hSourceRaw, hBodyResult⟩
+          have hSourceFromRun :
+              EvmYul.Yul.exec sourceFuel
+                  (.Block [program.contract.dispatcher])
+                  (some program.contract)
+                  (.Ok
+                    { shared with
+                      executionEnv :=
+                        { shared.executionEnv with code :=
+                            program.contract } }
+                    (default : EvmYul.Yul.VarStore)) =
+                sourceResultFromRun := by
+            simpa [Reference.Imported.dispatcherBody_installContract_ok,
+              Reference.Imported.dispatcherCallState_installContract_ok]
+              using hSourceRaw
+          have hEq : sourceResult = sourceResultFromRun := by
+            rw [hSource] at hSourceFromRun
+            exact hSourceFromRun
+          have hBodyResult' :
+              Reference.Imported.dispatcherRunResultOfBody program
+                  (.Ok shared store) sourceResult =
+                .ok referenceResult := by
+            simpa [hEq] using hBodyResult
+          exact
+            (dispatcherRunResultSound_of_observation
+              (cfg := cfg) (layout := layout) (terminalRel := terminalRel)
+              (revertRel := revertRel) (prim := prim)
+              (outcomeRel := outcomeRel) (program := program)
+              (referenceInitial := .Ok shared store)
+              (sourceInitial := sourceInitial)
+              (referenceResult := referenceResult) hBridge.observation)
+              sourceResult hBodyResult' sourceOutcome targetFuel hSourceRun
+              hRel)
+        hCompile hInitialPc hInitialStack hSourceInitial with
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRun, hTargetRun, hOutcomeRel, hWholeRel⟩
+  obtain
+    ⟨hAsmAccepted, hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩ :=
+    Assembly.compile_whole_program_result_sound
+      hAssemble hRuntime hTargetRun
+  exact
+    ⟨sourceOutcome, sourceTargetFuel, targetFuel, targetOutcome,
+      hReferenceRun, hSourceRun, hOutcomeRel, hWholeRel, hAsmAccepted,
+      hBytes, hEncoding, hOutOfGas, hProjection, hTrace⟩
 
 theorem compile_whole_program_result_sound_of_checked_recursive_dispatcher_successful_sound_compileAccepted
     {cfg : Reference.StateRelConfig} {layout : List Name}

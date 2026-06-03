@@ -1,6 +1,7 @@
 import EvmCompiler.Objects.Semantics
 import EvmCompiler.Objects.SourceSemantics
 import EvmCompiler.Functions.Preservation
+import EvmCompiler.Functions.LiveLayoutPreservation
 
 namespace EvmCompiler
 namespace Objects
@@ -80,6 +81,24 @@ theorem compile_preserves {program : Program} {lower : Expressions.Program}
     Functions.Inline.Program.compile_preserves hLower hCompile hInitialPc
       (by simpa [run_toFunctions] using hRun)
 
+theorem compile_preserves_endPc {program : Program}
+    {lower : Expressions.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {outcome : Outcome}
+    (hLower : program.toExpressions? = some lower)
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        lower.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  exact
+    Functions.Inline.Program.compile_preserves_endPc hLower hCompile
+      hInitialPc (by simpa [run_toFunctions] using hRun)
+
 theorem compile_preserves_checked {program : Program}
     {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
     {outcome : Outcome}
@@ -102,6 +121,31 @@ theorem compile_preserves_checked {program : Program}
     simp [hFunctionLower, hLowerCompile]
   exact
     Functions.Program.compile_preserves_checked
+      hFunctionCompile hInitialPc (by simpa [run_toFunctions] using hRun)
+
+theorem compile_preserves_checked_endPc {program : Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Outcome}
+    (hCompile : compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hLowerCompile⟩
+  have hFunctionCompile :
+      Functions.Program.compileChecked? program.toFunctions = some asm := by
+    unfold Functions.Program.compileChecked?
+    have hFunctionLower :
+        program.toFunctions.toExpressions? = some lower := by
+      simpa [Program.toExpressions?, Functions.Inline.Program.toExpressions?]
+        using hLower
+    simp [hFunctionLower, hLowerCompile]
+  exact
+    Functions.Program.compile_preserves_checked_endPc
       hFunctionCompile hInitialPc (by simpa [run_toFunctions] using hRun)
 
 end Program
@@ -130,6 +174,11 @@ noncomputable def compileChecked? (program : Objects.Program) :
   let lower ← program.toExpressions?
   Structured.Preservation.ProcedurePreservation.compileChecked?
     lower.toStructured
+
+noncomputable def compileLiveNoInternalCallChecked?
+    (program : Objects.Program) : Option Assembly.Program :=
+  Functions.Source.Program.compileLiveNoInternalCallChecked?
+    program.toFunctions
 
 theorem compileChecked?_eq_some {program : Objects.Program}
     {asm : Assembly.Program}
@@ -174,6 +223,14 @@ theorem compileChecked?_noCallCreate {program : Objects.Program}
           using hLowerNo)
       hLowerCompile
 
+theorem compileLiveNoInternalCallChecked?_noCallCreate
+    {program : Objects.Program} {asm : Assembly.Program}
+    (hProgram : program.toFunctions.usesCallCreate = false)
+    (hCompile : compileLiveNoInternalCallChecked? program = some asm) :
+    Assembly.Program.usesCallCreate asm = false :=
+  Functions.Source.Program.compileLiveNoInternalCallChecked?_noCallCreate
+    hProgram hCompile
+
 theorem compile_preserves {prim : PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
     {program : Objects.Program} {lower : Expressions.Program}
@@ -209,6 +266,47 @@ theorem compile_preserves {prim : PrimitiveSemantics}
       Functions.Inline.Program.toExpressions?] using hLower
   exact
     Functions.Source.Program.compile_preserves
+      (prim := prim) hPrim (program := program.toFunctions) (lower := lower)
+      (asm := asm) (fuel := fuel) (initial := initial)
+      (sourceOutcome := sourceOutcome) hSourceAccepted.2.2 hFrameBound
+      hFunctionLower hCompile hInitialPc hInitialStack hFunctionRun
+
+theorem compile_preserves_endPc {prim : PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Objects.Program} {lower : Expressions.Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Outcome}
+    (hSourceAccepted : Objects.Program.SourceAccepted program)
+    (hFrameBound :
+      Functions.SourceDirect.FrameBound.Program program.toFunctions)
+    (hLower : program.toExpressions? = some lower)
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        lower.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun : Source.Program.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hFunctionRun :
+      Functions.Source.Program.run prim fuel program.toFunctions initial =
+        .ok sourceOutcome := by
+    cases program with
+    | mk root =>
+        cases root with
+        | mk name code data objects =>
+            simpa [Source.Program.run, Source.Object.run,
+              Objects.Program.toFunctions, Objects.Object.toFunctions] using
+              hRun
+  have hFunctionLower :
+      program.toFunctions.toExpressions? = some lower := by
+    simpa [Objects.Program.toExpressions?,
+      Functions.Inline.Program.toExpressions?] using hLower
+  exact
+    Functions.Source.Program.compile_preserves_endPc
       (prim := prim) hPrim (program := program.toFunctions) (lower := lower)
       (asm := asm) (fuel := fuel) (initial := initial)
       (sourceOutcome := sourceOutcome) hSourceAccepted.2.2 hFrameBound
@@ -253,6 +351,46 @@ theorem compile_preserves_of_compileAccepted
       (sourceOutcome := sourceOutcome) hAccepted.functions hFunctionLower
       hCompile hInitialPc hInitialStack hFunctionRun
 
+theorem compile_preserves_of_compileAccepted_endPc
+    {prim : PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Objects.Program} {lower : Expressions.Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Outcome}
+    (hAccepted : CompileAccepted program)
+    (hLower : program.toExpressions? = some lower)
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        lower.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun : Source.Program.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hFunctionRun :
+      Functions.Source.Program.run prim fuel program.toFunctions initial =
+        .ok sourceOutcome := by
+    cases program with
+    | mk root =>
+        cases root with
+        | mk name code data objects =>
+            simpa [Source.Program.run, Source.Object.run,
+              Objects.Program.toFunctions, Objects.Object.toFunctions] using
+              hRun
+  have hFunctionLower :
+      program.toFunctions.toExpressions? = some lower := by
+    simpa [Objects.Program.toExpressions?,
+      Functions.Inline.Program.toExpressions?] using hLower
+  exact
+    Functions.Source.Program.compile_preserves_of_compileAccepted_endPc
+      (prim := prim) hPrim (program := program.toFunctions)
+      (lower := lower) (asm := asm) (fuel := fuel) (initial := initial)
+      (sourceOutcome := sourceOutcome) hAccepted.functions hFunctionLower
+      hCompile hInitialPc hInitialStack hFunctionRun
+
 theorem compile_preserves_checked_of_compileAccepted
     {prim : PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -272,6 +410,96 @@ theorem compile_preserves_checked_of_compileAccepted
   exact
     compile_preserves_of_compileAccepted hPrim hAccepted hLower
       hStructuredCompile hInitialPc hInitialStack hRun
+
+theorem compile_preserves_checked_of_compileAccepted_endPc
+    {prim : PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Objects.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Outcome}
+    (hCompile : compileChecked? program = some asm)
+    (hAccepted : CompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun : Source.Program.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hStructuredCompile⟩
+  exact
+    compile_preserves_of_compileAccepted_endPc hPrim hAccepted hLower
+      hStructuredCompile hInitialPc hInitialStack hRun
+
+theorem compile_live_noInternalCall_preserves_checked
+    {prim : PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Objects.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Outcome}
+    (hCompile : compileLiveNoInternalCallChecked? program = some asm)
+    (hSourceAccepted : Objects.Program.SourceAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      Source.Program.run prim (fuel + 1) program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome := by
+  have hFunctionRun :
+      Functions.Source.Program.run prim (fuel + 1) program.toFunctions
+          initial =
+        .ok sourceOutcome := by
+    cases program with
+    | mk root =>
+        cases root with
+        | mk name code data objects =>
+            simpa [Source.Program.run, Source.Object.run,
+              Objects.Program.toFunctions, Objects.Object.toFunctions] using
+              hRun
+  exact
+    Functions.LiveLayout.SourceTarget.Program.compileLiveNoInternalCallChecked_preserves
+      (prim := prim) hPrim (sourceProgram := program.toFunctions)
+      (asm := asm) (fuel := fuel) (initial := initial)
+      (sourceOutcome := sourceOutcome) hCompile hSourceAccepted.2.2
+      hInitialPc hInitialStack hFunctionRun
+
+theorem compile_live_noInternalCall_preserves_checked_endPc
+    {prim : PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Objects.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Outcome}
+    (hCompile : compileLiveNoInternalCallChecked? program = some asm)
+    (hSourceAccepted : Objects.Program.SourceAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hRun :
+      Source.Program.run prim (fuel + 1) program initial =
+        .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hFunctionRun :
+      Functions.Source.Program.run prim (fuel + 1) program.toFunctions
+          initial =
+        .ok sourceOutcome := by
+    cases program with
+    | mk root =>
+        cases root with
+        | mk name code data objects =>
+            simpa [Source.Program.run, Source.Object.run,
+              Objects.Program.toFunctions, Objects.Object.toFunctions] using
+              hRun
+  exact
+    Functions.LiveLayout.SourceTarget.Program.compileLiveNoInternalCallChecked_preserves_endPc
+      (prim := prim) hPrim (sourceProgram := program.toFunctions)
+      (asm := asm) (fuel := fuel) (initial := initial)
+      (sourceOutcome := sourceOutcome) hCompile hSourceAccepted.2.2
+      hInitialPc hInitialStack hFunctionRun
 
 end Program
 end Source

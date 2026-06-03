@@ -49,6 +49,15 @@ def codeByteLength : List LocatedTarget → Nat
   | [] => 0
   | located :: rest => byteSize located.instr + codeByteLength rest
 
+theorem codeByteLength_append (left right : List LocatedTarget) :
+    codeByteLength (left ++ right) =
+      codeByteLength left + codeByteLength right := by
+  induction left with
+  | nil =>
+      simp [codeByteLength]
+  | cons located rest ih =>
+      simp [codeByteLength, ih, Nat.add_assoc]
+
 def codeLayoutFrom : List LocatedTarget → Nat → Prop
   | [], _ => True
   | located :: rest, pc =>
@@ -667,6 +676,32 @@ theorem emitFrom_layout {program suffix : Program} {base : Nat}
               refine codeLayout_append hHereLayout ?_
               simpa [hHereLength] using hThereLayout
 
+theorem emitFrom_byteLength {program suffix : Program} {base : Nat}
+    {code : List LocatedTarget}
+    (hEmit : emitFrom? program suffix base = some code) :
+    codeByteLength code = Program.byteLength suffix := by
+  induction suffix generalizing base code with
+  | nil =>
+      simp [emitFrom?] at hEmit
+      subst code
+      rfl
+  | cons instr rest ih =>
+      unfold emitFrom? at hEmit
+      cases hHere : emitInstr? program base instr with
+      | none =>
+          simp [hHere] at hEmit
+      | some here =>
+          cases hThere : emitFrom? program rest (base + instr.byteSize) with
+          | none =>
+              simp [hHere, hThere] at hEmit
+          | some there =>
+              simp [hHere, hThere] at hEmit
+              cases hEmit
+              have hHereLength := emitInstr_byteLength hHere
+              have hThereLength := ih hThere
+              simp [codeByteLength_append, Program.byteLength,
+                hHereLength, hThereLength]
+
 theorem assemble_layout {program : Program} {target : TargetProgram}
     (hAsm : assemble? program = some target) :
     codeLayoutFrom target.code 0 := by
@@ -679,10 +714,29 @@ theorem assemble_layout {program : Program} {target : TargetProgram}
       cases hAsm
       exact emitFrom_layout (program := program) (suffix := program) (base := 0) hEmit
 
+theorem assemble_codeByteLength {program : Program} {target : TargetProgram}
+    (hAsm : assemble? program = some target) :
+    codeByteLength target.code = Program.byteLength program := by
+  unfold assemble? at hAsm
+  cases hEmit : emit? program with
+  | none =>
+      simp [hEmit] at hAsm
+  | some code =>
+      simp [hEmit] at hAsm
+      cases hAsm
+      exact
+        emitFrom_byteLength (program := program) (suffix := program)
+          (base := 0) hEmit
+
 theorem compile_layout {program : Program} {target : TargetProgram}
     (hCompile : compile? program = some target) :
     codeLayoutFrom target.code 0 :=
   assemble_layout (Preservation.compile?_some_assemble hCompile)
+
+theorem compile_codeByteLength {program : Program} {target : TargetProgram}
+    (hCompile : compile? program = some target) :
+    codeByteLength target.code = Program.byteLength program :=
+  assemble_codeByteLength (Preservation.compile?_some_assemble hCompile)
 
 theorem byteSize_pos (instr : TargetInstr) :
     0 < byteSize instr := by

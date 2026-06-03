@@ -418,6 +418,25 @@ theorem compile_preserves {program : Program} {asm : Assembly.Program}
   exact
     Structured.Preservation.compile_preserves hCompile hInitialPc hStructuredRun
 
+theorem compile_preserves_endPc {program : Program} {asm : Assembly.Program}
+    {fuel : Nat} {initial : EVMState} {outcome : Outcome}
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        program.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  have hStructuredRun :
+      Structured.Program.run fuel program.toStructured initial = .ok outcome := by
+    simpa [run_toStructured fuel program initial] using hRun
+  exact
+    Structured.Preservation.compile_preserves_endPc hCompile hInitialPc
+      hStructuredRun
+
 theorem compile_preserves_checked {program : Program} {asm : Assembly.Program}
     {fuel : Nat} {initial : EVMState} {outcome : Outcome}
     (hCompile :
@@ -431,6 +450,21 @@ theorem compile_preserves_checked {program : Program} {asm : Assembly.Program}
       Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome :=
   compile_preserves hCompile hInitialPc hRun
 
+theorem compile_preserves_checked_endPc {program : Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Outcome}
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        program.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome :=
+  compile_preserves_endPc hCompile hInitialPc hRun
+
 theorem compile_preserves_of_compileChecked {program : Program}
     {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
     {outcome : Outcome}
@@ -442,6 +476,19 @@ theorem compile_preserves_of_compileChecked {program : Program}
         .ok targetOutcome ∧
       Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome := by
   exact compile_preserves_checked hCompile hInitialPc hRun
+
+theorem compile_preserves_of_compileChecked_endPc {program : Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {outcome : Outcome}
+    (hCompile : compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hRun : program.run fuel initial = .ok outcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      Structured.Preservation.WholeProgramOutcomeRel outcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  exact compile_preserves_checked_endPc hCompile hInitialPc hRun
 
 end Program
 

@@ -50101,6 +50101,8 @@ theorem yulOpen_toOpenResult_execSeq_cons_succ
   intro state'
   cases state' <;> rfl
 
+universe u v
+
 theorem openResult_bind_ok_id
     {ε : Type u} {α : Type v} (result : OpenExternal.OpenResult ε α) :
     OpenExternal.OpenResult.bind result OpenExternal.OpenResult.ok = result := by
@@ -63412,6 +63414,7 @@ theorem sourceOpenStmtHeadPathRel_to_kont_leave_layout_no_loop_control
       Assembly.HaltKind → Word → State → Objects.Source.State → Prop}
     {revertRel : State → Objects.Source.State → Prop}
     {allowed : Except Exception State → Prop}
+    {allowedPath : Except Exception State → Prop}
     {source : OpenExternal.OpenResult Exception State}
     {target :
       OpenExternal.OpenResult Functions.EVMException
@@ -73964,7 +73967,7 @@ theorem sourceOpenLoopHeadPathSound_generated_condition_stopped_of_cond_open
     {allowed : Except Exception State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {bodySeqFuel minimumTargetFuel : Nat}
+    {sourceFuel minimumTargetFuel : Nat}
     {cond : AstExpr} {post body : List AstStmt}
     {codeOverride : Option AstContract}
     {shared : EvmYul.SharedState .Yul}
@@ -74077,7 +74080,7 @@ theorem sourceOpenLoopHeadPathSound_generated_zero_of_cond_open
     {allowed : Except Exception State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {bodySeqFuel minimumTargetFuel : Nat}
+    {sourceFuel minimumTargetFuel : Nat}
     {cond : AstExpr} {post body : List AstStmt}
     {codeOverride : Option AstContract}
     {shared sharedAfter : EvmYul.SharedState .Yul}
@@ -74762,7 +74765,6 @@ theorem sourceOpenLoopHeadStmtPathSound_generated_condition_split_of_cond_open
         (terminalRel := terminalRel) (revertRel := revertRel)
         (allowed := allowed) (prim := prim) (program := program)
         (ctx := ctx) (sourceFuel := sourceFuel)
-        (bodySeqFuel := sourceFuel)
         (minimumTargetFuel := minimumTargetFuel)
         (cond := cond) (post := post) (body := body)
         (codeOverride := codeOverride) (shared := shared) (store := store)
@@ -74802,7 +74804,6 @@ theorem sourceOpenLoopHeadStmtPathSound_generated_condition_split_of_cond_open
           (terminalRel := terminalRel) (revertRel := revertRel)
           (allowed := allowed) (prim := prim) (program := program)
           (ctx := ctx) (sourceFuel := sourceFuel)
-          (bodySeqFuel := sourceFuel)
           (minimumTargetFuel := minimumTargetFuel)
           (cond := cond) (post := post) (body := body)
           (codeOverride := codeOverride) (shared := shared)
@@ -75277,7 +75278,7 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_break_of_genera
     {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
     {store storeAfterCond storeAfterBody : EvmYul.Yul.VarStore}
     {compiler compilerAfterBody : Objects.Source.State}
-    {generatedBody : Functions.Block}
+    {generatedBody : Functions.Block} {lowerPost : Functions.Block}
     {value : Word}
     {condTrace bodyTrace : OpenExternal.OpenTrace}
     (hResolveValues :
@@ -75929,7 +75930,7 @@ theorem sourceOpenLoopHeadPathSound_generated_nonzero_body_break_of_callbacks
     {allowed : Except Exception State → Prop}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
-    {sourceFuel minimumTargetFuel : Nat}
+    {sourceFuel bodySeqFuel minimumTargetFuel : Nat}
     {cond : AstExpr} {post body : List AstStmt}
     {codeOverride : Option AstContract}
     {shared sharedAfterCond sharedAfterBody : EvmYul.SharedState .Yul}
@@ -76518,7 +76519,7 @@ theorem sourceOpenLoopContinuationPathRel_generated_nonzero_body_stopping_of_gen
     {shared : EvmYul.SharedState .Yul}
     {store : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
-    {generatedBody : Functions.Block}
+    {generatedBody : Functions.Block} {lowerPost : Functions.Block}
     {condTrace bodyTrace : OpenExternal.OpenTrace}
     {sourceResult : Except Exception State}
     {bodyOutcome : Functions.Source.Outcome}
@@ -114515,6 +114516,8 @@ theorem sourceRegularStmtRunHiddenExact_if_true_regular_of_eval_domain
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
     {sharedAfterCond : EvmYul.SharedState .Yul}
     {storeAfterCond : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -114631,6 +114634,8 @@ theorem sourceRegularStmtRunHiddenExact_if_true_regular_exists_of_eval_domain
     {cfg : StateRelConfig} {layout : List Name}
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {ctx : Functions.Source.Ctx}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
     {sharedAfterCond : EvmYul.SharedState .Yul}
     {storeAfterCond : EvmYul.Yul.VarStore}
     {compiler : Objects.Source.State}
@@ -169441,6 +169446,7 @@ theorem sourceOpenResultSeqPathSoundWhenAtExactHiddenCtx_cons_switch_expr_recurs
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
     {bodyFuel : Nat}
+    {reserved : List Name}
     {ctx : Functions.Source.Ctx} {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody rest : List AstStmt}
     {freshState freshState' : Fresh.State}
@@ -169675,6 +169681,7 @@ theorem sourceOpenResultSeqKontPathSoundWhenAtExactHiddenCtx_cons_switch_expr_re
     {prim : Objects.Source.PrimitiveSemantics}
     {program : Functions.Program} {contract : AstContract}
     {bodyFuel : Nat}
+    {reserved : List Name}
     {ctx : Functions.Source.Ctx} {scrutinee : AstExpr}
     {cases : List (Word × List AstStmt)} {defaultBody rest : List AstStmt}
     {freshState freshState' : Fresh.State}

@@ -245,6 +245,10 @@ theorem stmt_outEnv_contains_of_contains {env : List Name} {stmt : Stmt}
     name ∈ Functions.Scope.Stmt.outEnv env stmt := by
   cases stmt <;> simp [Functions.Scope.Stmt.outEnv, hContains]
 
+theorem stmt_outEnv_length_le {env : List Name} {stmt : Stmt} :
+    env.length ≤ (Functions.Scope.Stmt.outEnv env stmt).length := by
+  cases stmt <;> simp [Functions.Scope.Stmt.outEnv]
+
 mutual
   theorem block_outEnv_contains_of_contains {env : List Name} {block : Block}
       {name : Name}
@@ -265,6 +269,32 @@ mutual
         exact stmtList_outEnv_contains_of_contains
           (env := Functions.Scope.Stmt.outEnv env stmt) (stmts := rest)
           (stmt_outEnv_contains_of_contains (stmt := stmt) hContains)
+end
+
+mutual
+  theorem block_outEnv_length_le {env : List Name} {block : Block} :
+      env.length ≤ (Functions.Scope.Block.outEnv env block).length := by
+    cases block with
+    | mk stmts =>
+        exact stmtList_outEnv_length_le (env := env) (stmts := stmts)
+
+  theorem stmtList_outEnv_length_le :
+      ∀ {env : List Name} {stmts : List Stmt},
+        env.length ≤ (Functions.Scope.StmtList.outEnv env stmts).length
+    | _env, [] => by
+        simp [Functions.Scope.StmtList.outEnv]
+    | env, stmt :: rest => by
+        have hHead :
+            env.length ≤
+              (Functions.Scope.Stmt.outEnv env stmt).length :=
+          stmt_outEnv_length_le (env := env) (stmt := stmt)
+        have hTail :
+            (Functions.Scope.Stmt.outEnv env stmt).length ≤
+              (Functions.Scope.StmtList.outEnv
+                (Functions.Scope.Stmt.outEnv env stmt) rest).length :=
+          stmtList_outEnv_length_le
+            (env := Functions.Scope.Stmt.outEnv env stmt) (stmts := rest)
+        simpa [Functions.Scope.StmtList.outEnv] using Nat.le_trans hHead hTail
 end
 
 theorem switch_select_block_scoped {env : List Name} {scrutinee : Word}
@@ -3733,6 +3763,19 @@ mutual
         max (exprWidth head) (left + exprSeqWidth tail)
 end
 
+theorem exprSeq_results_le_width :
+    ∀ {results : Nat} (exprs : Locals.ExprSeq results),
+      results ≤ exprSeqWidth exprs
+  | _, exprs => by
+      cases exprs with
+      | nil =>
+          simp [exprSeqWidth]
+      | cons head tail =>
+          rename_i left right
+          have hTail := exprSeq_results_le_width tail
+          simp [exprSeqWidth]
+          omega
+
 end Access
 
 namespace FrameBound
@@ -4047,6 +4090,25 @@ theorem funDef_regularReturnBound {fn : Functions.FunDef}
     fn.returns.length +
       (Scope.Block.outEnv (fn.returns ++ fn.params) fn.body).length ≤ 16 := by
   exact hBound.2
+
+theorem funDef_targetBodyCtx_layout_le16 {fn : Functions.FunDef}
+    (hBound : FunDef fn) :
+    (SourceDirect.FunDef.targetBodyCtx fn).layout.length ≤ 16 := by
+  have hStartLeOut :
+      (fn.returns ++ fn.params).length ≤
+        (Scope.Block.outEnv (fn.returns ++ fn.params) fn.body).length :=
+    SourceScope.block_outEnv_length_le
+      (env := fn.returns ++ fn.params) (block := fn.body)
+  have hTargetLen :
+      (SourceDirect.FunDef.targetBodyCtx fn).layout.length =
+        (fn.returns ++ fn.params).length := by
+    simp [SourceDirect.FunDef.targetBodyCtx,
+      Locals.Ctx.procEntryWithLayoutAndRetc,
+      Locals.Ctx.procEntryWithLayout, Locals.Ctx.procEntry,
+      Locals.Ctx.initial]
+  have hFinal := funDef_regularReturnBound hBound
+  rw [hTargetLen]
+  omega
 
 theorem stmtList_head {returns env : List Name}
     {stmt : Functions.Stmt} {rest : List Functions.Stmt}
@@ -4596,6 +4658,11 @@ theorem argExprs_scoped_of_scoped {env : List Name} :
         (Locals.ExprSeq.cons arg (Lower.argExprs rest))]
       simp [Scope.ExprSeqScoped, hHead, hTail]
 
+theorem length_le_argExprsWidth :
+    ∀ {args : List (Expr 1)},
+      args.length ≤ Access.exprSeqWidth (Lower.argExprs args)
+  | args => Access.exprSeq_results_le_width (Lower.argExprs args)
+
 theorem evalArgs_of_eval_sourceOwned {prim : Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
     {layout : List Name} {ctx : Locals.Ctx}
@@ -4706,6 +4773,59 @@ structure CallPrelude (layout : List Name)
       (sourceAfterArgs.withShared sharedAfterCall) callerBase
 
 namespace CallPrelude
+
+theorem callerBase_stack_length {layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {sourceAfterArgs : Source.State}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {argValues : List Word}
+    {targetCtx : Locals.Ctx}
+    {args : List (Expr 1)}
+    {target targetAfterArgs callerBase : Locals.RunState}
+    (prelude :
+      CallPrelude layout hiddenReturns sourceAfterArgs sharedAfterCall
+        argValues targetCtx args target targetAfterArgs callerBase) :
+    callerBase.evm.stack.length = layout.length := by
+  rcases prelude.baseRel with ⟨hLowerRel, _hReturns⟩
+  rcases hLowerRel with ⟨_hShared, hStackRel⟩
+  exact hStackRel.1
+
+theorem argCallerBound_of_access_insertMany_eval
+    {prim : Source.PrimitiveSemantics}
+    {layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source sourceAfterArgs : Source.State}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {argValues : List Word}
+    {targetCtx : Locals.Ctx}
+    {args : List (Expr 1)}
+    {target targetAfterArgs callerBase : Locals.RunState}
+    {fn : FunDef} {paramStore : Source.Store}
+    (prelude :
+      CallPrelude layout hiddenReturns sourceAfterArgs sharedAfterCall
+        argValues targetCtx args target targetAfterArgs callerBase)
+    (hAccessBound :
+      layout.length + Access.exprSeqWidth (Lower.argExprs args) ≤ 16)
+    (hEval :
+      Source.ArgList.eval prim args source =
+        .ok (sourceAfterArgs, argValues))
+    (hParams :
+      Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore) :
+    fn.params.length + callerBase.evm.stack.length ≤ 16 := by
+  have hValuesArgs :
+      argValues.length = args.length :=
+    Source.ArgList.eval_length prim hEval
+  have hValuesParams :
+      argValues.length = fn.params.length :=
+    Source.Store.insertMany_length hParams
+  have hParamsWidth :
+      fn.params.length ≤ Access.exprSeqWidth (Lower.argExprs args) := by
+    rw [← hValuesParams, hValuesArgs]
+    exact ArgList.length_le_argExprsWidth (args := args)
+  have hCallerLen := prelude.callerBase_stack_length
+  omega
 
 theorem exists_of_eval_sourceOwned {prim : Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -15550,6 +15670,118 @@ theorem call_stmtRunBridge_from_source_run_program_with_layout
             hStateRel _hInit
           exact hBody hLookup hParams hSourceOpen hStateRel)
 
+theorem call_stmtRunBridge_from_source_run_program_with_layout_callBound
+    {prim : Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {program : Program} {returns : List Name}
+    {retc fuel : Nat} {sourceCtx : Source.Ctx} {targetCtx : Locals.Ctx}
+    {source : Source.State} {target : Locals.RunState}
+    {hiddenReturns : List Structured.ReturnDest}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {sourceResult : Source.Outcome × Source.Ctx}
+    (hFunctionsScoped : Functions.FunList.Scoped program.functions)
+    (hFrameBound : FrameBound.FunList program.functions)
+    (hCtx : CtxRel retc sourceCtx targetCtx)
+    (hNoDupLayout : targetCtx.layout.Nodup)
+    (hScoped :
+      Scope.Stmt.Scoped sourceCtx.scope (.call targets functionName args))
+    (hArgAccessBound :
+      targetCtx.layout.length + Access.exprSeqWidth (Lower.argExprs args) ≤
+        16)
+    (hAssignBound : targets.length + targetCtx.layout.length ≤ 16)
+    (hRel : StateRel targetCtx.layout hiddenReturns source target)
+    (hSourceRun :
+      Source.Stmt.run prim program sourceCtx (fuel + 2)
+          (.call targets functionName args) source =
+        .ok sourceResult)
+    (hBody :
+      ∀ {sourceAfterArgs : Source.State} {argValues : List Word}
+          {fn : FunDef} {paramStore : Source.Store}
+          {targetAfterInit : Locals.RunState} {bodyOutcome : Source.Outcome}
+          {sourceCtxOut : Source.Ctx} {callerBase : Locals.RunState},
+        Source.FunList.find? functionName program.functions = some fn →
+        Source.Store.insertMany fn.params argValues
+            Locals.Source.Store.empty =
+          some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
+        Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) fuel
+            fn.body
+            { shared := sourceAfterArgs.shared,
+              vars := Source.Store.initReturns fn.returns paramStore } =
+          .ok (bodyOutcome, sourceCtxOut) →
+        StateRel (FunDef.targetBodyCtx fn).layout
+          ({ callerStack := callerBase.evm.stack,
+              retc := fn.returns.length } :: hiddenReturns)
+          { shared := sourceAfterArgs.shared,
+            vars := Source.Store.initReturns fn.returns paramStore }
+          targetAfterInit →
+        BlockOpenRunBridgeWithLayout prim program fn.returns
+          fn.returns.length fuel (FunDef.sourceBodyCtx fn)
+          (FunDef.targetBodyCtx fn)
+          ({ callerStack := callerBase.evm.stack,
+              retc := fn.returns.length } :: hiddenReturns)
+          fn.body
+          { shared := sourceAfterArgs.shared,
+            vars := Source.Store.initReturns fn.returns paramStore }
+          targetAfterInit) :
+    StmtRunBridgeWithLayout prim program returns retc (fuel + 2)
+      sourceCtx targetCtx hiddenReturns (.call targets functionName args)
+      source target := by
+  refine
+    call_stmtRunBridge_from_source_run_with_layout
+      (prim := prim) hPrim (program := program) (returns := returns)
+      (retc := retc) (fuel := fuel + 1) (sourceCtx := sourceCtx)
+      (targetCtx := targetCtx) (source := source) (target := target)
+      (hiddenReturns := hiddenReturns) (targets := targets)
+      (functionName := functionName) (args := args)
+      (sourceResult := sourceResult)
+      hCtx hNoDupLayout hScoped hArgAccessBound hAssignBound hRel hSourceRun
+      ?hReturned ?hHalted
+  · intro sourceAfterArgs argValues fn sharedAfterCall returnValues
+      returnStore targetAfterArgs callerBase hArgEval hLookup hSourceBody
+      hAssign hPrelude
+    exact
+      FunDef.returned_runBody_from_program_body_bridge_with_layout
+        (prim := prim) (program := program) (fn := fn)
+        (functionName := functionName)
+        (sourceAfterArgs := sourceAfterArgs)
+        (sharedAfterCall := sharedAfterCall)
+        (argValues := argValues) (returnValues := returnValues)
+        (targetCtx := targetCtx) (args := args) (target := target)
+        (targetAfterArgs := targetAfterArgs) (callerBase := callerBase)
+        (hiddenReturns := hiddenReturns) (targets := targets)
+        (returnStore := returnStore) (fuel := fuel)
+        hFunctionsScoped hFrameBound hLookup hSourceBody hAssign hAssignBound
+        hPrelude
+        (by
+          intro paramStore targetAfterInit bodyOutcome sourceCtxOut hParams
+            hSourceOpen hStateRel _hInit
+          exact hBody hLookup hParams
+            (CallPrelude.argCallerBound_of_access_insertMany_eval
+              (prim := prim) (source := source) (prelude := hPrelude)
+              hArgAccessBound hArgEval hParams)
+            hSourceOpen hStateRel)
+  · intro sourceAfterArgs argValues fn kind haltedSource targetAfterArgs
+      callerBase hArgEval hLookup hSourceBody hPrelude
+    exact
+      FunDef.halted_runBody_from_program_body_bridge_with_layout
+        (prim := prim) (program := program) (fn := fn)
+        (functionName := functionName)
+        (sourceAfterArgs := sourceAfterArgs) (haltedSource := haltedSource)
+        (argValues := argValues) (targetCtx := targetCtx) (args := args)
+        (target := target) (targetAfterArgs := targetAfterArgs)
+        (callerBase := callerBase) (hiddenReturns := hiddenReturns)
+        (fuel := fuel) (kind := kind)
+        hFunctionsScoped hLookup hSourceBody hPrelude
+        (by
+          intro paramStore targetAfterInit sourceCtxOut hParams hSourceOpen
+            hStateRel _hInit
+          exact hBody hLookup hParams
+            (CallPrelude.argCallerBound_of_access_insertMany_eval
+              (prim := prim) (source := source) (prelude := hPrelude)
+              hArgAccessBound hArgEval hParams)
+            hSourceOpen hStateRel)
+
 theorem terminal_stmtOutcome_bridge {prim : Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
     {program : Program} {returns : List Name}
@@ -22060,6 +22292,7 @@ theorem stmtRunBridge_from_source_run_invariant
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -22320,7 +22553,7 @@ theorem stmtRunBridge_from_source_run_invariant
                   Structured.invalid] at hSourceRun
           | succ fuel =>
               exact
-                call_stmtRunBridge_from_source_run_program_with_layout
+                call_stmtRunBridge_from_source_run_program_with_layout_callBound
                   (prim := prim) hPrim (program := program)
                   (returns := returns) (retc := retc) (fuel := fuel)
                   (sourceCtx := sourceCtx) (targetCtx := targetCtx)
@@ -22337,9 +22570,10 @@ theorem stmtRunBridge_from_source_run_invariant
                   (by
                     intro sourceAfterArgs argValues fn paramStore
                       targetAfterInit bodyOutcome sourceCtxOut callerBase
-                      hLookup hParams hSourceOpen hStateRel
+                      hLookup hParams hArgCallerBound hSourceOpen hStateRel
                     exact
-                      hCallBody hLookup hParams hSourceOpen hStateRel)
+                      hCallBody hLookup hParams hArgCallerBound hSourceOpen
+                        hStateRel)
   | terminal kind =>
       exact
         terminal_stmtRunBridge_from_source_run_with_layout
@@ -22441,6 +22675,7 @@ theorem loopStmtRunBridge_from_source_run_invariant
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -22877,7 +23112,7 @@ theorem loopStmtRunBridge_from_source_run_invariant
                     Structured.invalid] at hSourceRun
             | succ fuel =>
                 exact
-                  call_stmtRunBridge_from_source_run_program_with_layout
+                  call_stmtRunBridge_from_source_run_program_with_layout_callBound
                     (prim := prim) hPrim (program := program)
                     (returns := returns) (retc := retc) (fuel := fuel)
                     (sourceCtx := sourceCtx) (targetCtx := targetCtx)
@@ -22894,9 +23129,10 @@ theorem loopStmtRunBridge_from_source_run_invariant
                     (by
                       intro sourceAfterArgs argValues fn paramStore
                         targetAfterInit bodyOutcome sourceCtxOut callerBase
-                        hLookup hParams hSourceOpen hStateRel
+                        hLookup hParams hArgCallerBound hSourceOpen hStateRel
                       exact
-                        hCallBody hLookup hParams hSourceOpen hStateRel)
+                        hCallBody hLookup hParams hArgCallerBound hSourceOpen
+                          hStateRel)
   | terminal kind =>
       refine
         LoopStmtRunBridgeWithLayout.of_stmt_bridge_with_layout_not_break_continue
@@ -23042,6 +23278,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23165,6 +23402,7 @@ theorem runOpen_from_source_run_with_loop_statement_dispatcher
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23292,6 +23530,7 @@ theorem runScoped_from_source_run_with_loop_statement_dispatcher
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23403,6 +23642,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23576,6 +23816,7 @@ theorem runForLoop_from_exact_source_run_with_body_dispatcher
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23759,6 +24000,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -23935,6 +24177,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers_induction
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -24084,6 +24327,7 @@ theorem for_stmtRunBridge_from_exact_source_run_with_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -24309,6 +24553,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -24555,6 +24800,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback_bounded
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -24764,7 +25010,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback_bounded
                   Structured.invalid] at hSourceRun
           | succ fuel =>
               exact
-                call_stmtRunBridge_from_source_run_program_with_layout
+                call_stmtRunBridge_from_source_run_program_with_layout_callBound
                   (prim := prim) hPrim (program := program)
                   (returns := returns) (retc := retc) (fuel := fuel)
                   (sourceCtx := sourceCtx) (targetCtx := targetCtx)
@@ -24781,10 +25027,10 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback_bounded
                   (by
                     intro sourceAfterArgs argValues fn paramStore
                       targetAfterInit bodyOutcome sourceCtxOut callerBase
-                      hLookup hParams hSourceOpen hStateRel
+                      hLookup hParams hArgCallerBound hSourceOpen hStateRel
                     exact
-                      hCallBody (by omega) hLookup hParams hSourceOpen
-                        hStateRel)
+                      hCallBody (by omega) hLookup hParams hArgCallerBound
+                        hSourceOpen hStateRel)
   | terminal kind =>
       exact
         terminal_stmtRunBridge_from_source_run_with_layout
@@ -24858,6 +25104,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -24898,8 +25145,8 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback
     (by
       intro callFuel functionName sourceAfterArgs argValues fn paramStore
         targetAfterInit bodyOutcome sourceCtxOut callerBase _hFuel hLookup
-        hParams hSourceOpen hStateRel
-      exact hCallBody hLookup hParams hSourceOpen hStateRel)
+        hParams hArgCallerBound hSourceOpen hStateRel
+      exact hCallBody hLookup hParams hArgCallerBound hSourceOpen hStateRel)
 
 theorem loopStmtRunBridge_from_source_run_invariant_with_for_callback_bounded
     {prim : Source.PrimitiveSemantics}
@@ -24981,6 +25228,7 @@ theorem loopStmtRunBridge_from_source_run_invariant_with_for_callback_bounded
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25428,6 +25676,7 @@ theorem loopStmtRunBridge_from_source_run_invariant_with_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25475,8 +25724,8 @@ theorem loopStmtRunBridge_from_source_run_invariant_with_for_callback
     (by
       intro callFuel functionName sourceAfterArgs argValues fn paramStore
         targetAfterInit bodyOutcome sourceCtxOut callerBase _hFuel hFind
-        hParams hSourceRun hRel
-      exact hCallBody hFind hParams hSourceRun hRel)
+        hParams hArgCallerBound hSourceRun hRel
+      exact hCallBody hFind hParams hArgCallerBound hSourceRun hRel)
 
 end Stmt
 
@@ -25560,6 +25809,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25692,6 +25942,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25792,6 +26043,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25902,6 +26154,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_callback_bounded
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -25998,6 +26251,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26103,6 +26357,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_callback_bounded
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26224,6 +26479,7 @@ theorem runOpen_from_source_run_with_loop_statement_dispatcher_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26360,6 +26616,7 @@ theorem runScoped_from_source_run_with_loop_statement_dispatcher_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26489,6 +26746,7 @@ theorem runOpen_from_source_run_with_loop_statement_dispatcher_for_callback_boun
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26614,6 +26872,7 @@ theorem runScoped_from_source_run_with_loop_statement_dispatcher_for_callback_bo
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26782,6 +27041,7 @@ theorem runForLoop_from_exact_source_run_with_body_dispatcher_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -26971,6 +27231,7 @@ theorem runForLoop_from_exact_source_run_with_body_dispatcher_for_callback_bound
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -27146,6 +27407,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -27331,6 +27593,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -27498,6 +27761,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers_induction_fo
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -27659,6 +27923,7 @@ theorem runForLoop_from_exact_source_run_with_body_post_dispatchers_induction_fo
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -27800,6 +28065,7 @@ theorem for_stmtRunBridge_from_exact_source_run_with_for_callback
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28028,6 +28294,7 @@ theorem for_stmtRunBridge_from_exact_source_run_with_for_callback_bounded
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28249,6 +28516,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback_dispatchers
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28512,6 +28780,7 @@ theorem stmtRunBridge_from_source_run_invariant_with_for_callback_dispatchers_bo
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28681,6 +28950,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_callback_dispatche
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28793,6 +29063,7 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_callback_dispatche
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -28840,8 +29111,8 @@ theorem runOpen_from_source_run_with_statement_dispatcher_for_callback_dispatche
     (by
       intro callFuel functionName sourceAfterArgs argValues fn paramStore
         targetAfterInit bodyOutcome sourceCtxOut callerBase _hFuel hFind
-        hParams hSourceRun hRel
-      exact hCallBody hFind hParams hSourceRun hRel)
+        hParams hArgCallerBound hSourceRun hRel
+      exact hCallBody hFind hParams hArgCallerBound hSourceRun hRel)
 
 theorem runScoped_from_source_run_with_statement_dispatcher_for_callback_dispatchers_bounded
     {prim : Source.PrimitiveSemantics}
@@ -28919,6 +29190,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_callback_dispatc
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -29034,6 +29306,7 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_callback_dispatc
         Source.Store.insertMany fn.params argValues
             Locals.Source.Store.empty =
           some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
         Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
             fn.body
             { shared := sourceAfterArgs.shared,
@@ -29084,8 +29357,8 @@ theorem runScoped_from_source_run_with_statement_dispatcher_for_callback_dispatc
     (by
       intro callFuel functionName sourceAfterArgs argValues fn paramStore
         targetAfterInit bodyOutcome sourceCtxOut callerBase _hFuel hFind
-        hParams hSourceRun hRel
-      exact hCallBody hFind hParams hSourceRun hRel)
+        hParams hArgCallerBound hSourceRun hRel
+      exact hCallBody hFind hParams hArgCallerBound hSourceRun hRel)
 
 end Block
 
@@ -29144,6 +29417,7 @@ structure RecursiveCallbacks (prim : Source.PrimitiveSemantics)
       Source.Store.insertMany fn.params argValues
           Locals.Source.Store.empty =
         some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
       Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
           fn.body
           { shared := sourceAfterArgs.shared,
@@ -29224,6 +29498,7 @@ structure RecursiveCallbacksUpTo (prim : Source.PrimitiveSemantics)
       Source.Store.insertMany fn.params argValues
           Locals.Source.Store.empty =
         some paramStore →
+        fn.params.length + callerBase.evm.stack.length ≤ 16 →
       Source.Block.runOpen prim program (FunDef.sourceBodyCtx fn) callFuel
           fn.body
           { shared := sourceAfterArgs.shared,
@@ -29276,9 +29551,9 @@ theorem mono {prim : Source.PrimitiveSemantics}
       hSourceRun hCtx hRel
   · intro callFuel functionName sourceAfterArgs argValues fn paramStore
       targetAfterInit bodyOutcome sourceCtxOut callerBase hFuel hFind hParams
-      hSourceRun hRel
+      hArgCallerBound hSourceRun hRel
     exact callbacks.callBody (Nat.le_trans hFuel hLe) hFind hParams
-      hSourceRun hRel
+      hArgCallerBound hSourceRun hRel
 
 theorem zero {prim : Source.PrimitiveSemantics}
     {program : Program} {returns : List Name} {retc : Nat}
@@ -29307,7 +29582,7 @@ theorem zero {prim : Source.PrimitiveSemantics}
     simp [Source.Stmt.run, Source.invalid, Structured.invalid] at hSourceRun
   · intro callFuel functionName sourceAfterArgs argValues fn paramStore
       targetAfterInit bodyOutcome sourceCtxOut callerBase hFuel _hFind _hParams
-      hSourceRun _hRel
+      _hArgCallerBound hSourceRun _hRel
     have hFuelEq : callFuel = 0 := Nat.eq_zero_of_le_zero hFuel
     subst callFuel
     simp [Source.Block.runOpen, Source.invalid, Structured.invalid] at hSourceRun
@@ -29450,7 +29725,8 @@ theorem succ_all {prim : Source.PrimitiveSemantics}
                   (by
                     intro callFuel functionName sourceAfterArgs argValues fn
                       paramStore targetAfterInit bodyOutcome sourceCtxOut
-                      callerBase hCallFuel hFind hParams hRun hRel
+                      callerBase hCallFuel hFind hParams _hArgCallerBound
+                      hRun hRel
                     exact
                       callBody_from_all_upTo callbacks hFunctionsScoped
                         hFunctionBounds
@@ -29523,7 +29799,8 @@ theorem succ_all {prim : Source.PrimitiveSemantics}
                   (by
                     intro callFuel functionName sourceAfterArgs argValues fn
                       paramStore targetAfterInit bodyOutcome sourceCtxOut
-                      callerBase hCallFuel hFind hParams hRun hRel
+                      callerBase hCallFuel hFind hParams _hArgCallerBound
+                      hRun hRel
                     exact
                       callBody_from_all_upTo callbacks hFunctionsScoped
                         hFunctionBounds
@@ -29604,13 +29881,14 @@ theorem succ_all {prim : Source.PrimitiveSemantics}
                 (by
                   intro callFuel functionName sourceAfterArgs argValues fn
                     paramStore targetAfterInit bodyOutcome sourceCtxOut
-                    callerBase hCallFuel hFind hParams hRun hRel
+                    callerBase hCallFuel hFind hParams _hArgCallerBound hRun
+                    hRel
                   exact
                     callBody_from_all_upTo callbacks hFunctionsScoped
                       hFunctionBounds hCallFuel hFind hParams hRun hRel)
   · intro callFuel functionName sourceAfterArgs argValues fn paramStore
       targetAfterInit bodyOutcome sourceCtxOut callerBase hFuel hFind hParams
-      hSourceRun hRel
+      _hArgCallerBound hSourceRun hRel
     cases callFuel with
     | zero =>
         simp [Source.Block.runOpen, Source.invalid, Structured.invalid]
@@ -29707,7 +29985,8 @@ theorem succ_all {prim : Source.PrimitiveSemantics}
                       nestedArgValues nestedFn nestedParamStore
                       nestedTargetAfterInit nestedBodyOutcome
                       nestedSourceCtxOut nestedCallerBase hNestedFuel
-                      hNestedFind hNestedParams hNestedRun hNestedRel
+                      hNestedFind hNestedParams _hNestedArgCallerBound
+                      hNestedRun hNestedRel
                     exact
                       callBody_from_all_upTo callbacks hFunctionsScoped
                         hFunctionBounds
@@ -29770,8 +30049,8 @@ theorem to_upTo {prim : Source.PrimitiveSemantics}
     exact callbacks.forStmt hLeaveFrame hInv hSourceRun hCtx hRel
   · intro callFuel functionName sourceAfterArgs argValues fn paramStore
       targetAfterInit bodyOutcome sourceCtxOut callerBase _hFuel hFind hParams
-      hSourceRun hRel
-    exact callbacks.callBody hFind hParams hSourceRun hRel
+      hArgCallerBound hSourceRun hRel
+    exact callbacks.callBody hFind hParams hArgCallerBound hSourceRun hRel
 
 theorem of_forall_upTo {prim : Source.PrimitiveSemantics}
     {program : Program} {returns : List Name} {retc : Nat}
@@ -29804,10 +30083,10 @@ theorem of_forall_upTo {prim : Source.PrimitiveSemantics}
         hSourceRun hCtx hRel
   · intro callFuel functionName sourceAfterArgs argValues fn paramStore
       targetAfterInit bodyOutcome sourceCtxOut callerBase hFind hParams
-      hSourceRun hRel
+      hArgCallerBound hSourceRun hRel
     exact
       (callbacks callFuel).callBody (Nat.le_refl callFuel) hFind hParams
-        hSourceRun hRel
+        hArgCallerBound hSourceRun hRel
 
 theorem constructed {prim : Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)

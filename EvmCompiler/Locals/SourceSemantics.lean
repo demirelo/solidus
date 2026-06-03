@@ -482,6 +482,10 @@ mutual
         invalid
     | _fuel, .assignTopWithOffset _offset _name, _state =>
         invalid
+    | _fuel, .promoteName _name, _state =>
+        invalid
+    | _fuel, .cleanupTo _targetLayout, _state =>
+        invalid
     | fuel, .block body, state => do
         let outcome ← Block.runScoped prim program ctx body fuel state
         .ok (outcome, ctx)
@@ -626,6 +630,11 @@ theorem run_regular_scope {prim : PrimitiveSemantics} {program : Program}
       simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
   | assignTopWithOffset offset name =>
       simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+  | promoteName name =>
+      simp [Source.Stmt.run, Source.invalid, invalid, EvmCompiler.Structured.invalid] at hRun
+  | cleanupTo targetLayout =>
+      simp [Source.Stmt.run, Source.invalid, invalid,
+        EvmCompiler.Structured.invalid] at hRun
   | block body =>
       cases hBlock : Block.runScoped prim program ctx body fuel state with
       | error err =>
@@ -952,6 +961,8 @@ mutual
     | .assign _name value => Expr.SourceOwned value
     | .assignTop _name => False
     | .assignTopWithOffset _offset _name => False
+    | .promoteName _name => False
+    | .cleanupTo _targetLayout => False
     | .block body => Block.SourceOwned body
     | .if_ cond body => Expr.SourceOwned cond ∧ Block.SourceOwned body
     | .switch scrutinee cases defaultBody =>

@@ -306,6 +306,24 @@ mutual
         let evmAfterSwap ← swapOp.step state.evm
         let evmAfterPop ← Structured.BasicOp.pop.step evmAfterSwap
         .ok (Outcome.regular (state.withEVM evmAfterPop), ctx)
+    | _fuel, .promoteName name, state => do
+        let depth ← (Layout.lookupDepth? name ctx.layout).elim invalid pure
+        let idx := depth - 1
+        if idx ≤ 16 then
+          let code ← (Ctx.swapRestoreUpTo? idx).elim invalid pure
+          let evmAfterPromote ← Structured.Code.run code state.evm
+          .ok (Outcome.regular (state.withEVM evmAfterPromote),
+            ctx.withLayout (Layout.promoteAt idx ctx.layout))
+        else
+          invalid
+    | _fuel, .cleanupTo targetLayout, state => do
+        if targetLayout =
+            ctx.layout.drop (ctx.layout.length - targetLayout.length) then
+          let stateAfterCleanup ← Ctx.runCleanupTo ctx targetLayout.length state
+          .ok (Outcome.regular stateAfterCleanup,
+            ctx.withLayout targetLayout)
+        else
+          invalid
     | _fuel, .block body, state => do
         let outcome ← Block.runScoped program ctx body _fuel state
         .ok (outcome, ctx)

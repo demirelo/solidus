@@ -1,6 +1,9 @@
 import EvmCompiler.Yul.RecursiveBridgeSupport
 import EvmCompiler.Yul.NoCallCreate
 import EvmCompiler.Assembly.GasAware
+import EvmCompiler.Functions.CallDepth
+import EvmCompiler.Functions.CallDepthRanked
+import EvmCompiler.Structured.StackResource
 
 /-!
 Glue from the accepted Yul no-CALL/CREATE lowering theorem to the final
@@ -191,6 +194,27 @@ theorem
       hCompileTarget).1
 
 theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target := by
+  let hStatic :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_eq_some
+        hCompileTarget).1
+  let hFeatures :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some hStatic.1
+  let hResources :=
+    compileCheckedAssemblyTargetBytecodeResources?_eq_some hFeatures.1
+  let hBytecode :=
+    compileCheckedAssemblyTargetBytecode?_eq_some hResources.1
+  exact (compileCheckedAssemblyTarget?_eq_some hBytecode.1).2
+
+theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
     {program : Program} {asm : Assembly.Program}
     {target : Assembly.TargetProgram}
@@ -259,6 +283,47 @@ theorem
   exact
     Assembly.GasAware.targetInstr_usesCallCreate_false_of_program_noCall_emit_mem
       hNoCallAsm hAt hEmit hLocatedMem
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    asm.usesCallCreate = false := by
+  have hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?
+          program =
+        some (asm, target) :=
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget).1
+  let hStatic :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_eq_some
+      hBase
+  let hFeatures :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeatures?_eq_some hStatic.1
+  let hResources :=
+    compileCheckedAssemblyTargetBytecodeResources?_eq_some hFeatures.1
+  let hBytecode :=
+    compileCheckedAssemblyTargetBytecode?_eq_some hResources.1
+  let hProgramSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.2.sourceAcceptedCore hStatic.2.supported
+  let hProgramAccepted : Program.Accepted program :=
+    accepted_of_sourceAccepted_compileChecked? hProgramSourceAccepted
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStatic?_compileChecked
+        hBase)
+  let hFullSourceAccepted : RecursiveBridgeFullSourceAccepted program :=
+    hStatic.2.toFullSourceAccepted hProgramAccepted
+  let hCompile := (compileCheckedAssemblyTarget?_eq_some hBytecode.1).1
+  let hSourceAccepted : RecursiveBridgeSourceAccepted program :=
+    RecursiveBridgeSourceAccepted.ofFullCoverageAndCompileChecked
+      hFullSourceAccepted hFeatures.2 hCompile
+  exact
+    Program.compileCheckedAssemblyTarget?_noCallCreate hSourceAccepted.reference
+      hBytecode.1
 
 theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockPathChecks_of_core
@@ -352,6 +417,448 @@ theorem
     Assembly.Bytecode.compile_decodeSafety
       (compileCheckedAssemblyTarget?_eq_some hBytecode.1).2
       hBytecode.2.1
+
+/--
+Live-layout checked no-CALL compiler boundary.
+
+This is the stack-too-deep replacement for the old `compileChecked?` public
+gate.  It keeps the same bytecode/source-static/runtime checks, but the
+assembly comes from the executable live-layout compiler rather than from the
+direct locals lowering that can fail when dead or movable locals sit below the
+top-16 EVM stack window.
+-/
+noncomputable def compileLiveNoInternalCallCheckedAssemblyTarget?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) := do
+  let asm ← compileLiveNoInternalCallChecked? program
+  let target ← Assembly.compile? asm
+  some (asm, target)
+
+theorem compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTarget? program =
+        some (asm, target)) :
+    compileLiveNoInternalCallChecked? program = some asm ∧
+      Assembly.compile? asm = some target := by
+  unfold compileLiveNoInternalCallCheckedAssemblyTarget? at hCompileTarget
+  cases hCompile : compileLiveNoInternalCallChecked? program with
+  | none =>
+      simp [hCompile] at hCompileTarget
+  | some asm' =>
+      simp [hCompile] at hCompileTarget
+      cases hAssemble : Assembly.compile? asm' with
+      | none =>
+          simp [hAssemble] at hCompileTarget
+      | some target' =>
+          simp [hAssemble] at hCompileTarget
+          rcases hCompileTarget with ⟨rfl, rfl⟩
+          exact ⟨by simpa [hCompile], hAssemble⟩
+
+noncomputable def compileLiveNoInternalCallCheckedAssemblyTargetBytecode?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileLiveNoInternalCallCheckedAssemblyTarget? program with
+  | none => none
+  | some (asm, target) =>
+      if Assembly.Bytecode.bytecodeBridgeChecked? target then
+        some (asm, target)
+      else
+        none
+
+theorem compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecode? program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTarget? program =
+        some (asm, target) ∧
+      Assembly.Bytecode.TargetFitsDecodeWindow target ∧
+        Assembly.Bytecode.JumpdestCorrect target := by
+  unfold compileLiveNoInternalCallCheckedAssemblyTargetBytecode?
+    at hCompileTarget
+  cases hBase :
+      compileLiveNoInternalCallCheckedAssemblyTarget? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hChecked :
+          Assembly.Bytecode.bytecodeBridgeChecked? target' <;>
+        simp [hChecked] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          Assembly.Bytecode.targetFitsDecodeWindow_of_bytecodeBridgeChecked
+            (by simpa using hChecked),
+          Assembly.Bytecode.jumpdestCorrect_of_bytecodeBridgeChecked
+            (by simpa using hChecked)⟩
+
+noncomputable def
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match compileLiveNoInternalCallCheckedAssemblyTargetBytecode? program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeFeatureCoverage.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecode? program =
+        some (asm, target) ∧
+      RecursiveBridgeFeatureCoverage program := by
+  unfold
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+      at hCompileTarget
+  cases hBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecode? program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hCoverage :
+          RecursiveBridgeFeatureCoverage.checked? program <;>
+        simp [hCoverage] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeFeatureCoverage.of_checked?
+            (by simpa using hCoverage)⟩
+
+noncomputable def
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+        program with
+  | none => none
+  | some (asm, target) =>
+      if RecursiveBridgeSourceStaticFacts.checked? program then
+        some (asm, target)
+      else
+        none
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+        program =
+      some (asm, target) ∧
+      RecursiveBridgeSourceStaticFacts program := by
+  unfold
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+      at hCompileTarget
+  cases hBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hFacts :
+          RecursiveBridgeSourceStaticFacts.checked? program <;>
+        simp [hFacts] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simpa using hBase,
+          RecursiveBridgeSourceStaticFacts.of_checked?
+            (by simpa using hFacts)⟩
+
+noncomputable def
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+        program with
+  | none => none
+  | some (asm, target) =>
+      if Reference.Safe.FeatureCoverage.returnDataCopyBoundaryProgram?
+          program
+      then
+        if Assembly.GasAware.targetProgramNoReturnDataCopy? target then
+          some (asm, target)
+        else
+          none
+      else
+        none
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+        program =
+      some (asm, target) ∧
+        Reference.Safe.FeatureCoverage.returnDataCopyBoundaryProgram
+          program ∧
+          Assembly.GasAware.targetProgramNoReturnDataCopy target := by
+  unfold
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+      at hCompileTarget
+  cases hBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hReturnDataCopy :
+          Reference.Safe.FeatureCoverage.returnDataCopyBoundaryProgram?
+            program <;>
+        simp [hReturnDataCopy] at hCompileTarget
+      cases hTargetReturnDataCopy :
+          Assembly.GasAware.targetProgramNoReturnDataCopy? target' <;>
+        simp [hTargetReturnDataCopy] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact
+        ⟨by simp,
+          Reference.Safe.FeatureCoverage.returnDataCopyBoundaryProgram_of_check
+            (by simpa using hReturnDataCopy),
+          Assembly.GasAware.targetProgramNoReturnDataCopy_of_check
+            (by simpa using hTargetReturnDataCopy)⟩
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileLive
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallChecked? program = some asm := by
+  let hNoReturn :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hNoReturn.1
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  let hBytecode :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+      hFeatures.1
+  exact
+    (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+      hBytecode.1).1
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target := by
+  let hNoReturn :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hNoReturn.1
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  let hBytecode :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+      hFeatures.1
+  exact
+    (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+      hBytecode.1).2
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.GasAware.targetProgramNoReturnDataCopy target :=
+  (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+    hCompileTarget).2.2
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockReplayNoReturnDataCopy asm target :=
+  Assembly.GasAware.XStepTrace.XBlockReplayNoReturnDataCopy.of_target_noReturnDataCopy
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_targetNoReturnDataCopy
+      hCompileTarget)
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.assemble? asm = some target :=
+  Assembly.Preservation.compile?_some_assemble
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.Bytecode.JumpdestCorrect target := by
+  let hNoReturn :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hNoReturn.1
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  exact
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+      hFeatures.1).2.2
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.Bytecode.DecodeSafety target := by
+  let hNoReturn :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hNoReturn.1
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  let hBytecode :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+      hFeatures.1
+  exact
+    Assembly.Bytecode.compile_decodeSafety
+      (compileLiveNoInternalCallCheckedAssemblyTarget?_eq_some
+        hBytecode.1).2
+      hBytecode.2.1
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    asm.usesCallCreate = false := by
+  let hNoReturn :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCompileTarget
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hNoReturn.1
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  let hCompile :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileLive
+      hCompileTarget
+  rcases compileLiveNoInternalCallChecked?_eq_some hCompile with
+    ⟨lowerObj, hLowerObj, _hObjCompile⟩
+  have hCoverageProgram :
+      Reference.Safe.FeatureCoverage.program program :=
+    hFeatures.2.to_program_of_objectBuiltin
+      (Reference.Safe.FeatureCoverage.objectBuiltinProgram_of_toObjects?_some
+        hLowerObj)
+  have hSafeProgram : Reference.Safe.program program :=
+    (Reference.Safe.FeatureCoverage.program_iff_safe program).mp
+      hCoverageProgram
+  exact
+    Program.compileLiveNoInternalCallChecked?_noCallCreate_of_loweredFunctions
+      (fun obj hLower =>
+        _root_.EvmCompiler.Yul.NoCallCreate.contract_toObjects?_functions_noCallCreate
+          (by simpa [Reference.Safe.program] using hSafeProgram)
+          (by simpa [Program.toObjects?] using hLower))
+      hCompile
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
+  Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate.of_program_no_call_create
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+      hCompileTarget)
+
+theorem exists_functionProgram_of_toObjects?_some
+    {program : Program} {lowerObj : Objects.Program}
+    (hLower : program.toObjects? = some lowerObj) :
+    ∃ functionProgram : Functions.Program,
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] } := by
+  unfold Program.toObjects? Contract.toObjects? at hLower
+  cases hBody :
+      Stmt.toFunctionsList?
+        (Fresh.initial (Contract.names program.contract))
+        program.contract.dispatcher with
+  | none =>
+      simp [hBody] at hLower
+  | some bodyRes =>
+      rcases bodyRes with ⟨bodyStmts, state⟩
+      cases hFunctions :
+          FunctionList.toFunDefs? state
+            (Contract.functionEntries program.contract) with
+      | none =>
+          simp [hBody, hFunctions] at hLower
+      | some functionRes =>
+          rcases functionRes with ⟨functions, _state'⟩
+          refine
+            ⟨{ functions := functions, body := { stmts := bodyStmts } }, ?_⟩
+          unfold Program.toObjects? Contract.toObjects?
+          simp [hBody, hFunctions]
 
 theorem
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreReady
@@ -469,6 +976,94 @@ theorem
     (Assembly.GasAware.XStepTrace.XBlockInstrCoreInputsReady.of_resources
       hResources)
     hTrace
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_instrCoreResidualResources
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetOutcome : Assembly.StepResult}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hNoCallCreate : Assembly.Program.usesCallCreate asm = false)
+    (hResidual :
+      Assembly.GasAware.XStepTrace.XBlockInstrCoreResidualResources
+        asm target)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetOutcome) :
+    Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor
+      (Assembly.GasAware.validJumps target) hTrace :=
+  Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor.of_block_instr_core_residual_resources
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemble
+        hCompileTarget)
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+        hCompileTarget)
+      hTrace hNoCallCreate hResidual
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_traceInstrCoreResidualReady
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetOutcome : Assembly.StepResult}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hNoCallCreate : Assembly.Program.usesCallCreate asm = false)
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetOutcome}
+    (hResidual :
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor
+        target hTrace) :
+    Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor
+      (Assembly.GasAware.validJumps target) hTrace :=
+  Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor.of_trace_instr_core_residual_ready
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemble
+        hCompileTarget)
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+        hCompileTarget)
+      hNoCallCreate hResidual
+
+theorem xTraceFallthroughPcFor_of_targetOutcomeEndPc
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {initial : EVMState}
+    {targetOutcome : Assembly.StepResult}
+    (hCompile : Assembly.compile? asm = some target)
+    (hDecodeWindow : Assembly.Bytecode.TargetFitsDecodeWindow target)
+    (hEndPc :
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel initial
+        targetOutcome) :
+    Assembly.GasAware.XStepTrace.XTraceFallthroughPcFor hTrace := by
+  cases targetOutcome with
+  | running targetState =>
+      simp only [Structured.Preservation.TargetOutcomeEndPc] at hEndPc
+      change targetState.pc.toNat =
+        Assembly.Bytecode.codeByteLength target.code
+      rw [hEndPc]
+      unfold Assembly.Program.pcAfter
+      have hLength :
+          Assembly.Bytecode.codeByteLength target.code =
+            Assembly.Program.byteLength asm :=
+        Assembly.Bytecode.compile_codeByteLength hCompile
+      have hNoWrap :
+          (EvmYul.UInt256.ofNat
+              (Assembly.Program.byteLength asm)).toNat =
+            Assembly.Program.byteLength asm := by
+        rw [← hLength]
+        exact
+          Assembly.Bytecode.uint256_ofNat_toNat_of_decode_window
+            hDecodeWindow
+      exact hNoWrap.trans hLength.symm
+  | halted halt =>
+      change True
+      trivial
 
 namespace RecursiveBridgeTargetRuntime
 
@@ -728,10 +1323,11 @@ replay assumption over arbitrary block states or zero-fuel traces.
 The core target trace is enough to derive the trace-local
 `InstrCoreBlockTraceInputsReadyFor` evidence.  It is also enough, together with
 the checked no-CALL fragment and canonical empty entry stack, to derive the
-final running stack bound.  The package therefore carries only the remaining
-fallthrough PC fact; return-buffer cleanliness is derived from the initial
-entry relation plus no-CALL target trace preservation, and the theorem derives
-the installed-code and decode-none observation internally.
+final running stack bound.  The package therefore carries only the actual core
+target trace fact; fallthrough PC is derived from checked whole-program
+preservation, return-buffer cleanliness is derived from the initial entry
+relation plus no-CALL target trace preservation, and the theorem derives the
+installed-code and decode-none observation internally.
 -/
 structure RecursiveBridgeActualXTraceFacts
     (cfg : Reference.StateRelConfig)
@@ -755,9 +1351,8528 @@ structure RecursiveBridgeActualXTraceFacts
         Assembly.Preservation.BlockTraceResult asm target targetFuel
           (canonicalEntryState initial) targetOutcome) →
       Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor
-          (Assembly.GasAware.validJumps target) hTrace ∧
-        Assembly.GasAware.XStepTrace.XTraceFallthroughPcFor
-          hTrace
+        (Assembly.GasAware.validJumps target) hTrace
+
+structure RecursiveBridgeActualXTraceResidualFacts
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  traceResidual :
+    ∀ {sourceFuel : Nat} {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult →
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor
+        target hTrace
+
+/-!
+Narrow actual-trace resource boundary for the remaining non-gas `EVM.X`
+checks.  The target-local residual predicate below wants exact stack-overflow
+inequalities and static-mode write exclusion at each executed instruction.
+Those exact target facts are derivable from the smaller invariant carried here:
+the actual trace states stay within the compiler's 16-slot source/frame bound,
+and primitive source execution is static-mode compatible.
+-/
+structure RecursiveBridgeActualXTraceStackStaticFacts
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  traceStackStatic :
+    ∀ {sourceFuel : Nat} {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult →
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceStackStaticReadyFor
+        target hTrace
+
+/-!
+Actual-trace resource boundary for the remaining non-gas `EVM.X` checks.  This
+is the preferred residual package: it asks for concrete EVM stack headroom on
+the actual trace, not merely the active source-frame bound.  The `+ 17`
+constant is the target-layer maximum `α` used to derive exact overflow room for
+all primitive opcodes and one-slot room for generated control pushes.
+-/
+structure RecursiveBridgeActualXTraceHeadroomStaticFacts
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  traceHeadroomStatic :
+    ∀ {sourceFuel : Nat} {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult →
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomStaticReadyFor
+        target hTrace
+
+/-!
+Neutral actual-trace EVM stack resource.  This is intentionally not an
+`EVM.X` predicate: it records only the concrete stack headroom needed before
+each emitted target block.  The gas-aware bridge turns this resource into the
+internal `XStepTrace` headroom predicate below.
+-/
+inductive RecursiveBridgeActualBlockTraceStackHeadroom
+    {asm : Assembly.Program} {target : Assembly.TargetProgram} :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : Assembly.StepResult} →
+        Assembly.Preservation.BlockTraceResult asm target targetFuel state
+          targetResult → Prop where
+  | done {state : EVMState} :
+      RecursiveBridgeActualBlockTraceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.done (program := asm)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : Assembly.StepResult}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Assembly.Preservation.BlockTraceResult asm target fuel mid result)
+      (hHeadroom : state.stack.length + 17 ≤ 1024)
+      (hRestReady :
+        RecursiveBridgeActualBlockTraceStackHeadroom hRest) :
+      RecursiveBridgeActualBlockTraceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Assembly.Halt}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hHeadroom : state.stack.length + 17 ≤ 1024) :
+      RecursiveBridgeActualBlockTraceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+namespace RecursiveBridgeActualBlockTraceStackHeadroom
+
+theorem toXStepTrace
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hHeadroom :
+      RecursiveBridgeActualBlockTraceStackHeadroom hTrace) :
+    Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor target
+      hTrace := by
+  induction hHeadroom with
+  | done =>
+      exact
+        Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor.done
+          (target := target)
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hHeadroom _ ih =>
+      exact
+        Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor.stepRunning
+          (target := target)
+          hAt hEmit hTargetBlock hRun hRest hHeadroom ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hHeadroom =>
+      exact
+        Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor.stepHalted
+          (target := target)
+          fuel hAt hEmit hTargetBlock hRun hHeadroom
+
+theorem of_blockTraceResultPoints
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hPoints :
+      Structured.Preservation.BlockTraceResultPoints
+        (fun state => state.stack.length + 17 ≤ 1024) hTrace) :
+    RecursiveBridgeActualBlockTraceStackHeadroom hTrace := by
+  induction hPoints with
+  | done =>
+      exact RecursiveBridgeActualBlockTraceStackHeadroom.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hHeadroom _ ih =>
+      exact
+        RecursiveBridgeActualBlockTraceStackHeadroom.stepRunning
+          hAt hEmit hTargetBlock hRun hRest hHeadroom ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hHeadroom =>
+      exact
+        RecursiveBridgeActualBlockTraceStackHeadroom.stepHalted
+          fuel hAt hEmit hTargetBlock hRun hHeadroom
+
+theorem of_assemblyBoundCheck
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (check :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+        asm 17 1024)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm check.table 17 1024 state) :
+    RecursiveBridgeActualBlockTraceStackHeadroom hTrace :=
+  of_blockTraceResultPoints
+    (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.blockTraceResultPoints_headroom_of_check
+      check hInitialPoint)
+
+theorem of_sourceRunResultPoints
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    (hCompile : Assembly.compile? asm = some target)
+    (hSourcePoints :
+      Structured.Preservation.SourceRunResultPoints asm
+        (fun state => state.stack.length + 17 ≤ 1024)
+        targetFuel state targetResult)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult) :
+    RecursiveBridgeActualBlockTraceStackHeadroom hTrace :=
+  of_blockTraceResultPoints
+    (Structured.Preservation.SourceRunResultPoints.to_blockTraceResultPoints
+      hCompile hSourcePoints hTrace)
+
+end RecursiveBridgeActualBlockTraceStackHeadroom
+
+/--
+Source-frame version of the actual-trace stack resource.
+
+This is the shape we ultimately want higher compiler layers to establish:
+each executed target block boundary is related to a structured source frame
+whose visible stack plus hidden return-frame payload has enough room.  The
+target-side `state.stack.length + 17 <= 1024` fact is then derived from
+`Frame.StateRel`, not supplied directly.
+-/
+inductive RecursiveBridgeActualBlockTraceSourceStackHeadroom
+    {asm : Assembly.Program} {target : Assembly.TargetProgram} :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : Assembly.StepResult} →
+        Assembly.Preservation.BlockTraceResult asm target targetFuel state
+          targetResult → Prop where
+  | done {state : EVMState} :
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.done (program := asm)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : Assembly.StepResult}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Assembly.Preservation.BlockTraceResult asm target fuel mid result)
+      (hSourceHeadroom :
+        ∃ source tokens,
+          Structured.Preservation.Frame.StateRel source state tokens ∧
+            Structured.Preservation.Frame.SourceStackHeadroom source)
+      (hRestReady :
+        RecursiveBridgeActualBlockTraceSourceStackHeadroom hRest) :
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Assembly.Halt}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hSourceHeadroom :
+        ∃ source tokens,
+          Structured.Preservation.Frame.StateRel source state tokens ∧
+            Structured.Preservation.Frame.SourceStackHeadroom source) :
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom
+        (Assembly.Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+namespace RecursiveBridgeActualBlockTraceSourceStackHeadroom
+
+theorem toStackHeadroom
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hSourceHeadroom :
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom hTrace) :
+    RecursiveBridgeActualBlockTraceStackHeadroom hTrace := by
+  induction hSourceHeadroom with
+  | done =>
+      exact RecursiveBridgeActualBlockTraceStackHeadroom.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hFrameHeadroom
+      _ ih =>
+      rcases hFrameHeadroom with
+        ⟨source, tokens, hFrameRel, hSourceBound⟩
+      exact
+        RecursiveBridgeActualBlockTraceStackHeadroom.stepRunning
+          hAt hEmit hTargetBlock hRun hRest
+          (Structured.Preservation.Frame.StateRel.target_stack_headroom_of_source_headroom
+            hFrameRel hSourceBound)
+          ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hFrameHeadroom =>
+      rcases hFrameHeadroom with
+        ⟨source, tokens, hFrameRel, hSourceBound⟩
+      exact
+        RecursiveBridgeActualBlockTraceStackHeadroom.stepHalted
+          fuel hAt hEmit hTargetBlock hRun
+          (Structured.Preservation.Frame.StateRel.target_stack_headroom_of_source_headroom
+            hFrameRel hSourceBound)
+
+end RecursiveBridgeActualBlockTraceSourceStackHeadroom
+
+/--
+Actual-run EVM stack headroom resource for the no-CALL gas-aware bridge.
+
+Unlike the internal `RecursiveBridgeActualXTraceHeadroomFacts`, this public
+resource does not ask callers to provide an `EVM.X` proof object.  It says only
+that the actual gasless target trace generated from the accepted source run has
+enough EVM stack room at every emitted block boundary.
+-/
+structure RecursiveBridgeActualEVMStackHeadroomBound
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  traceHeadroom :
+    ∀ {sourceFuel : Nat} {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult →
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      RecursiveBridgeActualBlockTraceStackHeadroom hTrace
+
+namespace RecursiveBridgeActualEVMStackHeadroomBound
+
+theorem of_assemblyBoundCheck
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (check :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+        asm 17 1024)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm check.table 17 1024 (canonicalEntryState initial)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult where
+  traceHeadroom := by
+    intro _sourceFuel _sourceOutcome _targetFuel _targetOutcome
+      _hSourceRun _hOutcome _hWholeRel hTrace
+    exact
+      RecursiveBridgeActualBlockTraceStackHeadroom.of_assemblyBoundCheck
+        check hInitialPoint
+
+end RecursiveBridgeActualEVMStackHeadroomBound
+
+/--
+Actual imported source run together with the source-frame stack resource needed
+by the gas-aware no-CALL bridge.
+
+This fixes the successful source run used by the public theorem, then asks for
+source-frame headroom only for traces/outcomes related to that run.  In the
+preferred executable route this fact is derived from checked stack-resource
+check results plus preservation annotations, not supplied as compiler-owned
+proof evidence.
+-/
+def RecursiveBridgeActualSourceRunFrameStackHeadroom
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom hTrace
+
+/--
+Actual imported source run plus concrete EVM stack-headroom points for the
+gasless assembly-source replay produced by preservation.
+
+This is intentionally trace-local: the source-run proof still fixes the
+reference execution, while the point annotation is the target-side fact the
+gas-aware bridge needs at every emitted-block boundary.
+-/
+def RecursiveBridgeActualSourceRunEVMStackHeadroomPoints
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (_target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      Structured.Preservation.SourceRunResultPoints asm
+        (fun state => state.stack.length + 17 ≤ 1024)
+        targetFuel (canonicalEntryState initial) targetOutcome
+
+namespace RecursiveBridgeActualSourceRunEVMStackHeadroomPoints
+
+theorem toEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompile : Assembly.compile? asm = some target)
+    (hPoints :
+      RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+        target shared store initial referenceResult) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult where
+  traceHeadroom := by
+    rcases hPoints with ⟨_sourceFuel, _hSourceRun, hTracePoints⟩
+    intro sourceFuel sourceOutcome targetFuel targetOutcome
+      _hSourceRun hOutcome hWholeRel hTrace
+    exact
+      RecursiveBridgeActualBlockTraceStackHeadroom.of_sourceRunResultPoints
+        hCompile (hTracePoints hOutcome hWholeRel) hTrace
+
+theorem of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      (canonicalEntryState initial).stack.length + 17 ≤ 1024)
+    (hStep :
+      ∀ {state mid : EVMState},
+        state.stack.length + 17 ≤ 1024 →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            mid.stack.length + 17 ≤ 1024) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+    Structured.Preservation.SourceRunResultPoints.of_runNResult_invariant
+      (hRun hOutcome hWholeRel)
+      hInitialPoint hStep⟩
+
+theorem of_runNResult_invariant_initial
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        state.stack.length + 17 ≤ 1024 →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            mid.stack.length + 17 ≤ 1024) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  of_runNResult_invariant hSourceRun hRun
+    (by simp [canonicalEntryState]) hStep
+
+theorem of_assemblyBoundCheck
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (check :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+        asm 17 1024)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm check.table 17 1024 (canonicalEntryState initial)) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.sourceRunResultPoints_headroom_of_check
+      check (hRun hOutcome hWholeRel) hInitialPoint⟩
+
+end RecursiveBridgeActualSourceRunEVMStackHeadroomPoints
+
+/--
+Executable stack-depth check result obtained from the lowered function program.
+
+This is the first checked component of the replacement stack-resource boundary:
+it computes a root-reachable acyclic internal-call depth and checks that
+`16 + 17 * depth + 17 <= 1024`.  The semantic source-run headroom theorem is
+still staged separately below until the source/direct preservation annotations
+derive the runtime frame-shape premises.
+-/
+structure RecursiveBridgeExecutableStackDepthCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  depth :
+    Functions.CallDepth.Program.StackDepthCheckResult lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableFrameWordSumStackCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  resource :
+    Functions.CallDepth.SourceFrameWordSumResourceBound lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableRankedStackCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  ranked :
+    Functions.CallDepth.Ranked.CheckedProgramCheckResult
+      lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  checked :
+    Functions.CallDepth.Ranked.SelfGuardedOnce.CheckResult
+      lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  checked :
+    Functions.CallDepth.Ranked.MutualGuardedOnce.CheckResult
+      lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  checked :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.CheckResult
+      lowerObj.toFunctions
+
+structure RecursiveBridgeExecutableSCCRecurrenceCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  checked :
+    Functions.CallDepth.Ranked.SCCRecurrenceCheckResult
+      lowerObj.toFunctions
+  checked_result :
+    Functions.CallDepth.Ranked.checkSCCRecurrence?
+      lowerObj.toFunctions =
+        some checked
+
+inductive RecursiveBridgeExecutableStackCheckResult
+    (program : Program) : Type where
+  | acyclic :
+      RecursiveBridgeExecutableStackDepthCheckResult program →
+        RecursiveBridgeExecutableStackCheckResult program
+  | ranked :
+      RecursiveBridgeExecutableRankedStackCheckResult program →
+        RecursiveBridgeExecutableStackCheckResult program
+  | selfGuardedOnce :
+      RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program →
+        RecursiveBridgeExecutableStackCheckResult program
+  | mutualGuardedOnce :
+      RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program →
+        RecursiveBridgeExecutableStackCheckResult program
+  | guardedZeroCalls :
+      RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program →
+        RecursiveBridgeExecutableStackCheckResult program
+
+namespace RecursiveBridgeExecutableStackDepthCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableStackDepthCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.depth.toStackBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableStackDepthCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      check.lowerObj.toFunctions :=
+  check.depth.toStackResourceCheckResult
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableStackDepthCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.depth.stackResourceSafe
+
+end RecursiveBridgeExecutableStackDepthCheckResult
+
+namespace RecursiveBridgeExecutableRankedStackCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableRankedStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.ranked.toStackBudget
+
+theorem conformance {program : Program}
+    (check : RecursiveBridgeExecutableRankedStackCheckResult program) :
+    Functions.CallDepth.Ranked.ProgramConformance check.lowerObj.toFunctions
+      check.ranked.edges check.ranked.roots :=
+  check.ranked.conformance
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableRankedStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      check.lowerObj.toFunctions :=
+  check.ranked.toStackResourceCheckResult
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableRankedStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.ranked.stackResourceSafe
+
+end RecursiveBridgeExecutableRankedStackCheckResult
+
+namespace RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.checked.toStackBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      check.lowerObj.toFunctions :=
+  check.checked.toStackResourceCheckResult
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.checked.stackResourceSafe
+
+theorem maxRank_le_one {program : Program}
+    (check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :
+    Functions.CallDepth.Ranked.SelfGuardedOnce.maxRank
+      check.checked.roots ≤ 1 :=
+  check.checked.maxRank_le_one
+
+theorem edges_empty_or_one {program : Program}
+    (check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :
+    check.checked.edges = [] ∨
+      check.checked.edges =
+        [{ src :=
+            Functions.CallDepth.Ranked.SelfGuardedOnce.node
+              check.checked.functionName 1
+           dst :=
+            Functions.CallDepth.Ranked.SelfGuardedOnce.node
+              check.checked.functionName 0 }] :=
+  check.checked.edges_empty_or_one
+
+end RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult
+
+namespace RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.checked.toStackBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      check.lowerObj.toFunctions :=
+  check.checked.toStackResourceCheckResult
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.checked.stackResourceSafe
+
+theorem maxRank_le_one {program : Program}
+    (check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :
+    Functions.CallDepth.Ranked.MutualGuardedOnce.maxRank
+      check.checked.roots ≤ 1 :=
+  check.checked.maxRank_le_one
+
+theorem edges_empty_or_pair {program : Program}
+    (check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :
+    check.checked.edges = [] ∨
+      check.checked.edges =
+        [{ src :=
+            Functions.CallDepth.Ranked.MutualGuardedOnce.node
+              check.checked.leftName 1
+           dst :=
+            Functions.CallDepth.Ranked.MutualGuardedOnce.node
+              check.checked.rightName 0 },
+         { src :=
+            Functions.CallDepth.Ranked.MutualGuardedOnce.node
+              check.checked.rightName 1
+           dst :=
+            Functions.CallDepth.Ranked.MutualGuardedOnce.node
+              check.checked.leftName 0 }] :=
+  check.checked.edges_empty_or_pair
+
+end RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult
+
+namespace RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.checked.toStackBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      check.lowerObj.toFunctions :=
+  check.checked.toStackResourceCheckResult
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.checked.stackResourceSafe
+
+theorem maxRank_le_one {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.maxRank
+      check.checked.roots ≤ 1 :=
+  check.checked.maxRank_le_one
+
+theorem edge_rank_one_to_zero {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {edge : Functions.CallDepth.Ranked.Edge}
+    (hEdge : edge ∈ check.checked.edges) :
+    edge.src.rank = 1 ∧ edge.dst.rank = 0 :=
+  check.checked.edge_rank_one_to_zero hEdge
+
+theorem shapeNames_nodup {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    (Functions.CallDepth.Ranked.GuardedZeroCalls.shapeNames
+      check.checked.shapes).Nodup :=
+  check.checked.shapeNames_nodup
+
+theorem callee_mem_shapeNames {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {shape : Name × Name} (hShape : shape ∈ check.checked.shapes) :
+    shape.2 ∈
+      Functions.CallDepth.Ranked.GuardedZeroCalls.shapeNames
+        check.checked.shapes :=
+  check.checked.callee_mem_shapeNames hShape
+
+theorem shape_call_facts {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {shape : Name × Name} (hShape : shape ∈ check.checked.shapes) :
+    ∃ fn,
+      fn ∈ check.lowerObj.toFunctions.functions ∧
+        Functions.CallDepth.Ranked.GuardedZeroCalls.functionShape? fn =
+          some shape ∧
+        shape.2 ∈ Functions.CallDepth.FunDef.internalCalls fn :=
+  check.checked.shape_call_facts hShape
+
+theorem shape_body_facts {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {shape : Name × Name} (hShape : shape ∈ check.checked.shapes) :
+    ∃ fn counter,
+      fn ∈ check.lowerObj.toFunctions.functions ∧
+        Functions.CallDepth.Ranked.GuardedZeroCalls.functionShape? fn =
+          some shape ∧
+        shape.1 = fn.name ∧ fn.params = [counter] ∧
+          fn.returns = [] ∧
+            Functions.CallDepth.Ranked.GuardedZeroCalls.guardedZeroCallFromBlock?
+              counter fn.body =
+              some shape.2 :=
+  check.checked.shape_body_facts hShape
+
+theorem callGraphSound {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    Functions.CallDepth.Ranked.CallGraphSound check.checked.edges
+      check.checked.roots
+      Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractMatches
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractRootFrame
+        check.checked.roots)
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractDirectCall
+        check.checked.shapes) :=
+  check.checked.callGraphSound
+
+theorem abstractCallChain_frame_count_bound {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {frame : Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractFrame}
+    {depth : Nat}
+    (hRoot :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractRootFrame
+        check.checked.roots frame)
+    (hChain :
+      Functions.CallDepth.Ranked.ConcreteCallChain
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.AbstractDirectCall
+          check.checked.shapes)
+        frame depth) :
+    depth + 1 ≤ check.checked.depthCheck.depth :=
+  check.checked.abstractCallChain_frame_count_bound hRoot hChain
+
+theorem sourceCallGraphSound {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    Functions.CallDepth.Ranked.CallGraphSound check.checked.edges
+      check.checked.roots
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceMatches
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+        check.checked.roots)
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+        check.checked.shapes) :=
+  check.checked.sourceCallGraphSound
+
+theorem sourceCallChain_frame_count_bound {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {frame : Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    {depth : Nat}
+    (hRoot :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+        check.checked.roots frame)
+    (hChain :
+      Functions.CallDepth.Ranked.ConcreteCallChain
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+          check.checked.shapes)
+        frame depth) :
+    depth + 1 ≤ check.checked.depthCheck.depth :=
+  check.checked.sourceCallChain_frame_count_bound hRoot hChain
+
+theorem sourceCallDepthBound {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :
+    Functions.CallDepth.Ranked.CallChainDepthBound
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+        check.checked.roots)
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+        check.checked.shapes)
+      check.checked.depthCheck.depth :=
+  check.checked.sourceCallDepthBound
+
+theorem sourceRootFrame_of_rootFromCall? {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {callee : Name} {arg : Word}
+    {root : Functions.CallDepth.Ranked.Node}
+    (hRootCall :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.rootFromCall?
+          (Functions.CallDepth.Ranked.GuardedZeroCalls.shapeNames
+            check.checked.shapes)
+          callee [.lit arg] =
+        some root)
+    (hRootMem : root ∈ check.checked.roots) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+      check.checked.roots { functionName := callee, args := [arg] } :=
+  check.checked.sourceRootFrame_of_rootFromCall? hRootCall hRootMem
+
+theorem sourceRootFrame_of_call_run_rootFromCall? {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {prim : Functions.Source.PrimitiveSemantics}
+    {ctx : Functions.Source.Ctx} {fuel : Nat}
+    {callee : Name} {arg : Word}
+    {root : Functions.CallDepth.Ranked.Node}
+    {source : Functions.Source.State}
+    {outcome : Functions.Source.Outcome}
+    (hRun :
+      Functions.Source.Stmt.run prim check.lowerObj.toFunctions ctx fuel
+          (.call [] callee [.lit arg]) source =
+        .ok (outcome, ctx))
+    (hRootCall :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.rootFromCall?
+          (Functions.CallDepth.Ranked.GuardedZeroCalls.shapeNames
+            check.checked.shapes)
+          callee [.lit arg] =
+        some root)
+    (hRootMem : root ∈ check.checked.roots) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+      check.checked.roots { functionName := callee, args := [arg] } :=
+  check.checked.sourceRootFrame_of_call_run_rootFromCall?
+    hRun hRootCall hRootMem
+
+theorem sourceRootFrame_of_call_run_rootFromCall?_parts {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {prim : Functions.Source.PrimitiveSemantics}
+    {ctx : Functions.Source.Ctx} {fuel : Nat}
+    {callee : Name} {arg : Word}
+    {root : Functions.CallDepth.Ranked.Node}
+    {source : Functions.Source.State}
+    {outcome : Functions.Source.Outcome}
+    (hRun :
+      Functions.Source.Stmt.run prim check.lowerObj.toFunctions ctx fuel
+          (.call [] callee [.lit arg]) source =
+        .ok (outcome, ctx))
+    (hRootCall :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.rootFromCall?
+          (Functions.CallDepth.Ranked.GuardedZeroCalls.shapeNames
+            check.checked.shapes)
+          callee [.lit arg] =
+        some root)
+    (hRootMem : root ∈ check.checked.roots) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+        check.checked.roots { functionName := callee, args := [arg] } ∧
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallRunParts prim
+        check.lowerObj.toFunctions ctx fuel [] callee [.lit arg] source
+        outcome :=
+  check.checked.sourceRootFrame_of_call_run_rootFromCall?_parts
+    hRun hRootCall hRootMem
+
+theorem sourceDirectCall_of_shape_nonzero {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {caller callee : Name} {arg : Word}
+    (hArgNonzero :
+      (arg == Functions.CallDepth.Ranked.GuardedZeroCalls.zero) = false)
+    (hShape : (caller, callee) ∈ check.checked.shapes) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+      check.checked.shapes
+      { functionName := caller, args := [arg] }
+      { functionName := callee,
+        args := [Functions.CallDepth.Ranked.GuardedZeroCalls.zero] } :=
+  check.checked.sourceDirectCall_of_shape_nonzero hArgNonzero hShape
+
+theorem sourceDirectCall_of_runBody_nonzero {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {prim : Functions.Source.PrimitiveSemantics}
+    {caller callee : Name} {arg : Word} {fn : Functions.FunDef}
+    {fuel : Nat} {shared : EvmYul.SharedState .EVM}
+    {result : Functions.Source.CallResult}
+    (hFind :
+      Functions.FunList.find? caller check.lowerObj.toFunctions.functions =
+        some fn)
+    (hRun :
+      Functions.Source.FunDef.runBody prim check.lowerObj.toFunctions fn
+          [arg] fuel shared =
+        .ok result)
+    (hArgNonzero :
+      (arg == Functions.CallDepth.Ranked.GuardedZeroCalls.zero) = false)
+    (hShape : (caller, callee) ∈ check.checked.shapes) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+      check.checked.shapes
+      { functionName := caller, args := [arg] }
+      { functionName := callee,
+        args := [Functions.CallDepth.Ranked.GuardedZeroCalls.zero] } :=
+  check.checked.sourceDirectCall_of_runBody_nonzero
+    hFind hRun hArgNonzero hShape
+
+theorem sourceDirectCall_of_runBody_nonzero_parts {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {prim : Functions.Source.PrimitiveSemantics}
+    {caller callee : Name} {arg : Word} {fn : Functions.FunDef}
+    {fuel : Nat} {shared : EvmYul.SharedState .EVM}
+    {result : Functions.Source.CallResult}
+    (hFind :
+      Functions.FunList.find? caller check.lowerObj.toFunctions.functions =
+        some fn)
+    (hRun :
+      Functions.Source.FunDef.runBody prim check.lowerObj.toFunctions fn
+          [arg] fuel shared =
+        .ok result)
+    (hArgNonzero :
+      (arg == Functions.CallDepth.Ranked.GuardedZeroCalls.zero) = false)
+    (hShape : (caller, callee) ∈ check.checked.shapes) :
+    Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+        check.checked.shapes
+        { functionName := caller, args := [arg] }
+        { functionName := callee,
+          args := [Functions.CallDepth.Ranked.GuardedZeroCalls.zero] } ∧
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRunBodyParts prim
+        check.lowerObj.toFunctions caller fn [arg] fuel shared result :=
+  check.checked.sourceDirectCall_of_runBody_nonzero_parts
+    hFind hRun hArgNonzero hShape
+
+theorem rootCallBody_of_sourceRootFrame {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {callerLayout calleeLayout : List Name}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {retc : Nat}
+    {rootFrame :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    {calleeFn : Functions.FunDef}
+    (hCaller :
+      Functions.CallDepth.Ranked.RankedResourceContext
+        check.lowerObj.toFunctions check.checked.depthCheck [] []
+        callerLayout [] callerSource callerTarget)
+    (hRoot :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceRootFrame
+        check.checked.roots rootFrame)
+    (hCalleeFind :
+      Functions.FunList.find? rootFrame.functionName
+          check.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeLayout : calleeLayout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel calleeLayout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget) :
+    ∃ rootNode,
+      Functions.CallDepth.Ranked.RankedResourceContext
+        check.lowerObj.toFunctions check.checked.depthCheck
+        [rootFrame.functionName] [rootNode] calleeLayout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget :=
+  check.checked.rootCallBody_of_sourceRootFrame hCaller hRoot hCalleeFind
+    hCalleeLayout hRel
+
+theorem callBody_of_sourceDirectCall {program : Program}
+    (check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program)
+    {active callerLayout calleeLayout : List Name}
+    {nodes : List Functions.CallDepth.Ranked.Node}
+    {hiddenReturns : List Structured.ReturnDest}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {callerFrame nextFrame :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    {callerFn calleeFn : Functions.FunDef} {retc : Nat}
+    (hCallerContext :
+      Functions.CallDepth.Ranked.RankedResourceContext
+        check.lowerObj.toFunctions check.checked.depthCheck active nodes
+        callerLayout hiddenReturns callerSource callerTarget)
+    (hCurrent :
+      nodes.getLast? =
+        some
+          (Functions.CallDepth.Ranked.GuardedZeroCalls.node
+            callerFrame.functionName 1))
+    (hDirect :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceDirectCall
+        check.checked.shapes callerFrame nextFrame)
+    (hCallerFind :
+      Functions.FunList.find? callerFrame.functionName
+          check.lowerObj.toFunctions.functions =
+        some callerFn)
+    (hCall : nextFrame.functionName ∈
+      Functions.CallDepth.FunDef.internalCalls callerFn)
+    (hCalleeFind :
+      Functions.FunList.find? nextFrame.functionName
+          check.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeLayout : calleeLayout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel calleeLayout
+        ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+          hiddenReturns)
+        calleeSource calleeTarget) :
+    Functions.CallDepth.Ranked.RankedResourceContext
+      check.lowerObj.toFunctions check.checked.depthCheck
+      (active ++ [nextFrame.functionName])
+      (nodes ++
+        [Functions.CallDepth.Ranked.GuardedZeroCalls.node
+          nextFrame.functionName 0])
+      calleeLayout
+      ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+        hiddenReturns)
+      calleeSource calleeTarget :=
+  check.checked.callBody_of_sourceDirectCall hCallerContext hCurrent hDirect
+    hCallerFind hCall hCalleeFind hCalleeLayout hRel
+
+end RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult
+
+namespace RecursiveBridgeExecutableSCCRecurrenceCheckResult
+
+def maxFrames {program : Program}
+    (check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program) :
+    Nat :=
+  check.checked.maxFrames
+
+theorem sourceRecurrenceBound {program : Program}
+    (check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program) :
+    Functions.CallDepth.Ranked.SourceRecurrenceBound
+      check.lowerObj.toFunctions check.maxFrames :=
+  check.checked.sourceRecurrenceBound
+
+theorem guardedSemanticCallDepthBound {program : Program}
+    (check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program) :
+    Functions.CallDepth.Ranked.SourceCallDepth.Bound
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticRootFrame
+        check.lowerObj.toFunctions)
+      (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticDirectCall
+        check.lowerObj.toFunctions)
+      check.maxFrames :=
+  check.checked.guardedSemanticCallDepthBound
+
+theorem guardedSemanticRootChain_frame_count_bound {program : Program}
+    (check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program)
+    {frame : Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    {depth : Nat}
+    (hRoot :
+      Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticRootFrame
+        check.lowerObj.toFunctions frame)
+    (hChain :
+      Functions.CallDepth.Ranked.ConcreteCallChain
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticDirectCall
+          check.lowerObj.toFunctions)
+        frame depth) :
+    depth + 1 ≤ check.maxFrames :=
+  check.checked.guardedSemanticRootChain_frame_count_bound hRoot hChain
+
+theorem guardedSemanticFrameStack_length_le {program : Program}
+    (check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program)
+    {frames : List
+      Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    (hStack :
+      Functions.CallDepth.Ranked.ConcreteFrameStack
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticRootFrame
+          check.lowerObj.toFunctions)
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticDirectCall
+          check.lowerObj.toFunctions)
+        frames) :
+    frames.length ≤ check.maxFrames :=
+  check.checked.guardedSemanticFrameStack_length_le hStack
+
+end RecursiveBridgeExecutableSCCRecurrenceCheckResult
+
+structure RecursiveBridgeExecutableStackResourceCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  resource :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceCheckResult
+      lowerObj.toFunctions
+
+namespace RecursiveBridgeExecutableStackResourceCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableStackResourceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.resource.budget
+
+theorem stackResourceSafeFromBase {program : Program}
+    (check : RecursiveBridgeExecutableStackResourceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafeFromBase
+      check.lowerObj.toFunctions check.toStackBudget :=
+  check.resource.baseSafe
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableStackResourceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.resource.safe
+
+end RecursiveBridgeExecutableStackResourceCheckResult
+
+structure RecursiveBridgeExecutableSourceRecurrenceCheckResult
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  sourceBudget : _root_.EvmCompiler.Functions.CallDepth.StackBudget
+  resourceSafe :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe lowerObj.toFunctions
+      sourceBudget
+
+namespace RecursiveBridgeExecutableSourceRecurrenceCheckResult
+
+def maxFrames {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    Nat :=
+  check.sourceBudget.depth
+
+theorem budget {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    16 + 17 * check.maxFrames + 17 ≤ 1024 :=
+  check.sourceBudget.budget
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+  check.sourceBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    RecursiveBridgeExecutableStackResourceCheckResult program where
+  lowerObj := check.lowerObj
+  lower := check.lower
+  resource :=
+    { budget := check.toStackBudget
+      baseSafe :=
+        _root_.EvmCompiler.Functions.CallDepth.Program.stackResourceSafeFromBase_of_budget
+          check.lowerObj.toFunctions check.toStackBudget
+      safe := check.resourceSafe }
+
+theorem stackResourceSafe {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe check.lowerObj.toFunctions
+      check.toStackBudget :=
+  check.resourceSafe
+
+theorem stackResourceSafeFromBase {program : Program}
+    (check : RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafeFromBase
+      check.lowerObj.toFunctions check.toStackBudget :=
+  check.toStackResourceCheckResult.stackResourceSafeFromBase
+
+end RecursiveBridgeExecutableSourceRecurrenceCheckResult
+
+def RecursiveBridgeSourceRecurrenceBound
+    (program : Program) (maxFrames : Nat) : Prop :=
+  ∃ lowerObj,
+    program.toObjects? = some lowerObj ∧
+      Functions.CallDepth.Ranked.SourceRecurrenceBound lowerObj.toFunctions
+        maxFrames
+
+def RecursiveBridgeSourceActiveDepthBound
+    (program : Program) (maxFrames : Nat) : Prop :=
+  ∃ lowerObj,
+    program.toObjects? = some lowerObj ∧
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveDepthBound
+        lowerObj.toFunctions maxFrames
+
+def RecursiveBridgeSourceResourceBound
+    (program : Program) (maxFrames : Nat) : Prop :=
+  ∃ lowerObj,
+    program.toObjects? = some lowerObj ∧
+      Functions.CallDepth.Ranked.SourceResourceBound lowerObj.toFunctions
+        maxFrames
+
+def RecursiveBridgeSourceFrameWordsResourceBound
+    (program : Program) (maxFrames : Nat) : Prop :=
+  ∃ lowerObj,
+    program.toObjects? = some lowerObj ∧
+      Functions.CallDepth.Ranked.SourceFrameWordsResourceBound
+        lowerObj.toFunctions maxFrames
+
+structure RecursiveBridgeSourceFrameWordSumResourceBound
+    (program : Program) : Type where
+  lowerObj : Objects.Program
+  lower : program.toObjects? = some lowerObj
+  resource :
+    Functions.CallDepth.SourceFrameWordSumResourceBound
+      lowerObj.toFunctions
+
+namespace RecursiveBridgeSourceResourceBound
+
+noncomputable def lowerObj
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames) :
+    Objects.Program :=
+  Classical.choose hResource
+
+theorem lower
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames) :
+    program.toObjects? = some hResource.lowerObj :=
+  (Classical.choose_spec hResource).1
+
+noncomputable def resource
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames) :
+    Functions.CallDepth.Ranked.SourceResourceBound
+      hResource.lowerObj.toFunctions maxFrames :=
+  (Classical.choose_spec hResource).2
+
+noncomputable def toStackResourceCheckResult
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames) :
+    RecursiveBridgeExecutableStackResourceCheckResult program where
+  lowerObj := hResource.lowerObj
+  lower := hResource.lower
+  resource := hResource.resource.toStackResourceCheckResult
+
+theorem activeStackWitness_empty
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames) :
+    Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+      hResource.lowerObj.toFunctions maxFrames [] :=
+  hResource.resource.activeStackWitness_empty
+
+theorem activeStackWitness_of_programActive_byName
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames)
+    {active : List Name}
+    (hByName :
+      ∃ hDepth :
+        Functions.CallDepth.Ranked.SourceCallDepth.Contract.depthBound
+          (Functions.CallDepth.Ranked.SourceCallDepth.Contract.byName
+            hResource.lowerObj.toFunctions) maxFrames,
+        hResource.resource.recurrence =
+          Functions.CallDepth.Ranked.SourceRecurrenceBound.byName
+            (program := hResource.lowerObj.toFunctions)
+            (maxFrames := maxFrames) hDepth)
+    (hActive :
+      Functions.CallDepth.Program.ActiveCallStack
+        hResource.lowerObj.toFunctions active) :
+    Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+      hResource.lowerObj.toFunctions maxFrames active :=
+  hResource.resource.activeStackWitness_of_programActive_byName
+    hByName hActive
+
+theorem activeStackWitness_of_guardedZero_frameStack
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames)
+    {frames :
+      List Functions.CallDepth.Ranked.GuardedZeroCalls.SourceCallFrame}
+    {active : List Name}
+    (hGuarded :
+      ∃ hDepth :
+        Functions.CallDepth.Ranked.SourceCallDepth.Contract.depthBound
+          (Functions.CallDepth.Ranked.SourceCallDepth.Contract.guardedZero
+            hResource.lowerObj.toFunctions) maxFrames,
+        hResource.resource.recurrence =
+          Functions.CallDepth.Ranked.SourceRecurrenceBound.guardedZero
+            (program := hResource.lowerObj.toFunctions)
+            (maxFrames := maxFrames) hDepth)
+    (hNames : frames.map (fun frame => frame.functionName) = active)
+    (hStack :
+      Functions.CallDepth.Ranked.ConcreteFrameStack
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticRootFrame
+          hResource.lowerObj.toFunctions)
+        (Functions.CallDepth.Ranked.GuardedZeroCalls.GuardedSemanticDirectCall
+          hResource.lowerObj.toFunctions)
+        frames) :
+    Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+      hResource.lowerObj.toFunctions maxFrames active :=
+  hResource.resource.activeStackWitness_of_guardedZero_frameStack
+    hGuarded hNames hStack
+
+end RecursiveBridgeSourceResourceBound
+
+namespace RecursiveBridgeSourceFrameWordsResourceBound
+
+noncomputable def lowerObj
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    Objects.Program :=
+  Classical.choose hResource
+
+theorem lower
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    program.toObjects? = some hResource.lowerObj :=
+  (Classical.choose_spec hResource).1
+
+noncomputable def resource
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    Functions.CallDepth.Ranked.SourceFrameWordsResourceBound
+      hResource.lowerObj.toFunctions maxFrames :=
+  (Classical.choose_spec hResource).2
+
+theorem activeDepthBound
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    Functions.CallDepth.Ranked.SourceCallDepth.ActiveDepthBound
+      hResource.lowerObj.toFunctions maxFrames :=
+  hResource.resource.activeDepthBound
+
+theorem activeStackWitness_empty
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+      hResource.lowerObj.toFunctions maxFrames [] :=
+  hResource.resource.activeStackWitness_empty
+
+noncomputable def toFrameWordStackBudget
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames) :
+    Functions.CallDepth.FrameWordStackBudget :=
+  hResource.resource.toFrameWordStackBudget
+
+theorem sourceStackHeadroom_of_frameWordsContext
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State} {target : Structured.RunState}
+    (context :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active layout hiddenReturns source target)
+    (hActiveLength : active.length ≤ maxFrames) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  hResource.resource.sourceStackHeadroom_of_frameWordsContext context
+    hActiveLength
+
+theorem sourceStackHeadroom_of_activeStackWitness
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State} {target : Structured.RunState}
+    (context :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active layout hiddenReturns source target)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  hResource.resource.sourceStackHeadroom_of_activeStackWitness context
+    hActive
+
+end RecursiveBridgeSourceFrameWordsResourceBound
+
+namespace RecursiveBridgeSourceFrameWordSumResourceBound
+
+theorem sourceStackHeadroom_of_weightedContext
+    {program : Program}
+    (hResource :
+      RecursiveBridgeSourceFrameWordSumResourceBound program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State} {target : Structured.RunState}
+    (context :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  hResource.resource.sourceStackHeadroom_of_weightedContext context
+
+end RecursiveBridgeSourceFrameWordSumResourceBound
+
+noncomputable def RecursiveBridgeSourceDirectFrameWordsPoint
+    {program : Program} {maxFrames : Nat}
+    (hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames)
+    (state : EVMState) : Prop :=
+  ∃ active layout hiddenReturns source baseState tokens,
+    ∃ _ :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active layout hiddenReturns source baseState,
+      ∃ _ :
+        Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+          hResource.lowerObj.toFunctions maxFrames active,
+        Structured.Preservation.Frame.StateRel baseState state tokens
+
+namespace RecursiveBridgeSourceDirectFrameWordsPoint
+
+theorem of_context
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hContext :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active layout hiddenReturns source baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectFrameWordsPoint hResource state :=
+  ⟨active, layout, hiddenReturns, source, baseState, tokens, hContext,
+    hActive, hFrameRel⟩
+
+theorem sourceStackHeadroom
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    (hContext :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active layout hiddenReturns source baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active) :
+    Structured.Preservation.Frame.SourceStackHeadroom baseState :=
+  hResource.sourceStackHeadroom_of_activeStackWitness hContext hActive
+
+theorem point_sourceStackHeadroom
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {state : EVMState}
+    (hPoint :
+      RecursiveBridgeSourceDirectFrameWordsPoint hResource state) :
+    ∃ baseState tokens,
+      Structured.Preservation.Frame.StateRel baseState state tokens ∧
+        Structured.Preservation.Frame.SourceStackHeadroom baseState := by
+  rcases hPoint with
+    ⟨active, layout, hiddenReturns, source, baseState, tokens,
+      hContext, hActive, hFrameRel⟩
+  exact
+    ⟨baseState, tokens, hFrameRel,
+      sourceStackHeadroom hContext hActive⟩
+
+theorem of_main
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {layout : List Name}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hLayout : layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout [] source baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectFrameWordsPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectFrameWordsContext.main
+      (program := hResource.lowerObj.toFunctions)
+      (frameWords :=
+        Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+      hLayout hRel)
+    hResource.activeStackWitness_empty hFrameRel
+
+theorem rootCallBodyTargetCtxOfArgCallerBound
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {callerLayout : List Name}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {callee : Name} {calleeFn : Functions.FunDef} {retc : Nat}
+    (hCaller :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        [] callerLayout [] callerSource callerTarget)
+    (hRoot :
+      callee ∈
+        Functions.CallDepth.Program.mainInternalCalls
+          hResource.lowerObj.toFunctions)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hArgCallerBound :
+      calleeFn.params.length + callerTarget.evm.stack.length ≤ 16)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames [callee])
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordsPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectFrameWordsContext.rootCallBodyTargetCtxOfArgCallerBound
+      hCaller hRoot hCalleeFind hCalleeBound hArgCallerBound hRel)
+    hActive hFrameRel
+
+theorem callBodyTargetCtxOfArgCallerBound
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {active callerLayout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {caller callee : Name} {callerFn calleeFn : Functions.FunDef}
+    {retc : Nat}
+    (hCallerContext :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        active callerLayout hiddenReturns callerSource callerTarget)
+    (hCaller : active.getLast? = some caller)
+    (hCallerFind :
+      Functions.FunList.find? caller
+          hResource.lowerObj.toFunctions.functions =
+        some callerFn)
+    (hCall :
+      callee ∈ Functions.CallDepth.FunDef.internalCalls callerFn)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hArgCallerBound :
+      calleeFn.params.length + callerTarget.evm.stack.length ≤ 16)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames (active ++ [callee]))
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+          hiddenReturns)
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordsPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectFrameWordsContext.callBodyTargetCtxOfArgCallerBound
+      hCallerContext hCaller hCallerFind hCall hCalleeFind hCalleeBound
+      hArgCallerBound hRel)
+    hActive hFrameRel
+
+theorem afterAttachReturns?
+    {program : Program} {maxFrames : Nat}
+    {hResource :
+      RecursiveBridgeSourceFrameWordsResourceBound program maxFrames}
+    {active : List Name} {callee : Name}
+    {calleeLayout callerLayout : List Name}
+    {calleeHidden callerHidden : List Structured.ReturnDest}
+    {calleeSource callerSource : Functions.Source.State}
+    {calleeTarget returned callerTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {frame : Structured.ReturnDest} {stack : EvmYul.Stack Word}
+    (hCalleeContext :
+      Functions.CallDepth.SourceDirectFrameWordsContext
+        hResource.lowerObj.toFunctions
+        (Functions.CallDepth.Program.maxSourceReturnFrameWords
+          hResource.lowerObj.toFunctions)
+        (active ++ [callee]) calleeLayout calleeHidden calleeSource
+        calleeTarget)
+    (hActiveStack :
+      Functions.CallDepth.Program.ActiveCallStack
+        hResource.lowerObj.toFunctions active)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hPop : calleeTarget.popReturn? = some (frame, returned))
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame calleeTarget.evm.stack =
+        some stack)
+    (hReturnFrameVisible :
+      frame.retc + frame.callerStack.length ≤ 16)
+    (hCallerTarget :
+      callerTarget =
+        returned.withEVM { calleeTarget.evm with stack := stack })
+    (hRel :
+      Functions.SourceDirect.StateRel callerLayout callerHidden callerSource
+        callerTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel callerTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordsPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectFrameWordsContext.afterAttachReturns?
+      hCalleeContext hActiveStack hPop hAttach hReturnFrameVisible
+      hCallerTarget hRel)
+    hActive hFrameRel
+
+end RecursiveBridgeSourceDirectFrameWordsPoint
+
+noncomputable def RecursiveBridgeSourceDirectFrameWordSumPoint
+    {program : Program}
+    (hResource : RecursiveBridgeSourceFrameWordSumResourceBound program)
+    (state : EVMState) : Prop :=
+  ∃ active layout hiddenReturns source baseState tokens,
+    ∃ _ :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState,
+      Structured.Preservation.Frame.StateRel baseState state tokens
+
+namespace RecursiveBridgeSourceDirectFrameWordSumPoint
+
+theorem of_context
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hContext :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource state :=
+  ⟨active, layout, hiddenReturns, source, baseState, tokens, hContext,
+    hFrameRel⟩
+
+theorem sourceStackHeadroom
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    (hContext :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState) :
+    Structured.Preservation.Frame.SourceStackHeadroom baseState :=
+  hResource.sourceStackHeadroom_of_weightedContext hContext
+
+theorem point_sourceStackHeadroom
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {state : EVMState}
+    (hPoint :
+      RecursiveBridgeSourceDirectFrameWordSumPoint hResource state) :
+    ∃ baseState tokens,
+      Structured.Preservation.Frame.StateRel baseState state tokens ∧
+        Structured.Preservation.Frame.SourceStackHeadroom baseState := by
+  rcases hPoint with
+    ⟨_active, _layout, _hiddenReturns, _source, baseState, tokens,
+      hContext, hFrameRel⟩
+  exact
+    ⟨baseState, tokens, hFrameRel, sourceStackHeadroom hContext⟩
+
+theorem to_stack_headroom
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {state : EVMState}
+    (hPoint :
+      RecursiveBridgeSourceDirectFrameWordSumPoint hResource state) :
+    state.stack.length + 17 ≤ 1024 := by
+  rcases point_sourceStackHeadroom hPoint with
+    ⟨baseState, tokens, hFrameRel, hSourceHeadroom⟩
+  exact
+    Structured.Preservation.Frame.StateRel.target_stack_headroom_of_source_headroom
+      hFrameRel hSourceHeadroom
+
+theorem of_main
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {layout : List Name}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hLayout : layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout [] source baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectWeightedFrameContext.main
+      (program := hResource.lowerObj.toFunctions) hLayout hRel)
+    hFrameRel
+
+theorem initial
+    {program : Program}
+    (hResource : RecursiveBridgeSourceFrameWordSumResourceBound program)
+    (initial : EVMState) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource
+      (canonicalEntryState initial) := by
+  let source : Functions.Source.State :=
+    Functions.Source.Program.initialState
+      (canonicalEntryState initial).toSharedState
+  let baseState : Structured.RunState :=
+    Structured.RunState.initial (canonicalEntryState initial)
+  have hSourceDirect :
+      Functions.SourceDirect.StateRel [] [] source baseState := by
+    simpa [source, baseState] using
+      Functions.SourceDirect.StateRel.initial
+        (evm := canonicalEntryState initial)
+        (by simp [canonicalEntryState])
+  exact
+    of_main
+      (hResource := hResource)
+      (layout := [])
+      (source := source)
+      (baseState := baseState)
+      (state := canonicalEntryState initial)
+      (tokens := [])
+      (by simp)
+      hSourceDirect
+      (Structured.Preservation.Frame.stateRel_initial
+        (canonicalEntryState initial))
+
+theorem rootCallBodyTargetCtxOfArgCallerBound
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {callerLayout : List Name}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {callee : Name} {calleeFn : Functions.FunDef} {retc : Nat}
+    (hCaller :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions [] callerLayout [] callerSource
+        callerTarget)
+    (hRoot :
+      callee ∈
+        Functions.CallDepth.Program.mainInternalCalls
+          hResource.lowerObj.toFunctions)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hArgCallerBound :
+      calleeFn.params.length + callerTarget.evm.stack.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectWeightedFrameContext.rootCallBodyTargetCtxOfArgCallerBound
+      hCaller hRoot hCalleeFind hCalleeBound hArgCallerBound hRel)
+    hFrameRel
+
+theorem callBodyTargetCtxOfArgCallerBound
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {active callerLayout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {caller callee : Name} {callerFn calleeFn : Functions.FunDef}
+    {retc : Nat}
+    (hCallerContext :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions active callerLayout hiddenReturns
+        callerSource callerTarget)
+    (hCaller : active.getLast? = some caller)
+    (hCallerFind :
+      Functions.FunList.find? caller
+          hResource.lowerObj.toFunctions.functions =
+        some callerFn)
+    (hCall :
+      callee ∈ Functions.CallDepth.FunDef.internalCalls callerFn)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hArgCallerBound :
+      calleeFn.params.length + callerTarget.evm.stack.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+          hiddenReturns)
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectWeightedFrameContext.callBodyTargetCtxOfArgCallerBound
+      hCallerContext hCaller hCallerFind hCall hCalleeFind hCalleeBound
+      hArgCallerBound hRel)
+    hFrameRel
+
+theorem afterAttachReturns?
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {active : List Name} {callee : Name}
+    {calleeLayout callerLayout : List Name}
+    {calleeHidden callerHidden : List Structured.ReturnDest}
+    {calleeSource callerSource : Functions.Source.State}
+    {calleeTarget returned callerTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {frame : Structured.ReturnDest} {stack : EvmYul.Stack Word}
+    (hCalleeContext :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        hResource.lowerObj.toFunctions (active ++ [callee]) calleeLayout
+        calleeHidden calleeSource calleeTarget)
+    (hActiveStack :
+      Functions.CallDepth.Program.ActiveCallStack
+        hResource.lowerObj.toFunctions active)
+    (hPop : calleeTarget.popReturn? = some (frame, returned))
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame calleeTarget.evm.stack =
+        some stack)
+    (hReturnFrameVisible :
+      frame.retc + frame.callerStack.length ≤ 16)
+    (hCallerTarget :
+      callerTarget =
+        returned.withEVM { calleeTarget.evm with stack := stack })
+    (hRel :
+      Functions.SourceDirect.StateRel callerLayout callerHidden callerSource
+        callerTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel callerTarget state tokens) :
+    RecursiveBridgeSourceDirectFrameWordSumPoint hResource state :=
+  of_context
+    (Functions.CallDepth.SourceDirectWeightedFrameContext.afterAttachReturns?
+      hCalleeContext hActiveStack hPop hAttach hReturnFrameVisible
+      hCallerTarget hRel)
+    hFrameRel
+
+end RecursiveBridgeSourceDirectFrameWordSumPoint
+
+namespace RecursiveBridgeActualBlockTraceSourceStackHeadroom
+
+theorem of_frameWordSumPoints
+    {program : Program}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hPoints :
+      Structured.Preservation.BlockTraceResultPoints
+        (RecursiveBridgeSourceDirectFrameWordSumPoint hResource) hTrace) :
+    RecursiveBridgeActualBlockTraceSourceStackHeadroom hTrace := by
+  induction hPoints with
+  | done =>
+      exact RecursiveBridgeActualBlockTraceSourceStackHeadroom.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hPoint _ ih =>
+      exact
+        RecursiveBridgeActualBlockTraceSourceStackHeadroom.stepRunning
+          hAt hEmit hTargetBlock hRun hRest
+          (RecursiveBridgeSourceDirectFrameWordSumPoint.point_sourceStackHeadroom
+            hPoint)
+          ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hPoint =>
+      exact
+        RecursiveBridgeActualBlockTraceSourceStackHeadroom.stepHalted
+          fuel hAt hEmit hTargetBlock hRun
+          (RecursiveBridgeSourceDirectFrameWordSumPoint.point_sourceStackHeadroom
+            hPoint)
+
+end RecursiveBridgeActualBlockTraceSourceStackHeadroom
+
+noncomputable def RecursiveBridgeSourceDirectActiveResourcePoint
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames)
+    (state : EVMState) : Prop :=
+  ∃ active layout hiddenReturns source baseState transientState tokens,
+    ∃ _ :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState,
+      ∃ _ :
+        Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+          hResource.lowerObj.toFunctions maxFrames active,
+        ∃ _ :
+          Functions.CallDepth.SourceDirectTransientResourceContext
+            hResource.lowerObj.toFunctions
+            hResource.resource.toStackBudget active layout
+            hiddenReturns source baseState transientState,
+          Structured.Preservation.Frame.StateRel transientState state tokens
+
+namespace RecursiveBridgeSourceDirectActiveResourcePoint
+
+theorem of_base
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state := by
+  let hResourceContext :
+      Functions.CallDepth.SourceDirectResourceContext
+        hResource.lowerObj.toFunctions
+        hResource.resource.toStackBudget active layout
+        hiddenReturns source baseState :=
+    hResource.resource.toResourceContext_of_activeStackWitness hBase hActive
+  exact
+    ⟨active, layout, hiddenReturns, source, baseState, baseState, tokens,
+      hBase, hActive,
+      Functions.CallDepth.SourceDirectTransientResourceContext.of_base
+        hResourceContext hResourceContext.sourceStackHeadroom,
+      hFrameRel⟩
+
+theorem of_base_withStateRel
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState baseState' : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source'
+        baseState')
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState' state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base (hBase.withStateRel hRel) hActive hFrameRel
+
+theorem of_base_withStateRelLayout
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout layout' : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState baseState' : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hLayout' : layout'.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout' hiddenReturns source'
+        baseState')
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState' state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base (hBase.withStateRelLayout hLayout' hRel) hActive hFrameRel
+
+theorem of_regularBlockScopedOutcomeRel
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout layout' returns : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState target' : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hLayout' : layout'.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.BlockScopedOutcomeRel returns layout'
+        hiddenReturns
+        (Functions.Source.Outcome.regular source')
+        (Structured.Outcome.regular target'))
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel target' state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (hBase.of_regularBlockScopedOutcomeRel hLayout' hRel)
+    hActive hFrameRel
+
+theorem of_regularStmtRunResultRel
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout returns : List Name} {retc : Nat}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState target' : Structured.RunState}
+    {sourceCtx : Functions.Source.Ctx} {targetCtx : Locals.Ctx}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hLayout' : targetCtx.layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StmtRunResultRel retc returns hiddenReturns
+        (Functions.Source.Outcome.regular source', sourceCtx)
+        (Structured.Outcome.regular target', targetCtx))
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel target' state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (hBase.of_regularStmtRunResultRel hLayout' hRel)
+    hActive hFrameRel
+
+theorem of_regularBlockOpenResultRel
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout returns : List Name} {retc : Nat}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState target' : Structured.RunState}
+    {sourceCtx : Functions.Source.Ctx} {targetCtx : Locals.Ctx}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hLayout' : targetCtx.layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.BlockOpenResultRel retc returns hiddenReturns
+        (Functions.Source.Outcome.regular source', sourceCtx)
+        (Structured.Outcome.regular target', targetCtx))
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel target' state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (hBase.of_regularBlockOpenResultRel hLayout' hRel)
+    hActive hFrameRel
+
+theorem of_base_empty
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions [] layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base hBase hResource.activeStackWitness_empty hFrameRel
+
+theorem of_main
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {layout : List Name}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hLayout : layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout [] source baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base_empty
+    (Functions.CallDepth.SourceDirectBaseContext.main
+      (program := hResource.lowerObj.toFunctions) hLayout hRel)
+    hFrameRel
+
+theorem of_base_byName
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hByName :
+      ∃ hDepth :
+        Functions.CallDepth.Ranked.SourceCallDepth.Contract.depthBound
+          (Functions.CallDepth.Ranked.SourceCallDepth.Contract.byName
+            hResource.lowerObj.toFunctions) maxFrames,
+        hResource.resource.recurrence =
+          Functions.CallDepth.Ranked.SourceRecurrenceBound.byName
+            (program := hResource.lowerObj.toFunctions)
+            (maxFrames := maxFrames) hDepth)
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base hBase
+    (hResource.activeStackWitness_of_programActive_byName
+      hByName hBase.activeStack)
+    hFrameRel
+
+theorem rootCallBody
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {callerLayout calleeLayout : List Name}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {callee : Name} {calleeFn : Functions.FunDef} {retc : Nat}
+    (hCaller :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions [] callerLayout [] callerSource
+        callerTarget)
+    (hRoot :
+      callee ∈
+        Functions.CallDepth.Program.mainInternalCalls
+          hResource.lowerObj.toFunctions)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames [callee])
+    (hCalleeLayout : calleeLayout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel calleeLayout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (Functions.CallDepth.SourceDirectBaseContext.rootCallBody
+      hCaller hRoot hCalleeFind hCalleeLayout hRel)
+    hActive hFrameRel
+
+theorem callBody
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active callerLayout calleeLayout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {caller callee : Name} {callerFn calleeFn : Functions.FunDef}
+    {retc : Nat}
+    (hCallerContext :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active callerLayout hiddenReturns
+        callerSource callerTarget)
+    (hCaller : active.getLast? = some caller)
+    (hCallerFind :
+      Functions.FunList.find? caller
+          hResource.lowerObj.toFunctions.functions =
+        some callerFn)
+    (hCall :
+      callee ∈ Functions.CallDepth.FunDef.internalCalls callerFn)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames (active ++ [callee]))
+    (hCalleeLayout : calleeLayout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel calleeLayout
+        ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+          hiddenReturns)
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (Functions.CallDepth.SourceDirectBaseContext.callBody
+      hCallerContext hCaller hCallerFind hCall hCalleeFind
+      hCalleeLayout hRel)
+    hActive hFrameRel
+
+theorem rootCallBodyTargetCtx
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {callerLayout : List Name}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {callee : Name} {calleeFn : Functions.FunDef} {retc : Nat}
+    (hCaller :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions [] callerLayout [] callerSource
+        callerTarget)
+    (hRoot :
+      callee ∈
+        Functions.CallDepth.Program.mainInternalCalls
+          hResource.lowerObj.toFunctions)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames [callee])
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        [{ callerStack := callerTarget.evm.stack, retc := retc }]
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (Functions.CallDepth.SourceDirectBaseContext.rootCallBodyTargetCtx
+      hCaller hRoot hCalleeFind hCalleeBound hRel)
+    hActive hFrameRel
+
+theorem callBodyTargetCtx
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active callerLayout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {callerSource calleeSource : Functions.Source.State}
+    {callerTarget calleeTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {caller callee : Name} {callerFn calleeFn : Functions.FunDef}
+    {retc : Nat}
+    (hCallerContext :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active callerLayout hiddenReturns
+        callerSource callerTarget)
+    (hCaller : active.getLast? = some caller)
+    (hCallerFind :
+      Functions.FunList.find? caller
+          hResource.lowerObj.toFunctions.functions =
+        some callerFn)
+    (hCall :
+      callee ∈ Functions.CallDepth.FunDef.internalCalls callerFn)
+    (hCalleeFind :
+      Functions.FunList.find? callee
+          hResource.lowerObj.toFunctions.functions =
+        some calleeFn)
+    (hCalleeBound :
+      Functions.SourceDirect.FrameBound.FunDef calleeFn)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames (active ++ [callee]))
+    (hRel :
+      Functions.SourceDirect.StateRel
+        (Functions.SourceDirect.FunDef.targetBodyCtx calleeFn).layout
+        ({ callerStack := callerTarget.evm.stack, retc := retc } ::
+          hiddenReturns)
+        calleeSource calleeTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel calleeTarget state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (Functions.CallDepth.SourceDirectBaseContext.callBodyTargetCtx
+      hCallerContext hCaller hCallerFind hCall hCalleeFind hCalleeBound hRel)
+    hActive hFrameRel
+
+theorem afterAttachReturns?
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active : List Name} {callee : Name}
+    {calleeLayout callerLayout : List Name}
+    {calleeHidden callerHidden : List Structured.ReturnDest}
+    {calleeSource callerSource : Functions.Source.State}
+    {calleeTarget returned callerTarget : Structured.RunState}
+    {state : EVMState} {tokens : List Word}
+    {frame : Structured.ReturnDest} {stack : EvmYul.Stack Word}
+    (hCalleeContext :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions (active ++ [callee]) calleeLayout
+        calleeHidden calleeSource calleeTarget)
+    (hActiveStack :
+      Functions.CallDepth.Program.ActiveCallStack
+        hResource.lowerObj.toFunctions active)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hPop : calleeTarget.popReturn? = some (frame, returned))
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame calleeTarget.evm.stack =
+        some stack)
+    (hReturnFrameVisible :
+      frame.retc + frame.callerStack.length ≤ 16)
+    (hCallerTarget :
+      callerTarget =
+        returned.withEVM { calleeTarget.evm with stack := stack })
+    (hRel :
+      Functions.SourceDirect.StateRel callerLayout callerHidden callerSource
+        callerTarget)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel callerTarget state tokens) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource state :=
+  of_base
+    (Functions.CallDepth.SourceDirectBaseContext.afterAttachReturns?
+      hCalleeContext hActiveStack hPop hAttach hReturnFrameVisible
+      hCallerTarget hRel)
+    hActive hFrameRel
+
+theorem of_base_prefix
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } := by
+  let hResourceContext :
+      Functions.CallDepth.SourceDirectResourceContext
+        hResource.lowerObj.toFunctions
+        hResource.resource.toStackBudget active layout
+        hiddenReturns source baseState :=
+    hResource.resource.toResourceContext_of_activeStackWitness hBase hActive
+  exact
+    ⟨active, layout, hiddenReturns, source, baseState,
+      baseState.withEVM
+        { baseState.evm with stack := stackPrefix ++ baseState.evm.stack },
+      tokens, hBase, hActive,
+      Functions.CallDepth.SourceDirectTransientResourceContext.of_prefix
+        hResourceContext stackPrefix hHeadroom,
+      Structured.Preservation.Frame.StateRel.with_visible_prefix
+        hFrameRel stackPrefix⟩
+
+theorem of_base_prefix_withStateRel
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState baseState' : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source'
+        baseState')
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState' state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState' + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } :=
+  of_base_prefix (hBase.withStateRel hRel) hActive hFrameRel stackPrefix
+    hHeadroom
+
+theorem of_base_prefix_withStateRelLayout
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout layout' : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source source' : Functions.Source.State}
+    {baseState baseState' : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hActive :
+      Functions.CallDepth.Ranked.SourceCallDepth.ActiveStackWitness
+        hResource.lowerObj.toFunctions maxFrames active)
+    (hLayout' : layout'.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout' hiddenReturns source'
+        baseState')
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState' state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState' + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } :=
+  of_base_prefix (hBase.withStateRelLayout hLayout' hRel) hActive hFrameRel
+    stackPrefix hHeadroom
+
+theorem of_base_prefix_empty
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions [] layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } :=
+  of_base_prefix hBase hResource.activeStackWitness_empty hFrameRel
+    stackPrefix hHeadroom
+
+theorem of_main_prefix
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {layout : List Name}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hLayout : layout.length ≤ 16)
+    (hRel :
+      Functions.SourceDirect.StateRel layout [] source baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } :=
+  of_base_prefix_empty
+    (Functions.CallDepth.SourceDirectBaseContext.main
+      (program := hResource.lowerObj.toFunctions) hLayout hRel)
+    hFrameRel stackPrefix hHeadroom
+
+theorem of_base_prefix_byName
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hByName :
+      ∃ hDepth :
+        Functions.CallDepth.Ranked.SourceCallDepth.Contract.depthBound
+          (Functions.CallDepth.Ranked.SourceCallDepth.Contract.byName
+            hResource.lowerObj.toFunctions) maxFrames,
+        hResource.resource.recurrence =
+          Functions.CallDepth.Ranked.SourceRecurrenceBound.byName
+            (program := hResource.lowerObj.toFunctions)
+            (maxFrames := maxFrames) hDepth)
+    (hBase :
+      Functions.CallDepth.SourceDirectBaseContext
+        hResource.lowerObj.toFunctions active layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      { state with stack := stackPrefix ++ state.stack } :=
+  of_base_prefix hBase
+    (hResource.activeStackWitness_of_programActive_byName
+      hByName hBase.activeStack)
+    hFrameRel stackPrefix hHeadroom
+
+theorem initial
+    {program : Program} {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames)
+    (initial : EVMState) :
+    RecursiveBridgeSourceDirectActiveResourcePoint hResource
+      (canonicalEntryState initial) := by
+  let source : Functions.Source.State :=
+    Functions.Source.Program.initialState
+      (canonicalEntryState initial).toSharedState
+  let baseState : Structured.RunState :=
+    Structured.RunState.initial (canonicalEntryState initial)
+  have hSourceDirect :
+      Functions.SourceDirect.StateRel [] [] source baseState := by
+    simpa [source, baseState] using
+      Functions.SourceDirect.StateRel.initial
+        (evm := canonicalEntryState initial)
+        (by simp [canonicalEntryState])
+  have hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState
+        (canonicalEntryState initial) [] :=
+    Structured.Preservation.Frame.stateRel_initial
+      (canonicalEntryState initial)
+  exact of_main (by simp) hSourceDirect hFrameRel
+
+end RecursiveBridgeSourceDirectActiveResourcePoint
+
+def RecursiveBridgeSourceDirectResourcePoint
+    {program : Program}
+    (resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program)
+    (state : EVMState) : Prop :=
+  ∃ active layout hiddenReturns source baseState transientState tokens,
+    ∃ _ :
+      Functions.CallDepth.SourceDirectTransientResourceContext
+      resourceCheck.lowerObj.toFunctions
+      resourceCheck.toStackBudget active layout hiddenReturns
+      source baseState transientState,
+      Structured.Preservation.Frame.StateRel transientState state tokens
+
+theorem RecursiveBridgeSourceDirectResourcePoint.of_resourceContext
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hContext :
+      Functions.CallDepth.SourceDirectResourceContext
+        resourceCheck.lowerObj.toFunctions
+        resourceCheck.toStackBudget active layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens) :
+    RecursiveBridgeSourceDirectResourcePoint resourceCheck state :=
+  ⟨active, layout, hiddenReturns, source, baseState, baseState, tokens,
+    Functions.CallDepth.SourceDirectTransientResourceContext.of_base hContext
+      hContext.sourceStackHeadroom,
+    hFrameRel⟩
+
+theorem RecursiveBridgeSourceDirectResourcePoint.of_resourceContext_prefix
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State}
+    {baseState : Structured.RunState}
+    {state : EVMState}
+    {tokens : List Word}
+    (hContext :
+      Functions.CallDepth.SourceDirectResourceContext
+        resourceCheck.lowerObj.toFunctions
+        resourceCheck.toStackBudget active layout hiddenReturns source
+        baseState)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel baseState state tokens)
+    (stackPrefix : EvmYul.Stack Word)
+    (hHeadroom :
+      stackPrefix.length +
+          Structured.Preservation.Frame.sourceStackWeight baseState + 17 ≤
+        1024) :
+    RecursiveBridgeSourceDirectResourcePoint resourceCheck
+      { state with stack := stackPrefix ++ state.stack } :=
+  ⟨active, layout, hiddenReturns, source, baseState,
+    baseState.withEVM
+      { baseState.evm with stack := stackPrefix ++ baseState.evm.stack },
+    tokens,
+    Functions.CallDepth.SourceDirectTransientResourceContext.of_prefix
+      hContext stackPrefix hHeadroom,
+    Structured.Preservation.Frame.StateRel.with_visible_prefix
+      hFrameRel stackPrefix⟩
+
+theorem RecursiveBridgeSourceDirectResourcePoint.initial
+    {program : Program}
+    (resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program)
+    (initial : EVMState) :
+    RecursiveBridgeSourceDirectResourcePoint resourceCheck
+      (canonicalEntryState initial) := by
+  let source : Functions.Source.State :=
+    Functions.Source.Program.initialState
+      (canonicalEntryState initial).toSharedState
+  let baseState : Structured.RunState :=
+    Structured.RunState.initial (canonicalEntryState initial)
+  have hSourceDirect :
+      Functions.SourceDirect.StateRel [] [] source baseState := by
+    simpa [source, baseState] using
+      Functions.SourceDirect.StateRel.initial
+        (evm := canonicalEntryState initial)
+        (by simp [canonicalEntryState])
+  have hContext :
+      Functions.CallDepth.SourceDirectResourceContext
+        resourceCheck.lowerObj.toFunctions
+        resourceCheck.toStackBudget [] [] [] source baseState :=
+    Functions.CallDepth.SourceDirectResourceContext.main
+      (program := resourceCheck.lowerObj.toFunctions)
+      (budget := resourceCheck.toStackBudget)
+      (layout := [])
+      (source := source)
+      (target := baseState)
+      (by simp)
+      hSourceDirect
+  exact
+    RecursiveBridgeSourceDirectResourcePoint.of_resourceContext
+      hContext
+      (Structured.Preservation.Frame.stateRel_initial
+        (canonicalEntryState initial))
+
+theorem RecursiveBridgeSourceDirectResourcePoint.to_stack_headroom
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {state : EVMState}
+    (hPoint :
+      RecursiveBridgeSourceDirectResourcePoint resourceCheck state) :
+    state.stack.length + 17 ≤ 1024 := by
+  rcases hPoint with
+    ⟨active, layout, hiddenReturns, source, baseState, transientState, tokens,
+      hResourceContext, hFrameRel⟩
+  exact
+    Structured.Preservation.Frame.StateRel.target_stack_headroom_of_source_headroom
+      hFrameRel hResourceContext.sourceStackHeadroom
+
+theorem RecursiveBridgeSourceDirectActiveResourcePoint.to_resourcePoint
+    {program : Program} {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {state : EVMState}
+    (hPoint :
+      RecursiveBridgeSourceDirectActiveResourcePoint hResource state) :
+    RecursiveBridgeSourceDirectResourcePoint
+      hResource.toStackResourceCheckResult state := by
+  rcases hPoint with
+    ⟨active, layout, hiddenReturns, source, baseState, transientState, tokens,
+      _hBase, _hActive, hTransient, hFrameRel⟩
+  exact
+    ⟨active, layout, hiddenReturns, source, baseState, transientState, tokens,
+      hTransient, hFrameRel⟩
+
+/--
+Actual block-trace resource context before each emitted target block.
+
+This is the source/direct version of
+`RecursiveBridgeActualBlockTraceSourceStackHeadroom`: instead of directly
+supplying `Frame.SourceStackHeadroom`, each trace point supplies the checked
+source/direct resource context from the executable stack check result plus the
+ordinary structured frame relation to the target state.
+-/
+inductive RecursiveBridgeActualBlockTraceSourceDirectResourceContext
+    {program : Program}
+    (resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program)
+    {asm : Assembly.Program} {target : Assembly.TargetProgram} :
+    {targetFuel : Nat} → {state : EVMState} →
+      {targetResult : Assembly.StepResult} →
+        Assembly.Preservation.BlockTraceResult asm target targetFuel state
+          targetResult → Prop where
+  | done {state : EVMState} :
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+        (Assembly.Preservation.BlockTraceResult.done (program := asm)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : Assembly.StepResult}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Assembly.Preservation.BlockTraceResult asm target fuel mid result)
+      (hResource :
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state)
+      (hRestReady :
+        RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+          hRest) :
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+        (Assembly.Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Assembly.Halt}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc asm state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? asm pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hResource :
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state) :
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+        (Assembly.Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+namespace RecursiveBridgeActualBlockTraceSourceDirectResourceContext
+
+theorem toSourceStackHeadroom
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hContext :
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+        hTrace) :
+    RecursiveBridgeActualBlockTraceSourceStackHeadroom hTrace := by
+  induction hContext with
+  | done =>
+      exact RecursiveBridgeActualBlockTraceSourceStackHeadroom.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hResource _ ih =>
+      rcases hResource with
+        ⟨active, layout, hiddenReturns, source, baseState, transientState,
+          tokens, hResourceContext, hFrameRel⟩
+      exact
+        RecursiveBridgeActualBlockTraceSourceStackHeadroom.stepRunning
+          hAt hEmit hTargetBlock hRun hRest
+          ⟨transientState, tokens, hFrameRel,
+            hResourceContext.sourceStackHeadroom⟩
+          ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hResource =>
+      rcases hResource with
+        ⟨active, layout, hiddenReturns, source, baseState, transientState,
+          tokens, hResourceContext, hFrameRel⟩
+      exact
+        RecursiveBridgeActualBlockTraceSourceStackHeadroom.stepHalted
+          fuel hAt hEmit hTargetBlock hRun
+          ⟨transientState, tokens, hFrameRel,
+            hResourceContext.sourceStackHeadroom⟩
+
+theorem of_blockTraceResultPoints
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult}
+    (hPoints :
+      Structured.Preservation.BlockTraceResultPoints
+        (RecursiveBridgeSourceDirectResourcePoint resourceCheck) hTrace) :
+    RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+      hTrace := by
+  induction hPoints with
+  | done =>
+      exact RecursiveBridgeActualBlockTraceSourceDirectResourceContext.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest hResource _ ih =>
+      exact
+        RecursiveBridgeActualBlockTraceSourceDirectResourceContext.stepRunning
+          hAt hEmit hTargetBlock hRun hRest hResource ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun hResource =>
+      exact
+        RecursiveBridgeActualBlockTraceSourceDirectResourceContext.stepHalted
+          fuel hAt hEmit hTargetBlock hRun hResource
+
+theorem of_blockTraceResult_invariant
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    (hInitial :
+      RecursiveBridgeSourceDirectResourcePoint resourceCheck state)
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state →
+          Assembly.Program.instrAtPc asm state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? asm pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint resourceCheck mid)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult) :
+    RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+      hTrace :=
+  of_blockTraceResultPoints
+    (Structured.Preservation.BlockTraceResultPoints.of_blockTraceResult_invariant
+      hInitial hStep hTrace)
+
+theorem of_sourceRunResultPoints
+    {program : Program}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {targetFuel : Nat} {state : EVMState}
+    {targetResult : Assembly.StepResult}
+    (hCompile : Assembly.compile? asm = some target)
+    (hSourcePoints :
+      Structured.Preservation.SourceRunResultPoints asm
+        (RecursiveBridgeSourceDirectResourcePoint resourceCheck)
+        targetFuel state targetResult)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult asm target targetFuel state
+        targetResult) :
+    RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+      hTrace :=
+  of_blockTraceResultPoints
+    (Structured.Preservation.SourceRunResultPoints.to_blockTraceResultPoints
+      hCompile hSourcePoints hTrace)
+
+end RecursiveBridgeActualBlockTraceSourceDirectResourceContext
+
+/--
+Actual imported source run plus source/direct resource contexts for the
+preservation trace.  The executable stack check result derives source-frame
+headroom from these contexts; this is the bridge that annotated preservation
+needs to construct next.
+-/
+def RecursiveBridgeActualSourceRunFrameStackResourceContext
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext resourceCheck
+        hTrace
+
+namespace RecursiveBridgeActualSourceRunFrameStackResourceContext
+
+theorem toHeadroom
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hContext :
+      RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+        target resourceCheck shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackHeadroom cfg program asm target
+      shared store initial referenceResult := by
+  rcases hContext with ⟨sourceFuel, hSourceRun, hTraceContext⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel hTrace =>
+      (hTraceContext hOutcome hWholeRel hTrace).toSourceStackHeadroom⟩
+
+theorem of_blockTraceResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hInitial :
+      RecursiveBridgeSourceDirectResourcePoint resourceCheck
+        (canonicalEntryState initial))
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state →
+          Assembly.Program.instrAtPc asm state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? asm pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint resourceCheck mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target resourceCheck shared store initial referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun _hOutcome _hWholeRel hTrace =>
+    RecursiveBridgeActualBlockTraceSourceDirectResourceContext.of_blockTraceResult_invariant
+      hInitial hStep hTrace⟩
+
+theorem of_blockTraceResult_invariant_initial
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state →
+          Assembly.Program.instrAtPc asm state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? asm pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint resourceCheck mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target resourceCheck shared store initial referenceResult :=
+  of_blockTraceResult_invariant hSourceRun
+    (RecursiveBridgeSourceDirectResourcePoint.initial resourceCheck initial)
+    hStep
+
+end RecursiveBridgeActualSourceRunFrameStackResourceContext
+
+/--
+Actual imported source run plus annotated assembly-source replay points for the
+preservation trace.
+
+This is one step closer to the preservation theorem we ultimately need: the
+annotation lives on the `Assembly.Source.runNResult` run produced by compiler
+preservation, and the generic assembly bridge turns it into the block-trace
+resource-context package.
+-/
+def RecursiveBridgeActualSourceRunFrameStackResourcePoints
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (_target : Assembly.TargetProgram)
+    (resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      Structured.Preservation.SourceRunResultPoints asm
+        (RecursiveBridgeSourceDirectResourcePoint resourceCheck)
+        targetFuel (canonicalEntryState initial) targetOutcome
+
+namespace RecursiveBridgeActualSourceRunFrameStackResourcePoints
+
+theorem toContext
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompile : Assembly.compile? asm = some target)
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target resourceCheck shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target resourceCheck shared store initial referenceResult := by
+  rcases hPoints with ⟨sourceFuel, hSourceRun, hTracePoints⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel hTrace =>
+      RecursiveBridgeActualBlockTraceSourceDirectResourceContext.of_sourceRunResultPoints
+        hCompile (hTracePoints hOutcome hWholeRel) hTrace⟩
+
+theorem toEVMStackHeadroomPoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target resourceCheck shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult := by
+  rcases hPoints with ⟨sourceFuel, hSourceRun, hTracePoints⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+      (hTracePoints hOutcome hWholeRel).mono
+        (fun state hPoint =>
+          RecursiveBridgeSourceDirectResourcePoint.to_stack_headroom
+            hPoint)⟩
+
+theorem of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      RecursiveBridgeSourceDirectResourcePoint resourceCheck
+        (canonicalEntryState initial))
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint resourceCheck mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+      target resourceCheck shared store initial referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+    Structured.Preservation.SourceRunResultPoints.of_runNResult_invariant
+      (hRun hOutcome hWholeRel)
+      hInitialPoint hStep⟩
+
+theorem of_runNResult_invariant_initial
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {resourceCheck : RecursiveBridgeExecutableStackResourceCheckResult program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint resourceCheck state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint resourceCheck mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+      target resourceCheck shared store initial referenceResult :=
+  of_runNResult_invariant hSourceRun hRun
+    (RecursiveBridgeSourceDirectResourcePoint.initial resourceCheck initial)
+    hStep
+
+end RecursiveBridgeActualSourceRunFrameStackResourcePoints
+
+def RecursiveBridgeActualSourceRunActiveResourcePoints
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (_target : Assembly.TargetProgram)
+    {maxFrames : Nat}
+    (hResource : RecursiveBridgeSourceResourceBound program maxFrames)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      Structured.Preservation.SourceRunResultPoints asm
+        (RecursiveBridgeSourceDirectActiveResourcePoint hResource)
+        targetFuel (canonicalEntryState initial) targetOutcome
+
+namespace RecursiveBridgeActualSourceRunActiveResourcePoints
+
+theorem toFrameStackResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hPoints :
+      RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm
+        target hResource shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+      target hResource.toStackResourceCheckResult shared store initial
+      referenceResult := by
+  rcases hPoints with ⟨sourceFuel, hSourceRun, hTracePoints⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+      (hTracePoints hOutcome hWholeRel).mono
+        (fun _state hPoint =>
+          RecursiveBridgeSourceDirectActiveResourcePoint.to_resourcePoint
+            hPoint)⟩
+
+theorem toFrameStackResourceContext
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompile : Assembly.compile? asm = some target)
+    (hPoints :
+      RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm
+        target hResource shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target hResource.toStackResourceCheckResult shared store initial
+      referenceResult :=
+  hPoints.toFrameStackResourcePoints.toContext hCompile
+
+theorem toFrameStackHeadroom
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompile : Assembly.compile? asm = some target)
+    (hPoints :
+      RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm
+        target hResource shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackHeadroom cfg program asm target
+      shared store initial referenceResult :=
+  (hPoints.toFrameStackResourceContext hCompile).toHeadroom
+
+theorem toEVMStackHeadroomPoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hPoints :
+      RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm
+        target hResource shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  hPoints.toFrameStackResourcePoints.toEVMStackHeadroomPoints
+
+theorem of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      RecursiveBridgeSourceDirectActiveResourcePoint hResource
+        (canonicalEntryState initial))
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint hResource state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint hResource mid) :
+    RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm target
+      hResource shared store initial referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+    Structured.Preservation.SourceRunResultPoints.of_runNResult_invariant
+      (hRun hOutcome hWholeRel)
+      hInitialPoint hStep⟩
+
+theorem of_runNResult_invariant_initial
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {maxFrames : Nat}
+    {hResource : RecursiveBridgeSourceResourceBound program maxFrames}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint hResource state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint hResource mid) :
+    RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm target
+      hResource shared store initial referenceResult :=
+  of_runNResult_invariant hSourceRun hRun
+    (RecursiveBridgeSourceDirectActiveResourcePoint.initial hResource initial)
+    hStep
+
+end RecursiveBridgeActualSourceRunActiveResourcePoints
+
+def RecursiveBridgeActualSourceRunFrameWordSumPoints
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (_target : Assembly.TargetProgram)
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop :=
+  ∃ sourceFuel,
+    RecursiveBridgeSourceRun program shared store sourceFuel referenceResult ∧
+    ∀ {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      Structured.Preservation.SourceRunResultPoints asm
+        (RecursiveBridgeSourceDirectFrameWordSumPoint hResource)
+        targetFuel (canonicalEntryState initial) targetOutcome
+
+namespace RecursiveBridgeActualSourceRunFrameWordSumPoints
+
+theorem toFrameStackHeadroom
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompile : Assembly.compile? asm = some target)
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameWordSumPoints
+        (hResource := hResource) cfg program asm target shared store initial
+        referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackHeadroom cfg program asm target
+      shared store initial referenceResult := by
+  rcases hPoints with ⟨sourceFuel, hSourceRun, hTracePoints⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel hTrace =>
+      RecursiveBridgeActualBlockTraceSourceStackHeadroom.of_frameWordSumPoints
+        (Structured.Preservation.SourceRunResultPoints.to_blockTraceResultPoints
+          hCompile (hTracePoints hOutcome hWholeRel) hTrace)⟩
+
+theorem toEVMStackHeadroomPoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameWordSumPoints
+        (hResource := hResource) cfg program asm target shared store initial
+        referenceResult) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult := by
+  rcases hPoints with ⟨sourceFuel, hSourceRun, hTracePoints⟩
+  exact
+    ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+      (hTracePoints hOutcome hWholeRel).mono
+        (fun _state hPoint =>
+          RecursiveBridgeSourceDirectFrameWordSumPoint.to_stack_headroom
+            hPoint)⟩
+
+theorem of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      RecursiveBridgeSourceDirectFrameWordSumPoint hResource
+        (canonicalEntryState initial))
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectFrameWordSumPoint hResource state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectFrameWordSumPoint hResource mid) :
+    RecursiveBridgeActualSourceRunFrameWordSumPoints
+      (hResource := hResource) cfg program asm target shared store initial
+      referenceResult :=
+  ⟨sourceFuel, hSourceRun, fun hOutcome hWholeRel =>
+    Structured.Preservation.SourceRunResultPoints.of_runNResult_invariant
+      (hRun hOutcome hWholeRel)
+      hInitialPoint hStep⟩
+
+theorem of_runNResult_invariant_initial
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {hResource : RecursiveBridgeSourceFrameWordSumResourceBound program}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectFrameWordSumPoint hResource state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectFrameWordSumPoint hResource mid) :
+    RecursiveBridgeActualSourceRunFrameWordSumPoints
+      (hResource := hResource) cfg program asm target shared store initial
+      referenceResult :=
+  of_runNResult_invariant (hResource := hResource) hSourceRun hRun
+    (RecursiveBridgeSourceDirectFrameWordSumPoint.initial hResource initial)
+    hStep
+
+end RecursiveBridgeActualSourceRunFrameWordSumPoints
+
+namespace RecursiveBridgeExecutableStackCheckResult
+
+def toStackBudget {program : Program}
+    (check : RecursiveBridgeExecutableStackCheckResult program) :
+    _root_.EvmCompiler.Functions.CallDepth.StackBudget := by
+  cases check with
+  | acyclic acyclicCheck =>
+      exact acyclicCheck.toStackBudget
+  | ranked rankedCheck =>
+      exact rankedCheck.toStackBudget
+  | selfGuardedOnce guardedCheck =>
+      exact guardedCheck.toStackBudget
+  | mutualGuardedOnce guardedCheck =>
+      exact guardedCheck.toStackBudget
+  | guardedZeroCalls guardedCheck =>
+      exact guardedCheck.toStackBudget
+
+def toStackResourceCheckResult {program : Program}
+    (check : RecursiveBridgeExecutableStackCheckResult program) :
+    RecursiveBridgeExecutableStackResourceCheckResult program := by
+  cases check with
+  | acyclic acyclicCheck =>
+      exact
+        { lowerObj := acyclicCheck.lowerObj
+          lower := acyclicCheck.lower
+          resource := acyclicCheck.toStackResourceCheckResult }
+  | ranked rankedCheck =>
+      exact
+        { lowerObj := rankedCheck.lowerObj
+          lower := rankedCheck.lower
+          resource := rankedCheck.toStackResourceCheckResult }
+  | selfGuardedOnce guardedCheck =>
+      exact
+        { lowerObj := guardedCheck.lowerObj
+          lower := guardedCheck.lower
+          resource := guardedCheck.toStackResourceCheckResult }
+  | mutualGuardedOnce guardedCheck =>
+      exact
+        { lowerObj := guardedCheck.lowerObj
+          lower := guardedCheck.lower
+          resource := guardedCheck.toStackResourceCheckResult }
+  | guardedZeroCalls guardedCheck =>
+      exact
+        { lowerObj := guardedCheck.lowerObj
+          lower := guardedCheck.lower
+          resource := guardedCheck.toStackResourceCheckResult }
+
+def toSourceRecurrenceCheck {program : Program}
+    (check : RecursiveBridgeExecutableStackCheckResult program) :
+    RecursiveBridgeExecutableSourceRecurrenceCheckResult program :=
+  let resourceCheck := check.toStackResourceCheckResult
+  { lowerObj := resourceCheck.lowerObj
+    lower := resourceCheck.lower
+    sourceBudget := resourceCheck.toStackBudget
+    resourceSafe := resourceCheck.stackResourceSafe }
+
+end RecursiveBridgeExecutableStackCheckResult
+
+noncomputable def recursiveBridgeExecutableStackDepthCheckResult?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackDepthCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Program.stackDepthCheck?
+            lowerObj.toFunctions with
+      | none => none
+      | some depth =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              depth := depth }
+
+noncomputable def recursiveBridgeExecutableFrameWordSumStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableFrameWordSumStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Program.sourceFrameWordSumResourceBound?
+            lowerObj.toFunctions with
+      | none => none
+      | some resource =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              resource := resource }
+
+theorem recursiveBridgeExecutableStackDepthCheckResult?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableStackDepthCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableStackDepthCheckResult? program = some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Program.maxInternalCallDepth?
+          check.lowerObj.toFunctions =
+        some check.depth.depth ∧
+      16 + 17 * check.depth.depth + 17 ≤ 1024 := by
+  exact ⟨check.lower, check.depth.checked, check.depth.budget⟩
+
+theorem recursiveBridgeExecutableFrameWordSumStackCheck?_checked
+    {program : Program}
+    {check :
+      RecursiveBridgeExecutableFrameWordSumStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableFrameWordSumStackCheck? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Program.maxActiveFrameWords?
+          check.lowerObj.toFunctions =
+        some check.resource.check.frameWords ∧
+      16 + check.resource.check.frameWords + 17 ≤ 1024 :=
+  ⟨check.lower, check.resource.checked, check.resource.budget⟩
+
+namespace RecursiveBridgeExecutableFrameWordSumStackCheckResult
+
+def toSourceFrameWordSumResourceBound {program : Program}
+    (check : RecursiveBridgeExecutableFrameWordSumStackCheckResult program) :
+    RecursiveBridgeSourceFrameWordSumResourceBound program :=
+  { lowerObj := check.lowerObj
+    lower := check.lower
+    resource := check.resource }
+
+theorem sourceStackHeadroom_of_weightedContext {program : Program}
+    (check : RecursiveBridgeExecutableFrameWordSumStackCheckResult program)
+    {active layout : List Name}
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Functions.Source.State} {target : Structured.RunState}
+    (context :
+      Functions.CallDepth.SourceDirectWeightedFrameContext
+        check.lowerObj.toFunctions active layout hiddenReturns source
+        target) :
+    Structured.Preservation.Frame.SourceStackHeadroom target :=
+  check.resource.sourceStackHeadroom_of_weightedContext context
+
+end RecursiveBridgeExecutableFrameWordSumStackCheckResult
+
+def recursiveBridgeExecutableFrameWordSumStackCheck?_sound
+    {program : Program}
+    {check :
+      RecursiveBridgeExecutableFrameWordSumStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableFrameWordSumStackCheck? program =
+        some check) :
+    RecursiveBridgeSourceFrameWordSumResourceBound program :=
+  check.toSourceFrameWordSumResourceBound
+
+noncomputable def recursiveBridgeExecutableRankedStackCheck?
+    (program : Program)
+    (edges : List Functions.CallDepth.Ranked.Edge)
+    (roots : List Functions.CallDepth.Ranked.Node) :
+    Option (RecursiveBridgeExecutableRankedStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Ranked.checkedProgramCheck?
+            lowerObj.toFunctions edges roots with
+      | none => none
+      | some ranked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              ranked := ranked }
+
+theorem recursiveBridgeExecutableRankedStackCheck?_eq_some
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {check : RecursiveBridgeExecutableRankedStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableRankedStackCheck? program edges roots =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+          check.ranked.edges check.ranked.roots =
+        some check.ranked.depthCheck.depth ∧
+      16 + 17 * check.ranked.depthCheck.depth + 17 ≤ 1024 ∧
+      Functions.CallDepth.Ranked.graphConforms? check.lowerObj.toFunctions
+          check.ranked.edges check.ranked.roots =
+        true := by
+  exact
+    ⟨check.lower, check.ranked.depthCheck.checked,
+      check.ranked.depthCheck.budget, check.ranked.conforms⟩
+
+noncomputable def
+    recursiveBridgeExecutableSelfGuardedOnceStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Ranked.SelfGuardedOnce.checkResult?
+            lowerObj.toFunctions with
+      | none => none
+      | some checked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              checked := checked }
+
+theorem recursiveBridgeExecutableSelfGuardedOnceStackCheck?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheck? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.SelfGuardedOnce.programShape?
+          check.lowerObj.toFunctions =
+        some (check.checked.functionName, check.checked.roots) ∧
+      check.checked.edges =
+        Functions.CallDepth.Ranked.SelfGuardedOnce.edgesUpTo
+          check.checked.functionName
+          (Functions.CallDepth.Ranked.SelfGuardedOnce.maxRank
+            check.checked.roots) ∧
+      Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+          check.checked.edges check.checked.roots =
+        some check.checked.depthCheck.depth ∧
+      16 + 17 * check.checked.depthCheck.depth + 17 ≤ 1024 := by
+  exact
+    ⟨check.lower, check.checked.shape, check.checked.edges_eq,
+      check.checked.depthCheck.checked,
+      check.checked.depthCheck.budget⟩
+
+noncomputable def
+    recursiveBridgeExecutableMutualGuardedOnceStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Ranked.MutualGuardedOnce.checkResult?
+            lowerObj.toFunctions with
+      | none => none
+      | some checked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              checked := checked }
+
+theorem recursiveBridgeExecutableMutualGuardedOnceStackCheck?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheck? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.MutualGuardedOnce.programShape?
+          check.lowerObj.toFunctions =
+        some
+          (check.checked.leftName, check.checked.rightName,
+            check.checked.roots) ∧
+      check.checked.edges =
+        Functions.CallDepth.Ranked.MutualGuardedOnce.edgesUpTo
+          check.checked.leftName check.checked.rightName
+          (Functions.CallDepth.Ranked.MutualGuardedOnce.maxRank
+            check.checked.roots) ∧
+      Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+          check.checked.edges check.checked.roots =
+        some check.checked.depthCheck.depth ∧
+      16 + 17 * check.checked.depthCheck.depth + 17 ≤ 1024 := by
+  exact
+    ⟨check.lower, check.checked.shape, check.checked.edges_eq,
+      check.checked.depthCheck.checked,
+      check.checked.depthCheck.budget⟩
+
+noncomputable def
+    recursiveBridgeExecutableGuardedZeroCallsStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Ranked.GuardedZeroCalls.checkResult?
+            lowerObj.toFunctions with
+      | none => none
+      | some checked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              checked := checked }
+
+theorem recursiveBridgeExecutableGuardedZeroCallsStackCheck?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheck? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.GuardedZeroCalls.programShape?
+          check.lowerObj.toFunctions =
+        some (check.checked.shapes, check.checked.roots) ∧
+      check.checked.edges =
+        Functions.CallDepth.Ranked.GuardedZeroCalls.edgesForShapes
+          check.checked.shapes ∧
+      Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+          check.checked.edges check.checked.roots =
+        some check.checked.depthCheck.depth ∧
+      16 + 17 * check.checked.depthCheck.depth + 17 ≤ 1024 := by
+  exact
+    ⟨check.lower, check.checked.shape, check.checked.edges_eq,
+      check.checked.depthCheck.checked,
+      check.checked.depthCheck.budget⟩
+
+noncomputable def recursiveBridgeExecutableSCCRecurrenceCheckResult?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableSCCRecurrenceCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          hChecked :
+          Functions.CallDepth.Ranked.checkSCCRecurrence?
+            lowerObj.toFunctions with
+      | none => none
+      | some checked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              checked := checked
+              checked_result := hChecked }
+
+theorem recursiveBridgeExecutableSCCRecurrenceCheckResult?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableSCCRecurrenceCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableSCCRecurrenceCheckResult? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.checkSCCRecurrence?
+          check.lowerObj.toFunctions =
+        some check.checked :=
+  ⟨check.lower, check.checked_result⟩
+
+noncomputable def recursiveBridgeExecutableInferredRankedStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableRankedStackCheckResult program) :=
+  match hLower : program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      match
+          Functions.CallDepth.Ranked.inferStackRecurrences?
+            lowerObj.toFunctions with
+      | none => none
+      | some ranked =>
+          some
+            { lowerObj := lowerObj
+              lower := hLower
+              ranked := ranked }
+
+theorem recursiveBridgeExecutableInferredRankedStackCheck?_eq_some
+    {program : Program}
+    {check : RecursiveBridgeExecutableRankedStackCheckResult program}
+    (_hCheck :
+      recursiveBridgeExecutableInferredRankedStackCheck? program =
+        some check) :
+    program.toObjects? = some check.lowerObj ∧
+      Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+          check.ranked.edges check.ranked.roots =
+        some check.ranked.depthCheck.depth ∧
+      16 + 17 * check.ranked.depthCheck.depth + 17 ≤ 1024 ∧
+      Functions.CallDepth.Ranked.graphConforms? check.lowerObj.toFunctions
+          check.ranked.edges check.ranked.roots =
+        true :=
+  ⟨check.lower, check.ranked.depthCheck.checked,
+    check.ranked.depthCheck.budget, check.ranked.conforms⟩
+
+noncomputable def recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableInferredRankedStackCheck? program with
+  | none => none
+  | some check => some (.ranked check)
+
+noncomputable def
+    recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableSelfGuardedOnceStackCheck? program with
+  | none => none
+  | some check => some (.selfGuardedOnce check)
+
+noncomputable def
+    recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableMutualGuardedOnceStackCheck? program with
+  | none => none
+  | some check => some (.mutualGuardedOnce check)
+
+noncomputable def
+    recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableGuardedZeroCallsStackCheck? program with
+  | none => none
+  | some check => some (.guardedZeroCalls check)
+
+theorem recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?_eq_some
+    {program : Program}
+    {stackCheck : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        some stackCheck) :
+    ∃ rankedCheck : RecursiveBridgeExecutableRankedStackCheckResult program,
+      stackCheck = .ranked rankedCheck ∧
+        recursiveBridgeExecutableInferredRankedStackCheck? program =
+          some rankedCheck := by
+  unfold recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?
+    at hCheck
+  cases hRanked :
+      recursiveBridgeExecutableInferredRankedStackCheck? program with
+  | none =>
+      simp [hRanked] at hCheck
+  | some rankedCheck =>
+      simp [hRanked] at hCheck
+      cases hCheck
+      exact ⟨rankedCheck, rfl, rfl⟩
+
+theorem recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?_eq_some
+    {program : Program}
+    {stackCheck : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        some stackCheck) :
+    ∃ selfCheck :
+        RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program,
+      stackCheck = .selfGuardedOnce selfCheck ∧
+        recursiveBridgeExecutableSelfGuardedOnceStackCheck? program =
+          some selfCheck := by
+  unfold recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+    at hCheck
+  cases hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheck? program with
+  | none =>
+      simp [hSelf] at hCheck
+  | some selfCheck =>
+      simp [hSelf] at hCheck
+      cases hCheck
+      exact ⟨selfCheck, rfl, rfl⟩
+
+theorem recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?_eq_some
+    {program : Program}
+    {stackCheck : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+          program =
+        some stackCheck) :
+    ∃ mutualCheck :
+        RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program,
+      stackCheck = .mutualGuardedOnce mutualCheck ∧
+        recursiveBridgeExecutableMutualGuardedOnceStackCheck?
+            program =
+          some mutualCheck := by
+  unfold recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+    at hCheck
+  cases hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheck? program with
+  | none =>
+      simp [hMutual] at hCheck
+  | some mutualCheck =>
+      simp [hMutual] at hCheck
+      cases hCheck
+      exact ⟨mutualCheck, rfl, rfl⟩
+
+theorem recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?_eq_some
+    {program : Program}
+    {stackCheck : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+          program =
+        some stackCheck) :
+    ∃ guardedCheck :
+        RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program,
+      stackCheck = .guardedZeroCalls guardedCheck ∧
+        recursiveBridgeExecutableGuardedZeroCallsStackCheck?
+            program =
+          some guardedCheck := by
+  unfold recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+    at hCheck
+  cases hGuarded :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheck? program with
+  | none =>
+      simp [hGuarded] at hCheck
+  | some guardedCheck =>
+      simp [hGuarded] at hCheck
+      cases hCheck
+      exact ⟨guardedCheck, rfl, rfl⟩
+
+noncomputable def recursiveBridgeExecutableStackCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program with
+  | some check => some check
+  | none =>
+      match recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program with
+      | some check => some check
+      | none =>
+          match
+              recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+                program with
+          | some check => some check
+          | none =>
+              recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+                program
+
+noncomputable def recursiveBridgeExecutableSourceRecurrenceCheck?
+    (program : Program) :
+    Option (RecursiveBridgeExecutableSourceRecurrenceCheckResult program) :=
+  match recursiveBridgeExecutableStackCheck? program with
+  | none => none
+  | some check => some check.toSourceRecurrenceCheck
+
+theorem recursiveBridgeExecutableSourceRecurrenceCheck?_eq_some
+    {program : Program}
+    {sourceCheck : RecursiveBridgeExecutableSourceRecurrenceCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableSourceRecurrenceCheck? program =
+        some sourceCheck) :
+    ∃ stackCheck : RecursiveBridgeExecutableStackCheckResult program,
+      recursiveBridgeExecutableStackCheck? program = some stackCheck ∧
+        sourceCheck = stackCheck.toSourceRecurrenceCheck := by
+  unfold recursiveBridgeExecutableSourceRecurrenceCheck? at hCheck
+  cases hStack : recursiveBridgeExecutableStackCheck? program with
+  | none =>
+      simp [hStack] at hCheck
+  | some stackCheck =>
+      simp [hStack] at hCheck
+      cases hCheck
+      exact ⟨stackCheck, rfl, rfl⟩
+
+noncomputable def recursiveBridgeExecutableSourceRecurrenceDepth?
+    (program : Program) : Option Nat :=
+  match program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      Functions.CallDepth.Ranked.sourceRecurrenceDepth? lowerObj.toFunctions
+
+theorem recursiveBridgeExecutableSourceRecurrenceDepth?_sound
+    {program : Program} {depth : Nat}
+    (hDepth :
+      recursiveBridgeExecutableSourceRecurrenceDepth? program = some depth) :
+    RecursiveBridgeSourceRecurrenceBound program depth := by
+  unfold recursiveBridgeExecutableSourceRecurrenceDepth? at hDepth
+  cases hLower : program.toObjects? with
+  | none =>
+      simp [hLower] at hDepth
+  | some lowerObj =>
+      simp [hLower] at hDepth
+      exact
+        ⟨lowerObj, hLower,
+          Functions.CallDepth.Ranked.sourceRecurrenceDepth?_sourceRecurrenceBound
+            hDepth⟩
+
+theorem recursiveBridgeExecutableSourceRecurrenceDepth?_sourceRecurrenceBound
+    {program : Program} {depth : Nat}
+    (hDepth :
+      recursiveBridgeExecutableSourceRecurrenceDepth? program = some depth) :
+    RecursiveBridgeSourceRecurrenceBound program depth :=
+  recursiveBridgeExecutableSourceRecurrenceDepth?_sound hDepth
+
+theorem recursiveBridgeExecutableSourceRecurrenceDepth?_eq_some_cases
+    {program : Program} {depth : Nat}
+    (hDepth :
+      recursiveBridgeExecutableSourceRecurrenceDepth? program = some depth) :
+    ∃ lowerObj,
+      program.toObjects? = some lowerObj ∧
+        ((∃ check :
+            Functions.CallDepth.Ranked.CheckedProgramRecurrenceCheckResult
+              lowerObj.toFunctions,
+            check.depth = depth) ∨
+          (Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+              lowerObj.toFunctions =
+            none ∧
+              ∃ check :
+                Functions.CallDepth.Ranked.SCCRecurrenceCheckResult
+                  lowerObj.toFunctions,
+                Functions.CallDepth.Ranked.checkSCCRecurrence?
+                    lowerObj.toFunctions =
+                  some check ∧
+                  check.maxFrames = depth)) := by
+  unfold recursiveBridgeExecutableSourceRecurrenceDepth? at hDepth
+  cases hLower : program.toObjects? with
+  | none =>
+      simp [hLower] at hDepth
+  | some lowerObj =>
+      simp [hLower] at hDepth
+      exact
+        ⟨lowerObj, rfl,
+          Functions.CallDepth.Ranked.sourceRecurrenceDepth?_eq_some_cases
+            hDepth⟩
+
+theorem recursiveBridgeExecutableSourceRecurrenceDepth?_none_of_default_branches_none
+    {program : Program} {lowerObj : Objects.Program}
+    (hLower : program.toObjects? = some lowerObj)
+    (hAcyclic :
+      Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+          lowerObj.toFunctions =
+        none)
+    (hSCC :
+      Functions.CallDepth.Ranked.checkSCCRecurrence?
+          lowerObj.toFunctions =
+        none) :
+    recursiveBridgeExecutableSourceRecurrenceDepth? program = none := by
+  unfold recursiveBridgeExecutableSourceRecurrenceDepth?
+  simp [hLower,
+    Functions.CallDepth.Ranked.sourceRecurrenceDepth?_none_of_default_branches_none
+      hAcyclic hSCC]
+
+noncomputable def recursiveBridgeSourceResourceDepth?
+    (program : Program) : Option Nat :=
+  match program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      Functions.CallDepth.Ranked.sourceResourceDepth? lowerObj.toFunctions
+
+noncomputable def recursiveBridgeSourceFrameWordsResourceDepth?
+    (program : Program) : Option Nat :=
+  match program.toObjects? with
+  | none => none
+  | some lowerObj =>
+      Functions.CallDepth.Ranked.sourceFrameWordsResourceDepth?
+        lowerObj.toFunctions
+
+theorem recursiveBridgeSourceResourceDepth?_sound
+    {program : Program} {depth : Nat}
+    (hDepth : recursiveBridgeSourceResourceDepth? program = some depth) :
+    RecursiveBridgeSourceResourceBound program depth := by
+  unfold recursiveBridgeSourceResourceDepth? at hDepth
+  cases hLower : program.toObjects? with
+  | none =>
+      simp [hLower] at hDepth
+  | some lowerObj =>
+      simp [hLower] at hDepth
+      exact
+        ⟨lowerObj, hLower,
+          Functions.CallDepth.Ranked.sourceResourceDepth?_sound hDepth⟩
+
+theorem recursiveBridgeSourceFrameWordsResourceDepth?_sound
+    {program : Program} {depth : Nat}
+    (hDepth :
+      recursiveBridgeSourceFrameWordsResourceDepth? program = some depth) :
+    RecursiveBridgeSourceFrameWordsResourceBound program depth := by
+  unfold recursiveBridgeSourceFrameWordsResourceDepth? at hDepth
+  cases hLower : program.toObjects? with
+  | none =>
+      simp [hLower] at hDepth
+  | some lowerObj =>
+      simp [hLower] at hDepth
+      exact
+        ⟨lowerObj, hLower,
+          Functions.CallDepth.Ranked.sourceFrameWordsResourceDepth?_sound
+            hDepth⟩
+
+theorem recursiveBridgeSourceResourceDepth?_sourceActiveDepthBound
+    {program : Program} {depth : Nat}
+    (hDepth : recursiveBridgeSourceResourceDepth? program = some depth) :
+    RecursiveBridgeSourceActiveDepthBound program depth := by
+  rcases recursiveBridgeSourceResourceDepth?_sound hDepth with
+    ⟨lowerObj, hLower, hResource⟩
+  exact ⟨lowerObj, hLower, hResource.activeDepthBound⟩
+
+theorem recursiveBridgeSourceFrameWordsResourceDepth?_sourceActiveDepthBound
+    {program : Program} {depth : Nat}
+    (hDepth :
+      recursiveBridgeSourceFrameWordsResourceDepth? program = some depth) :
+    RecursiveBridgeSourceActiveDepthBound program depth := by
+  rcases recursiveBridgeSourceFrameWordsResourceDepth?_sound hDepth with
+    ⟨lowerObj, hLower, hResource⟩
+  exact ⟨lowerObj, hLower, hResource.activeDepthBound⟩
+
+theorem recursiveBridgeSourceResourceDepth?_eq_some_cases
+    {program : Program} {depth : Nat}
+    (hDepth : recursiveBridgeSourceResourceDepth? program = some depth) :
+    ∃ lowerObj,
+      program.toObjects? = some lowerObj ∧
+        ((Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+              lowerObj.toFunctions =
+            some depth ∧
+            Functions.CallDepth.Ranked.sourceStackFitsEVM? depth = true ∧
+            ∃ check :
+              Functions.CallDepth.Ranked.CheckedProgramRecurrenceCheckResult
+                lowerObj.toFunctions,
+              check.depth = depth) ∨
+          (((Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+                lowerObj.toFunctions =
+              none) ∨
+              ∃ acyclicDepth,
+                Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+                    lowerObj.toFunctions =
+                  some acyclicDepth ∧
+                  Functions.CallDepth.Ranked.sourceStackFitsEVM?
+                      acyclicDepth =
+                    false) ∧
+            ∃ check :
+              Functions.CallDepth.Ranked.SCCRecurrenceCheckResult
+                lowerObj.toFunctions,
+              Functions.CallDepth.Ranked.checkSCCRecurrence?
+                  lowerObj.toFunctions =
+                some check ∧
+                check.maxFrames = depth ∧
+                  Functions.CallDepth.Ranked.sourceStackFitsEVM? depth =
+                    true)) := by
+  unfold recursiveBridgeSourceResourceDepth? at hDepth
+  cases hLower : program.toObjects? with
+  | none =>
+      simp [hLower] at hDepth
+  | some lowerObj =>
+      simp [hLower] at hDepth
+      exact
+        ⟨lowerObj, rfl,
+          Functions.CallDepth.Ranked.sourceResourceDepth?_eq_some_cases
+            hDepth⟩
+
+theorem recursiveBridgeSourceResourceDepth?_none_of_default_branches_none
+    {program : Program} {lowerObj : Objects.Program}
+    (hLower : program.toObjects? = some lowerObj)
+    (hAcyclic :
+      Functions.CallDepth.Ranked.inferAcyclicRecurrenceDepth?
+          lowerObj.toFunctions =
+        none)
+    (hSCC :
+      Functions.CallDepth.Ranked.checkSCCRecurrence?
+          lowerObj.toFunctions =
+        none) :
+    recursiveBridgeSourceResourceDepth? program = none := by
+  unfold recursiveBridgeSourceResourceDepth?
+  simp [hLower,
+    Functions.CallDepth.Ranked.sourceResourceDepth?_none_of_default_branches_none
+      hAcyclic hSCC]
+
+theorem recursiveBridgeSourceResourceDepth?_stackResourceSafeFromBase
+    {program : Program} {depth : Nat}
+    (hDepth : recursiveBridgeSourceResourceDepth? program = some depth) :
+    ∃ lowerObj,
+      ∃ resource :
+        Functions.CallDepth.Ranked.SourceResourceBound lowerObj.toFunctions
+          depth,
+        program.toObjects? = some lowerObj ∧
+          _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafeFromBase
+            lowerObj.toFunctions resource.toStackBudget := by
+  rcases recursiveBridgeSourceResourceDepth?_sound hDepth with
+    ⟨lowerObj, hLower, hResource⟩
+  exact
+    ⟨lowerObj, hResource, hLower,
+      hResource.stackResourceSafeFromBase⟩
+
+theorem recursiveBridgeSourceResourceDepth?_sourceRecurrenceCheck
+    {program : Program} {depth : Nat}
+    (hDepth : recursiveBridgeSourceResourceDepth? program = some depth) :
+    ∃ sourceCheck : RecursiveBridgeExecutableSourceRecurrenceCheckResult program,
+      sourceCheck.maxFrames = depth ∧
+        Functions.CallDepth.Ranked.SourceRecurrenceBound
+          sourceCheck.lowerObj.toFunctions sourceCheck.maxFrames := by
+  rcases recursiveBridgeSourceResourceDepth?_sound hDepth with
+    ⟨lowerObj, hLower, hResource⟩
+  let sourceBudget : _root_.EvmCompiler.Functions.CallDepth.StackBudget :=
+    hResource.toStackBudget
+  let sourceCheck : RecursiveBridgeExecutableSourceRecurrenceCheckResult program :=
+    { lowerObj := lowerObj
+      lower := hLower
+      sourceBudget := sourceBudget
+      resourceSafe :=
+        _root_.EvmCompiler.Functions.CallDepth.Program.stackResourceSafe_of_budget
+          lowerObj.toFunctions sourceBudget }
+  refine ⟨sourceCheck, ?_, ?_⟩
+  · simp [sourceCheck,
+      RecursiveBridgeExecutableSourceRecurrenceCheckResult.maxFrames,
+      sourceBudget,
+      Functions.CallDepth.Ranked.SourceResourceBound.toStackBudget]
+  · simpa [sourceCheck,
+      RecursiveBridgeExecutableSourceRecurrenceCheckResult.maxFrames,
+      sourceBudget,
+      Functions.CallDepth.Ranked.SourceResourceBound.toStackBudget]
+      using hResource.recurrence
+
+noncomputable def recursiveBridgeExecutableRankedStackCheckResultAsStack?
+    (program : Program)
+    (edges : List Functions.CallDepth.Ranked.Edge)
+    (roots : List Functions.CallDepth.Ranked.Node) :
+    Option (RecursiveBridgeExecutableStackCheckResult program) :=
+  match recursiveBridgeExecutableRankedStackCheck? program edges roots with
+  | none => none
+  | some check => some (.ranked check)
+
+theorem recursiveBridgeExecutableRankedStackCheckResultAsStack?_eq_some
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {stackCheck : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck :
+      recursiveBridgeExecutableRankedStackCheckResultAsStack? program
+          edges roots =
+        some stackCheck) :
+    ∃ rankedCheck : RecursiveBridgeExecutableRankedStackCheckResult program,
+      stackCheck = .ranked rankedCheck ∧
+        recursiveBridgeExecutableRankedStackCheck? program edges roots =
+          some rankedCheck ∧
+        program.toObjects? = some rankedCheck.lowerObj ∧
+        Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+            rankedCheck.ranked.edges rankedCheck.ranked.roots =
+          some rankedCheck.ranked.depthCheck.depth ∧
+        16 + 17 * rankedCheck.ranked.depthCheck.depth + 17 ≤ 1024 ∧
+        Functions.CallDepth.Ranked.graphConforms?
+            rankedCheck.lowerObj.toFunctions
+            rankedCheck.ranked.edges rankedCheck.ranked.roots =
+          true := by
+  unfold recursiveBridgeExecutableRankedStackCheckResultAsStack? at hCheck
+  cases hRanked :
+      recursiveBridgeExecutableRankedStackCheck? program edges roots with
+  | none =>
+      simp [hRanked] at hCheck
+  | some rankedCheck =>
+      simp [hRanked] at hCheck
+      cases hCheck
+      have hFacts :=
+        recursiveBridgeExecutableRankedStackCheck?_eq_some hRanked
+      exact
+        ⟨rankedCheck, rfl, by simp, hFacts.1, hFacts.2.1,
+          hFacts.2.2.1, hFacts.2.2.2⟩
+
+theorem recursiveBridgeExecutableStackCheck?_eq_some_cases
+    {program : Program}
+    {check : RecursiveBridgeExecutableStackCheckResult program}
+    (hCheck : recursiveBridgeExecutableStackCheck? program = some check) :
+    recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        some check ∨
+      (recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+          none ∧
+        recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+            program =
+          some check) ∨
+        (recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?
+            program =
+          none ∧
+          recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+              program =
+            none ∧
+          recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+              program =
+            some check) ∨
+          recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?
+              program =
+            none ∧
+            recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+                program =
+              none ∧
+              recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+                  program =
+                none ∧
+                recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+                    program =
+                  some check := by
+  unfold recursiveBridgeExecutableStackCheck? at hCheck
+  cases hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?
+        program with
+  | some inferredCheck =>
+      simp [hInferred] at hCheck
+      cases hCheck
+      exact Or.inl rfl
+  | none =>
+      simp [hInferred] at hCheck
+      cases hSelf :
+          recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+            program with
+      | some selfCheck =>
+          simp [hSelf] at hCheck
+          cases hCheck
+          exact Or.inr (Or.inl ⟨rfl, rfl⟩)
+      | none =>
+          simp [hSelf] at hCheck
+          cases hMutual :
+              recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+                program with
+          | some mutualCheck =>
+              simp [hMutual] at hCheck
+              cases hCheck
+              exact Or.inr (Or.inr (Or.inl ⟨rfl, rfl, rfl⟩))
+          | none =>
+              simp [hMutual] at hCheck
+              exact Or.inr (Or.inr (Or.inr ⟨rfl, rfl, rfl, hCheck⟩))
+
+theorem recursiveBridgeExecutableStackCheck?_of_inferredRanked
+    {program : Program}
+    {check : RecursiveBridgeExecutableRankedStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheck? program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program =
+      some (.ranked check) := by
+  simp [recursiveBridgeExecutableStackCheck?,
+    recursiveBridgeExecutableInferredRankedStackCheckResultAsStack?,
+    hInferred]
+
+theorem recursiveBridgeExecutableStackCheck?_of_selfGuardedOnce
+    {program : Program}
+    {check : RecursiveBridgeExecutableStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program = some check := by
+  simp [recursiveBridgeExecutableStackCheck?, hInferred, hSelf]
+
+theorem recursiveBridgeExecutableStackCheck?_of_mutualGuardedOnce
+    {program : Program}
+    {check : RecursiveBridgeExecutableStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+          program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program = some check := by
+  simp [recursiveBridgeExecutableStackCheck?, hInferred, hSelf,
+    hMutual]
+
+theorem recursiveBridgeExecutableStackCheck?_of_guardedZeroCalls
+    {program : Program}
+    {check : RecursiveBridgeExecutableStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hGuarded :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+          program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program = some check := by
+  simp [recursiveBridgeExecutableStackCheck?, hInferred, hSelf,
+    hMutual, hGuarded]
+
+theorem recursiveBridgeExecutableStackCheck?_of_selfGuardedOnceChecked
+    {program : Program}
+    {check : RecursiveBridgeExecutableSelfGuardedOnceStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheck? program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program =
+      some (.selfGuardedOnce check) := by
+  exact
+    recursiveBridgeExecutableStackCheck?_of_selfGuardedOnce
+      hInferred
+      (by
+        simp [recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?,
+          hSelf])
+
+theorem recursiveBridgeExecutableStackCheck?_of_mutualGuardedOnceChecked
+    {program : Program}
+    {check : RecursiveBridgeExecutableMutualGuardedOnceStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheck? program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program =
+      some (.mutualGuardedOnce check) := by
+  exact
+    recursiveBridgeExecutableStackCheck?_of_mutualGuardedOnce
+      hInferred hSelf
+      (by
+        simp [recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?,
+          hMutual])
+
+theorem recursiveBridgeExecutableStackCheck?_of_guardedZeroCallsChecked
+    {program : Program}
+    {check : RecursiveBridgeExecutableGuardedZeroCallsStackCheckResult program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hGuarded :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheck? program =
+        some check) :
+    recursiveBridgeExecutableStackCheck? program =
+      some (.guardedZeroCalls check) := by
+  exact
+    recursiveBridgeExecutableStackCheck?_of_guardedZeroCalls
+      hInferred hSelf hMutual
+      (by
+        simp [recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?,
+          hGuarded])
+
+theorem recursiveBridgeExecutableStackCheck?_none_of_branches_none
+    {program : Program}
+    (hInferred :
+      recursiveBridgeExecutableInferredRankedStackCheckResultAsStack? program =
+        none)
+    (hSelf :
+      recursiveBridgeExecutableSelfGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hMutual :
+      recursiveBridgeExecutableMutualGuardedOnceStackCheckResultAsStack?
+          program =
+        none)
+    (hGuarded :
+      recursiveBridgeExecutableGuardedZeroCallsStackCheckResultAsStack?
+          program =
+        none) :
+    recursiveBridgeExecutableStackCheck? program = none := by
+  simp [recursiveBridgeExecutableStackCheck?, hInferred, hSelf,
+    hMutual, hGuarded]
+
+/--
+Executable-only stack-safe no-CALL checker.
+
+This is the source-resource half of the preferred public stack gate.  It uses
+the verified source-resource checker, which may try multiple recurrence
+analyzers and only accepts a bound that fits the source-frame EVM stack budget,
+before the combined inferred assembly-bound checker below consumes it.
+-/
+structure ExecutableStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceDepth : Nat
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option (ExecutableStackSafeNoReturnDataCopyCheckedCompile program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match recursiveBridgeSourceResourceDepth? program with
+      | none => none
+      | some sourceDepth =>
+          some
+            { asm := asm
+              target := target
+              sourceDepth := sourceDepth }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked : ExecutableStackSafeNoReturnDataCopyCheckedCompile program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (checked.asm, checked.target) ∧
+      recursiveBridgeSourceResourceDepth? program =
+        some checked.sourceDepth ∧
+        RecursiveBridgeSourceResourceBound program checked.sourceDepth := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hChecked
+  | some pair =>
+      rcases pair with ⟨asm, target⟩
+      cases hSourceResource : recursiveBridgeSourceResourceDepth? program with
+      | none =>
+          simp [hBase, hSourceResource] at hChecked
+      | some sourceDepth =>
+          simp [hBase, hSourceResource] at hChecked
+          cases hChecked
+          exact
+            ⟨rfl, rfl,
+              recursiveBridgeSourceResourceDepth?_sound hSourceResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableStackSafeNoReturnDataCopyCheckedCompile program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    recursiveBridgeSourceResourceDepth? program =
+        some
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+            hCompileTarget).sourceDepth ∧
+      RecursiveBridgeSourceResourceBound program
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).sourceDepth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_hBase, hDepth, hResource⟩
+  exact ⟨hDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ sourceCheck :
+          RecursiveBridgeExecutableSourceRecurrenceCheckResult program,
+          ∃ depth,
+            recursiveBridgeSourceResourceDepth? program =
+              some depth ∧
+              sourceCheck.maxFrames = depth ∧
+                Functions.CallDepth.Ranked.SourceRecurrenceBound
+                  sourceCheck.lowerObj.toFunctions
+                  sourceCheck.maxFrames := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨hBase, hSourceResource, _hResource⟩
+  have hBase' :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target) := by
+    simpa [hAsm, hTarget] using hBase
+  rcases
+      recursiveBridgeSourceResourceDepth?_sourceRecurrenceCheck
+        hSourceResource with
+    ⟨sourceCheck, hMaxFrames, hBound⟩
+  exact
+    ⟨hBase', sourceCheck, checked.sourceDepth, hSourceResource, hMaxFrames,
+      hBound⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceResource
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ depth,
+          recursiveBridgeSourceResourceDepth? program = some depth ∧
+            RecursiveBridgeSourceResourceBound program depth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨hBase, hSourceResource, hResource⟩
+  have hBase' :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target) := by
+    simpa [hAsm, hTarget] using hBase
+  exact ⟨hBase', checked.sourceDepth, hSourceResource, hResource⟩
+
+/--
+Checked sidecar gate for the assembly CFG stack-bound checker.
+
+Unlike the older semantic stack-headroom check, this gate checks a
+concrete word-PC keyed bound table against the emitted assembly.  It is still a
+sidecar rather than an inferred table: callers supply the table, and the gate
+accepts only when the executable checker constructs a check result.
+-/
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+    (program : Program)
+    (table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.checkProgramBoundCheckResult?
+            asm table 17 1024 with
+      | none => none
+      | some _check => some (asm, target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ check :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+            asm 17 1024,
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.checkProgramBoundCheckResult?
+              asm table 17 1024 =
+            some check := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.checkProgramBoundCheckResult?
+            asm' table 17 1024 with
+      | none =>
+          simp [hBase, hBound] at hCompileTarget
+      | some check =>
+          simp [hBase, hBound] at hCompileTarget
+          rcases hCompileTarget with ⟨rfl, rfl⟩
+          exact ⟨rfl, check, hBound⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.checkProgramBoundCheckResult?
+        asm table 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) :=
+  Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_table
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+        hCompileTarget).table =
+      table :=
+  _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.checkProgramBoundCheckResult?_table
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints_of_checked_table
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm table 17 1024 (canonicalEntryState initial)) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    hSourceRun hRun
+    (by
+      have hTable :=
+        compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_table
+          hCompileTarget
+      simpa [hTable] using hInitialPoint)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_checked_table
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {table :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.BoundTable}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?
+          program table =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm table 17 1024 (canonicalEntryState initial)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.toEVMStackHeadroomBound
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints_of_checked_table
+      hCompileTarget hSourceRun hRun hInitialPoint)
+
+/--
+Checked compile gate using the executable assembly-bound inference pass.
+
+The inference result is not trusted directly: successful compilation requires
+`inferProgramBoundCheckResult?` to return the checker-produced
+`ProgramBoundCheckResult` for the emitted assembly.
+-/
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm 17 1024 with
+      | none => none
+      | some _check => some (asm, target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ check :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+            asm 17 1024,
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+              asm 17 1024 =
+            some check := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm' 17 1024 with
+      | none =>
+          simp [hBase, hBound] at hCompileTarget
+      | some check =>
+          simp [hBase, hBound] at hCompileTarget
+          rcases hCompileTarget with ⟨rfl, rfl⟩
+          exact ⟨rfl, check, hBound⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) :=
+  Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    hSourceRun hRun
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualEVMStackHeadroomBound.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_base
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+        target shared store initial referenceResult) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.toEVMStackHeadroomBound
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    hPoints
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeExecutableSourceRecurrenceCheckResult program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Functions.CallDepth.Ranked.SourceRecurrenceBound
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).maxFrames := by
+  let hExists :=
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceRecurrence
+      hCompileTarget).2
+  rcases Classical.choose_spec hExists with
+    ⟨_depth, _hDepth, _hMaxFrames, hBound⟩
+  exact hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ depth,
+      recursiveBridgeSourceResourceDepth? program = some depth ∧
+        RecursiveBridgeSourceResourceBound program depth :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_eq_some_sourceResource
+    hCompileTarget).2
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeExecutableStackResourceCheckResult program :=
+  RecursiveBridgeSourceResourceBound.toStackResourceCheckResult
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceSafe
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+    hCompileTarget).stackResourceSafe
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceSafeFromBase
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafeFromBase
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+    hCompileTarget).stackResourceSafeFromBase
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceSafe
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+    hCompileTarget).stackResourceSafe
+
+/--
+Checked compile gate combining the executable source-recurrence stack checker
+with the executable assembly-bound inference pass.
+
+The source half consumes the executable `recursiveBridgeSourceResourceDepth?`
+check, so success includes both a semantic recurrence bound and the source-frame
+EVM stack-capacity arithmetic. The theorem-facing source recurrence check
+is reconstructed from that resource check's soundness theorem, while the older
+stack-check disjunction remains only as a compatibility surface for
+branch-local checker facts. The target headroom table is still inferred and
+immediately rechecked against the emitted assembly.
+-/
+structure
+    ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceDepth : Nat
+  assemblyBound :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option
+      (ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
+        program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some sourceChecked =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none => none
+      | some assemblyBound =>
+          some
+            { asm := sourceChecked.asm
+              target := sourceChecked.target
+              sourceDepth := sourceChecked.sourceDepth
+              assemblyBound := assemblyBound }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked :
+      ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
+        program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    ∃ sourceChecked :
+      ExecutableStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+          program =
+        some sourceChecked ∧
+        sourceChecked.asm = checked.asm ∧
+        sourceChecked.target = checked.target ∧
+        sourceChecked.sourceDepth = checked.sourceDepth ∧
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            checked.asm 17 1024 =
+          some checked.assemblyBound ∧
+        recursiveBridgeSourceResourceDepth? program =
+          some checked.sourceDepth ∧
+        RecursiveBridgeSourceResourceBound program checked.sourceDepth := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hSourceFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hSourceFull] at hChecked
+  | some sourceChecked =>
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none =>
+          simp [hSourceFull, hBound] at hChecked
+      | some assemblyBound =>
+          simp [hSourceFull, hBound] at hChecked
+          cases hChecked
+          rcases
+              compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopyFull?_eq_some
+                hSourceFull with
+            ⟨_hBase, hSourceDepth, hResource⟩
+          exact
+            ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound,
+              hSourceDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
+        program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyCheckedCompile
+      program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).assemblyBound := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_sourceChecked, _hSourceFull, _hSourceAsm, _hSourceTarget,
+      _hSourceDepth, hBound, _hDepth, _hResource⟩
+  exact hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    recursiveBridgeSourceResourceDepth? program =
+        some
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+            hCompileTarget).sourceDepth ∧
+      RecursiveBridgeSourceResourceBound program
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).sourceDepth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_sourceChecked, _hSourceFull, _hSourceAsm, _hSourceTarget,
+      _hSourceDepth, _hBound, hDepth, hResource⟩
+  exact ⟨hDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceActiveDepthBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    recursiveBridgeSourceResourceDepth? program =
+        some
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+            hCompileTarget).sourceDepth ∧
+      RecursiveBridgeSourceActiveDepthBound program
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).sourceDepth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+        hCompileTarget with
+    ⟨hDepth, ⟨lowerObj, hLower, hResource⟩⟩
+  exact ⟨hDepth, lowerObj, hLower, hResource.activeDepthBound⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ check :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+            asm 17 1024,
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+              asm 17 1024 =
+            some check := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨sourceChecked, hSourceFull, hSourceAsm, hSourceTarget,
+      _hSourceDepth, hBound, _hDepth, _hResource⟩
+  cases hAsm
+  cases hTarget
+  have hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (checked.asm, checked.target) := by
+    unfold
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+    simp [hSourceFull, hSourceAsm, hSourceTarget]
+  refine ⟨hBase, checked.assemblyBound, ?_⟩
+  simpa using hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_base
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeExecutableSourceRecurrenceCheckResult program :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Functions.CallDepth.Ranked.SourceRecurrenceBound
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).maxFrames :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_sourceRecurrenceBound
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ depth,
+      recursiveBridgeSourceResourceDepth? program = some depth ∧
+        RecursiveBridgeSourceResourceBound program depth :=
+  ⟨(compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+      hCompileTarget).sourceDepth,
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+      hCompileTarget⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceActiveDepthBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ depth,
+      recursiveBridgeSourceResourceDepth? program = some depth ∧
+        RecursiveBridgeSourceActiveDepthBound program depth :=
+  ⟨(compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+      hCompileTarget).sourceDepth,
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceActiveDepthBound
+      hCompileTarget⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeExecutableStackResourceCheckResult program :=
+  RecursiveBridgeSourceResourceBound.toStackResourceCheckResult
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+      hCompileTarget).2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceSafe
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+    hCompileTarget).stackResourceSafe
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceSafeFromBase
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafeFromBase
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+    hCompileTarget).stackResourceSafeFromBase
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceSafe
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceRecurrenceCheck
+    hCompileTarget).stackResourceSafe
+
+private theorem
+    inferProgramBoundCheckResult?_checked_cast
+    {program asm : Assembly.Program}
+    {check :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+        program 17 1024}
+    (hAsm : program = asm)
+    (hBound :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+          program 17 1024 =
+        some check) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some (hAsm ▸ check) := by
+  cases hAsm
+  exact hBound
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget) ▸
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked
+      hCompileTarget).assemblyBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) :=
+by
+  have hBound :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+      hCompileTarget
+  have hAsm :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget
+  exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualEVMStackHeadroomBound.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+/--
+Frame-word-refined source stack gate.
+
+The older executable source stack gate budgets every hidden return frame as
+`17` words.  This parallel gate uses the verified
+`recursiveBridgeSourceFrameWordsResourceDepth?` checker, whose arithmetic is
+`16 + Program.maxSourceReturnFrameWords program * depth + 17 <= 1024`.
+That keeps the theorem boundary executable while accepting programs whose
+internal-call frames are provably smaller than the worst case.
+-/
+structure ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceDepth : Nat
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option
+      (ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match recursiveBridgeSourceFrameWordsResourceDepth? program with
+      | none => none
+      | some sourceDepth =>
+          some
+            { asm := asm
+              target := target
+              sourceDepth := sourceDepth }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked :
+      ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (checked.asm, checked.target) ∧
+      recursiveBridgeSourceFrameWordsResourceDepth? program =
+        some checked.sourceDepth ∧
+        RecursiveBridgeSourceFrameWordsResourceBound program
+          checked.sourceDepth := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hChecked
+  | some pair =>
+      rcases pair with ⟨asm, target⟩
+      cases hSourceResource :
+          recursiveBridgeSourceFrameWordsResourceDepth? program with
+      | none =>
+          simp [hBase, hSourceResource] at hChecked
+      | some sourceDepth =>
+          simp [hBase, hSourceResource] at hChecked
+          cases hChecked
+          exact
+            ⟨rfl, rfl,
+              recursiveBridgeSourceFrameWordsResourceDepth?_sound
+                hSourceResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_sourceFrameWordsResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    recursiveBridgeSourceFrameWordsResourceDepth? program =
+        some
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+            hCompileTarget).sourceDepth ∧
+      RecursiveBridgeSourceFrameWordsResourceBound program
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).sourceDepth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_hBase, hDepth, hResource⟩
+  exact ⟨hDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_base
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨hBase, _hDepth, _hResource⟩
+  cases hAsm
+  cases hTarget
+  exact hBase
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+/--
+Frame-word-refined source stack gate plus inferred target assembly headroom.
+-/
+structure
+    ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceDepth : Nat
+  assemblyBound :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option
+      (ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+        program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some sourceChecked =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none => none
+      | some assemblyBound =>
+          some
+            { asm := sourceChecked.asm
+              target := sourceChecked.target
+              sourceDepth := sourceChecked.sourceDepth
+              assemblyBound := assemblyBound }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked :
+      ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+        program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    ∃ sourceChecked :
+      ExecutableFrameWordsStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+          program =
+        some sourceChecked ∧
+        sourceChecked.asm = checked.asm ∧
+        sourceChecked.target = checked.target ∧
+        sourceChecked.sourceDepth = checked.sourceDepth ∧
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            checked.asm 17 1024 =
+          some checked.assemblyBound ∧
+        recursiveBridgeSourceFrameWordsResourceDepth? program =
+          some checked.sourceDepth ∧
+        RecursiveBridgeSourceFrameWordsResourceBound program
+          checked.sourceDepth := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hSourceFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hSourceFull] at hChecked
+  | some sourceChecked =>
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none =>
+          simp [hSourceFull, hBound] at hChecked
+      | some assemblyBound =>
+          simp [hSourceFull, hBound] at hChecked
+          cases hChecked
+          rcases
+              compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+                hSourceFull with
+            ⟨_hBase, hSourceDepth, hResource⟩
+          exact
+            ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound,
+              hSourceDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+        program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyCheckedCompile
+      program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).assemblyBound := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_sourceChecked, _hSourceFull, _hSourceAsm, _hSourceTarget,
+      _hSourceDepth, hBound, _hDepth, _hResource⟩
+  exact hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_sourceFrameWordsResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    recursiveBridgeSourceFrameWordsResourceDepth? program =
+        some
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+            hCompileTarget).sourceDepth ∧
+      RecursiveBridgeSourceFrameWordsResourceBound program
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).sourceDepth := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_sourceChecked, _hSourceFull, _hSourceAsm, _hSourceTarget,
+      _hSourceDepth, _hBound, hDepth, hResource⟩
+  exact ⟨hDepth, hResource⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+      ∃ check :
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+          asm 17 1024,
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm 17 1024 =
+          some check := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨sourceChecked, hSourceFull, hSourceAsm, hSourceTarget,
+      _hSourceDepth, hBound, _hDepth, _hResource⟩
+  cases hAsm
+  cases hTarget
+  have hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (checked.asm, checked.target) := by
+    unfold
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+    simp [hSourceFull, hSourceAsm, hSourceTarget]
+  refine ⟨hBase, checked.assemblyBound, ?_⟩
+  simpa using hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_executableBase
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordsStackSafeNoReturnDataCopy?_base
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget) ▸
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked
+      hCompileTarget).assemblyBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) := by
+  have hBound :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+      hCompileTarget
+  have hAsm :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget
+  exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualEVMStackHeadroomBound.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+/--
+Exact accumulated hidden-frame source stack gate.
+
+This is the source-side sibling of the frame-words-depth gate above.  Instead
+of checking `maxFrameWords * depth`, it keeps the executable
+`recursiveBridgeExecutableFrameWordSumStackCheck?` result, whose resource
+bound is the maximum sum of the actual active hidden return-frame sizes along
+accepted acyclic call paths.
+-/
+structure ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceCheck : RecursiveBridgeExecutableFrameWordSumStackCheckResult program
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option
+      (ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+        program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match recursiveBridgeExecutableFrameWordSumStackCheck? program with
+      | none => none
+      | some sourceCheck =>
+          some
+            { asm := asm
+              target := target
+              sourceCheck := sourceCheck }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked :
+      ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+        program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (checked.asm, checked.target) ∧
+      recursiveBridgeExecutableFrameWordSumStackCheck? program =
+        some checked.sourceCheck := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hChecked
+  | some pair =>
+      rcases pair with ⟨asm, target⟩
+      cases hSourceCheck :
+          recursiveBridgeExecutableFrameWordSumStackCheck? program with
+      | none =>
+          simp [hBase, hSourceCheck] at hChecked
+      | some sourceCheck =>
+          simp [hBase, hSourceCheck] at hChecked
+          cases hChecked
+          exact ⟨rfl, rfl⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeSourceFrameWordSumResourceBound program :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_checked
+    hCompileTarget).sourceCheck.toSourceFrameWordSumResourceBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_base
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨hBase, _hSourceCheck⟩
+  cases hAsm
+  cases hTarget
+  exact hBase
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+/--
+Exact accumulated hidden-frame source gate plus inferred target assembly
+headroom.  This is the preferred no-CALL stack gate once the exact weighted
+resource route is available.
+-/
+structure
+    ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+    (program : Program) : Type where
+  asm : Assembly.Program
+  target : Assembly.TargetProgram
+  sourceCheck : RecursiveBridgeExecutableFrameWordSumStackCheckResult program
+  assemblyBound :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+    (program : Program) :
+    Option
+      (ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+        program) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some sourceChecked =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none => none
+      | some assemblyBound =>
+          some
+            { asm := sourceChecked.asm
+              target := sourceChecked.target
+              sourceCheck := sourceChecked.sourceCheck
+              assemblyBound := assemblyBound }
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none => none
+  | some checked => some (checked.asm, checked.target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+    {program : Program}
+    {checked :
+      ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+        program}
+    (hChecked :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+          program =
+        some checked) :
+    ∃ sourceChecked :
+      ExecutableFrameWordSumStackSafeNoReturnDataCopyCheckedCompile program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+          program =
+        some sourceChecked ∧
+        sourceChecked.asm = checked.asm ∧
+        sourceChecked.target = checked.target ∧
+        sourceChecked.sourceCheck = checked.sourceCheck ∧
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            checked.asm 17 1024 =
+          some checked.assemblyBound := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+      at hChecked
+  cases hSourceFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hSourceFull] at hChecked
+  | some sourceChecked =>
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            sourceChecked.asm 17 1024 with
+      | none =>
+          simp [hSourceFull, hBound] at hChecked
+      | some assemblyBound =>
+          simp [hSourceFull, hBound] at hChecked
+          cases hChecked
+          rcases
+              compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+                hSourceFull with
+            ⟨_hBase, _hSourceCheck⟩
+          exact ⟨sourceChecked, rfl, rfl, rfl, rfl, hBound⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ∃ checked :
+      ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+        program,
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+          program =
+        some checked ∧
+        checked.asm = asm ∧ checked.target = target := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hFull :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+        program with
+  | none =>
+      simp [hFull] at hCompileTarget
+  | some checked =>
+      simp [hFull] at hCompileTarget
+      rcases hCompileTarget with ⟨rfl, rfl⟩
+      exact ⟨checked, rfl, rfl, rfl⟩
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    ExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyCheckedCompile
+      program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_full
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?
+        program =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+          hCompileTarget) :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).asm =
+      asm :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_target
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+        hCompileTarget).target =
+      target :=
+  (Classical.choose_spec
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+      hCompileTarget)).2.2
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+          hCompileTarget).assemblyBound := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_full
+          hCompileTarget) with
+    ⟨_sourceChecked, _hSourceFull, _hSourceAsm, _hSourceTarget,
+      _hSourceCheck, hBound⟩
+  exact hBound
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_sourceFrameWordSumResourceBound
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeSourceFrameWordSumResourceBound program :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+    hCompileTarget).sourceCheck.toSourceFrameWordSumResourceBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+      ∃ check :
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+          asm 17 1024,
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm 17 1024 =
+          some check := by
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some_full
+        hCompileTarget with
+    ⟨checked, hFull, hAsm, hTarget⟩
+  rcases
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopyFull?_eq_some
+        hFull with
+    ⟨sourceChecked, hSourceFull, hSourceAsm, hSourceTarget,
+      _hSourceCheck, hBound⟩
+  cases hAsm
+  cases hTarget
+  have hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (checked.asm, checked.target) := by
+    unfold
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+    simp [hSourceFull, hSourceAsm, hSourceTarget]
+  refine ⟨hBase, checked.assemblyBound, ?_⟩
+  simpa using hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_base
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_executableBase
+      hCompileTarget)
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget) ▸
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked
+      hCompileTarget).assemblyBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) := by
+  have hBound :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_assemblyBound_checked
+      hCompileTarget
+  have hAsm :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_checked_asm
+      hCompileTarget
+  exact inferProgramBoundCheckResult?_checked_cast hAsm hBound
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualEVMStackHeadroomBound.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+noncomputable def
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+    (program : Program) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm 17 1024 with
+      | none => none
+      | some _assemblyBound => some (asm, target)
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+      ∃ check :
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+          asm 17 1024,
+        _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm 17 1024 =
+          some check := by
+  unfold
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      simp [hBase] at hCompileTarget
+      cases hBound :
+          _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+            asm' 17 1024 with
+      | none =>
+          simp [hBound] at hCompileTarget
+      | some assemblyBound =>
+          simp [hBound] at hCompileTarget
+          rcases hCompileTarget with ⟨rfl, rfl⟩
+          exact ⟨by simpa [hBase] using hBase, assemblyBound, by simpa using hBound⟩
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+noncomputable def
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+      asm 17 1024 :=
+  Classical.choose
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck_checked
+    {program : Program} {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.inferProgramBoundCheckResult?
+        asm 17 1024 =
+      some
+        (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+          hCompileTarget) :=
+  Classical.choose_spec
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+theorem
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target)) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualEVMStackHeadroomBound.of_assemblyBoundCheck
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCheck
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+      hCompileTarget)
+    hSourceRun hRun
+    (by
+      simpa [canonicalEntryState] using
+        (_root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult.initialSourceStackBoundPoint
+          (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
+            hCompileTarget)
+          (by decide : 17 ≤ 1024)
+          (state := initial)))
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourcePoints.of_runNResult_invariant_initial
+    hSourceRun hRun hStep
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunActiveResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+              hCompileTarget).2
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+                hCompileTarget).2
+              mid) :
+    RecursiveBridgeActualSourceRunActiveResourcePoints cfg program asm target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+        hCompileTarget).2
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunActiveResourcePoints.of_runNResult_invariant_initial
+    hSourceRun hRun hStep
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourcePoints_of_activeResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+              hCompileTarget).2
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+                hCompileTarget).2
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunActiveResourcePoints
+    hCompileTarget hSourceRun hRun hStep).toFrameStackResourcePoints
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_activeResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+              hCompileTarget).2
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+                hCompileTarget).2
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourcePoints.toContext
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourcePoints_of_activeResourcePoints
+      hCompileTarget hSourceRun hRun hStep)
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackHeadroom_of_activeResourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectActiveResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+              hCompileTarget).2
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectActiveResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_checked_sourceResourceBound
+                hCompileTarget).2
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackHeadroom cfg program asm target
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourceContext.toHeadroom
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_activeResourcePoints
+      hCompileTarget hSourceRun hRun hStep)
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourcePoints.toContext
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourcePoints
+      hCompileTarget hSourceRun hRun hStep)
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackHeadroom
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackHeadroom cfg program asm target
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourceContext.toHeadroom
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext
+      hCompileTarget hSourceRun hRun hStep)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_resourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+          hCompileTarget)
+        shared store initial referenceResult) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
+    hCompileTarget
+    (RecursiveBridgeActualSourceRunFrameStackResourcePoints.toEVMStackHeadroomPoints
+      hPoints)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunEVMStackHeadroomPoints_of_assemblyBoundCheck
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (_hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (check :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.ProgramBoundCheckResult
+        asm 17 1024)
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hInitialPoint :
+      _root_.EvmCompiler.Structured.StackResource.AssemblyBounds.SourceStackBoundPoint
+        asm check.table 17 1024 (canonicalEntryState initial)) :
+    RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+      target shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.of_assemblyBoundCheck
+    check hSourceRun hRun hInitialPoint
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+          hCompileTarget)
+        shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourcePoints.toContext
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    hPoints
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
+    hCompileTarget
+    (RecursiveBridgeActualSourceRunFrameStackResourcePoints.of_runNResult_invariant_initial
+      hSourceRun hRun hStep)
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_blockTraceResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Program.instrAtPc asm state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? asm pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourceContext.of_blockTraceResult_invariant_initial
+    hSourceRun hStep
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+    (program : Program)
+    (edges : List Functions.CallDepth.Ranked.Edge)
+    (roots : List Functions.CallDepth.Ranked.Node) :
+    Option (Assembly.Program × Assembly.TargetProgram) :=
+  match
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none => none
+  | some (asm, target) =>
+      match
+          recursiveBridgeExecutableRankedStackCheckResultAsStack? program
+            edges roots with
+      | none => none
+      | some _stack => some (asm, target)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) ∧
+        ∃ stackCheck : RecursiveBridgeExecutableStackCheckResult program,
+          recursiveBridgeExecutableRankedStackCheckResultAsStack? program
+            edges roots =
+            some stackCheck := by
+  unfold
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+      at hCompileTarget
+  cases hBase :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program with
+  | none =>
+      simp [hBase] at hCompileTarget
+  | some pair =>
+      rcases pair with ⟨asm', target'⟩
+      cases hStack :
+          recursiveBridgeExecutableRankedStackCheckResultAsStack? program
+            edges roots with
+      | none =>
+          simp [hBase, hStack] at hCompileTarget
+      | some stackCheck =>
+          simp [hBase, hStack] at hCompileTarget
+          rcases hCompileTarget with ⟨rfl, rfl⟩
+          exact ⟨rfl, ⟨stackCheck, by simp⟩⟩
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_base
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+        program =
+      some (asm, target) :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
+    hCompileTarget).1
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    Assembly.compile? asm = some target :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_base
+      hCompileTarget)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunEVMStackHeadroomPoints cfg program asm
+        target shared store initial referenceResult) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  RecursiveBridgeActualSourceRunEVMStackHeadroomPoints.toEVMStackHeadroomBound
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    hPoints
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackCheck
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    RecursiveBridgeExecutableStackCheckResult program :=
+  Classical.choose
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
+      hCompileTarget).2
+
+noncomputable def
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    RecursiveBridgeExecutableStackResourceCheckResult program :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackCheck
+    hCompileTarget).toStackResourceCheckResult
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceSafe
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    _root_.EvmCompiler.Functions.CallDepth.Program.StackResourceSafe
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).lowerObj.toFunctions
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget).toStackBudget :=
+  (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+    hCompileTarget).stackResourceSafe
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_resourcePoints
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+          hCompileTarget)
+        shared store initial referenceResult) :
+    RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+      store initial referenceResult :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound_of_points
+    hCompileTarget
+    (RecursiveBridgeActualSourceRunFrameStackResourcePoints.toEVMStackHeadroomPoints
+      hPoints)
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target))
+    (hPoints :
+      RecursiveBridgeActualSourceRunFrameStackResourcePoints cfg program asm
+        target
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+          hCompileTarget)
+        shared store initial referenceResult) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourcePoints.toContext
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_assemblyCompile
+      hCompileTarget)
+    hPoints
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_runNResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hRun :
+      ∀ {sourceOutcome : Objects.Source.Outcome}
+        {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store) referenceResult sourceOutcome →
+        SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+        Assembly.Source.runNResult asm targetFuel (canonicalEntryState initial) =
+          .ok targetOutcome)
+    (hStep :
+      ∀ {state mid : EVMState},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Source.stepResult asm state = .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_points
+    hCompileTarget
+    (RecursiveBridgeActualSourceRunFrameStackResourcePoints.of_runNResult_invariant_initial
+      hSourceRun hRun hStep)
+
+private theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_actualSourceRunFrameStackResourceContext_of_blockTraceResult_invariant
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {sourceFuel : Nat}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target))
+    (hSourceRun :
+      RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        RecursiveBridgeSourceDirectResourcePoint
+            (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+              hCompileTarget)
+            state →
+          Assembly.Program.instrAtPc asm state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? asm pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            RecursiveBridgeSourceDirectResourcePoint
+              (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+                hCompileTarget)
+              mid) :
+    RecursiveBridgeActualSourceRunFrameStackResourceContext cfg program asm
+      target
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackResourceCheck
+        hCompileTarget)
+      shared store initial referenceResult :=
+  RecursiveBridgeActualSourceRunFrameStackResourceContext.of_blockTraceResult_invariant_initial
+    hSourceRun hStep
+
+theorem
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_rankedCheck
+    {program : Program}
+    {edges : List Functions.CallDepth.Ranked.Edge}
+    {roots : List Functions.CallDepth.Ranked.Node}
+    {asm : Assembly.Program}
+    {target : Assembly.TargetProgram}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?
+          program edges roots =
+        some (asm, target)) :
+    ∃ rankedCheck : RecursiveBridgeExecutableRankedStackCheckResult program,
+      recursiveBridgeExecutableRankedStackCheck? program edges roots =
+        some rankedCheck ∧
+        program.toObjects? = some rankedCheck.lowerObj ∧
+        Functions.CallDepth.Ranked.Program.rankedMaxRootDepth?
+            rankedCheck.ranked.edges rankedCheck.ranked.roots =
+          some rankedCheck.ranked.depthCheck.depth ∧
+        16 + 17 * rankedCheck.ranked.depthCheck.depth + 17 ≤ 1024 ∧
+        Functions.CallDepth.Ranked.graphConforms?
+            rankedCheck.lowerObj.toFunctions
+            rankedCheck.ranked.edges rankedCheck.ranked.roots =
+          true := by
+  let stackCheck :=
+    compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_stackCheck
+      hCompileTarget
+  have hStack :
+      recursiveBridgeExecutableRankedStackCheckResultAsStack? program
+          edges roots =
+        some stackCheck :=
+    Classical.choose_spec
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticRankedExecutableStackSafeNoReturnDataCopy?_eq_some
+        hCompileTarget).2
+  rcases
+      recursiveBridgeExecutableRankedStackCheckResultAsStack?_eq_some hStack with
+    ⟨rankedCheck, _hStackEq, hRanked, hLower, hDepth, hBudget,
+      hConforms⟩
+  exact ⟨rankedCheck, hRanked, hLower, hDepth, hBudget, hConforms⟩
+
+/-!
+Actual-trace EVM stack headroom only.  For ordinary non-static entry states,
+the static-mode side condition is derivable target-locally from no-CALL/no-CREATE
+permission preservation, so the public residual target resource can be just this
+headroom package plus `initial.executionEnv.perm = true`.
+-/
+structure RecursiveBridgeActualXTraceHeadroomFacts
+    (cfg : Reference.StateRelConfig)
+    (program : Program)
+    (asm : Assembly.Program) (target : Assembly.TargetProgram)
+    (shared : EvmYul.SharedState .Yul)
+    (store : EvmYul.Yul.VarStore)
+    (initial : EVMState)
+    (referenceResult : Reference.Result) : Prop where
+  traceHeadroom :
+    ∀ {sourceFuel : Nat} {sourceOutcome : Objects.Source.Outcome}
+      {targetFuel : Nat} {targetOutcome : Assembly.StepResult},
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult →
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome →
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome →
+      (hTrace :
+        Assembly.Preservation.BlockTraceResult asm target targetFuel
+          (canonicalEntryState initial) targetOutcome) →
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor
+        target hTrace
+
+namespace RecursiveBridgeActualEVMStackHeadroomBound
+
+theorem toXTraceHeadroomFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hBound :
+      RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target shared
+      store initial referenceResult where
+  traceHeadroom := by
+    intro sourceFuel sourceOutcome targetFuel targetOutcome
+      hSourceRun hOutcome hWholeRel hTrace
+    exact
+      RecursiveBridgeActualBlockTraceStackHeadroom.toXStepTrace
+        (hBound.traceHeadroom hSourceRun hOutcome hWholeRel hTrace)
+
+end RecursiveBridgeActualEVMStackHeadroomBound
+
+namespace RecursiveBridgeActualXTraceFacts
+
+theorem toResidualFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hFacts :
+      RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+        initial referenceResult) :
+    RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+      store initial referenceResult where
+  traceResidual := by
+    intro sourceFuel sourceOutcome targetFuel targetOutcome
+      hSourceRun hOutcome hWholeRel hTrace
+    exact
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor.of_core_trace
+        (hFacts.traceFacts hSourceRun hOutcome hWholeRel hTrace)
+
+end RecursiveBridgeActualXTraceFacts
+
+namespace RecursiveBridgeActualXTraceResidualFacts
+
+theorem toCoreFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hResidual :
+      RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+        store initial referenceResult) :
+    RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+      initial referenceResult where
+  traceFacts :=
+    fun {sourceFuel} {sourceOutcome} {targetFuel} {targetOutcome}
+      hSourceRun hOutcome hWholeRel hTrace =>
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_coreTrace_of_traceInstrCoreResidualReady
+        hCompileTarget
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+          hCompileTarget)
+        (hResidual.traceResidual
+          (sourceFuel := sourceFuel)
+          (sourceOutcome := sourceOutcome)
+          (targetFuel := targetFuel)
+          (targetOutcome := targetOutcome)
+          hSourceRun hOutcome hWholeRel hTrace)
+
+end RecursiveBridgeActualXTraceResidualFacts
+
+namespace RecursiveBridgeActualXTraceStackStaticFacts
+
+theorem toResidualFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hStackStatic :
+      RecursiveBridgeActualXTraceStackStaticFacts cfg program asm target shared
+        store initial referenceResult) :
+    RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+      store initial referenceResult where
+  traceResidual :=
+    fun {sourceFuel} {sourceOutcome} {targetFuel} {targetOutcome}
+      hSourceRun hOutcome hWholeRel hTrace =>
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor.of_stack_static_ready
+        (hStackStatic.traceStackStatic
+          (sourceFuel := sourceFuel)
+          (sourceOutcome := sourceOutcome)
+          (targetFuel := targetFuel)
+          (targetOutcome := targetOutcome)
+          hSourceRun hOutcome hWholeRel hTrace)
+
+theorem toCoreFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hStackStatic :
+      RecursiveBridgeActualXTraceStackStaticFacts cfg program asm target shared
+        store initial referenceResult) :
+    RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+      initial referenceResult :=
+  RecursiveBridgeActualXTraceResidualFacts.toCoreFacts
+    hCompileTarget hStackStatic.toResidualFacts
+
+end RecursiveBridgeActualXTraceStackStaticFacts
+
+namespace RecursiveBridgeActualXTraceHeadroomStaticFacts
+
+theorem toResidualFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hHeadroomStatic :
+      RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+      store initial referenceResult where
+  traceResidual :=
+    fun {sourceFuel} {sourceOutcome} {targetFuel} {targetOutcome}
+      hSourceRun hOutcome hWholeRel hTrace =>
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor.of_headroom_static_ready
+        (hHeadroomStatic.traceHeadroomStatic
+          (sourceFuel := sourceFuel)
+          (sourceOutcome := sourceOutcome)
+          (targetFuel := targetFuel)
+          (targetOutcome := targetOutcome)
+          hSourceRun hOutcome hWholeRel hTrace)
+
+theorem toCoreFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hHeadroomStatic :
+      RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+      initial referenceResult :=
+  RecursiveBridgeActualXTraceResidualFacts.toCoreFacts
+    hCompileTarget hHeadroomStatic.toResidualFacts
+
+theorem of_stackStatic
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hStackStatic :
+      RecursiveBridgeActualXTraceStackStaticFacts cfg program asm target shared
+        store initial referenceResult) :
+    RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+      shared store initial referenceResult where
+  traceHeadroomStatic := by
+    intro sourceFuel sourceOutcome targetFuel targetOutcome
+      hSourceRun hOutcome hWholeRel hTrace
+    exact
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomStaticReadyFor.of_stack_static_ready
+        (hStackStatic.traceStackStatic
+          hSourceRun hOutcome hWholeRel hTrace)
+
+end RecursiveBridgeActualXTraceHeadroomStaticFacts
+
+namespace RecursiveBridgeActualXTraceHeadroomFacts
+
+theorem toHeadroomStaticFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hHeadroom :
+      RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+      shared store initial referenceResult where
+  traceHeadroomStatic := by
+    intro sourceFuel sourceOutcome targetFuel targetOutcome
+      hSourceRun hOutcome hWholeRel hTrace
+    exact
+      Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomStaticReadyFor.of_headroom_perm_true
+        (hHeadroom.traceHeadroom hSourceRun hOutcome hWholeRel hTrace)
+        (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+          hCompileTarget)
+        (by simpa [canonicalEntryState] using hInitialPerm)
+
+theorem toResidualFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hHeadroom :
+      RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+      store initial referenceResult :=
+  (toHeadroomStaticFacts hCompileTarget hInitialPerm hHeadroom).toResidualFacts
+
+theorem toCoreFacts
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hHeadroom :
+      RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target
+        shared store initial referenceResult) :
+    RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+      initial referenceResult :=
+  RecursiveBridgeActualXTraceResidualFacts.toCoreFacts
+    hCompileTarget
+    (toResidualFacts hCompileTarget hInitialPerm hHeadroom)
+
+end RecursiveBridgeActualXTraceHeadroomFacts
 
 namespace RecursiveBridgeTopNoCallAssumptions
 
@@ -825,7 +9940,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
   compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
     (hTop := hTop.toTopAssumptions)
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_budgetedConcreteGas_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_budgetedConcreteGas_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -928,7 +10043,7 @@ trace produced by preservation. This is the thin bridge we want higher layers
 to construct, rather than a global path-check predicate over every target
 state.
 -/
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_traceChecks_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_traceChecks_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1029,7 +10144,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
       hGasFits
   exact ⟨evmFuel, result, hXRun, hAgrees⟩
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_coreNoReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_coreNoReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1114,7 +10229,7 @@ than asking callers to prove that the exact budget itself fits in a `UInt256`.
 For every installed UInt256 gas value at or above that bound, the gas-aware EVM
 run follows the checked path and agrees with the gasless target result.
 -/
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sufficientGas_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1178,7 +10293,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
         hTrace hTargetNonGasChecks)
     hTargetDoneContinuation
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_budgetedConcreteGas_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_budgetedConcreteGas_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1242,7 +10357,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     hTop.toNoCallAssumptions hCode hTargetGasBudgetFits
     hTargetNonGasChecks hTargetDoneContinuation
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_traceChecks_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_traceChecks_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1307,7 +10422,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     hTop.toNoCallAssumptions hCode hTargetTraceChecks
     hTargetDoneContinuation
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_coreNoReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_coreNoReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1370,7 +10485,7 @@ theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllB
     hTop.toNoCallAssumptions hCode hTargetCoreChecks hTargetNoReturnDataCopy
     hTargetDoneContinuation
 
-theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_X
+private theorem compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_sufficientGas_X
     {cfg : Reference.StateRelConfig}
     {terminalRel :
       Assembly.HaltKind → Word → Reference.State →
@@ -1444,7 +10559,7 @@ path-local non-gas `EVM.X` checks are safe, and fuel-exhausted target traces
 have a continuation. Bytecode decode readiness is derived from the checked
 compiler encoding and decode-safety facts.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_budgetedConcreteGas_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_budgetedConcreteGas_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -1577,7 +10692,7 @@ This is the same public observation theorem as `..._sufficientGas_X`, but its
 target-side non-gas safety premise is indexed by the actual gasless trace
 produced by the compiler-preservation proof.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -1707,7 +10822,7 @@ Trace-local sufficient-gas theorem whose public source boundary is the
 expression-result contract directly, rather than the older successful
 `.OutOfFuel` exclusion used to manufacture it.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_traceChecks_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_traceChecks_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -1841,7 +10956,7 @@ a `.running` state, callers only need to prove the precise fallthrough-STOP
 observation condition for that final state; the generic
 `XTraceDoneContinuation` package is built internally here.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -1932,7 +11047,7 @@ structurally rejects `RETURNDATACOPY`, avoiding the known mismatch where
 gas-aware `EVM.X` checks return-data bounds that the current source/gasless
 target bridge does not yet model.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2015,9 +11130,9 @@ Preferred no-CALL gas-aware public root with trace-local core non-gas checks.
 The checked compiler boundary supplies the no-CALL/CREATE and
 no-`RETURNDATACOPY` side conditions. The remaining target-side safety premise
 is local to the concrete gasless block trace rather than a global replay
-certificate over arbitrary emitted-code suffix states.
+check result over arbitrary emitted-code suffix states.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2108,7 +11223,7 @@ fallthrough `STOP` step. This wrapper keeps that finalization premise concrete:
 the final state must decode off the end of bytecode, have a bounded stack, and
 already have the empty return buffers that `STOP` writes.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2195,7 +11310,7 @@ intermediate trace (`CoreBlockTraceResultFor`) rather than directly as the
 gas-aware replay predicate. The checked compiler facts still discharge
 no-CALL/CREATE and no-`RETURNDATACOPY`.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_coreTrace_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_coreTrace_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2283,7 +11398,7 @@ readiness.
 The checked compiler boundary constructs the assembly layout and jumpdest facts
 needed to lift this local premise into the core-safe target trace layer.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2365,7 +11480,7 @@ Unlike `XBlockInstrCoreReady`, this premise only talks about blocks that occur
 in the actual gasless target trace, so later stack/resource invariants can
 discharge it without proving false facts about arbitrary starting stacks.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInstrCoreReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInstrCoreReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2451,7 +11566,7 @@ This is the proof-facing boundary we want to discharge next: stack bounds and
 primitive core readiness are attached to the exact gasless target trace
 constructor before being lifted to emitted-block core readiness.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2537,9 +11652,9 @@ Audit-facing sufficient-gas theorem whose conclusion exposes the checked
 The older `traceInputsReady` theorem only exposes the final `EVM.X = .ok`
 equation.  This wrapper keeps the same public premises but strengthens the
 sufficient-gas conclusion with the `XStepTrace` proof that the gas-aware run
-follows the decoded bytecode path certified from the gasless trace.
+follows the decoded bytecode path validated from the gasless trace.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2690,7 +11805,7 @@ This removes the public per-trace callback shape: callers supply one checked
 `InstrCoreBlockTraceInputsReadyFor` evidence is constructed by induction over
 the actual gasless target trace.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_instrCoreInputsReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_instrCoreInputsReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2775,7 +11890,7 @@ They are requested only for the preservation trace that the checked source and
 compiler proof actually produce.  This avoids the false obligations over
 arbitrary target block states and the zero-fuel `done` trace.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -2887,11 +12002,46 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
         (initial := canonicalEntryState initial))
       (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
   obtain
-    ⟨sourceOutcome, targetFuel, targetOutcome, hSourceRun, hOutcome,
-      hWholeRel, hAccepted, hBytes, hEncoding, hOutOfGas, hProjection,
-      hTrace⟩ :=
-    compile_whole_program_result_sound_of_programAcceptedRecursiveBridgeAllBoundsReserved_topNoCall
-      hTop.toNoCallAssumptions
+    ⟨sourceOutcome, _sourceTargetFuel, _oldTargetFuel, _oldTargetOutcome,
+      hSourceRun, hSourceLoweredRun, hOutcome, _hOldWholeRel,
+      _hOldAccepted, _hOldBytes, _hOldEncoding, _hOldOutOfGas,
+      _hOldProjection, _hOldTrace⟩ :=
+    compile_whole_program_result_sound_with_source_run_of_programAcceptedRecursiveBridgeAllBoundsReserved_top
+      hTop.toNoCallAssumptions.toTopAssumptions
+  obtain ⟨targetFuel, targetOutcome, hTargetRun, hWholeRel, hTargetEndPc⟩ :=
+    compile_source_preserves_checked_of_compileAccepted_endPc
+      hTop.semantics.primitiveSound
+      hCompile hSourceCompileAccepted
+      (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
+      hSourceLoweredRun
+  let hCompileTarget := (compileCheckedAssemblyTarget?_eq_some hBytecode.1).2
+  have hAcceptedTrace :
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.EncodingCorrect target
+          (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (canonicalEntryState initial) targetOutcome :=
+    Assembly.Bytecode.compile_runN_result_bytecode_bridge_checked
+      hCompileTarget
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
+        hCheckedCompileTarget)
+      (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+        hCheckedCompileTarget)
+      hTargetRun
+  rcases hAcceptedTrace with ⟨hAccepted, hEncoding, hTrace⟩
+  have hBytes :
+      Assembly.Bytecode.compileBytes? asm =
+        some (Assembly.Bytecode.encodeTarget target) := by
+    simp [Assembly.Bytecode.compileBytes?, hCompileTarget]
+  have hOutOfGas :
+      Assembly.OutOfGasPolicyAssumption asm (canonicalEntryState initial) :=
+    Assembly.OutOfGasPolicyAssumption.trivial (program := asm)
+      (initial := canonicalEntryState initial)
+  have hProjection :
+      Assembly.CurrentContractProjectionAssumption asm
+        (canonicalEntryState initial) :=
+    Assembly.CurrentContractProjectionAssumption.trivial (program := asm)
+      (initial := canonicalEntryState initial)
   have hCode :
       (canonicalEntryState initial).executionEnv.code =
         Assembly.Bytecode.encodeTarget target := by
@@ -2910,12 +12060,14 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
       Assembly.GasAware.XStepTrace.XBlockReplayNoReturnDataCopy asm target :=
     compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
       hCheckedCompileTarget
-  have hActualFacts :=
-    hActualXTraceFacts.traceFacts hSourceRun hOutcome hWholeRel hTrace
   have hCoreTrace :
       Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor
         (Assembly.GasAware.validJumps target) hTrace :=
-    hActualFacts.1
+    hActualXTraceFacts.traceFacts hSourceRun hOutcome hWholeRel hTrace
+  have hTraceFallthroughPc :
+      Assembly.GasAware.XStepTrace.XTraceFallthroughPcFor hTrace :=
+    xTraceFallthroughPcFor_of_targetOutcomeEndPc
+      hCompileTarget hBytecode.2.1 hTargetEndPc hTrace
   have hTraceCoreChecks :
       Assembly.GasAware.XStepTrace.XBlockTraceCoreChecksReadyFor
         (Assembly.GasAware.validJumps target) hTrace :=
@@ -2932,7 +12084,7 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
     Assembly.GasAware.XStepTrace.XTraceFallthroughPcAndReturnCleanFor.of_pc_initialClean
       hAsmNoCallCreate
       hInitialCodeImageRel.canonicalReturnBuffersClean
-      hActualFacts.2
+      hTraceFallthroughPc
   have hFinalObservation :
       Assembly.GasAware.XStepTrace.XTraceFinalizationObservationReadyFor
         hTrace :=
@@ -2976,6 +12128,1484 @@ theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_t
   exact ⟨evmFuel, result, hTraceX, hXRun, hAgrees⟩
 
 /--
+Live-layout checked no-CALL gas-aware root.
+
+This is the same actual-trace theorem as the legacy checked-compile root above,
+but the compiler premise is the executable live-layout no-internal-CALL gate.
+In particular, the source/target preservation step consumes
+`compileLiveNoInternalCallChecked?` directly rather than reconstructing the old
+`SourceCompileAccepted` resource package.
+-/
+private theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceFacts :
+      RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+        initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result := by
+  obtain ⟨sourceFuel, hRun⟩ := hSourceFuelRun
+  have hCheckedBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?
+          program =
+        some (asm, target) :=
+    (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_eq_some
+      hCheckedCompileTarget).1
+  let hStatic :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStatic?_eq_some
+      hCheckedBase
+  let hFeatures :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeatures?_eq_some
+      hStatic.1
+  let hBytecode :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecode?_eq_some
+      hFeatures.1
+  let hCompile :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_compileLive
+      hCheckedCompileTarget
+  let hAssemble :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemblyCompile
+      hCheckedCompileTarget
+  rcases compileLiveNoInternalCallChecked?_eq_some hCompile with
+    ⟨lowerObj, hLowerObj, _hObjCompile⟩
+  rcases exists_functionProgram_of_toObjects?_some hLowerObj with
+    ⟨functionProgram, hToObjects⟩
+  let hProgramSourceAccepted : Program.SourceAccepted program :=
+    Program.sourceAccepted_of_sourceAcceptedCore_supported
+      hStatic.2.sourceAcceptedCore hStatic.2.supported
+  have hCoverageProgram :
+      Reference.Safe.FeatureCoverage.program program :=
+    hFeatures.2.to_program_of_objectBuiltin
+      (Reference.Safe.FeatureCoverage.objectBuiltinProgram_of_toObjects?_some
+        hLowerObj)
+  have hSafeProgram : Reference.Safe.program program :=
+    (Reference.Safe.FeatureCoverage.program_iff_safe program).mp
+      hCoverageProgram
+  let hCore :
+      RecursiveBridgeSemanticCoreContracts cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured program :=
+    RecursiveBridgeSemanticCoreContracts.ofBoundaries
+      RecursiveBridgePrimitiveArityContracts.structured
+      (RecursiveBridgeTerminalContracts.structured_of_observation
+        (RecursiveBridgeTerminalObservationContracts.canonical cfg program))
+      hExprResultContracts
+  let hSemantics :=
+    hCore.toSemanticContracts (shared := shared) (store := store)
+  let sourceInitial : Objects.Source.State :=
+    Functions.Source.Program.initialState
+      (canonicalEntryState initial).toSharedState
+  have hSourceInitialRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial := by
+    exact
+      Reference.SourceBridgeFacts.SourceStateRel.ok
+        (RecursiveBridgeInitialWorldRel.to_canonicalEntryState
+          hInitialCodeImageRel.world)
+        (by
+          intro name hMem
+          cases hMem)
+  have hInitialRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (Program.installContract program (.Ok shared store)) sourceInitial := by
+    cases hSourceInitialRel with
+    | ok hShared _hVars =>
+        exact
+          Reference.SourceBridgeFacts.SourceStateRel.ok hShared
+            (by
+              intro name hMem
+              cases hMem)
+  let context :
+      Reference.SourceBridgeFacts.ProgramBridgeContext program
+        functionProgram :=
+    { toObjects := hToObjects
+      safe := hSafeProgram
+      sourceScoped := hStatic.2.sourceScoped
+      controlScoped := hStatic.2.controlScoped
+      noShadowing := hStatic.2.noShadowing
+      userCalls := hStatic.2.userCalls
+      checkpoint :=
+        Reference.SourceBridgeFacts.CheckpointExpressionSound.of_primitive_families }
+  have hRecursive :
+      Reference.SourceBridgeFacts.ProgramAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved
+        cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured program functionProgram
+        context sourceFuel :=
+    Reference.SourceBridgeFacts.programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_allBounds
+      (cfg := cfg)
+      (terminalRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+      (revertRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (yulProgram := program) (program := functionProgram)
+      (context := context) hSemantics.terminal
+      (by
+        intro layout fuel yulPrim op hSafe hBasic
+        exact
+          hSemantics.primitiveStack (layout := layout) (fuel := fuel)
+            (yulPrim := yulPrim) (op := op) hSafe hBasic)
+      hSemantics.exprResultOk sourceFuel
+  have hSourceInitialExact :
+      Reference.SourceBridgeFacts.SourceStateExactRel cfg []
+        (.Ok
+          { shared with
+            executionEnv :=
+              { shared.executionEnv with code := program.contract } }
+          (default : EvmYul.Yul.VarStore))
+        sourceInitial :=
+    Reference.SourceBridgeFacts.SourceStateExactRel.of_initial_scope_default
+      (by rfl) hSourceInitialRel
+  have hBridge :
+      CheckedRecursiveDispatcherRunBridge cfg []
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured
+        (RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store))
+        program functionProgram shared store sourceInitial sourceFuel :=
+    checkedRecursiveDispatcherRunBridge_of_programAcceptedRecursiveSourceBridgeWhenUpToAtExactCompatNamesReserved_actual
+      (cfg := cfg) (layout := [])
+      (terminalRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+      (revertRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      (outcomeRel :=
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store))
+      (program := program) (functionProgram := functionProgram)
+      (context := context) (shared := shared) (store := store)
+      (sourceInitial := sourceInitial) (bound := sourceFuel)
+      (sourceFuel := sourceFuel) (referenceResult := referenceResult)
+      hSourceInitialExact hRun.run hRecursive (by rfl)
+      (Nat.le_refl sourceFuel)
+      (RecursiveBridgeSourceRun.toDispatcherBodyNoOutOfFuel hRun)
+      hSemantics.observation
+  obtain
+    ⟨sourceOutcome, sourceTargetFuel, _oldTargetFuel, _oldTargetOutcome,
+      hSourceRun, hSourceLoweredRun, _oldTargetRun, hOutcome,
+      _oldWholeRel⟩ :=
+    compile_preserves_with_source_run_of_dispatcher_source_result_block_bridge_liveNoInternalCallChecked
+      (cfg := cfg) (layout := [])
+      (terminalRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+      (revertRel :=
+        RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      hSemantics.primitiveSound
+      (stateRel := Reference.SourceBridgeFacts.SourceStateRel cfg [])
+      (outcomeRel :=
+        RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          program (.Ok shared store))
+      (program := program) (functionProgram := functionProgram)
+      (asm := asm) (shared := shared) (store := store)
+      (sourceInitial := sourceInitial) (sourceFuel := sourceFuel)
+      (initial := canonicalEntryState initial)
+      (referenceResult := referenceResult)
+      hProgramSourceAccepted hToObjects hInitialRel hBridge.runBridge
+      (fun sourceResult sourceOutcome targetFuel hSource hSourceRun hRel => by
+        rcases
+            Reference.Imported.exists_exec_dispatcher_of_runResult_succ_ok
+              sourceFuel program (.Ok shared store) hRun.run with
+          ⟨sourceResultFromRun, hSourceRaw, hBodyResult⟩
+        have hSourceFromRun :
+            EvmYul.Yul.exec sourceFuel
+                (.Block [program.contract.dispatcher])
+                (some program.contract)
+                (.Ok
+                  { shared with
+                    executionEnv :=
+                      { shared.executionEnv with code :=
+                          program.contract } }
+                  (default : EvmYul.Yul.VarStore)) =
+              sourceResultFromRun := by
+          simpa [Reference.Imported.dispatcherBody_installContract_ok,
+            Reference.Imported.dispatcherCallState_installContract_ok]
+            using hSourceRaw
+        have hEq : sourceResult = sourceResultFromRun := by
+          rw [hSource] at hSourceFromRun
+          exact hSourceFromRun
+        have hBodyResult' :
+            Reference.Imported.dispatcherRunResultOfBody program
+                (.Ok shared store) sourceResult =
+              .ok referenceResult := by
+          simpa [hEq] using hBodyResult
+        exact
+          (dispatcherRunResultSound_of_observation
+            (cfg := cfg) (layout := [])
+            (terminalRel :=
+              RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+                cfg)
+            (revertRel :=
+              RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+                cfg)
+            (prim := Locals.Source.PrimitiveSemantics.structured)
+            (outcomeRel :=
+              RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+                (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+                  cfg)
+                (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel
+                  cfg)
+                program (.Ok shared store))
+            (program := program) (referenceInitial := .Ok shared store)
+            (sourceInitial := sourceInitial)
+            (referenceResult := referenceResult) hBridge.observation)
+            sourceResult hBodyResult' sourceOutcome targetFuel hSourceRun
+            hRel)
+      hCompile (canonicalEntryState_pc initial)
+      (canonicalEntryState_stack initial) rfl
+  obtain ⟨targetFuel, targetOutcome, hTargetRun, hWholeRel, hTargetEndPc⟩ :=
+    compile_live_noInternalCall_source_preserves_checked_endPc_anyFuel
+      (prim := Locals.Source.PrimitiveSemantics.structured)
+      hSemantics.primitiveSound (program := program) (asm := asm)
+      (fuel := sourceTargetFuel) (initial := canonicalEntryState initial)
+      (sourceOutcome := sourceOutcome) hCompile hProgramSourceAccepted
+      (canonicalEntryState_pc initial) (canonicalEntryState_stack initial)
+      hSourceLoweredRun
+  have hAcceptedTrace :
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.EncodingCorrect target
+          (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Preservation.BlockTraceResult asm target targetFuel
+            (canonicalEntryState initial) targetOutcome :=
+    Assembly.Bytecode.compile_runN_result_bytecode_bridge_checked
+      hAssemble
+      (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
+        hCheckedCompileTarget)
+      (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+        hCheckedCompileTarget)
+      hTargetRun
+  rcases hAcceptedTrace with ⟨hAccepted, hEncoding, hTrace⟩
+  have hBytes :
+      Assembly.Bytecode.compileBytes? asm =
+        some (Assembly.Bytecode.encodeTarget target) := by
+    simp [Assembly.Bytecode.compileBytes?, hAssemble]
+  have hOutOfGas :
+      Assembly.OutOfGasPolicyAssumption asm (canonicalEntryState initial) :=
+    Assembly.OutOfGasPolicyAssumption.trivial (program := asm)
+      (initial := canonicalEntryState initial)
+  have hProjection :
+      Assembly.CurrentContractProjectionAssumption asm
+        (canonicalEntryState initial) :=
+    Assembly.CurrentContractProjectionAssumption.trivial (program := asm)
+      (initial := canonicalEntryState initial)
+  have hCode :
+      (canonicalEntryState initial).executionEnv.code =
+        Assembly.Bytecode.encodeTarget target := by
+    simpa [canonicalEntryState] using hInitialCodeImageRel.targetCode
+  have hSafety : Assembly.Bytecode.DecodeSafety target :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_decodeSafety
+      hCheckedCompileTarget
+  have hNoCallCreate :
+      Assembly.GasAware.XStepTrace.XBlockReplayNoCallCreate asm target :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoCallCreate
+      hCheckedCompileTarget
+  have hAsmNoCallCreate : asm.usesCallCreate = false :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+      hCheckedCompileTarget
+  have hNoReturnDataCopy :
+      Assembly.GasAware.XStepTrace.XBlockReplayNoReturnDataCopy asm target :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_blockReplayNoReturnDataCopy
+      hCheckedCompileTarget
+  have hCoreTrace :
+      Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor
+        (Assembly.GasAware.validJumps target) hTrace :=
+    hActualXTraceFacts.traceFacts hSourceRun hOutcome hWholeRel hTrace
+  have hTraceFallthroughPc :
+      Assembly.GasAware.XStepTrace.XTraceFallthroughPcFor hTrace :=
+    xTraceFallthroughPcFor_of_targetOutcomeEndPc
+      hAssemble hBytecode.2.1 hTargetEndPc hTrace
+  have hTraceCoreChecks :
+      Assembly.GasAware.XStepTrace.XBlockTraceCoreChecksReadyFor
+        (Assembly.GasAware.validJumps target) hTrace :=
+    Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor.to_trace_core_checks
+      hCoreTrace hNoCallCreate
+  have hTraceChecks :
+      Assembly.GasAware.XStepTrace.XBlockTraceChecksReadyFor
+        (Assembly.GasAware.validJumps target) hTrace :=
+    Assembly.GasAware.XStepTrace.XBlockTraceChecksReadyFor.of_trace_core_noReturnDataCopy_noCallCreate
+      hTraceCoreChecks hNoReturnDataCopy hNoCallCreate
+  have hTraceFallthroughClean :
+      Assembly.GasAware.XStepTrace.XTraceFallthroughPcAndReturnCleanFor
+        hTrace :=
+    Assembly.GasAware.XStepTrace.XTraceFallthroughPcAndReturnCleanFor.of_pc_initialClean
+      hAsmNoCallCreate
+      hInitialCodeImageRel.canonicalReturnBuffersClean
+      hTraceFallthroughPc
+  have hFinalObservation :
+      Assembly.GasAware.XStepTrace.XTraceFinalizationObservationReadyFor
+        hTrace :=
+    Assembly.GasAware.XStepTrace.XTraceFinalizationObservationReadyFor.of_fallthrough_pc_cleanReturn
+      hCode
+      hAsmNoCallCreate
+      hTraceFallthroughClean
+  have hFinalReady :
+      Assembly.GasAware.XStepTrace.XTraceFinalizationReadyFor hTrace :=
+    Assembly.GasAware.XStepTrace.XTraceFinalizationReadyFor.of_observation_core
+      hCoreTrace
+      (by simp [canonicalEntryState])
+      hAsmNoCallCreate
+      hFinalObservation
+  have hDoneContinue :
+      Assembly.GasAware.XStepTrace.XTraceDoneContinuation
+        (Assembly.GasAware.validJumps target) targetOutcome :=
+    Assembly.GasAware.XStepTrace.XTraceFinalizationReadyFor.to_done_continuation
+      hFinalReady
+  let gasBound :=
+    Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+      (canonicalEntryState initial) targetOutcome
+  refine
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hAccepted, hBytes, hEncoding,
+      hOutOfGas, hProjection, hTrace, rfl, ?_⟩
+  intro gas hGasAtLeast hGasFits
+  obtain ⟨evmFuel, result, hTraceX, hXRun, hAgrees⟩ :=
+    Assembly.GasAware.XStepTrace.blockTraceResult_stepTrace_at_or_above_computed_gas_of_trace_checks_no_call_create_and_budget
+      (program := asm)
+      (target := target)
+      (initial := canonicalEntryState initial)
+      (targetFuel := targetFuel)
+      (targetResult := targetOutcome)
+      hEncoding hSafety hCode hTrace hTraceChecks hNoCallCreate
+      (Assembly.GasAware.XStepTrace.XTraceDoneContinuation.to_path
+        hDoneContinue)
+      (gas := gas)
+      (by simpa [gasBound] using hGasAtLeast)
+      hGasFits
+  exact ⟨evmFuel, result, hTraceX, hXRun, hAgrees⟩
+
+theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result := by
+  have hBase :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target) :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget
+  have hActualStackHeadroom :
+      RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+        store initial referenceResult :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget
+  let hHeadroomFacts := hActualStackHeadroom.toXTraceHeadroomFacts
+  have hNoCallCreate : asm.usesCallCreate = false :=
+    compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_noCallCreate
+      hBase
+  have hActualXTraceFacts :
+      RecursiveBridgeActualXTraceFacts cfg program asm target shared store
+        initial referenceResult := {
+    traceFacts := by
+      intro sourceFuel sourceOutcome targetFuel targetOutcome
+        hSourceRun hOutcome hWholeRel hTrace
+      have hHeadroom :
+          Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomReadyFor
+            target hTrace :=
+        hHeadroomFacts.traceHeadroom hSourceRun hOutcome hWholeRel hTrace
+      have hHeadroomStatic :
+          Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomStaticReadyFor
+            target hTrace :=
+        Assembly.GasAware.XStepTrace.InstrCoreBlockTraceHeadroomStaticReadyFor.of_headroom_perm_true
+          hHeadroom hNoCallCreate
+          (by simpa [canonicalEntryState] using hInitialPerm)
+      have hResidual :
+          Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor
+            target hTrace :=
+        Assembly.GasAware.XStepTrace.InstrCoreBlockTraceResidualReadyFor.of_headroom_static_ready
+          hHeadroomStatic
+      exact
+        Assembly.GasAware.XStepTrace.CoreBlockTraceResultFor.of_trace_instr_core_residual_ready
+          (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_assemble
+            hBase)
+          (compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_jumpdestCorrect
+            hBase)
+          hNoCallCreate hResidual }
+  exact
+    compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X
+      hExprResultContracts hInitialCodeImageRel hSourceFuelRun hBase
+      hActualXTraceFacts
+
+theorem compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass := by
+  obtain
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, gasBound,
+      hSourceRun, hOutcome, hWholeRel, _hAccepted, _hBytes, _hEncoding,
+      _hOutOfGas, _hProjection, hTrace, hGasEq, hRunsAbove⟩ :=
+    compile_whole_program_result_sound_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+      hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+      hCheckedCompileTarget hInitialPerm
+  refine
+    ⟨sourceFuel, sourceOutcome, targetFuel, targetOutcome, gasBound,
+      hSourceRun, hOutcome, hWholeRel, hTrace, hGasEq, ?_⟩
+  intro gas hGasAtLeast hGasFits
+  obtain ⟨evmFuel, result, _hTraceX, hXRun, _hAgrees⟩ :=
+    hRunsAbove gas hGasAtLeast hGasFits
+  exact
+    ⟨evmFuel, by
+      rw [hXRun]
+      intro hImpossible
+      cases hImpossible⟩
+
+theorem compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_liveNoInternalCallChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceResidualFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceResidualFacts :
+      RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceResidualFacts.toCoreFacts
+      hCheckedCompileTarget hActualXTraceResidualFacts)
+
+/--
+Compatibility no-CALL gas-aware root with target-local residual checks derived
+from the older active-frame-sized stack/static invariant.
+-/
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceStackStaticFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceStackStaticFacts :
+      RecursiveBridgeActualXTraceStackStaticFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceResidualFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceStackStaticFacts.toResidualFacts
+      hActualXTraceStackStaticFacts)
+
+/--
+Preferred no-CALL gas-aware root with target-local residual checks derived from
+the actual trace's EVM stack headroom and static-mode compatibility.
+-/
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceHeadroomStaticFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceHeadroomStaticFacts :
+      RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+        shared store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceResidualFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceHeadroomStaticFacts.toResidualFacts
+      hActualXTraceHeadroomStaticFacts)
+
+/--
+Preferred no-CALL gas-aware root for ordinary non-static entry.  The public
+target residual is only actual trace stack headroom; primitive static-mode
+compatibility is derived from the entry permission bit and no-CALL/no-CREATE
+target permission preservation.
+-/
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceHeadroomFacts_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hActualXTraceHeadroomFacts :
+      RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceHeadroomStaticFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceHeadroomFacts.toHeadroomStaticFacts
+      hCheckedCompileTarget hInitialPerm hActualXTraceHeadroomFacts)
+
+/--
+Preferred no-CALL gas-aware root for ordinary non-static entry, with the
+remaining EVM stack resource exposed as a neutral stack-headroom bound rather
+than an `EVM.X` proof package.
+-/
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hActualStackHeadroom :
+      RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualTraceHeadroomFacts_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget hInitialPerm
+    hActualStackHeadroom.toXTraceHeadroomFacts
+
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+/--
+Preferred executable-stack no-CALL gas-aware root with the expression result
+contract constructed from the smaller source-fuel boundary.
+
+The older `...existsSourceRun_exprResultContracts...` wrapper remains as a
+compatibility surface, but the audit-facing route should use this theorem so
+callers do not supply an arbitrary expression-result package.
+-/
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Accepted asm ∧
+        Assembly.Bytecode.compileBytes? asm =
+          some (Assembly.Bytecode.encodeTarget target) ∧
+          Assembly.Bytecode.EncodingCorrect target
+            (Assembly.Bytecode.encodeTarget target) ∧
+                Assembly.OutOfGasPolicyAssumption asm
+                  (canonicalEntryState initial) ∧
+                  Assembly.CurrentContractProjectionAssumption asm
+                    (canonicalEntryState initial) ∧
+                    Assembly.Preservation.BlockTraceResult
+                      asm target targetFuel (canonicalEntryState initial)
+                      targetOutcome ∧
+                      gasBound =
+                        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm
+                          targetFuel (canonicalEntryState initial)
+                          targetOutcome ∧
+                      ∀ gas,
+                        gasBound ≤ gas →
+                        gas < EvmYul.UInt256.size →
+                          ∃ evmFuel result,
+                            Assembly.GasAware.XStepTrace
+                                (Assembly.GasAware.validJumps target) evmFuel
+                                (Assembly.GasAware.installCodeAndGas target gas
+                                  (canonicalEntryState initial)) result ∧
+                              EvmYul.EVM.X evmFuel
+                                  (Assembly.GasAware.validJumps target)
+                                  (Assembly.GasAware.installCodeAndGas target gas
+                                    (canonicalEntryState initial)) =
+                                .ok result ∧
+                              Assembly.GasAware.XResultAgrees targetOutcome
+                                result :=
+  compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+/--
 Preferred no-CALL gas-aware public root with the remaining non-CALL boundaries
 named directly.
 
@@ -2984,7 +13614,7 @@ program-wide successful-`.OutOfFuel` exclusion.  The target side splits the
 trace-local non-gas `EVM.X` checks into a resource package and a finalization
 package, both tied to the compiled target trace.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_instrCoreResources_finalization_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_stepTrace_instrCoreResources_finalization_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3141,7 +13771,7 @@ The checked compiler boundary supplies the no-CALL/CREATE and
 no-`RETURNDATACOPY` target-side side conditions; callers only provide the
 remaining core checks that are neither gas nor decoded-bytecode facts.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3228,7 +13858,7 @@ value at or above the checked gasless trace budget, `EVM.X` produces an
 agreeing result. The remaining target-side premise is the non-gas path-check
 safety package; gas is no longer supplied through an oracle-style assumption.
 -/
-theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_X
+private theorem compile_whole_program_result_sound_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3357,7 +13987,7 @@ non-oracle gas boundary as the result theorem: for every UInt256 gas value at
 or above the checked gasless trace budget, there is an `EVM.X` fuel value whose
 run is not an out-of-gas error.
 -/
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3434,7 +14064,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
 No-out-of-gas projection with the running-result continuation exposed as the
 fallthrough-STOP observation condition.
 -/
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3507,7 +14137,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
 No-out-of-gas projection for the stricter no-`RETURNDATACOPY` checked
 boundary.
 -/
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceChecks_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3570,7 +14200,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
         hCheckedCompileTarget).1
       hTargetTraceChecks hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3639,7 +14269,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
             hCheckedCompileTarget))
       hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceCoreChecks_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3703,7 +14333,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
         Assembly.GasAware.XStepTrace.XFallthroughStopContinuationReady.of_clean
           (hTargetFallthrough hTrace))
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_coreTrace_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_coreTrace_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3770,7 +14400,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
             hCheckedCompileTarget))
       hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3830,7 +14460,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
           hCheckedCompileTarget hTargetInstrCoreReady hTrace)
       hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInstrCoreReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInstrCoreReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3895,7 +14525,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
           hCheckedCompileTarget (hTargetTraceInstrCoreReady hTrace))
       hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_traceInputsReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -3960,7 +14590,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
           (hTargetTraceInputsReady hTrace))
       hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreInputsReady_cleanFallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_instrCoreInputsReady_cleanFallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -4019,7 +14649,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
         hTrace hTargetInstrCoreInputsReady)
     hTargetFallthrough
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceFacts_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceFacts_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -4083,7 +14713,554 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
       intro hImpossible
       cases hImpossible⟩
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_instrCoreResources_finalization_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceResidualFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceResidualFacts :
+      RecursiveBridgeActualXTraceResidualFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceResidualFacts.toCoreFacts
+      hCheckedCompileTarget hActualXTraceResidualFacts)
+
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceStackStaticFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceStackStaticFacts :
+      RecursiveBridgeActualXTraceStackStaticFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceResidualFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceStackStaticFacts.toResidualFacts
+      hActualXTraceStackStaticFacts)
+
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceHeadroomStaticFacts_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hActualXTraceHeadroomStaticFacts :
+      RecursiveBridgeActualXTraceHeadroomStaticFacts cfg program asm target
+        shared store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceResidualFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceHeadroomStaticFacts.toResidualFacts
+      hActualXTraceHeadroomStaticFacts)
+
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceHeadroomFacts_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hActualXTraceHeadroomFacts :
+      RecursiveBridgeActualXTraceHeadroomFacts cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceHeadroomStaticFacts_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget
+    (RecursiveBridgeActualXTraceHeadroomFacts.toHeadroomStaticFacts
+      hCheckedCompileTarget hInitialPerm hActualXTraceHeadroomFacts)
+
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true)
+    (hActualStackHeadroom :
+      RecursiveBridgeActualEVMStackHeadroomBound cfg program asm target shared
+        store initial referenceResult) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel
+          cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualTraceHeadroomFacts_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    hCheckedCompileTarget hInitialPerm
+    hActualStackHeadroom.toXTraceHeadroomFacts
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprResultContracts : RecursiveBridgeExprResultContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_actualEVMStackHeadroom_initialPerm_noReturnDataCopy_X
+    hExprResultContracts hInitialCodeImageRel hSourceFuelRun
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_base
+      hCheckedCompileTarget)
+    hInitialPerm
+    (compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound
+      hCheckedCompileTarget)
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordsStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordsStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    {cfg : Reference.StateRelConfig}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {initial : EVMState}
+    {referenceResult : Reference.Result}
+    (hExprNoSuccessfulOutOfFuel :
+      RecursiveBridgeExprNoOutOfFuelContracts cfg program)
+    (hInitialCodeImageRel :
+      RecursiveBridgeInitialCodeImageRel cfg program target shared initial)
+    (hSourceFuelRun :
+      ∃ sourceFuel,
+        RecursiveBridgeSourceRun program shared store sourceFuel referenceResult)
+    (hCheckedCompileTarget :
+      compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?
+          program =
+        some (asm, target))
+    (hInitialPerm : initial.executionEnv.perm = true) :
+    ∃ sourceFuel : Nat,
+    ∃ sourceOutcome : Objects.Source.Outcome,
+    ∃ targetFuel targetOutcome gasBound,
+      Reference.runResult sourceFuel.succ program (.Ok shared store) =
+        .ok referenceResult ∧
+      RecursiveBridgeSemanticContracts.dispatcherOutcomeRel cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        program (.Ok shared store) referenceResult sourceOutcome ∧
+      SourceLowered.WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Assembly.Preservation.BlockTraceResult
+        asm target targetFuel (canonicalEntryState initial) targetOutcome ∧
+      gasBound =
+        Assembly.GasAware.XStepTrace.XBlockTraceGasBudget asm targetFuel
+          (canonicalEntryState initial) targetOutcome ∧
+      ∀ gas,
+        gasBound ≤ gas →
+        gas < EvmYul.UInt256.size →
+          ∃ evmFuel,
+            EvmYul.EVM.X evmFuel (Assembly.GasAware.validJumps target)
+                (Assembly.GasAware.installCodeAndGas target gas
+                  (canonicalEntryState initial)) ≠
+              .error EvmYul.EVM.ExecutionException.OutOfGass :=
+  compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_executableAssemblyInferredBoundFrameWordSumStackSafeCompile_initialPerm_noReturnDataCopy_X
+    hExprNoSuccessfulOutOfFuel.to_resultContracts hInitialCodeImageRel
+    hSourceFuelRun hCheckedCompileTarget hInitialPerm
+
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceRun_exprResultContracts_sufficientGas_instrCoreResources_finalization_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}
@@ -4152,7 +15329,7 @@ theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsRe
       intro hImpossible
       cases hImpossible⟩
 
-theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_fallthrough_noReturnDataCopy_X
+private theorem compile_whole_program_result_no_out_of_gas_of_recursiveBridgeAllBoundsReserved_topNoCall_sourceCompile_structuredPrimitive_canonicalEntry_sourceStaticFeatureResourceBytecodeChecked_canonicalObservation_codeImage_existsSourceFuel_sufficientGas_core_fallthrough_noReturnDataCopy_X
     {cfg : Reference.StateRelConfig}
     {program : Program}
     {asm : Assembly.Program} {target : Assembly.TargetProgram}

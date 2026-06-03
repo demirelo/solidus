@@ -4,3 +4,4 @@ import EvmCompiler.Structured.Compiler
 import EvmCompiler.Structured.TypedContinuations
 import EvmCompiler.Structured.TypedCfgBridge
 import EvmCompiler.Structured.Preservation
+import EvmCompiler.Structured.StackResource

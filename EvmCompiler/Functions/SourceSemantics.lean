@@ -121,6 +121,12 @@ theorem eval_length (prim : PrimitiveSemantics) :
               rw [← hValuesEq]
               simp [hTail]
 
+theorem eval_single_lit (prim : PrimitiveSemantics)
+    (value : Word) (state : State) :
+    eval prim [.lit value] state = .ok (state, [value]) := by
+  simp [eval, Expr.evalOne, Locals.Source.Expr.evalOne,
+    Locals.Source.Expr.eval]
+
 end ArgList
 
 namespace Store
@@ -825,6 +831,241 @@ mutual
       | exact Prod.Lex.right _
           (Prod.Lex.left _ _ (by omega))
 end
+
+namespace Stmt
+
+theorem run_nonregular_ctx {prim : PrimitiveSemantics} {program : Program}
+    {ctx runCtx : Ctx} {fuel : Nat} {stmt : Stmt} {state : State}
+    {outcome : Outcome}
+    (hRun :
+      Stmt.run prim program ctx fuel stmt state = .ok (outcome, runCtx))
+    (hNonregular : outcome.mode ≠ .regular) :
+    runCtx = ctx := by
+  cases stmt with
+  | expr expr =>
+      unfold Stmt.run at hRun
+      cases hEval : Expr.eval prim expr state with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfter, values⟩
+          simp [hEval] at hRun
+          cases hRun.1
+          exact False.elim (hNonregular rfl)
+  | let_ name value =>
+      unfold Stmt.run at hRun
+      cases hEval : Expr.evalOne prim value state with
+      | error err =>
+          simp [hEval] at hRun
+      | ok result =>
+          rcases result with ⟨stateAfter, value'⟩
+          simp [hEval] at hRun
+          cases hRun.1
+          exact False.elim (hNonregular rfl)
+  | assign name value =>
+      unfold Stmt.run at hRun
+      cases hContains : state.vars.contains name with
+      | false =>
+          simp [hContains, invalid, Structured.invalid] at hRun
+      | true =>
+          cases hEval : Expr.evalOne prim value state with
+          | error err =>
+              simp [hContains, hEval] at hRun
+          | ok result =>
+              rcases result with ⟨stateAfter, value'⟩
+              simp [hContains, hEval] at hRun
+              cases hRun.1
+              exact False.elim (hNonregular rfl)
+  | block body =>
+      unfold Stmt.run at hRun
+      cases hScoped : Block.runScoped prim program ctx body fuel state with
+      | error err =>
+          simp [hScoped] at hRun
+      | ok bodyOutcome =>
+          simp [hScoped] at hRun
+          exact hRun.2.symm
+  | if_ cond body =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.run, invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Stmt.run at hRun
+          cases hCond : Expr.evalCondition prim cond state with
+          | error err =>
+              simp [hCond] at hRun
+          | ok condResult =>
+              rcases condResult with ⟨stateAfterCond, condTrue⟩
+              cases condTrue
+              · simp [hCond] at hRun
+                exact hRun.2.symm
+              · cases hScoped :
+                    Block.runScoped prim program ctx body fuel stateAfterCond with
+                | error err =>
+                    simp [hCond, hScoped] at hRun
+                | ok bodyOutcome =>
+                    simp [hCond, hScoped] at hRun
+                    exact hRun.2.symm
+  | switch scrutinee cases defaultBody =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.run, invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Stmt.run at hRun
+          cases hScrutinee : Expr.evalOne prim scrutinee state with
+          | error err =>
+              simp [hScrutinee] at hRun
+          | ok scrutineeResult =>
+              rcases scrutineeResult with ⟨stateAfterScrutinee, value⟩
+              cases hSelect : Switch.select value cases defaultBody with
+              | none =>
+                  simp [hScrutinee, hSelect] at hRun
+                  exact hRun.2.symm
+              | some body =>
+                  cases hScoped :
+                      Block.runScoped prim program ctx body fuel
+                        stateAfterScrutinee with
+                  | error err =>
+                      simp [hScrutinee, hSelect, hScoped] at hRun
+                  | ok bodyOutcome =>
+                      simp [hScrutinee, hSelect, hScoped] at hRun
+                      exact hRun.2.symm
+  | for_ init cond post body =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.run, invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Stmt.run at hRun
+          cases hInit :
+              Block.runOpen prim program ctx.withoutLoopControl fuel init
+                state with
+          | error err =>
+              simp [hInit] at hRun
+          | ok initResult =>
+              rcases initResult with ⟨initOutcome, initCtx⟩
+              cases hInitMode : initOutcome.mode with
+              | regular =>
+                  cases hLoop :
+                      runForLoop prim program initCtx cond
+                        initCtx.withoutLoopControl post
+                        (initCtx.withLoopControl initCtx.scope initCtx.scope)
+                        body fuel initOutcome.state with
+                  | error err =>
+                      simp [hInit, hInitMode, hLoop] at hRun
+                  | ok loopOutcome =>
+                      cases hLoopMode : loopOutcome.mode with
+                      | regular =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          exact hRun.2.symm
+                      | brk =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode, invalid,
+                            Structured.invalid] at hRun
+                      | cont =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode, invalid,
+                            Structured.invalid] at hRun
+                      | leave =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          exact hRun.2.symm
+                      | halt kind =>
+                          simp [hInit, hInitMode, hLoop, hLoopMode] at hRun
+                          exact hRun.2.symm
+              | brk =>
+                  simp [hInit, hInitMode, invalid, Structured.invalid] at hRun
+              | cont =>
+                  simp [hInit, hInitMode, invalid, Structured.invalid] at hRun
+              | leave =>
+                  simp [hInit, hInitMode] at hRun
+                  exact hRun.2.symm
+              | halt kind =>
+                  simp [hInit, hInitMode] at hRun
+                  exact hRun.2.symm
+  | brk =>
+      unfold Stmt.run at hRun
+      cases hBreak : ctx.breakScope? with
+      | none =>
+          simp [hBreak, invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hBreak] at hRun
+          exact hRun.2.symm
+  | cont =>
+      unfold Stmt.run at hRun
+      cases hContinue : ctx.continueScope? with
+      | none =>
+          simp [hContinue, invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hContinue] at hRun
+          exact hRun.2.symm
+  | leave =>
+      unfold Stmt.run at hRun
+      cases hLeave : ctx.leaveScope? with
+      | none =>
+          simp [hLeave, invalid, Structured.invalid] at hRun
+      | some scope =>
+          simp [hLeave] at hRun
+          exact hRun.2.symm
+  | call targets functionName args =>
+      cases fuel with
+      | zero =>
+          simp [Stmt.run, invalid, Structured.invalid] at hRun
+      | succ fuel =>
+          unfold Stmt.run at hRun
+          by_cases hTargets : targets.Nodup
+          ·
+              cases hArgs : ArgList.eval prim args state with
+              | error err =>
+                  simp [hTargets, hArgs] at hRun
+              | ok argResult =>
+                  rcases argResult with ⟨stateAfterArgs, argValues⟩
+                  cases hFind : FunList.find? functionName program.functions with
+                  | none =>
+                      simp [hTargets, hArgs, hFind, invalid,
+                        Structured.invalid] at hRun
+                  | some fn =>
+                      cases hBody :
+                          FunDef.runBody prim program fn argValues fuel
+                            stateAfterArgs.shared with
+                      | error err =>
+                          simp [hTargets, hArgs, hFind, hBody] at hRun
+                      | ok callResult =>
+                          cases callResult with
+                          | returned sharedAfterCall returnValues =>
+                              cases hAssign :
+                                  Store.assignMany targets returnValues
+                                    stateAfterArgs.vars with
+                              | none =>
+                                  simp [hTargets, hArgs, hFind, hBody, hAssign,
+                                    invalid, Structured.invalid] at hRun
+                              | some returnStore =>
+                                  simp [hTargets, hArgs, hFind, hBody, hAssign]
+                                    at hRun
+                                  cases hRun.1
+                                  exact False.elim (hNonregular rfl)
+                          | halted kind haltedState =>
+                              simp [hTargets, hArgs, hFind, hBody] at hRun
+                              exact hRun.2.symm
+          · simp [hTargets, invalid, Structured.invalid] at hRun
+  | terminal kind =>
+      unfold Stmt.run at hRun
+      cases hTerminal : prim.terminal kind state.shared [] with
+      | error err =>
+          simp [hTerminal] at hRun
+      | ok shared =>
+          simp [hTerminal] at hRun
+          exact hRun.2.symm
+  | terminalArgs kind args =>
+      unfold Stmt.run at hRun
+      cases hArgs : Locals.Source.Expr.ExprSeq.eval prim args state with
+      | error err =>
+          simp [hArgs] at hRun
+      | ok argResult =>
+          rcases argResult with ⟨stateAfterArgs, values⟩
+          cases hTerminal : prim.terminal kind stateAfterArgs.shared values with
+          | error err =>
+              simp [hArgs, hTerminal] at hRun
+          | ok shared =>
+              simp [hArgs, hTerminal] at hRun
+              exact hRun.2.symm
+
+end Stmt
 
 set_option maxHeartbeats 1000000 in
 mutual
@@ -1846,6 +2087,202 @@ theorem runBody_returned_length {prim : PrimitiveSemantics}
 end FunDef
 
 namespace Stmt
+
+theorem call_regular_parts {prim : PrimitiveSemantics}
+    {program : Program} {ctx : Ctx} {fuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source sourceAfter : State}
+    (hRun :
+      Stmt.run prim program ctx (fuel + 1)
+          (.call targets functionName args) source =
+        .ok (Outcome.regular sourceAfter, ctx)) :
+    ∃ stateAfterArgs argValues fn sharedAfterCall returnValues returnStore,
+      targets.Nodup ∧
+        ArgList.eval prim args source = .ok (stateAfterArgs, argValues) ∧
+        FunList.find? functionName program.functions = some fn ∧
+        FunDef.runBody prim program fn argValues fuel
+            stateAfterArgs.shared =
+          .ok (CallResult.returned sharedAfterCall returnValues) ∧
+        Store.assignMany targets returnValues stateAfterArgs.vars =
+          some returnStore ∧
+        sourceAfter = { shared := sharedAfterCall, vars := returnStore } := by
+  unfold Stmt.run at hRun
+  by_cases hTargets : targets.Nodup
+  · simp [hTargets] at hRun
+    cases hArgs : ArgList.eval prim args source with
+    | error err =>
+        simp [hArgs] at hRun
+    | ok argResult =>
+        rcases argResult with ⟨stateAfterArgs, argValues⟩
+        simp [hArgs] at hRun
+        cases hFind :
+            FunList.find? functionName program.functions with
+        | none =>
+            simp [hFind, invalid, Structured.invalid] at hRun
+        | some fn =>
+            simp [hFind] at hRun
+            cases hBody :
+                FunDef.runBody prim program fn argValues fuel
+                  stateAfterArgs.shared with
+            | error err =>
+                simp [hBody] at hRun
+            | ok callResult =>
+                cases callResult with
+                | returned sharedAfterCall returnValues =>
+                    simp [hBody] at hRun
+                    cases hAssign :
+                        Store.assignMany targets returnValues
+                          stateAfterArgs.vars with
+                    | none =>
+                        simp [hAssign, invalid, Structured.invalid] at hRun
+                    | some returnStore =>
+                        simp [hAssign] at hRun
+                        cases hRun
+                        exact
+                          ⟨stateAfterArgs, argValues, fn, sharedAfterCall,
+                            returnValues, returnStore, hTargets,
+                            by simpa [hArgs],
+                            by simpa [hFind],
+                            by simpa [hBody],
+                            by simpa [hAssign],
+                            rfl⟩
+                | halted kind haltedState =>
+                    simp [hBody, Outcome.regular, Outcome.halt] at hRun
+                    cases hRun
+  · simp [hTargets, invalid, Structured.invalid] at hRun
+
+theorem call_halted_parts {prim : PrimitiveSemantics}
+    {program : Program} {ctx : Ctx} {fuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source haltedState : State} {kind : Assembly.HaltKind}
+    (hRun :
+      Stmt.run prim program ctx (fuel + 1)
+          (.call targets functionName args) source =
+        .ok (Outcome.halt kind haltedState, ctx)) :
+    ∃ stateAfterArgs argValues fn,
+      targets.Nodup ∧
+        ArgList.eval prim args source = .ok (stateAfterArgs, argValues) ∧
+        FunList.find? functionName program.functions = some fn ∧
+        FunDef.runBody prim program fn argValues fuel
+            stateAfterArgs.shared =
+          .ok (CallResult.halted kind haltedState) := by
+  unfold Stmt.run at hRun
+  by_cases hTargets : targets.Nodup
+  · simp [hTargets] at hRun
+    cases hArgs : ArgList.eval prim args source with
+    | error err =>
+        simp [hArgs] at hRun
+    | ok argResult =>
+        rcases argResult with ⟨stateAfterArgs, argValues⟩
+        simp [hArgs] at hRun
+        cases hFind :
+            FunList.find? functionName program.functions with
+        | none =>
+            simp [hFind, invalid, Structured.invalid] at hRun
+        | some fn =>
+            simp [hFind] at hRun
+            cases hBody :
+                FunDef.runBody prim program fn argValues fuel
+                  stateAfterArgs.shared with
+            | error err =>
+                simp [hBody] at hRun
+            | ok callResult =>
+                cases callResult with
+                | returned sharedAfterCall returnValues =>
+                    simp [hBody] at hRun
+                    cases hAssign :
+                        Store.assignMany targets returnValues
+                          stateAfterArgs.vars with
+                    | none =>
+                        simp [hAssign, invalid, Structured.invalid] at hRun
+                    | some returnStore =>
+                        simp [hAssign, Outcome.regular, Outcome.halt] at hRun
+                        cases hRun
+                | halted actualKind actualState =>
+                    simp [hBody, Outcome.halt] at hRun
+                    cases hRun
+                    exact
+                      ⟨stateAfterArgs, argValues, fn, hTargets,
+                        by simpa [hArgs],
+                        by simpa [hFind],
+                        by simpa [hBody]⟩
+  · simp [hTargets, invalid, Structured.invalid] at hRun
+
+theorem call_ok_parts {prim : PrimitiveSemantics}
+    {program : Program} {ctx : Ctx} {fuel : Nat}
+    {targets : List Name} {functionName : Name} {args : List (Expr 1)}
+    {source : State} {outcome : Outcome}
+    (hRun :
+      Stmt.run prim program ctx (fuel + 1)
+          (.call targets functionName args) source =
+        .ok (outcome, ctx)) :
+    ∃ stateAfterArgs argValues fn callResult,
+      targets.Nodup ∧
+        ArgList.eval prim args source = .ok (stateAfterArgs, argValues) ∧
+        FunList.find? functionName program.functions = some fn ∧
+        FunDef.runBody prim program fn argValues fuel
+            stateAfterArgs.shared =
+          .ok callResult ∧
+        ((∃ sharedAfterCall returnValues returnStore,
+          callResult = CallResult.returned sharedAfterCall returnValues ∧
+            Store.assignMany targets returnValues stateAfterArgs.vars =
+              some returnStore ∧
+            outcome =
+              Outcome.regular
+                { shared := sharedAfterCall, vars := returnStore }) ∨
+          ∃ kind haltedState,
+            callResult = CallResult.halted kind haltedState ∧
+              outcome = Outcome.halt kind haltedState) := by
+  unfold Stmt.run at hRun
+  by_cases hTargets : targets.Nodup
+  · simp [hTargets] at hRun
+    cases hArgs : ArgList.eval prim args source with
+    | error err =>
+        simp [hArgs] at hRun
+    | ok argResult =>
+        rcases argResult with ⟨stateAfterArgs, argValues⟩
+        simp [hArgs] at hRun
+        cases hFind :
+            FunList.find? functionName program.functions with
+        | none =>
+            simp [hFind, invalid, Structured.invalid] at hRun
+        | some fn =>
+            simp [hFind] at hRun
+            cases hBody :
+                FunDef.runBody prim program fn argValues fuel
+                  stateAfterArgs.shared with
+            | error err =>
+                simp [hBody] at hRun
+            | ok callResult =>
+                cases callResult with
+                | returned sharedAfterCall returnValues =>
+                    simp [hBody] at hRun
+                    cases hAssign :
+                        Store.assignMany targets returnValues
+                          stateAfterArgs.vars with
+                    | none =>
+                        simp [hAssign, invalid, Structured.invalid] at hRun
+                    | some returnStore =>
+                        simp [hAssign] at hRun
+                        cases hRun
+                        exact
+                          ⟨stateAfterArgs, argValues, fn,
+                            CallResult.returned sharedAfterCall returnValues,
+                            hTargets, by simpa [hArgs],
+                            by simpa [hFind], by simpa [hBody],
+                            Or.inl
+                              ⟨sharedAfterCall, returnValues, returnStore,
+                                rfl, by simpa [hAssign], rfl⟩⟩
+                | halted kind haltedState =>
+                    simp [hBody] at hRun
+                    cases hRun
+                    exact
+                      ⟨stateAfterArgs, argValues, fn,
+                        CallResult.halted kind haltedState, hTargets,
+                        by simpa [hArgs], by simpa [hFind],
+                        by simpa [hBody],
+                        Or.inr ⟨kind, haltedState, rfl, rfl⟩⟩
+  · simp [hTargets, invalid, Structured.invalid] at hRun
 
 theorem call_regular_targets_nodup {prim : PrimitiveSemantics}
     {program : Program} {ctx : Ctx} {fuel : Nat}

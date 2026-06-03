@@ -333,6 +333,417 @@ theorem cast_program_mono {oldProgram newProgram : Assembly.Program}
 
 end ARunResult
 
+/--
+`Assembly.Source.runNResult` with a predicate recorded at every block-entry
+state visited by the run.
+
+This is the generic annotated-run spine needed by resource proofs: the ordinary
+`ARunResult` result only remembers the final outcome, while gas-aware replay
+needs facts at each emitted-block boundary.
+-/
+inductive SourceRunResultPoints (program : Assembly.Program)
+    (point : EVMState → Prop) :
+    Nat → EVMState → Assembly.StepResult → Prop where
+  | done {state : EVMState}
+      (hPoint : point state) :
+      SourceRunResultPoints program point 0 state (.running state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : Assembly.StepResult}
+      (hPoint : point state)
+      (hStep :
+        Assembly.Source.stepResult program state = .ok (.running mid))
+      (hRest : SourceRunResultPoints program point fuel mid result) :
+      SourceRunResultPoints program point (fuel + 1) state result
+  | stepHalted {fuel : Nat} {state : EVMState} {halt : Assembly.Halt}
+      (hPoint : point state)
+      (hStep :
+        Assembly.Source.stepResult program state = .ok (.halted halt)) :
+      SourceRunResultPoints program point (fuel + 1) state (.halted halt)
+
+namespace SourceRunResultPoints
+
+theorem run {program : Assembly.Program} {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hPoints : SourceRunResultPoints program point fuel state result) :
+    Assembly.Source.runNResult program fuel state = .ok result := by
+  induction hPoints with
+  | done hPoint =>
+      simp [Assembly.Source.runNResult]
+  | stepRunning hPoint hStep hRest ih =>
+      unfold Assembly.Source.runNResult
+      rw [hStep]
+      exact ih
+  | stepHalted hPoint hStep =>
+      unfold Assembly.Source.runNResult
+      rw [hStep]
+      rfl
+
+theorem append_running {program : Assembly.Program}
+    {point : EVMState → Prop}
+    {firstFuel secondFuel : Nat} {state mid : EVMState}
+    {result : Assembly.StepResult}
+    (hFirst :
+      SourceRunResultPoints program point firstFuel state (.running mid))
+    (hSecond :
+      SourceRunResultPoints program point secondFuel mid result) :
+    SourceRunResultPoints program point (firstFuel + secondFuel) state
+      result := by
+  induction firstFuel generalizing state mid with
+  | zero =>
+      cases hFirst with
+      | done hPoint =>
+          simpa using hSecond
+  | succ firstFuel ih =>
+      cases hFirst with
+      | stepRunning hPoint hStep hRest =>
+          rw [show firstFuel + 1 + secondFuel =
+              firstFuel + secondFuel + 1 by omega]
+          exact SourceRunResultPoints.stepRunning hPoint hStep
+            (ih hRest hSecond)
+
+theorem mono {program : Assembly.Program}
+    {point₁ point₂ : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hPoints : SourceRunResultPoints program point₁ fuel state result)
+    (hPoint : ∀ state, point₁ state → point₂ state) :
+    SourceRunResultPoints program point₂ fuel state result := by
+  induction hPoints with
+  | done h =>
+      exact SourceRunResultPoints.done (hPoint _ h)
+  | stepRunning h hStep hRest ih =>
+      exact SourceRunResultPoints.stepRunning (hPoint _ h) hStep ih
+  | stepHalted h hStep =>
+      exact SourceRunResultPoints.stepHalted (hPoint _ h) hStep
+
+theorem cast_program {oldProgram newProgram : Assembly.Program}
+    {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hEq : oldProgram = newProgram)
+    (hPoints :
+      SourceRunResultPoints oldProgram point fuel state result) :
+    SourceRunResultPoints newProgram point fuel state result := by
+  cases hEq
+  exact hPoints
+
+theorem of_runNResult_invariant {program : Assembly.Program}
+    {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hRun : Assembly.Source.runNResult program fuel state = .ok result)
+    (hPoint : point state)
+    (hStep :
+      ∀ {state mid : EVMState},
+        point state →
+          Assembly.Source.stepResult program state = .ok (.running mid) →
+            point mid) :
+    SourceRunResultPoints program point fuel state result := by
+  induction fuel generalizing state result with
+  | zero =>
+      simp [Assembly.Source.runNResult] at hRun
+      cases hRun
+      exact SourceRunResultPoints.done hPoint
+  | succ fuel ih =>
+      unfold Assembly.Source.runNResult at hRun
+      cases hStepResult : Assembly.Source.stepResult program state with
+      | error err =>
+          rw [hStepResult] at hRun
+          simp [Bind.bind, Except.bind] at hRun
+      | ok stepResult =>
+          rw [hStepResult] at hRun
+          cases stepResult with
+          | running mid =>
+              exact
+                SourceRunResultPoints.stepRunning hPoint hStepResult
+                  (ih hRun (hStep hPoint hStepResult))
+          | halted halt =>
+              simp [Bind.bind, Except.bind] at hRun
+              cases hRun
+              exact SourceRunResultPoints.stepHalted hPoint hStepResult
+
+end SourceRunResultPoints
+
+def ARunResultPoints (program : Assembly.Program)
+    (point : EVMState → Prop) (state : EVMState)
+    (post : Assembly.StepResult → Prop) : Prop :=
+  ∃ fuel result,
+    SourceRunResultPoints program point fuel state result ∧
+      post result
+
+namespace ARunResultPoints
+
+theorem to_ARunResult {program : Assembly.Program}
+    {point : EVMState → Prop} {state : EVMState}
+    {post : Assembly.StepResult → Prop}
+    (hRun : ARunResultPoints program point state post) :
+    ARunResult program state post := by
+  rcases hRun with ⟨fuel, result, hPoints, hPost⟩
+  exact ⟨fuel, result, hPoints.run, hPost⟩
+
+theorem pure {program : Assembly.Program} {point : EVMState → Prop}
+    {state : EVMState} {post : Assembly.StepResult → Prop}
+    (hPoint : point state)
+    (hPost : post (.running state)) :
+    ARunResultPoints program point state post :=
+  ⟨0, .running state, SourceRunResultPoints.done hPoint, hPost⟩
+
+theorem bind_running {program : Assembly.Program}
+    {point : EVMState → Prop} {state : EVMState}
+    {middle : EVMState → Prop} {post : Assembly.StepResult → Prop}
+    (hRun :
+      ARunResultPoints program point state
+        (fun result =>
+          match result with
+          | .running mid => middle mid
+          | .halted _ => False))
+    (hNext : ∀ mid, middle mid → ARunResultPoints program point mid post) :
+    ARunResultPoints program point state post := by
+  rcases hRun with ⟨firstFuel, firstResult, hFirst, hMiddleResult⟩
+  cases firstResult with
+  | halted halt =>
+      cases hMiddleResult
+  | running mid =>
+      rcases hNext mid hMiddleResult with
+        ⟨secondFuel, result, hSecond, hPost⟩
+      exact
+        ⟨firstFuel + secondFuel, result,
+          SourceRunResultPoints.append_running hFirst hSecond, hPost⟩
+
+theorem mono {program : Assembly.Program} {point : EVMState → Prop}
+    {state : EVMState} {post₁ post₂ : Assembly.StepResult → Prop}
+    (hRun : ARunResultPoints program point state post₁)
+    (hPost : ∀ result, post₁ result → post₂ result) :
+    ARunResultPoints program point state post₂ := by
+  rcases hRun with ⟨fuel, result, hPoints, hResult⟩
+  exact ⟨fuel, result, hPoints, hPost result hResult⟩
+
+theorem point_mono {program : Assembly.Program}
+    {point₁ point₂ : EVMState → Prop}
+    {state : EVMState} {post : Assembly.StepResult → Prop}
+    (hRun : ARunResultPoints program point₁ state post)
+    (hPoint : ∀ state, point₁ state → point₂ state) :
+    ARunResultPoints program point₂ state post := by
+  rcases hRun with ⟨fuel, result, hPoints, hResult⟩
+  exact
+    ⟨fuel, result, hPoints.mono hPoint, hResult⟩
+
+theorem cast_program {oldProgram newProgram : Assembly.Program}
+    {point : EVMState → Prop} {state : EVMState}
+    {post : Assembly.StepResult → Prop}
+    (hEq : oldProgram = newProgram)
+    (hRun : ARunResultPoints oldProgram point state post) :
+    ARunResultPoints newProgram point state post := by
+  rcases hRun with ⟨fuel, result, hPoints, hResult⟩
+  exact
+    ⟨fuel, result, hPoints.cast_program hEq, hResult⟩
+
+theorem cast_program_mono {oldProgram newProgram : Assembly.Program}
+    {point : EVMState → Prop} {state : EVMState}
+    {post₁ post₂ : Assembly.StepResult → Prop}
+    (hEq : oldProgram = newProgram)
+    (hRun : ARunResultPoints oldProgram point state post₁)
+    (hPost : ∀ result, post₁ result → post₂ result) :
+    ARunResultPoints newProgram point state post₂ :=
+  mono (cast_program hEq hRun) hPost
+
+theorem of_ARunResult_invariant {program : Assembly.Program}
+    {point : EVMState → Prop} {state : EVMState}
+    {post : Assembly.StepResult → Prop}
+    (hRun : ARunResult program state post)
+    (hPoint : point state)
+    (hStep :
+      ∀ {state mid : EVMState},
+        point state →
+          Assembly.Source.stepResult program state = .ok (.running mid) →
+            point mid) :
+    ARunResultPoints program point state post := by
+  rcases hRun with ⟨fuel, result, hRunEq, hPost⟩
+  exact
+    ⟨fuel, result,
+      SourceRunResultPoints.of_runNResult_invariant hRunEq hPoint hStep,
+      hPost⟩
+
+end ARunResultPoints
+
+/--
+`Assembly.Preservation.BlockTraceResult` with a predicate recorded at every
+source/target block-entry state.
+
+This is the target-trace counterpart of `SourceRunResultPoints`: bytecode
+assembly preservation constructs a block trace from the assembly source run,
+and this wrapper keeps any source-run annotation aligned with the corresponding
+trace constructor.
+-/
+inductive BlockTraceResultPoints
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    (point : EVMState → Prop) :
+    {fuel : Nat} → {state : EVMState} →
+      {result : Assembly.StepResult} →
+        Assembly.Preservation.BlockTraceResult program target fuel state
+          result → Prop where
+  | done {state : EVMState} :
+      BlockTraceResultPoints point
+        (Assembly.Preservation.BlockTraceResult.done (program := program)
+          (target := target) state)
+  | stepRunning {fuel : Nat} {state mid : EVMState}
+      {result : Assembly.StepResult}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.running mid))
+      (hRest :
+        Assembly.Preservation.BlockTraceResult program target fuel mid result)
+      (hPoint : point state)
+      (hRestReady : BlockTraceResultPoints point hRest) :
+      BlockTraceResultPoints point
+        (Assembly.Preservation.BlockTraceResult.stepRunning hAt hEmit
+          hTargetBlock hRun hRest)
+  | stepHalted (fuel : Nat) {state : EVMState} {halt : Assembly.Halt}
+      {pc : Nat} {instr : Assembly.Instr}
+      {emitted before after : List Assembly.LocatedTarget}
+      (hAt :
+        Assembly.Program.instrAtPc program state.pc.toNat = some (pc, instr))
+      (hEmit : Assembly.emitInstr? program pc instr = some emitted)
+      (hTargetBlock : target.code = before ++ emitted ++ after)
+      (hRun :
+        Assembly.Target.runListResult
+            (emitted.map Assembly.LocatedTarget.instr) state =
+          .ok (.halted halt))
+      (hPoint : point state) :
+      BlockTraceResultPoints point
+        (Assembly.Preservation.BlockTraceResult.stepHalted hAt hEmit
+          hTargetBlock hRun)
+
+namespace BlockTraceResultPoints
+
+theorem point_mono
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {point₁ point₂ : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    {hTrace :
+      Assembly.Preservation.BlockTraceResult program target fuel state result}
+    (hPoints : BlockTraceResultPoints point₁ hTrace)
+    (hPoint : ∀ state, point₁ state → point₂ state) :
+    BlockTraceResultPoints point₂ hTrace := by
+  induction hPoints with
+  | done =>
+      exact BlockTraceResultPoints.done
+  | stepRunning hAt hEmit hTargetBlock hRun hRest h hRestReady ih =>
+      exact
+        BlockTraceResultPoints.stepRunning hAt hEmit hTargetBlock hRun
+          hRest (hPoint _ h) ih
+  | stepHalted fuel hAt hEmit hTargetBlock hRun h =>
+      exact
+        BlockTraceResultPoints.stepHalted fuel hAt hEmit hTargetBlock hRun
+          (hPoint _ h)
+
+theorem of_blockTraceResult_invariant
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hPoint : point state)
+    (hStep :
+      ∀ {state mid : EVMState}
+        {pc : Nat} {instr : Assembly.Instr}
+        {emitted before after : List Assembly.LocatedTarget},
+        point state →
+          Assembly.Program.instrAtPc program state.pc.toNat =
+            some (pc, instr) →
+          Assembly.emitInstr? program pc instr = some emitted →
+          target.code = before ++ emitted ++ after →
+          Assembly.Target.runListResult
+              (emitted.map Assembly.LocatedTarget.instr) state =
+            .ok (.running mid) →
+            point mid)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult program target fuel state
+        result) :
+    BlockTraceResultPoints point hTrace := by
+  induction fuel generalizing state result with
+  | zero =>
+      cases hTrace with
+      | done state =>
+          exact BlockTraceResultPoints.done
+  | succ fuel ih =>
+      cases hTrace with
+      | stepRunning hAt hEmit hTargetBlock hRun hRest =>
+          exact
+            BlockTraceResultPoints.stepRunning hAt hEmit hTargetBlock hRun
+              hRest hPoint
+              (ih (hStep hPoint hAt hEmit hTargetBlock hRun) hRest)
+      | stepHalted hAt hEmit hTargetBlock hRun =>
+          exact
+            BlockTraceResultPoints.stepHalted fuel hAt hEmit hTargetBlock
+              hRun hPoint
+
+end BlockTraceResultPoints
+
+namespace SourceRunResultPoints
+
+theorem to_blockTraceResultPoints_of_compile
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hPoints : SourceRunResultPoints program point fuel state result) :
+    ∃ hTrace :
+      Assembly.Preservation.BlockTraceResult program target fuel state result,
+      BlockTraceResultPoints point hTrace := by
+  have hAsm : Assembly.assemble? program = some target :=
+    Assembly.Preservation.compile?_some_assemble hCompile
+  induction fuel generalizing state result with
+  | zero =>
+      cases hPoints with
+      | done hPoint =>
+          exact ⟨_, BlockTraceResultPoints.done⟩
+  | succ fuel ih =>
+      cases hPoints with
+      | stepRunning hPoint hStep hRest =>
+          rcases ih hRest with ⟨hRestTrace, hRestPoints⟩
+          obtain
+            ⟨pc, instr, emitted, before, after, hAt, hEmit, hTargetBlock,
+              hBlockRun⟩ :=
+            Assembly.Preservation.assemble_source_step_current_result_sound
+              hAsm hStep
+          exact
+            ⟨Assembly.Preservation.BlockTraceResult.stepRunning hAt hEmit
+                hTargetBlock hBlockRun hRestTrace,
+              BlockTraceResultPoints.stepRunning hAt hEmit hTargetBlock
+                hBlockRun hRestTrace hPoint hRestPoints⟩
+      | stepHalted hPoint hStep =>
+          obtain
+            ⟨pc, instr, emitted, before, after, hAt, hEmit, hTargetBlock,
+              hBlockRun⟩ :=
+            Assembly.Preservation.assemble_source_step_current_result_sound
+              hAsm hStep
+          exact
+            ⟨Assembly.Preservation.BlockTraceResult.stepHalted hAt hEmit
+                hTargetBlock hBlockRun,
+              BlockTraceResultPoints.stepHalted fuel hAt hEmit hTargetBlock
+                hBlockRun hPoint⟩
+
+theorem to_blockTraceResultPoints
+    {program : Assembly.Program} {target : Assembly.TargetProgram}
+    {point : EVMState → Prop}
+    {fuel : Nat} {state : EVMState} {result : Assembly.StepResult}
+    (hCompile : Assembly.compile? program = some target)
+    (hPoints : SourceRunResultPoints program point fuel state result)
+    (hTrace :
+      Assembly.Preservation.BlockTraceResult program target fuel state
+        result) :
+    BlockTraceResultPoints point hTrace := by
+  rcases to_blockTraceResultPoints_of_compile hCompile hPoints with
+    ⟨hTrace', hTracePoints⟩
+  have hEq : hTrace' = hTrace := Subsingleton.elim _ _
+  cases hEq
+  exact hTracePoints
+
+end SourceRunResultPoints
+
 namespace RelAt
 
 theorem entry {state : EVMState}
@@ -3533,6 +3944,46 @@ def materializeStack :
       some (visible ++ [token] ++ outer)
   | _, _, _ => none
 
+def returnStackWeight : List ReturnDest → Nat
+  | [] => 0
+  | frame :: rest => frame.callerStack.length + 1 + returnStackWeight rest
+
+def sourceStackWeight (source : RunState) : Nat :=
+  source.evm.stack.length + returnStackWeight source.returns
+
+def SourceStackHeadroom (source : RunState) : Prop :=
+  sourceStackWeight source + 17 ≤ 1024
+
+theorem materializeStack_length
+    {visible stack : EvmYul.Stack Word}
+    {returns : List ReturnDest} {tokens : List Word}
+    (hStack : materializeStack visible returns tokens = some stack) :
+    stack.length = visible.length + returnStackWeight returns := by
+  induction returns generalizing visible tokens stack with
+  | nil =>
+      cases tokens with
+      | nil =>
+          simp [materializeStack] at hStack
+          cases hStack
+          simp [returnStackWeight]
+      | cons _token _tokens =>
+          simp [materializeStack] at hStack
+  | cons frame rest ih =>
+      cases tokens with
+      | nil =>
+          simp [materializeStack] at hStack
+      | cons token tokens =>
+          cases hOuter :
+              materializeStack frame.callerStack rest tokens with
+          | none =>
+              simp [materializeStack, hOuter] at hStack
+          | some outer =>
+              simp [materializeStack, hOuter] at hStack
+              cases hStack
+              have hOuterLen := ih hOuter
+              simp [returnStackWeight, List.length_append, hOuterLen]
+              omega
+
 structure StateRel (source : RunState) (target : EVMState)
     (tokens : List Word) : Prop where
   stackRel :
@@ -3574,6 +4025,40 @@ inductive ReturnContextRel (program : Program) :
       (hRest : ReturnContextRel program frames returns tokens) :
       ReturnContextRel program (frame :: frames) (ret :: returns) (token :: tokens)
 
+namespace ReturnContextRel
+
+theorem frames_length_eq_returns_length {program : Program}
+    {frames : List StaticReturnFrame}
+    {returns : List ReturnDest} {tokens : List Word}
+    (hRel : ReturnContextRel program frames returns tokens) :
+    frames.length = returns.length := by
+  induction hRel with
+  | nil =>
+      rfl
+  | cons _hValid _hToken _hRetc _hRest ih =>
+      simp [ih]
+
+theorem tokens_length_eq_frames_length {program : Program}
+    {frames : List StaticReturnFrame}
+    {returns : List ReturnDest} {tokens : List Word}
+    (hRel : ReturnContextRel program frames returns tokens) :
+    tokens.length = frames.length := by
+  induction hRel with
+  | nil =>
+      rfl
+  | cons _hValid _hToken _hRetc _hRest ih =>
+      simp [ih]
+
+theorem tokens_length_eq_returns_length {program : Program}
+    {frames : List StaticReturnFrame}
+    {returns : List ReturnDest} {tokens : List Word}
+    (hRel : ReturnContextRel program frames returns tokens) :
+    tokens.length = returns.length := by
+  rw [tokens_length_eq_frames_length hRel,
+    frames_length_eq_returns_length hRel]
+
+end ReturnContextRel
+
 def TargetRel (program : Program) (source : RunState)
     (target : EVMState) (frames : List StaticReturnFrame) : Prop :=
   ∃ tokens,
@@ -3601,6 +4086,37 @@ theorem dataRel_replace_stack {source : RunState} {target : EVMState}
       cases source
       simp [eraseControl, Assembly.eraseGas] at hData ⊢
       exact hData
+
+theorem target_stack_length_eq {source : RunState} {target : EVMState}
+    {tokens : List Word} (hRel : StateRel source target tokens) :
+    target.stack.length =
+      source.evm.stack.length + returnStackWeight source.returns := by
+  exact materializeStack_length hRel.stackRel
+
+theorem target_stack_length_le_of_source_weight_le
+    {source : RunState} {target : EVMState} {tokens : List Word}
+    (hRel : StateRel source target tokens) {bound : Nat}
+    (hBound :
+      source.evm.stack.length + returnStackWeight source.returns ≤ bound) :
+    target.stack.length ≤ bound := by
+  rw [target_stack_length_eq hRel]
+  exact hBound
+
+theorem target_stack_headroom_of_source_weight_bound
+    {source : RunState} {target : EVMState} {tokens : List Word}
+    (hRel : StateRel source target tokens)
+    (hBound :
+      source.evm.stack.length + returnStackWeight source.returns + 17 ≤ 1024) :
+    target.stack.length + 17 ≤ 1024 := by
+  rw [target_stack_length_eq hRel]
+  exact hBound
+
+theorem target_stack_headroom_of_source_headroom
+    {source : RunState} {target : EVMState} {tokens : List Word}
+    (hRel : StateRel source target tokens)
+    (hBound : SourceStackHeadroom source) :
+    target.stack.length + 17 ≤ 1024 := by
+  exact target_stack_headroom_of_source_weight_bound hRel hBound
 
 end StateRel
 
@@ -3730,6 +4246,32 @@ theorem replace_visible_stack {source : RunState} {target : EVMState}
   refine ⟨?_, ?_⟩
   · simpa using hMaterialize newVisible
   · simpa using hRel.dataRel_replace_stack (newVisible ++ suffix)
+
+theorem with_visible_prefix {source : RunState} {target : EVMState}
+    {tokens : List Word} (hRel : StateRel source target tokens)
+    (stackPrefix : EvmYul.Stack Word) :
+    StateRel
+      (source.withEVM
+        { source.evm with stack := stackPrefix ++ source.evm.stack })
+      { target with stack := stackPrefix ++ target.stack }
+      tokens := by
+  refine ⟨?_, ?_⟩
+  · simpa [RunState.withEVM] using
+      materializeStack_append_visible
+        (visible := source.evm.stack) (pref := stackPrefix) hRel.stackRel
+  · calc
+      eraseControl { target with stack := stackPrefix ++ target.stack }
+          =
+            eraseControl
+              { { source.evm with stack := target.stack } with
+                stack := stackPrefix ++ target.stack } :=
+              eraseControl_with_stack_congr hRel.dataRel
+      _ =
+            eraseControl
+              { (source.withEVM
+                    { source.evm with stack := stackPrefix ++ source.evm.stack }).evm with
+                stack := stackPrefix ++ target.stack } := by
+              simp [RunState.withEVM]
 
 theorem cast_source {oldSource newSource : RunState} {target : EVMState}
     {tokens : List Word}
@@ -24672,6 +25214,12 @@ def WholeProgramOutcomeRel (source : Outcome)
   | _, _ =>
       False
 
+def TargetOutcomeEndPc (asm : Assembly.Program)
+    (target : Assembly.StepResult) : Prop :=
+  match target with
+  | .running targetState => targetState.pc = Assembly.Program.pcAfter asm
+  | .halted _ => True
+
 def WholeProgramSourceOutcome (source : Outcome) : Prop :=
   match source.mode with
   | .regular | .halt _ => True
@@ -25192,6 +25740,200 @@ theorem compile_preserves_of_checked_bounds
     (ProcedurePreservation.bounds_of_checked hChecked)
     hAccepted hInitialPc hSource
 
+theorem run_program_end_postamble_of_main_fallthrough
+    {program : Program}
+    (bounds : ProcedurePreservation.CompilationBounds program)
+    {state : EVMState}
+    (hPc :
+      state.pc =
+        Assembly.Program.pcAfter (CompiledProgram.main program).code) :
+    ∃ final,
+      Assembly.Source.runNResult program.compile 2 state =
+        .ok (.running final) ∧
+      eraseControl final = eraseControl state ∧
+      final.pc = Assembly.Program.pcAfter program.compile := by
+  let mainCode := (CompiledProgram.main program).code
+  let procCode := (CompiledProgram.emittedProcs program).code
+  let preLabel :=
+    mainCode ++ [Assembly.Instr.jump ProcLabel.programEnd] ++ procCode
+  have hFullFitsMain :
+      AssemblyProgram.PCFitsFrom []
+        (mainCode ++
+          ([Assembly.Instr.jump ProcLabel.programEnd] ++
+            procCode ++ [Assembly.Instr.label ProcLabel.programEnd])) := by
+    simpa [mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using bounds.pcFits
+  have hMainFitsFrom :
+      AssemblyProgram.PCFitsFrom [] mainCode :=
+    AssemblyProgram.PCFitsFrom.left (pre := []) (first := mainCode)
+      (second :=
+        [Assembly.Instr.jump ProcLabel.programEnd] ++
+          procCode ++ [Assembly.Instr.label ProcLabel.programEnd])
+      hFullFitsMain
+  have hMainFits : PCFits mainCode := by
+    simpa using AssemblyProgram.PCFitsFrom.end hMainFitsFrom
+  have hFullFitsLabel :
+      AssemblyProgram.PCFitsFrom []
+        (preLabel ++ [Assembly.Instr.label ProcLabel.programEnd]) := by
+    simpa [preLabel, mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using bounds.pcFits
+  have hPreLabelFitsFrom :
+      AssemblyProgram.PCFitsFrom [] preLabel :=
+    AssemblyProgram.PCFitsFrom.left (pre := []) (first := preLabel)
+      (second := [Assembly.Instr.label ProcLabel.programEnd])
+      hFullFitsLabel
+  have hPreLabelFits : PCFits preLabel := by
+    simpa using AssemblyProgram.PCFitsFrom.end hPreLabelFitsFrom
+  have hExact : ExactLabels program.compile :=
+    ExactLabels.of_labels_nodup bounds.labelsNodup
+  have hProgramEnd :
+      Assembly.Program.labelPc program.compile ProcLabel.programEnd =
+        some (Assembly.Program.byteLength preLabel) := by
+    apply hExact.labelPc_at preLabel ProcLabel.programEnd []
+    simp [preLabel, mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc]
+  have hProgramEndJump :
+      Assembly.Program.labelPc
+          (mainCode ++ [Assembly.Instr.jump ProcLabel.programEnd] ++
+            (procCode ++ [Assembly.Instr.label ProcLabel.programEnd]))
+          ProcLabel.programEnd =
+        some (Assembly.Program.byteLength preLabel) := by
+    simpa [preLabel, mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using hProgramEnd
+  have hRelStart :
+      RelAt (Assembly.Program.pcAfter mainCode) state state := by
+    exact ⟨by simpa [mainCode] using hPc, rfl⟩
+  obtain ⟨afterJump, hJumpStep, hRelJump⟩ :=
+    AssemblyControl.jump_stepResult_ctx_relAt_of_relAt
+      (label := ProcLabel.programEnd)
+      (dest := Assembly.Program.byteLength preLabel)
+      (pre := mainCode)
+      (post := procCode ++ [Assembly.Instr.label ProcLabel.programEnd])
+      hMainFits hRelStart hProgramEndJump
+  have hRelAtLabel :
+      RelAt (Assembly.Program.pcAfter preLabel) afterJump state := by
+    simpa [preLabel, Assembly.Program.pcAfter] using hRelJump
+  obtain ⟨final, hLabelStep, hRelFinal⟩ :=
+    AssemblyControl.label_stepResult_ctx_relAt_of_relAt
+      (label := ProcLabel.programEnd)
+      (pre := preLabel) (post := [])
+      hPreLabelFits hRelAtLabel
+  have hJumpStepProgram :
+      Assembly.Source.stepResult program.compile state =
+        .ok (.running afterJump) := by
+    simpa [mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using hJumpStep
+  have hLabelStepProgram :
+      Assembly.Source.stepResult program.compile afterJump =
+        .ok (.running final) := by
+    simpa [preLabel, mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using hLabelStep
+  refine ⟨final, ?_, hRelFinal.sameData, ?_⟩
+  · unfold Assembly.Source.runNResult
+    rw [hJumpStepProgram]
+    change Assembly.Source.runNResult program.compile 1 afterJump =
+      .ok (.running final)
+    unfold Assembly.Source.runNResult
+    rw [hLabelStepProgram]
+    rfl
+  · simpa [preLabel, mainCode, procCode, CompiledProgram.compile_eq,
+      List.append_assoc] using hRelFinal.pc_eq
+
+theorem compile_preserves_with_bounds_endPc
+    {program : Program} {sourceFuel : Nat} {initial : EVMState}
+    {sourceOutcome : Outcome}
+    (bounds : ProcedurePreservation.CompilationBounds program)
+    (hAccepted : Program.Accepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSource : program.run sourceFuel initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult program.compile targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      TargetOutcomeEndPc program.compile targetOutcome := by
+  let layout := ProcedurePreservation.ProgramLayout.ofCompilationBounds bounds
+  let evidence :=
+    ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds bounds
+  have hEval := Program.eval_of_run hSource
+  have hCall : ProcedurePreservation.CallObligationForAllFuel layout :=
+    callObligationForAllFuel_of_accepted layout hAccepted
+  have hMainPreserves :
+      ProcedurePreservation.ProgramLayout.MainPreserves layout :=
+    CompilerPreservationProgramLayout.main_block layout hCall hAccepted.wf
+      hAccepted.runner hAccepted.frame hAccepted.terminal
+  have hRun :=
+    hMainPreserves
+      (fuel := sourceFuel) (source := Program.initialState initial)
+      (outcome := sourceOutcome) (target := initial) (tokens := [])
+      hAccepted.wf rfl evidence.mainCalls
+      (ContextLabelsResolve.mainCtx program layout.asm)
+      evidence.mainSegment
+      (by simpa [evidence,
+        ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+        ProcedurePreservation.ProgramLayout.ofCompilationBounds] using
+        hInitialPc)
+      (Frame.stateRel_initial initial)
+      (by simpa [Program.initialState] using hEval)
+  rcases hRun with ⟨targetFuel, targetOutcome, hRunEq, hOutcome⟩
+  have hWhole :=
+    Program.wholeProgramSourceOutcome_of_eval hAccepted.wf hEval
+  have hRunProgram :
+      Assembly.Source.runNResult program.compile targetFuel initial =
+        .ok targetOutcome := by
+    rw [← evidence.asm_eq]
+    exact hRunEq
+  cases sourceOutcome with
+  | mk sourceState mode =>
+      cases mode with
+      | regular =>
+          cases targetOutcome with
+          | running targetState =>
+              rcases hOutcome with ⟨hFrame, hPc⟩
+              have hMainFallthrough :
+                  evidence.mainSegment.fallthroughPc =
+                    Assembly.Program.pcAfter
+                      (CompiledProgram.main program).code := by
+                simp [evidence,
+                  ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+                  ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+                  CompiledProgram.mainSegmentFromWholeFits,
+                  CodeSegment.fallthroughPc]
+              obtain ⟨final, hExitRun, hExitData, hExitPc⟩ :=
+                run_program_end_postamble_of_main_fallthrough
+                  (program := program) bounds
+                  (state := targetState)
+                  (hPc.trans hMainFallthrough)
+              have hFullRun :
+                  Assembly.Source.runNResult program.compile
+                      (targetFuel + 2) initial =
+                    .ok (.running final) :=
+                AssemblySource.runNResult_append_running hRunProgram
+                  hExitRun
+              refine ⟨targetFuel + 2, .running final, hFullRun, ?_, hExitPc⟩
+              have hWholeMain :
+                  WholeProgramOutcomeRel
+                    (Outcome.regular sourceState) (.running targetState) :=
+                WholeProgramOutcomeRel.running_of_stateRel hFrame
+              change eraseControl sourceState.evm = eraseControl final
+              change eraseControl sourceState.evm = eraseControl targetState
+                at hWholeMain
+              exact hWholeMain.trans hExitData.symm
+          | halted halt =>
+              cases hOutcome
+      | brk =>
+          cases hWhole
+      | cont =>
+          cases hWhole
+      | leave =>
+          cases hWhole
+      | halt kind =>
+          cases targetOutcome with
+          | running targetState =>
+              cases hOutcome
+          | halted halt =>
+              refine ⟨targetFuel, .halted halt, hRunProgram, ?_, trivial⟩
+              exact WholeProgramOutcomeRel.of_compiled_main hWhole hOutcome
+
 theorem compile_preserves
     {program : Program} {asm : Assembly.Program}
     {sourceFuel : Nat} {initial : EVMState}
@@ -25209,6 +25951,25 @@ theorem compile_preserves
   subst asm
   exact
     compile_preserves_with_bounds hBounds hAccepted hInitialPc hSource
+
+theorem compile_preserves_endPc
+    {program : Program} {asm : Assembly.Program}
+    {sourceFuel : Nat} {initial : EVMState}
+    {sourceOutcome : Outcome}
+    (hCompile :
+      ProcedurePreservation.compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hSource : program.run sourceFuel initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      TargetOutcomeEndPc asm targetOutcome := by
+  rcases ProcedurePreservation.compileChecked?_eq_some hCompile with
+    ⟨hAsm, hAccepted, hBounds⟩
+  subst asm
+  exact
+    compile_preserves_with_bounds_endPc hBounds hAccepted hInitialPc hSource
 
 end Preservation
 
