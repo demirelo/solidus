@@ -4632,6 +4632,87 @@ theorem openRunNResult_pushReturns_cleanup_frameStateRel_running_of_compileOpen
                 segment := hCleanupWholeFall,
       hOpen⟩
 
+theorem openRunNResult_body_regular_then_pushReturns_cleanup_running
+    {program : Assembly.Program}
+    {rawCode : Assembly.Program}
+    {rawCtx returnCtx : Structured.CompileContext}
+    {rawSegment : Structured.Preservation.CodeSegment program rawCode}
+    {returnSupply : Structured.LabelSupply}
+    {ctx finalCtx : Locals.Ctx}
+    {returns : List Name} {pushStmts : List Expressions.Stmt}
+    {cleanup : Structured.Code}
+    {bodyState afterPush returnedState : Locals.RunState}
+    {target afterRaw : EvmYul.EVM.State} {tokens : List Word}
+    {preserve targetDepth : Nat}
+    {rawFuel : Nat} {bodyTrace : OpenExternal.OpenTrace}
+    (returnTailSegment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (pushStmts ++ Locals.codeStmt cleanup) }
+          returnCtx returnSupply).code)
+    (hReturnStart :
+      Structured.Preservation.CodeSegment.startPc returnTailSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc rawSegment)
+    (hCompilePush :
+      Locals.Block.compileOpen ctx
+        { stmts := Functions.Lower.pushReturns returns } =
+        some (pushStmts, finalCtx))
+    (hCleanup :
+      finalCtx.cleanupToPreserving? preserve targetDepth = some cleanup)
+    (hRawRun :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program rawFuel target)
+        bodyTrace (.ok (.running afterRaw)))
+    (hRawRel :
+      Structured.Preservation.CompiledOutcomeRel program rawCtx
+        (Structured.Preservation.CodeSegment.fallthroughPc rawSegment)
+        (Structured.Outcome.regular bodyState) (.running afterRaw)
+        tokens)
+    (hPush :
+      Functions.Direct.pushReturns ctx returns bodyState = .ok afterPush)
+    (hCleanupRun :
+      Locals.Direct.Ctx.runCleanupToPreserving finalCtx preserve targetDepth
+        afterPush = .ok returnedState) :
+    ∃ bodyFuel targetFinal,
+      Structured.Preservation.Frame.StateRel returnedState targetFinal
+        tokens ∧
+        targetFinal.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc
+            returnTailSegment ∧
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program bodyFuel target)
+          bodyTrace (.ok (.running targetFinal)) := by
+  rcases hRawRel with ⟨hRelAfterRaw, hPcAfterRaw⟩
+  have hReturnPc :
+      afterRaw.pc =
+        Structured.Preservation.CodeSegment.startPc returnTailSegment := by
+    calc
+      afterRaw.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc rawSegment :=
+            hPcAfterRaw
+      _ =
+          Structured.Preservation.CodeSegment.startPc returnTailSegment :=
+            hReturnStart.symm
+  rcases
+      openRunNResult_pushReturns_cleanup_frameStateRel_running_of_compileOpen
+        (ctx := ctx) (finalCtx := finalCtx) (returns := returns)
+        (pushStmts := pushStmts) (cleanup := cleanup)
+        (state := bodyState) (afterPush := afterPush)
+        (final := returnedState) (target := afterRaw) (tokens := tokens)
+        (preserve := preserve) (targetDepth := targetDepth)
+        (structuredCtx := returnCtx) (supply := returnSupply)
+        hCompilePush hCleanup returnTailSegment hReturnPc hRelAfterRaw
+        hPush hCleanupRun with
+    ⟨returnFuel, targetFinal, hRelFinal, hPcFinal, hReturnOpen⟩
+  have hFull :=
+    OpenAssembly.Source.openRunNResult_resolves_running_continue
+      hRawRun hReturnOpen
+  exact
+    ⟨rawFuel + returnFuel, targetFinal, hRelFinal, hPcFinal,
+      by simpa using hFull⟩
+
 theorem openRunNResult_source_jumpi_no_call_running_continue
     {pre post : Assembly.Program} {label : Assembly.Label}
     {state afterPop : EvmYul.EVM.State} {condTrue : Bool}
