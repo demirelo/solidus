@@ -3201,6 +3201,173 @@ theorem openRunNResult_source_code_no_call_running_continue
           simpa [Structured.Code.toAssembly, List.append_assoc,
             Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hCurrent
 
+theorem openRunNResult_source_code_no_call_relAt_running_continue
+    {pre post : Assembly.Program} {code : Structured.Code}
+    {source target source' : EvmYul.EVM.State}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hSafe : Structured.Preservation.Code.RunnerSafe code)
+    (hNoCall : Structured.Code.usesCallCreate code = false)
+    (hFits : Structured.Preservation.Code.PCFitsFrom pre code)
+    (hRel :
+      Structured.Preservation.RelAt
+        (Assembly.Program.pcAfter pre) target source)
+    (hRun : Structured.Code.run code source = .ok source')
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.RelAt
+          (Assembly.Program.pcAfter (pre ++ code.toAssembly))
+          targetFinal source' →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ code.toAssembly ++ post) tailFuel targetFinal)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ code.toAssembly ++ post) (code.length + tailFuel) target)
+      tailTrace result := by
+  induction code generalizing pre source target with
+  | nil =>
+      simp [Structured.Code.run] at hRun
+      cases hRun
+      simpa [Structured.Code.toAssembly] using
+        hRest target (by simpa [Structured.Code.toAssembly] using hRel)
+  | cons instr rest ih =>
+      cases hSafe with
+      | cons hInstr hRestSafe =>
+          unfold Structured.Code.run at hRun
+          cases hStep : instr.step source with
+          | error err =>
+              rw [hStep] at hRun
+              cases hRun
+          | ok sourceMid =>
+              rw [hStep] at hRun
+              have hNoParts :
+                  instr.usesCallCreate = false ∧
+                    Structured.Code.usesCallCreate rest = false := by
+                simpa [Structured.Code.usesCallCreate] using hNoCall
+              rcases hFits with ⟨hFitHere, hFitsRest⟩
+              obtain ⟨targetMid, hAssemblyStep, hRelMid⟩ :=
+                Structured.Preservation.BasicInstr.source_stepResult_ctx_relAt_of_relAt
+                  (instr := instr) (pre := pre)
+                  (post := Structured.Code.toAssembly rest ++ post)
+                  hInstr hFitHere hRel hStep
+              have hRestOpen :
+                  OpenExternal.OpenResultResolves
+                    (OpenAssembly.Source.openRunNResult
+                      ((pre ++ [instr.toAssembly]) ++
+                        Structured.Code.toAssembly rest ++ post)
+                      (rest.length + tailFuel) targetMid)
+                    tailTrace result := by
+                exact
+                  ih (pre := pre ++ [instr.toAssembly])
+                    (source := sourceMid) (target := targetMid)
+                    hRestSafe hNoParts.2 hFitsRest hRelMid hRun
+                    (by
+                      intro targetFinal hRelFinal
+                      simpa [Structured.Code.toAssembly, List.append_assoc]
+                        using
+                          hRest targetFinal
+                            (by simpa [Structured.Code.toAssembly,
+                              List.append_assoc] using hRelFinal))
+              have hAt :
+                  Assembly.Program.instrAtPc
+                    (pre ++ [instr.toAssembly] ++
+                      (Structured.Code.toAssembly rest ++ post))
+                    target.pc.toNat =
+                    some (Assembly.Program.byteLength pre,
+                      instr.toAssembly) := by
+                unfold Assembly.Program.instrAtPc
+                rw [hRel.pc_eq, hFitHere]
+                simpa using
+                  Assembly.Program.instrAtPcFrom_append_boundary_cons
+                    pre (Structured.Code.toAssembly rest ++ post)
+                    instr.toAssembly 0
+              have hNoInstr :
+                  Assembly.Instr.usesCallCreate instr.toAssembly = false := by
+                simpa [Structured.BasicInstr.toAssembly_usesCallCreate]
+                  using hNoParts.1
+              have hStepResult :
+                  Assembly.Source.stepResult
+                    (pre ++ [instr.toAssembly] ++
+                      (Structured.Code.toAssembly rest ++ post)) target =
+                    .ok (.running targetMid) := by
+                simpa [List.append_assoc] using hAssemblyStep
+              have hCurrent :
+                  OpenExternal.OpenResultResolves
+                    (OpenAssembly.Source.openRunNResult
+                      (pre ++ [instr.toAssembly] ++
+                        (Structured.Code.toAssembly rest ++ post))
+                      ((rest.length + tailFuel) + 1) target)
+                    tailTrace result :=
+                OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+                  hAt hNoInstr hStepResult
+                  (by simpa [List.append_assoc] using hRestOpen)
+              simpa [Structured.Code.toAssembly, List.append_assoc,
+                Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hCurrent
+
+theorem openRunNResult_source_code_no_call_frameStateRel_running_continue
+    {pre post : Assembly.Program} {code : Structured.Code}
+    {source final : Structured.RunState}
+    {target : EvmYul.EVM.State} {tokens : List Word}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hSafe : Structured.Preservation.Code.RunnerSafe code)
+    (hFrame : Structured.Code.FrameSafe code)
+    (hNoCall : Structured.Code.usesCallCreate code = false)
+    (hFits : Structured.Preservation.Code.PCFitsFrom pre code)
+    (hPc : target.pc = Assembly.Program.pcAfter pre)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hRun : Structured.Code.runState code source = .ok final)
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.Frame.StateRel final targetFinal tokens →
+        targetFinal.pc =
+          Assembly.Program.pcAfter (pre ++ code.toAssembly) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ code.toAssembly ++ post) tailFuel targetFinal)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (pre ++ code.toAssembly ++ post) (code.length + tailFuel) target)
+      tailTrace result := by
+  rcases hRel.runState_frameSafe_hidden_exists hFrame hRun with
+    ⟨hiddenFinal, hHiddenRun, hHiddenRel⟩
+  have hRelAt :
+      Structured.Preservation.RelAt (Assembly.Program.pcAfter pre) target
+        { source.evm with stack := target.stack } := by
+    exact ⟨hPc, hRel.dataRel⟩
+  exact
+    openRunNResult_source_code_no_call_relAt_running_continue
+      (pre := pre) (post := post) (code := code)
+      hSafe hNoCall hFits hRelAt hHiddenRun
+      (by
+        intro targetFinal hRelFinal
+        have hStack : targetFinal.stack = hiddenFinal.stack :=
+          Structured.Preservation.stack_eq_of_eraseControl_eq
+            hRelFinal.sameData
+        have hFrameRel :
+            Structured.Preservation.Frame.StateRel final targetFinal
+              tokens := by
+          refine ⟨?_, ?_⟩
+          · rw [hStack]
+            exact hHiddenRel.stackRel
+          · calc
+              Structured.Preservation.eraseControl targetFinal
+                  = Structured.Preservation.eraseControl hiddenFinal :=
+                    hRelFinal.sameData
+              _ =
+                  Structured.Preservation.eraseControl
+                    { final.evm with stack := hiddenFinal.stack } :=
+                    hHiddenRel.dataRel
+              _ =
+                  Structured.Preservation.eraseControl
+                    { final.evm with stack := targetFinal.stack } := by
+                    rw [hStack]
+        exact hRest targetFinal hFrameRel hRelFinal.pc_eq)
+
 theorem structuredCode_run_no_call_fallthrough_pc
     {pre : Assembly.Program} {code : Structured.Code}
     {state final : EvmYul.EVM.State}
@@ -3340,6 +3507,62 @@ theorem openRunNResult_cleanupToPreserving_runState_continue
   exact
     openRunNResult_codeSegment_no_call_running_continue
       segment hNoCall hPc hRunCode hRest
+
+theorem openRunNResult_cleanupToPreserving_frameStateRel_continue
+    {program : Assembly.Program} {ctx : Locals.Ctx}
+    {preserve targetDepth : Nat} {cleanup : Structured.Code}
+    {state final : Locals.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hCleanup :
+      ctx.cleanupToPreserving? preserve targetDepth = some cleanup)
+    (segment :
+      Structured.Preservation.CodeSegment program cleanup.toAssembly)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hRel :
+      Structured.Preservation.Frame.StateRel state target tokens)
+    (hRun :
+      Locals.Direct.Ctx.runCleanupToPreserving ctx preserve targetDepth
+        state = .ok final)
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.Frame.StateRel final targetFinal tokens →
+        targetFinal.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel targetFinal)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult program
+        (cleanup.length + tailFuel) target)
+      tailTrace result := by
+  rcases segment with ⟨pre, post, hAsm, hFits⟩
+  subst program
+  have hCodeFits :
+      Structured.Preservation.Code.PCFitsFrom pre cleanup :=
+    Structured.Preservation.Code.PCFitsFrom.of_assembly hFits
+  have hRunState :
+      Structured.Code.runState cleanup state = .ok final :=
+    locals_runCleanupToPreserving_runState_of_cleanupToPreserving
+      hCleanup hRun
+  have hNoCall :
+      Structured.Code.usesCallCreate cleanup = false :=
+    Locals.CompilerFacts.Ctx.cleanupToPreserving?_noCallCreate hCleanup
+  have hSafe :
+      Structured.Preservation.Code.RunnerSafe cleanup :=
+    structuredCode_runnerSafe_cleanupToPreserving? hCleanup
+  have hFrame :
+      Structured.Code.FrameSafe cleanup :=
+    structuredCode_frameSafe_cleanupToPreserving? hCleanup
+  exact
+    openRunNResult_source_code_no_call_frameStateRel_running_continue
+      (pre := pre) (post := post) (code := cleanup)
+      hSafe hFrame hNoCall hCodeFits hPc hRel hRunState
+      (by
+        intro targetFinal hRelFinal hPcFinal
+        exact hRest targetFinal hRelFinal hPcFinal)
 
 theorem openRunNResult_source_jumpi_no_call_running_continue
     {pre post : Assembly.Program} {label : Assembly.Label}
