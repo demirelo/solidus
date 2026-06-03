@@ -9193,7 +9193,7 @@ theorem compilerOpenAssignTail_stackPrefix_openRunNResult_continue_fallthrough
     (hSwap : Locals.StackOp.swap? (idx + 1) = some swapOp)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout source [value] state)
-    (program : Assembly.Program) (tailFuel : Nat)
+    (program : Assembly.Program)
     (segment :
       Structured.Preservation.CodeSegment program
         ([Assembly.Instr.prim swapOp.toPrimOp] ++
@@ -9206,7 +9206,7 @@ theorem compilerOpenAssignTail_stackPrefix_openRunNResult_continue_fallthrough
         [] evmAfter ∧
       evmAfter.pc =
         Structured.Preservation.CodeSegment.fallthroughPc segment ∧
-      ∀ {tailTrace : OpenExternal.OpenTrace}
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
         {result : Except EVMException Assembly.StepResult},
         OpenExternal.OpenResultResolves
           (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
@@ -9380,7 +9380,7 @@ theorem compilerOpenAssignTail_stackPrefix_openRunNResult_continue_fallthrough
           (layout := layout) (store := source.vars)
           (stack := baseStack) (name := name) (value := value)
           (idx := idx) hNoDup hName hStoreRel)
-  · intro tailTrace result hRest
+  · intro tailFuel tailTrace result hRest
     have hPopAndRest :
         OpenExternal.OpenResultResolves
           (OpenAssembly.Source.openRunNResult program (tailFuel + 1)
@@ -9406,6 +9406,1323 @@ theorem compilerOpenAssignTail_stackPrefix_openRunNResult_continue_fallthrough
           (instr := .prim swapOp.toPrimOp)
           hAtSwap hOpenSwap hPopAndRest
     simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hSwapAndRest
+
+theorem compilerOpenAssignTopWithOffset_stackPrefix_openRunNResult_continue_fallthrough
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {name : Name} {idx offset : Nat} {value : Word}
+    {restValues : List Word} {swapOp : Structured.BasicOp}
+    (hNoDup : layout.Nodup)
+    (hName : layout[idx]? = some name)
+    (hPrefixLen : restValues.length = offset)
+    (hBound : offset + idx + 1 ≤ 16)
+    (hSwap : Locals.StackOp.swap? (offset + (idx + 1)) = some swapOp)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout source (value :: restValues)
+        state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        ([Assembly.Instr.prim swapOp.toPrimOp] ++
+          [Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp]))
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout
+        (source.withVars (Locals.Source.Store.insert source.vars name value))
+        restValues evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (2 + tailFuel) state)
+          tailTrace result := by
+  rcases hPrefixRel with ⟨hShared, baseStack, hStack, hStoreRel⟩
+  rcases Locals.SourceLowering.StackStoreRel.lookup_value hStoreRel hName with
+    ⟨oldAtIdx, hOld, _hOldStore⟩
+  let restValuesBase := restValues ++ baseStack
+  have hRestValuesOld :
+      restValuesBase[offset + idx]? = some oldAtIdx := by
+    subst restValuesBase
+    rw [← hPrefixLen]
+    exact
+      (Locals.StackLowering.getElem?_append_right_add restValues baseStack idx).trans
+        hOld
+  let swappedEVM :=
+    state.replaceStackAndIncrPC
+      (oldAtIdx :: restValues ++ baseStack.take idx ++ [value] ++
+        baseStack.drop (idx + 1))
+  let finalStack :=
+    restValues ++ baseStack.take idx ++ value :: baseStack.drop (idx + 1)
+  let finalEVM := swappedEVM.replaceStackAndIncrPC finalStack
+  let swapSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.prim swapOp.toPrimOp] :=
+    Structured.Preservation.CodeSegment.left segment
+  let popSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp] :=
+    Structured.Preservation.CodeSegment.right segment
+  have hPcSwap :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc swapSegment := by
+    simpa [swapSegment, Structured.Preservation.CodeSegment.left,
+      Structured.Preservation.CodeSegment.startPc] using hPc
+  have hAtSwap :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat,
+            Assembly.Instr.prim swapOp.toPrimOp) := by
+    simpa [hPcSwap] using codeSegment_instrAtPc_start_cons swapSegment
+  have hStackRestValues :
+      state.stack = value :: restValuesBase := by
+    subst restValuesBase
+    simpa [List.append_assoc] using hStack
+  have hSwapRunRaw :
+      EvmYul.swap (offset + idx + 1) state =
+        .ok
+          (state.replaceStackAndIncrPC
+            (oldAtIdx :: restValuesBase.take (offset + idx) ++ [value] ++
+              restValuesBase.drop (offset + idx + 1))) := by
+    simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+      (Locals.SourceLowering.Assignment.evm_swap_assign_get?
+        (state := state) (locals := restValuesBase) (idx := offset + idx)
+        (old := oldAtIdx) (value := value) hStackRestValues hRestValuesOld)
+  have hTakeRestValues :
+      restValuesBase.take (offset + idx) =
+        restValues ++ baseStack.take idx := by
+    subst restValuesBase
+    rw [← hPrefixLen]
+    simp [List.take_append]
+  have hDropRestValues :
+      restValuesBase.drop (offset + idx + 1) =
+        baseStack.drop (idx + 1) := by
+    subst restValuesBase
+    rw [← hPrefixLen]
+    simp [List.drop_append, Nat.add_assoc]
+  have hSwapRun :
+      EvmYul.swap (offset + idx + 1) state = .ok swappedEVM := by
+    simpa [swappedEVM, hTakeRestValues, hDropRestValues, List.append_assoc]
+      using hSwapRunRaw
+  have hSwapStep :
+      Structured.BasicOp.step swapOp state = .ok swappedEVM := by
+    rcases
+        Locals.SourceLowering.Assignment.stackOp_swap?_step_eq_swap
+          (n := offset + (idx + 1)) (by omega) hBound state with
+      ⟨op', hSwap', hStepEq⟩
+    have hOp : swapOp = op' := by
+      rw [hSwap] at hSwap'
+      cases hSwap'
+      rfl
+    rw [hOp, hStepEq]
+    simpa [Nat.add_assoc] using hSwapRun
+  have hSwapNoCall :
+      swapOp.toPrimOp.isCallCreate = false :=
+    Locals.CompilerFacts.StackOp.swap?_not_callCreate
+      (offset + (idx + 1)) hSwap
+  have hSwapStepAt :
+      Assembly.Source.stepAt program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state =
+        .ok swappedEVM := by
+    simpa [Assembly.Source.stepAt, Structured.BasicOp.step] using
+      hSwapStep
+  have hSwapStepResult :
+      Assembly.Source.stepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state =
+        .ok (.running swappedEVM) := by
+    simp [Assembly.Source.stepAtResult, hSwapStepAt,
+      basicOp_toPrimOp_haltKind?_none swapOp]
+  have hOpenSwap :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state)
+        [] (.ok (.running swappedEVM)) :=
+    OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+      (program := program)
+      (pc := (Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+      (op := swapOp.toPrimOp) (state := state)
+      (result := .running swappedEVM) hSwapNoCall hSwapStepResult
+  have hSwapPc :
+      swappedEVM.pc =
+        Structured.Preservation.CodeSegment.startPc popSegment := by
+    have hStepPc :
+        swappedEVM.pc = state.pc + EvmYul.UInt256.ofNat 1 :=
+      basicOp_no_callCreate_step_pc hSwapNoCall hSwapStep
+    have hSwapFall :
+        Structured.Preservation.CodeSegment.fallthroughPc swapSegment =
+          Structured.Preservation.CodeSegment.startPc swapSegment +
+            EvmYul.UInt256.ofNat 1 := by
+      simpa [Structured.BasicInstr.toAssembly, Structured.BasicOp.toPrimOp,
+        Assembly.Instr.byteSize] using
+        codeSegment_fallthroughPc_singleton swapSegment
+    have hPopStart :
+        Structured.Preservation.CodeSegment.startPc popSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc swapSegment :=
+      codeSegment_right_startPc_eq_left_fallthroughPc segment
+    rw [hStepPc, hPcSwap, hPopStart, hSwapFall]
+  have hAtPop :
+      Assembly.Program.instrAtPc program swappedEVM.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat,
+            Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp) := by
+    simpa [hSwapPc] using codeSegment_instrAtPc_start_cons popSegment
+  have hPopStep :
+      Structured.BasicOp.step Structured.BasicOp.pop swappedEVM =
+        .ok finalEVM := by
+    simp [Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimStep.run, Assembly.PrimOp.continuingStep?,
+      EvmYul.Stack.pop, swappedEVM, finalEVM, finalStack,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  have hPopStepAt :
+      Assembly.Source.stepAt program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM =
+        .ok finalEVM := by
+    simpa [Assembly.Source.stepAt, Structured.BasicOp.step] using
+      hPopStep
+  have hPopStepResult :
+      Assembly.Source.stepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM =
+        .ok (.running finalEVM) := by
+    simp [Assembly.Source.stepAtResult, hPopStepAt,
+      basicOp_toPrimOp_haltKind?_none Structured.BasicOp.pop]
+  have hOpenPop :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM)
+        [] (.ok (.running finalEVM)) :=
+    OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+      (program := program)
+      (pc := (Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+      (op := Structured.BasicOp.pop.toPrimOp) (state := swappedEVM)
+      (result := .running finalEVM) rfl hPopStepResult
+  have hFinalPc :
+      finalEVM.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    have hStepPc :
+        finalEVM.pc = swappedEVM.pc + EvmYul.UInt256.ofNat 1 :=
+      basicOp_no_callCreate_step_pc (op := Structured.BasicOp.pop) rfl hPopStep
+    have hPopFall :
+        Structured.Preservation.CodeSegment.fallthroughPc popSegment =
+          Structured.Preservation.CodeSegment.startPc popSegment +
+            EvmYul.UInt256.ofNat 1 := by
+      simpa [Structured.BasicInstr.toAssembly, Structured.BasicOp.toPrimOp,
+        Assembly.Instr.byteSize] using
+        codeSegment_fallthroughPc_singleton popSegment
+    have hPopFallSegment :
+        Structured.Preservation.CodeSegment.fallthroughPc popSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      simp [popSegment, Structured.Preservation.CodeSegment.right,
+        Structured.Preservation.CodeSegment.fallthroughPc]
+    rw [hStepPc, hSwapPc, ← hPopFall, hPopFallSegment]
+  refine ⟨finalEVM, ?_, hFinalPc, ?_⟩
+  · refine ⟨?_, baseStack.take idx ++ value :: baseStack.drop (idx + 1), ?_, ?_⟩
+    · simpa [finalEVM, swappedEVM, Locals.Source.State.withVars,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] using hShared
+    · simp [finalEVM, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, finalStack, List.append_assoc]
+    · simpa [Locals.Source.State.withVars] using
+        (Locals.SourceLowering.StackStoreRel.assign
+          (layout := layout) (store := source.vars)
+          (stack := baseStack) (name := name) (value := value)
+          (idx := idx) hNoDup hName hStoreRel)
+  · intro tailFuel tailTrace result hRest
+    have hPopAndRest :
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (tailFuel + 1)
+            swappedEVM)
+          tailTrace result := by
+      simpa using
+        OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+          (program := program) (fuel := tailFuel) (state := swappedEVM)
+          (mid := finalEVM)
+          (pc := (Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (instr := .prim Structured.BasicOp.pop.toPrimOp)
+          hAtPop hOpenPop hRest
+    have hSwapAndRest :
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program ((tailFuel + 1) + 1)
+            state)
+          tailTrace result := by
+      simpa using
+        OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+          (program := program) (fuel := tailFuel + 1) (state := state)
+          (mid := swappedEVM)
+          (pc := (Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (instr := .prim swapOp.toPrimOp)
+          hAtSwap hOpenSwap hPopAndRest
+    simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hSwapAndRest
+
+def StackPrefixSuffixRel (layout : List Name) (source : Objects.Source.State)
+    (stackPrefix suffix : List Word) (evm : EvmYul.EVM.State) : Prop :=
+  evm.toSharedState = source.shared ∧
+    ∃ baseStack : EvmYul.Stack Word,
+      evm.stack = stackPrefix ++ baseStack ++ suffix ∧
+        Locals.SourceLowering.StackStoreRel layout source.vars baseStack
+
+theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {name : Name} {idx offset : Nat} {value : Word}
+    {restValues suffix : List Word} {swapOp : Structured.BasicOp}
+    (hNoDup : layout.Nodup)
+    (hName : layout[idx]? = some name)
+    (hPrefixLen : restValues.length = offset)
+    (hBound : offset + idx + 1 ≤ 16)
+    (hSwap : Locals.StackOp.swap? (offset + (idx + 1)) = some swapOp)
+    (hPrefixRel :
+      StackPrefixSuffixRel layout source (value :: restValues) suffix state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        ([Assembly.Instr.prim swapOp.toPrimOp] ++
+          [Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp]))
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      StackPrefixSuffixRel layout
+        (source.withVars (Locals.Source.Store.insert source.vars name value))
+        restValues suffix evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (2 + tailFuel) state)
+          tailTrace result := by
+  rcases hPrefixRel with ⟨hShared, baseStack, hStack, hStoreRel⟩
+  rcases Locals.SourceLowering.StackStoreRel.lookup_value hStoreRel hName with
+    ⟨oldAtIdx, hOld, _hOldStore⟩
+  let localsWithSuffix := baseStack ++ suffix
+  have hLocalWithSuffix :
+      localsWithSuffix[idx]? = some oldAtIdx := by
+    have hIdxLt : idx < baseStack.length := by
+      exact (List.getElem?_eq_some_iff.mp hOld).1
+    simp [localsWithSuffix, List.getElem?_append_left hIdxLt, hOld]
+  let swappedEVM :=
+    state.replaceStackAndIncrPC
+      (oldAtIdx :: restValues ++ localsWithSuffix.take idx ++ [value] ++
+        localsWithSuffix.drop (idx + 1))
+  let finalStackRaw :=
+    restValues ++ localsWithSuffix.take idx ++ value ::
+      localsWithSuffix.drop (idx + 1)
+  let finalBaseStack :=
+    baseStack.take idx ++ value :: baseStack.drop (idx + 1)
+  let finalEVM := swappedEVM.replaceStackAndIncrPC finalStackRaw
+  let swapSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.prim swapOp.toPrimOp] :=
+    Structured.Preservation.CodeSegment.left segment
+  let popSegment :
+      Structured.Preservation.CodeSegment program
+        [Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp] :=
+    Structured.Preservation.CodeSegment.right segment
+  have hPcSwap :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc swapSegment := by
+    simpa [swapSegment, Structured.Preservation.CodeSegment.left,
+      Structured.Preservation.CodeSegment.startPc] using hPc
+  have hAtSwap :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat,
+            Assembly.Instr.prim swapOp.toPrimOp) := by
+    simpa [hPcSwap] using codeSegment_instrAtPc_start_cons swapSegment
+  have hStackRestValues :
+      state.stack = value :: restValues ++ localsWithSuffix := by
+    simp [localsWithSuffix, hStack, List.append_assoc]
+  have hSwapRunRaw :
+      EvmYul.swap (restValues.length + idx + 1) state =
+        .ok swappedEVM := by
+    simpa [swappedEVM, Nat.add_assoc] using
+      (Functions.SourceDirect.Assignment.evm_swap_assign_get?_with_prefix
+        (state := state) (stackPrefix := restValues)
+        (locals := localsWithSuffix) (idx := idx) (old := oldAtIdx)
+        (value := value) hStackRestValues hLocalWithSuffix)
+  have hSwapRun :
+      EvmYul.swap (offset + idx + 1) state = .ok swappedEVM := by
+    simpa [hPrefixLen, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+      hSwapRunRaw
+  have hSwapStep :
+      Structured.BasicOp.step swapOp state = .ok swappedEVM := by
+    rcases
+        Locals.SourceLowering.Assignment.stackOp_swap?_step_eq_swap
+          (n := offset + (idx + 1)) (by omega) hBound state with
+      ⟨op', hSwap', hStepEq⟩
+    have hOp : swapOp = op' := by
+      rw [hSwap] at hSwap'
+      cases hSwap'
+      rfl
+    rw [hOp, hStepEq]
+    simpa [Nat.add_assoc] using hSwapRun
+  have hSwapNoCall :
+      swapOp.toPrimOp.isCallCreate = false :=
+    Locals.CompilerFacts.StackOp.swap?_not_callCreate
+      (offset + (idx + 1)) hSwap
+  have hSwapStepAt :
+      Assembly.Source.stepAt program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state =
+        .ok swappedEVM := by
+    simpa [Assembly.Source.stepAt, Structured.BasicOp.step] using
+      hSwapStep
+  have hSwapStepResult :
+      Assembly.Source.stepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state =
+        .ok (.running swappedEVM) := by
+    simp [Assembly.Source.stepAtResult, hSwapStepAt,
+      basicOp_toPrimOp_haltKind?_none swapOp]
+  have hOpenSwap :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (.prim swapOp.toPrimOp) state)
+        [] (.ok (.running swappedEVM)) :=
+    OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+      (program := program)
+      (pc := (Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+      (op := swapOp.toPrimOp) (state := state)
+      (result := .running swappedEVM) hSwapNoCall hSwapStepResult
+  have hSwapPc :
+      swappedEVM.pc =
+        Structured.Preservation.CodeSegment.startPc popSegment := by
+    have hStepPc :
+        swappedEVM.pc = state.pc + EvmYul.UInt256.ofNat 1 :=
+      basicOp_no_callCreate_step_pc hSwapNoCall hSwapStep
+    have hSwapFall :
+        Structured.Preservation.CodeSegment.fallthroughPc swapSegment =
+          Structured.Preservation.CodeSegment.startPc swapSegment +
+            EvmYul.UInt256.ofNat 1 := by
+      simpa [Structured.BasicInstr.toAssembly, Structured.BasicOp.toPrimOp,
+        Assembly.Instr.byteSize] using
+        codeSegment_fallthroughPc_singleton swapSegment
+    have hPopStart :
+        Structured.Preservation.CodeSegment.startPc popSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc swapSegment :=
+      codeSegment_right_startPc_eq_left_fallthroughPc segment
+    rw [hStepPc, hPcSwap, hPopStart, hSwapFall]
+  have hAtPop :
+      Assembly.Program.instrAtPc program swappedEVM.pc.toNat =
+        some
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat,
+            Assembly.Instr.prim Structured.BasicOp.pop.toPrimOp) := by
+    simpa [hSwapPc] using codeSegment_instrAtPc_start_cons popSegment
+  have hPopStep :
+      Structured.BasicOp.step Structured.BasicOp.pop swappedEVM =
+        .ok finalEVM := by
+    simp [Structured.BasicOp.step, Structured.BasicOp.toPrimOp,
+      Assembly.Target.stepInstr, Assembly.PrimOp.step,
+      Assembly.PrimStep.run, Assembly.PrimOp.continuingStep?,
+      EvmYul.Stack.pop, swappedEVM, finalEVM, finalStackRaw,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, List.append_assoc]
+  have hPopStepAt :
+      Assembly.Source.stepAt program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM =
+        .ok finalEVM := by
+    simpa [Assembly.Source.stepAt, Structured.BasicOp.step] using
+      hPopStep
+  have hPopStepResult :
+      Assembly.Source.stepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM =
+        .ok (.running finalEVM) := by
+    simp [Assembly.Source.stepAtResult, hPopStepAt,
+      basicOp_toPrimOp_haltKind?_none Structured.BasicOp.pop]
+  have hOpenPop :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openStepAtResult program
+          ((Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (.prim Structured.BasicOp.pop.toPrimOp) swappedEVM)
+        [] (.ok (.running finalEVM)) :=
+    OpenAssembly.Source.openStepAtResult_resolves_closed_of_prim_no_callCreate
+      (program := program)
+      (pc := (Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+      (op := Structured.BasicOp.pop.toPrimOp) (state := swappedEVM)
+      (result := .running finalEVM) rfl hPopStepResult
+  have hFinalPc :
+      finalEVM.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    have hStepPc :
+        finalEVM.pc = swappedEVM.pc + EvmYul.UInt256.ofNat 1 :=
+      basicOp_no_callCreate_step_pc (op := Structured.BasicOp.pop) rfl hPopStep
+    have hPopFall :
+        Structured.Preservation.CodeSegment.fallthroughPc popSegment =
+          Structured.Preservation.CodeSegment.startPc popSegment +
+            EvmYul.UInt256.ofNat 1 := by
+      simpa [Structured.BasicInstr.toAssembly, Structured.BasicOp.toPrimOp,
+        Assembly.Instr.byteSize] using
+        codeSegment_fallthroughPc_singleton popSegment
+    have hPopFallSegment :
+        Structured.Preservation.CodeSegment.fallthroughPc popSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      simp [popSegment, Structured.Preservation.CodeSegment.right,
+        Structured.Preservation.CodeSegment.fallthroughPc]
+    rw [hStepPc, hSwapPc, ← hPopFall, hPopFallSegment]
+  have hFinalStackShape :
+      finalStackRaw = restValues ++ finalBaseStack ++ suffix := by
+    have hIdxLt : idx < baseStack.length :=
+      (List.getElem?_eq_some_iff.mp hOld).1
+    have hIdxLe : idx ≤ baseStack.length := Nat.le_of_lt hIdxLt
+    have hIdxSuccLe : idx + 1 ≤ baseStack.length := by omega
+    have hTake :
+        localsWithSuffix.take idx = baseStack.take idx := by
+      simpa [localsWithSuffix] using
+        (List.take_append_of_le_length (l₁ := baseStack) (l₂ := suffix)
+          hIdxLe)
+    have hDrop :
+        localsWithSuffix.drop (idx + 1) =
+          baseStack.drop (idx + 1) ++ suffix := by
+      simpa [localsWithSuffix] using
+        (List.drop_append_of_le_length (l₁ := baseStack) (l₂ := suffix)
+          hIdxSuccLe)
+    simp [finalStackRaw, finalBaseStack, hTake, hDrop, List.append_assoc]
+  refine ⟨finalEVM, ?_, hFinalPc, ?_⟩
+  · refine ⟨?_, finalBaseStack, ?_, ?_⟩
+    · simpa [finalEVM, swappedEVM, Locals.Source.State.withVars,
+        EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC] using hShared
+    · simp [finalEVM, EvmYul.EVM.State.replaceStackAndIncrPC,
+        EvmYul.EVM.State.incrPC, hFinalStackShape]
+    · simpa [finalBaseStack, Locals.Source.State.withVars] using
+        (Locals.SourceLowering.StackStoreRel.assign
+          (layout := layout) (store := source.vars)
+          (stack := baseStack) (name := name) (value := value)
+          (idx := idx) hNoDup hName hStoreRel)
+  · intro tailFuel tailTrace result hRest
+    have hPopAndRest :
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program (tailFuel + 1)
+            swappedEVM)
+          tailTrace result := by
+      simpa using
+        OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+          (program := program) (fuel := tailFuel) (state := swappedEVM)
+          (mid := finalEVM)
+          (pc := (Structured.Preservation.CodeSegment.startPc popSegment).toNat)
+          (instr := .prim Structured.BasicOp.pop.toPrimOp)
+          hAtPop hOpenPop hRest
+    have hSwapAndRest :
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program ((tailFuel + 1) + 1)
+            state)
+          tailTrace result := by
+      simpa using
+        OpenAssembly.Source.openRunNResult_current_stepAt_running_continue
+          (program := program) (fuel := tailFuel + 1) (state := state)
+          (mid := swappedEVM)
+          (pc := (Structured.Preservation.CodeSegment.startPc swapSegment).toNat)
+          (instr := .prim swapOp.toPrimOp)
+          hAtSwap hOpenSwap hPopAndRest
+    simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hSwapAndRest
+
+theorem compilerOpenFunctionsAssignReturnedTopsRev_stackPrefix_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {names : List Name} {values : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ names →
+        ∃ idx, layout[idx]? = some name ∧ names.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany names values source.vars = some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTopsRev names } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout source values state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      Locals.SourceLowering.StackPrefixRel layout
+        (source.withVars store') [] evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  induction names generalizing values source state store' compiledStmts
+      finalCtx supply with
+  | nil =>
+      cases values with
+      | nil =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+          subst store'
+          have hCompiled' :
+              compiledStmts = [] ∧ ctx = finalCtx := by
+            simpa [Functions.Lower.assignReturnedTopsRev,
+              Locals.Block.compileOpen] using hCompileBlock
+          have hCompiled :
+              compiledStmts = [] ∧ finalCtx = ctx :=
+            ⟨hCompiled'.1, hCompiled'.2.symm⟩
+          rcases hCompiled with ⟨hCompiledStmts, _hFinalCtx⟩
+          have hFallthrough :
+              state.pc =
+                Structured.Preservation.CodeSegment.fallthroughPc segment := by
+            have hSegmentCode :
+                (Structured.Block.compileFromCtx
+                    { stmts := Expressions.StmtList.toStructured compiledStmts }
+                    structuredCtx supply).code = [] := by
+              simp [hCompiledStmts, Expressions.StmtList.toStructured,
+                Structured.Block.compileFromCtx]
+            let emptySegment :
+                Structured.Preservation.CodeSegment program [] :=
+              Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+            have hEmpty :
+                Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+                  Structured.Preservation.CodeSegment.startPc emptySegment :=
+              codeSegment_fallthroughPc_empty emptySegment
+            have hStart :
+                Structured.Preservation.CodeSegment.startPc emptySegment =
+                  Structured.Preservation.CodeSegment.startPc segment := by
+              simp [emptySegment, Structured.Preservation.CodeSegment.cast_code,
+                Structured.Preservation.CodeSegment.startPc]
+            have hFall :
+                Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+                  Structured.Preservation.CodeSegment.fallthroughPc segment := by
+              cases segment with
+              | mk pre post hAsm hFits =>
+                  simp [emptySegment,
+                    Structured.Preservation.CodeSegment.cast_code,
+                    Structured.Preservation.CodeSegment.fallthroughPc,
+                    hSegmentCode]
+            calc
+              state.pc = Structured.Preservation.CodeSegment.startPc segment :=
+                hPc
+              _ = Structured.Preservation.CodeSegment.startPc emptySegment :=
+                hStart.symm
+              _ = Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+                hEmpty.symm
+              _ = Structured.Preservation.CodeSegment.fallthroughPc segment :=
+                hFall
+          refine ⟨0, state, ?_, hFallthrough, ?_⟩
+          · simpa [Locals.Source.State.withVars] using hPrefixRel
+          · intro tailFuel tailTrace result hRest
+            simpa using hRest
+      | cons value valuesTail =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+  | cons name rest ih =>
+      cases values with
+      | nil =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+      | cons value valuesTail =>
+          unfold Functions.Source.Store.assignMany at hAssign
+          cases hContains : source.vars.contains name with
+          | false =>
+              simp [hContains] at hAssign
+          | true =>
+              simp [hContains] at hAssign
+              unfold Functions.Lower.assignReturnedTopsRev at hCompileBlock
+              unfold Locals.Block.compileOpen at hCompileBlock
+              cases hDepth :
+                  Locals.Layout.lookupDepth? name ctx.layout with
+              | none =>
+                  simp [Locals.Stmt.compile, hDepth] at hCompileBlock
+              | some depth =>
+                  cases hSwap :
+                      Locals.StackOp.swap? (rest.length + depth) with
+                  | none =>
+                      simp [Locals.Stmt.compile, hDepth, hSwap]
+                        at hCompileBlock
+                  | some swapOp =>
+                      cases hRestCompile :
+                          Locals.Block.compileOpen ctx
+                            { stmts :=
+                                Functions.Lower.assignReturnedTopsRev rest } with
+                      | none =>
+                          simp [Locals.Stmt.compile, hDepth, hSwap,
+                            hRestCompile] at hCompileBlock
+                      | some restResult =>
+                          rcases restResult with ⟨restStmts, restCtx⟩
+                          simp [Locals.Stmt.compile, hDepth, hSwap,
+                            hRestCompile] at hCompileBlock
+                          rcases hCompileBlock with
+                            ⟨hCompiledStmts, hFinalCtx⟩
+                          subst finalCtx
+                          rcases hTargets (name := name) (by simp) with
+                            ⟨idx, hName, hHeadBoundAll⟩
+                          have hHeadBound :
+                              rest.length + idx + 1 ≤ 16 := by
+                            have hHeadBound' :
+                                (name :: rest).length + idx ≤ 16 :=
+                              hHeadBoundAll
+                            simpa [Nat.add_assoc, Nat.add_comm,
+                              Nat.add_left_comm] using hHeadBound'
+                          have hDepthExpected :
+                              Locals.Layout.lookupDepth? name ctx.layout =
+                                some (idx + 1) := by
+                            simpa [hCtxLayout] using
+                              (Locals.Layout.lookupDepth?_of_get?_nodup hName
+                                hNoDup)
+                          have hDepthEq : depth = idx + 1 := by
+                            rw [hDepthExpected] at hDepth
+                            cases hDepth
+                            rfl
+                          subst depth
+                          have hValuesTailLen :
+                              valuesTail.length = rest.length :=
+                            Functions.Source.Store.assignMany_length hAssign
+                          have hTargetsRest :
+                              ∀ {restName : Name}, restName ∈ rest →
+                                ∃ idx,
+                                  layout[idx]? = some restName ∧
+                                    rest.length + idx ≤ 16 := by
+                            intro restName hMem
+                            rcases hTargets (name := restName)
+                                (by simp [hMem]) with
+                              ⟨restIdx, hRestName, hRestBoundAll⟩
+                            refine ⟨restIdx, hRestName, ?_⟩
+                            have hRestBoundAll' :
+                                rest.length + restIdx + 1 ≤ 16 := by
+                              simpa [Nat.add_assoc, Nat.add_comm,
+                                Nat.add_left_comm] using hRestBoundAll
+                            omega
+                          have hSegmentCode :
+                              (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        compiledStmts }
+                                  structuredCtx supply).code =
+                                (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        (Locals.codeStmt
+                                          [Structured.BasicInstr.op swapOp,
+                                            Structured.BasicInstr.op
+                                              Structured.BasicOp.pop] ++
+                                          restStmts) }
+                                  structuredCtx supply).code := by
+                            simp [hCompiledStmts]
+                          let segment' :
+                              Structured.Preservation.CodeSegment program
+                                (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        (Locals.codeStmt
+                                          [Structured.BasicInstr.op swapOp,
+                                            Structured.BasicInstr.op
+                                              Structured.BasicOp.pop] ++
+                                          restStmts) }
+                                  structuredCtx supply).code :=
+                            Structured.Preservation.CodeSegment.cast_code
+                              hSegmentCode segment
+                          rcases codeSegment_expressions_codeStmt_cons_split
+                              segment' with
+                            ⟨headSegmentRaw, tailSegment, hHeadStart,
+                              hTailStart, hTailFall⟩
+                          have hSegmentStart :
+                              Structured.Preservation.CodeSegment.startPc
+                                  segment' =
+                                Structured.Preservation.CodeSegment.startPc
+                                  segment := by
+                            simp [segment',
+                              Structured.Preservation.CodeSegment.cast_code,
+                              Structured.Preservation.CodeSegment.startPc]
+                          have hSegmentFall :
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment' =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := by
+                            cases segment with
+                            | mk pre post hAsm hFits =>
+                                simp [segment',
+                                  Structured.Preservation.CodeSegment.cast_code,
+                                  Structured.Preservation.CodeSegment.fallthroughPc,
+                                  hSegmentCode]
+                          have hHeadPc :
+                              state.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  headSegmentRaw := by
+                            rw [hPc, ← hSegmentStart, ← hHeadStart]
+                          have hHeadAssembly :
+                              Structured.Code.toAssembly
+                                [Structured.BasicInstr.op swapOp,
+                                  Structured.BasicInstr.op
+                                    Structured.BasicOp.pop] =
+                                  [Assembly.Instr.prim swapOp.toPrimOp] ++
+                                  [Assembly.Instr.prim
+                                    Structured.BasicOp.pop.toPrimOp] := by
+                            rfl
+                          let headSegment :
+                              Structured.Preservation.CodeSegment program
+                                ([Assembly.Instr.prim swapOp.toPrimOp] ++
+                                  [Assembly.Instr.prim
+                                    Structured.BasicOp.pop.toPrimOp]) :=
+                            Structured.Preservation.CodeSegment.cast_code
+                              hHeadAssembly headSegmentRaw
+                          have hHeadPc' :
+                              state.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  headSegment := by
+                            simpa [headSegment,
+                              Structured.Preservation.CodeSegment.cast_code,
+                              Structured.Preservation.CodeSegment.startPc]
+                              using hHeadPc
+                          rcases
+                              compilerOpenAssignTopWithOffset_stackPrefix_openRunNResult_continue_fallthrough
+                                (layout := layout) (source := source)
+                                (state := state) (name := name) (idx := idx)
+                                (offset := rest.length) (value := value)
+                                (restValues := valuesTail) (swapOp := swapOp)
+                                hNoDup hName hValuesTailLen hHeadBound
+                                (by simpa [Nat.add_assoc] using hSwap)
+                                hPrefixRel program headSegment hHeadPc' with
+                            ⟨evmAfterHead, hHeadRel, hHeadAfterPc,
+                              hHeadCont⟩
+                          have hTailPc :
+                              evmAfterHead.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  tailSegment := by
+                            have hHeadFall :
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                    headSegment =
+                                  Structured.Preservation.CodeSegment.fallthroughPc
+                                    headSegmentRaw := by
+                              cases headSegmentRaw with
+                              | mk pre post hAsm hFits =>
+                                  simp [headSegment,
+                                    Structured.Preservation.CodeSegment.cast_code,
+                                    Structured.Preservation.CodeSegment.fallthroughPc,
+                                    hHeadAssembly]
+                            rw [hHeadAfterPc, hHeadFall]
+                            exact hTailStart.symm
+                          rcases
+                              ih (values := valuesTail)
+                                (source :=
+                                  source.withVars
+                                    (Locals.Source.Store.insert source.vars
+                                      name value))
+                                (state := evmAfterHead) (store' := store')
+                                (compiledStmts := restStmts)
+                                (finalCtx := restCtx) (supply := supply)
+                                hTargetsRest hAssign hRestCompile hHeadRel
+                                tailSegment hTailPc with
+                            ⟨restFuel, evmAfter, hRestRel, hRestAfterPc,
+                              hRestCont⟩
+                          have hTailFallFull :
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  tailSegment =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := by
+                            calc
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  tailSegment =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment' := hTailFall
+                              _ =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := hSegmentFall
+                          refine ⟨2 + restFuel, evmAfter, hRestRel, ?_, ?_⟩
+                          · rw [hRestAfterPc]
+                            exact hTailFallFull
+                          · intro tailFuel tailTrace result hTailRun
+                            have hRestAndTail :
+                                OpenExternal.OpenResultResolves
+                                  (OpenAssembly.Source.openRunNResult program
+                                    (restFuel + tailFuel) evmAfterHead)
+                                  tailTrace result :=
+                              hRestCont hTailRun
+                            have hFull := hHeadCont hRestAndTail
+                            simpa [Nat.add_assoc] using hFull
+
+theorem compilerOpenFunctionsAssignReturnedTops_stackPrefix_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout source values.reverse state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      Locals.SourceLowering.StackPrefixRel layout
+        (source.withVars store') [] evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  have hAssignReverse :
+      Functions.Source.Store.assignMany targets.reverse values.reverse
+          source.vars =
+        some store' :=
+    Functions.Source.Store.assignMany_reverse_of_run hAssign hTargetsNoDup
+  have hTargetsReverse :
+      ∀ {name : Name}, name ∈ targets.reverse →
+        ∃ idx, layout[idx]? = some name ∧
+          targets.reverse.length + idx ≤ 16 := by
+    intro name hMem
+    rcases hTargets (name := name) (by simpa using hMem) with
+      ⟨idx, hName, hBound⟩
+    exact ⟨idx, hName, by simpa using hBound⟩
+  exact
+    compilerOpenFunctionsAssignReturnedTopsRev_stackPrefix_openRunNResult_continue_fallthrough_of_compileOpen
+      (layout := layout) (source := source) (state := state) (ctx := ctx)
+      (finalCtx := finalCtx) (names := targets.reverse)
+      (values := values.reverse) (store' := store')
+      (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+      (supply := supply) hCtxLayout hNoDup hTargetsReverse hAssignReverse
+      (by simpa [Functions.Lower.assignReturnedTops] using hCompileBlock)
+      hPrefixRel program segment hPc
+
+theorem compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {names : List Name} {values suffix : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ names →
+        ∃ idx, layout[idx]? = some name ∧ names.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany names values source.vars = some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTopsRev names } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      StackPrefixSuffixRel layout source values suffix state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      StackPrefixSuffixRel layout (source.withVars store') [] suffix evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  induction names generalizing values source state store' compiledStmts
+      finalCtx supply with
+  | nil =>
+      cases values with
+      | nil =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+          subst store'
+          have hCompiled' :
+              compiledStmts = [] ∧ ctx = finalCtx := by
+            simpa [Functions.Lower.assignReturnedTopsRev,
+              Locals.Block.compileOpen] using hCompileBlock
+          have hCompiled :
+              compiledStmts = [] ∧ finalCtx = ctx :=
+            ⟨hCompiled'.1, hCompiled'.2.symm⟩
+          rcases hCompiled with ⟨hCompiledStmts, _hFinalCtx⟩
+          have hFallthrough :
+              state.pc =
+                Structured.Preservation.CodeSegment.fallthroughPc segment := by
+            have hSegmentCode :
+                (Structured.Block.compileFromCtx
+                    { stmts := Expressions.StmtList.toStructured compiledStmts }
+                    structuredCtx supply).code = [] := by
+              simp [hCompiledStmts, Expressions.StmtList.toStructured,
+                Structured.Block.compileFromCtx]
+            let emptySegment :
+                Structured.Preservation.CodeSegment program [] :=
+              Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+            have hEmpty :
+                Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+                  Structured.Preservation.CodeSegment.startPc emptySegment :=
+              codeSegment_fallthroughPc_empty emptySegment
+            have hStart :
+                Structured.Preservation.CodeSegment.startPc emptySegment =
+                  Structured.Preservation.CodeSegment.startPc segment := by
+              simp [emptySegment, Structured.Preservation.CodeSegment.cast_code,
+                Structured.Preservation.CodeSegment.startPc]
+            have hFall :
+                Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+                  Structured.Preservation.CodeSegment.fallthroughPc segment := by
+              cases segment with
+              | mk pre post hAsm hFits =>
+                  simp [emptySegment,
+                    Structured.Preservation.CodeSegment.cast_code,
+                    Structured.Preservation.CodeSegment.fallthroughPc,
+                    hSegmentCode]
+            calc
+              state.pc = Structured.Preservation.CodeSegment.startPc segment :=
+                hPc
+              _ = Structured.Preservation.CodeSegment.startPc emptySegment :=
+                hStart.symm
+              _ = Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+                hEmpty.symm
+              _ = Structured.Preservation.CodeSegment.fallthroughPc segment :=
+                hFall
+          refine ⟨0, state, ?_, hFallthrough, ?_⟩
+          · simpa [Locals.Source.State.withVars] using hPrefixRel
+          · intro tailFuel tailTrace result hRest
+            simpa using hRest
+      | cons value valuesTail =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+  | cons name rest ih =>
+      cases values with
+      | nil =>
+          simp [Functions.Source.Store.assignMany] at hAssign
+      | cons value valuesTail =>
+          unfold Functions.Source.Store.assignMany at hAssign
+          cases hContains : source.vars.contains name with
+          | false =>
+              simp [hContains] at hAssign
+          | true =>
+              simp [hContains] at hAssign
+              unfold Functions.Lower.assignReturnedTopsRev at hCompileBlock
+              unfold Locals.Block.compileOpen at hCompileBlock
+              cases hDepth :
+                  Locals.Layout.lookupDepth? name ctx.layout with
+              | none =>
+                  simp [Locals.Stmt.compile, hDepth] at hCompileBlock
+              | some depth =>
+                  cases hSwap :
+                      Locals.StackOp.swap? (rest.length + depth) with
+                  | none =>
+                      simp [Locals.Stmt.compile, hDepth, hSwap]
+                        at hCompileBlock
+                  | some swapOp =>
+                      cases hRestCompile :
+                          Locals.Block.compileOpen ctx
+                            { stmts :=
+                                Functions.Lower.assignReturnedTopsRev rest } with
+                      | none =>
+                          simp [Locals.Stmt.compile, hDepth, hSwap,
+                            hRestCompile] at hCompileBlock
+                      | some restResult =>
+                          rcases restResult with ⟨restStmts, restCtx⟩
+                          simp [Locals.Stmt.compile, hDepth, hSwap,
+                            hRestCompile] at hCompileBlock
+                          rcases hCompileBlock with
+                            ⟨hCompiledStmts, hFinalCtx⟩
+                          subst finalCtx
+                          rcases hTargets (name := name) (by simp) with
+                            ⟨idx, hName, hHeadBoundAll⟩
+                          have hHeadBound :
+                              rest.length + idx + 1 ≤ 16 := by
+                            have hHeadBound' :
+                                (name :: rest).length + idx ≤ 16 :=
+                              hHeadBoundAll
+                            simpa [Nat.add_assoc, Nat.add_comm,
+                              Nat.add_left_comm] using hHeadBound'
+                          have hDepthExpected :
+                              Locals.Layout.lookupDepth? name ctx.layout =
+                                some (idx + 1) := by
+                            simpa [hCtxLayout] using
+                              (Locals.Layout.lookupDepth?_of_get?_nodup hName
+                                hNoDup)
+                          have hDepthEq : depth = idx + 1 := by
+                            rw [hDepthExpected] at hDepth
+                            cases hDepth
+                            rfl
+                          subst depth
+                          have hValuesTailLen :
+                              valuesTail.length = rest.length :=
+                            Functions.Source.Store.assignMany_length hAssign
+                          have hTargetsRest :
+                              ∀ {restName : Name}, restName ∈ rest →
+                                ∃ idx,
+                                  layout[idx]? = some restName ∧
+                                    rest.length + idx ≤ 16 := by
+                            intro restName hMem
+                            rcases hTargets (name := restName)
+                                (by simp [hMem]) with
+                              ⟨restIdx, hRestName, hRestBoundAll⟩
+                            refine ⟨restIdx, hRestName, ?_⟩
+                            have hRestBoundAll' :
+                                rest.length + restIdx + 1 ≤ 16 := by
+                              simpa [Nat.add_assoc, Nat.add_comm,
+                                Nat.add_left_comm] using hRestBoundAll
+                            omega
+                          have hSegmentCode :
+                              (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        compiledStmts }
+                                  structuredCtx supply).code =
+                                (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        (Locals.codeStmt
+                                          [Structured.BasicInstr.op swapOp,
+                                            Structured.BasicInstr.op
+                                              Structured.BasicOp.pop] ++
+                                          restStmts) }
+                                  structuredCtx supply).code := by
+                            simp [hCompiledStmts]
+                          let segment' :
+                              Structured.Preservation.CodeSegment program
+                                (Structured.Block.compileFromCtx
+                                  { stmts :=
+                                      Expressions.StmtList.toStructured
+                                        (Locals.codeStmt
+                                          [Structured.BasicInstr.op swapOp,
+                                            Structured.BasicInstr.op
+                                              Structured.BasicOp.pop] ++
+                                          restStmts) }
+                                  structuredCtx supply).code :=
+                            Structured.Preservation.CodeSegment.cast_code
+                              hSegmentCode segment
+                          rcases codeSegment_expressions_codeStmt_cons_split
+                              segment' with
+                            ⟨headSegmentRaw, tailSegment, hHeadStart,
+                              hTailStart, hTailFall⟩
+                          have hSegmentStart :
+                              Structured.Preservation.CodeSegment.startPc
+                                  segment' =
+                                Structured.Preservation.CodeSegment.startPc
+                                  segment := by
+                            simp [segment',
+                              Structured.Preservation.CodeSegment.cast_code,
+                              Structured.Preservation.CodeSegment.startPc]
+                          have hSegmentFall :
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment' =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := by
+                            cases segment with
+                            | mk pre post hAsm hFits =>
+                                simp [segment',
+                                  Structured.Preservation.CodeSegment.cast_code,
+                                  Structured.Preservation.CodeSegment.fallthroughPc,
+                                  hSegmentCode]
+                          have hHeadPc :
+                              state.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  headSegmentRaw := by
+                            rw [hPc, ← hSegmentStart, ← hHeadStart]
+                          have hHeadAssembly :
+                              Structured.Code.toAssembly
+                                [Structured.BasicInstr.op swapOp,
+                                  Structured.BasicInstr.op
+                                    Structured.BasicOp.pop] =
+                                  [Assembly.Instr.prim swapOp.toPrimOp] ++
+                                  [Assembly.Instr.prim
+                                    Structured.BasicOp.pop.toPrimOp] := by
+                            rfl
+                          let headSegment :
+                              Structured.Preservation.CodeSegment program
+                                ([Assembly.Instr.prim swapOp.toPrimOp] ++
+                                  [Assembly.Instr.prim
+                                    Structured.BasicOp.pop.toPrimOp]) :=
+                            Structured.Preservation.CodeSegment.cast_code
+                              hHeadAssembly headSegmentRaw
+                          have hHeadPc' :
+                              state.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  headSegment := by
+                            simpa [headSegment,
+                              Structured.Preservation.CodeSegment.cast_code,
+                              Structured.Preservation.CodeSegment.startPc]
+                              using hHeadPc
+                          rcases
+                              compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
+                                (layout := layout) (source := source)
+                                (state := state) (name := name) (idx := idx)
+                                (offset := rest.length) (value := value)
+                                (restValues := valuesTail)
+                                (suffix := suffix) (swapOp := swapOp)
+                                hNoDup hName hValuesTailLen hHeadBound
+                                (by simpa [Nat.add_assoc] using hSwap)
+                                hPrefixRel program headSegment hHeadPc' with
+                            ⟨evmAfterHead, hHeadRel, hHeadAfterPc,
+                              hHeadCont⟩
+                          have hTailPc :
+                              evmAfterHead.pc =
+                                Structured.Preservation.CodeSegment.startPc
+                                  tailSegment := by
+                            have hHeadFall :
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                    headSegment =
+                                  Structured.Preservation.CodeSegment.fallthroughPc
+                                    headSegmentRaw := by
+                              cases headSegmentRaw with
+                              | mk pre post hAsm hFits =>
+                                  simp [headSegment,
+                                    Structured.Preservation.CodeSegment.cast_code,
+                                    Structured.Preservation.CodeSegment.fallthroughPc,
+                                    hHeadAssembly]
+                            rw [hHeadAfterPc, hHeadFall]
+                            exact hTailStart.symm
+                          rcases
+                              ih (values := valuesTail)
+                                (source :=
+                                  source.withVars
+                                    (Locals.Source.Store.insert source.vars
+                                      name value))
+                                (state := evmAfterHead) (store' := store')
+                                (compiledStmts := restStmts)
+                                (finalCtx := restCtx) (supply := supply)
+                                hTargetsRest hAssign hRestCompile hHeadRel
+                                tailSegment hTailPc with
+                            ⟨restFuel, evmAfter, hRestRel, hRestAfterPc,
+                              hRestCont⟩
+                          have hTailFallFull :
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  tailSegment =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := by
+                            calc
+                              Structured.Preservation.CodeSegment.fallthroughPc
+                                  tailSegment =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment' := hTailFall
+                              _ =
+                                Structured.Preservation.CodeSegment.fallthroughPc
+                                  segment := hSegmentFall
+                          refine ⟨2 + restFuel, evmAfter, hRestRel, ?_, ?_⟩
+                          · rw [hRestAfterPc]
+                            exact hTailFallFull
+                          · intro tailFuel tailTrace result hTailRun
+                            have hRestAndTail :
+                                OpenExternal.OpenResultResolves
+                                  (OpenAssembly.Source.openRunNResult program
+                                    (restFuel + tailFuel) evmAfterHead)
+                                  tailTrace result :=
+                              hRestCont hTailRun
+                            have hFull := hHeadCont hRestAndTail
+                            simpa [Nat.add_assoc] using hFull
+
+theorem compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values suffix : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      StackPrefixSuffixRel layout source values.reverse suffix state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      StackPrefixSuffixRel layout (source.withVars store') [] suffix evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  have hAssignReverse :
+      Functions.Source.Store.assignMany targets.reverse values.reverse
+          source.vars =
+        some store' :=
+    Functions.Source.Store.assignMany_reverse_of_run hAssign hTargetsNoDup
+  have hTargetsReverse :
+      ∀ {name : Name}, name ∈ targets.reverse →
+        ∃ idx, layout[idx]? = some name ∧
+          targets.reverse.length + idx ≤ 16 := by
+    intro name hMem
+    rcases hTargets (name := name) (by simpa using hMem) with
+      ⟨idx, hName, hBound⟩
+    exact ⟨idx, hName, by simpa using hBound⟩
+  exact
+    compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen
+      (layout := layout) (source := source) (state := state) (ctx := ctx)
+      (finalCtx := finalCtx) (names := targets.reverse)
+      (values := values.reverse) (suffix := suffix) (store' := store')
+      (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+      (supply := supply) hCtxLayout hNoDup hTargetsReverse hAssignReverse
+      (by simpa [Functions.Lower.assignReturnedTops] using hCompileBlock)
+      hPrefixRel program segment hPc
 
 theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode
     {prim : Objects.Source.PrimitiveSemantics}
@@ -9538,7 +10855,7 @@ theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthroug
         (state := evmAfterValue) (name := name) (idx := idx)
         (value := value) (swapOp := swapOp)
         hNoDup hName hBound hSwap (by simpa using hValueRel)
-        program tailFuel tailSegment hTailPc with
+        program tailSegment hTailPc with
     ⟨evmAfterAssign, hAssignRel, hAssignPc, hAssignCont⟩
   refine ⟨evmAfterAssign, hAssignRel, ?_, ?_⟩
   · simpa [hTailFallSegment] using hAssignPc
