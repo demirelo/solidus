@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 06:15 CEST.
+Last updated: 2026-06-03 06:20 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -306,9 +306,17 @@ Execution order:
    `OpenLowering.compilerOpenFunctionsArgList_openRunNResult_of_compileOpen`
    replays the actual compiled `Lower.evalArgs` prefix to the internal call site
    while preserving nested argument CALLs through expression-sequence recursion.
-   The next frontier is proving the semantic procedure-call head composition at
-   this open-result invariant, then extending the same shape to loops,
-   switch/conditionals, and the whole-program imported-Yul-to-open-EVM theorem.
+   The source-open procedure-call head is now split in the interpreter itself:
+   `CompilerOpen.FunctionsOpen.Stmt.call_resolves_ok_inv` exposes argument
+   trace, callee-body trace, return assignment, and halted-call alternatives,
+   while
+   `CompilerOpen.FunctionsOpen.Block.call_cons_resolves_ok_inv` lifts that split
+   to call-headed blocks and threads the recursive tail only after returned
+   regular calls. The next frontier is composing this checked source split with
+   the compiled argument prefix, internal call segment, return assignment
+   segment, and recursive tail at `FunctionsBlockCompiledOpenResultRel`, then
+   extending the same shape to loops, switch/conditionals, and the whole-program
+   imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 

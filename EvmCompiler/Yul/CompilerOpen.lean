@@ -755,6 +755,205 @@ mutual
           (Prod.Lex.left _ _ (by omega))
 end
 
+namespace Stmt
+
+theorem call_resolves_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxAfter : Ctx}
+    {fuel : Nat} {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)} {state : State}
+    {outcome : Outcome} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (run prim program ctx (fuel + 1)
+          (.call targets functionName args) state)
+        trace (.ok (outcome, ctxAfter))) :
+    ctxAfter = ctx ∧ targets.Nodup ∧
+      ((∃ argTrace bodyTrace sourceAfterArgs argValues fn
+          sharedAfterCall returnValues returnStore,
+          trace = argTrace ++ bodyTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          OpenExternal.OpenResultResolves
+            (FunDef.runBody prim program fn argValues fuel
+              sourceAfterArgs.shared)
+            bodyTrace
+            (.ok (Functions.Source.CallResult.returned
+              sharedAfterCall returnValues)) ∧
+          Functions.Source.Store.assignMany targets returnValues
+            sourceAfterArgs.vars = some returnStore ∧
+          outcome =
+            Functions.Source.Outcome.regular
+              { shared := sharedAfterCall, vars := returnStore }) ∨
+        ∃ argTrace bodyTrace sourceAfterArgs argValues fn kind haltedState,
+          trace = argTrace ++ bodyTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          OpenExternal.OpenResultResolves
+            (FunDef.runBody prim program fn argValues fuel
+              sourceAfterArgs.shared)
+            bodyTrace
+            (.ok (Functions.Source.CallResult.halted kind haltedState)) ∧
+          outcome = Functions.Source.Outcome.halt kind haltedState) := by
+  rw [run] at hResolve
+  by_cases hTargets : targets.Nodup
+  · simp [hTargets] at hResolve
+    rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+      hArgError | hArgOk
+    · rcases hArgError with ⟨err, _hArg, hResult⟩
+      cases hResult
+    · rcases hArgOk with
+        ⟨argTrace, callTrace, argResult, hTrace, hArgs, hCall⟩
+      rcases argResult with ⟨sourceAfterArgs, argValues⟩
+      cases hLookup :
+          Functions.FunList.find? functionName program.functions with
+      | none =>
+          simp [hLookup, invalid] at hCall
+          cases hCall
+      | some fn =>
+          simp [hLookup] at hCall
+          rcases OpenExternal.OpenResultResolves.bind_inv hCall with
+            hBodyError | hBodyOk
+          · rcases hBodyError with ⟨err, _hBody, hResult⟩
+            cases hResult
+          · rcases hBodyOk with
+              ⟨bodyTrace, finishTrace, callResult, hCallTrace, hBody,
+                hFinish⟩
+            cases callResult with
+            | returned sharedAfterCall returnValues =>
+                cases hAssign :
+                    Functions.Source.Store.assignMany targets returnValues
+                      sourceAfterArgs.vars with
+                | none =>
+                    simp [hAssign, invalid] at hFinish
+                    cases hFinish
+                | some returnStore =>
+                    simp [hAssign] at hFinish
+                    cases hFinish
+                    subst callTrace
+                    subst trace
+                    refine ⟨rfl, hTargets, Or.inl ?_⟩
+                    refine
+                      ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn,
+                        sharedAfterCall, returnValues, returnStore, ?_,
+                        hArgs, rfl, hBody, hAssign, rfl⟩
+                    simp
+            | halted kind haltedState =>
+                simp at hFinish
+                cases hFinish
+                subst callTrace
+                subst trace
+                refine ⟨rfl, hTargets, Or.inr ?_⟩
+                refine
+                  ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn,
+                    kind, haltedState, ?_, hArgs, rfl, hBody, rfl⟩
+                simp
+  · simp [hTargets, invalid] at hResolve
+    cases hResolve
+
+end Stmt
+
+namespace Block
+
+theorem call_cons_resolves_ok_inv
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxFinal : Ctx}
+    {bodyFuel : Nat} {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)} {rest : List Functions.Stmt}
+    {state : State} {sourceOutcome : Outcome}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (runOpen prim program ctx (bodyFuel + 2)
+          { stmts := .call targets functionName args :: rest } state)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    targets.Nodup ∧
+      ((∃ argTrace bodyTrace tailTrace sourceAfterArgs argValues fn
+          sharedAfterCall returnValues returnStore,
+          trace = argTrace ++ bodyTrace ++ tailTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          OpenExternal.OpenResultResolves
+            (FunDef.runBody prim program fn argValues bodyFuel
+              sourceAfterArgs.shared)
+            bodyTrace
+            (.ok (Functions.Source.CallResult.returned
+              sharedAfterCall returnValues)) ∧
+          Functions.Source.Store.assignMany targets returnValues
+            sourceAfterArgs.vars = some returnStore ∧
+          OpenExternal.OpenResultResolves
+            (runOpen prim program ctx (bodyFuel + 1)
+              { stmts := rest }
+              { shared := sharedAfterCall, vars := returnStore })
+            tailTrace (.ok (sourceOutcome, ctxFinal))) ∨
+        ∃ argTrace bodyTrace sourceAfterArgs argValues fn kind haltedState,
+          trace = argTrace ++ bodyTrace ∧
+          OpenExternal.OpenResultResolves
+            (ArgList.eval prim args state)
+            argTrace (.ok (sourceAfterArgs, argValues)) ∧
+          Functions.FunList.find? functionName
+              program.functions = some fn ∧
+          OpenExternal.OpenResultResolves
+            (FunDef.runBody prim program fn argValues bodyFuel
+              sourceAfterArgs.shared)
+            bodyTrace
+            (.ok (Functions.Source.CallResult.halted kind haltedState)) ∧
+          sourceOutcome = Functions.Source.Outcome.halt kind haltedState ∧
+          ctxFinal = ctx) := by
+  rw [runOpen] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hHeadError | hHeadOk
+  · rcases hHeadError with ⟨err, _hHead, hResult⟩
+    cases hResult
+  · rcases hHeadOk with
+      ⟨headTrace, tailTrace, stmtResult, hTrace, hHead, hTail⟩
+    rcases stmtResult with ⟨headOutcome, ctxAfterHead⟩
+    rcases Stmt.call_resolves_ok_inv hHead with
+      ⟨hCtxAfterHead, hTargets, hCall⟩
+    subst ctxAfterHead
+    cases hCall with
+    | inl hReturned =>
+        rcases hReturned with
+          ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn,
+            sharedAfterCall, returnValues, returnStore, hHeadTrace,
+            hArgs, hLookup, hBody, hAssign, hHeadOutcome⟩
+        subst headOutcome
+        simp [Functions.Source.Outcome.regular] at hTail
+        subst headTrace
+        subst trace
+        refine ⟨hTargets, Or.inl ?_⟩
+        refine
+          ⟨argTrace, bodyTrace, tailTrace, sourceAfterArgs, argValues, fn,
+            sharedAfterCall, returnValues, returnStore, ?_,
+            hArgs, hLookup, hBody, hAssign, hTail⟩
+        simp [List.append_assoc]
+    | inr hHalted =>
+        rcases hHalted with
+          ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn, kind,
+            haltedState, hHeadTrace, hArgs, hLookup, hBody,
+            hHeadOutcome⟩
+        subst headOutcome
+        simp [Functions.Source.Outcome.halt] at hTail
+        cases hTail
+        subst headTrace
+        subst trace
+        refine ⟨hTargets, Or.inr ?_⟩
+        refine
+          ⟨argTrace, bodyTrace, sourceAfterArgs, argValues, fn, kind,
+            haltedState, ?_, hArgs, hLookup, hBody, rfl, rfl⟩
+        simp
+
+end Block
+
 namespace Program
 
 def runState (prim : Objects.Source.PrimitiveSemantics)
