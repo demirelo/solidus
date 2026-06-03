@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:15 CEST.
+Last updated: 2026-06-03 05:24 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -229,10 +229,28 @@ Execution order:
    The corresponding locals compiler-generated block-head splits are checked
    too: `OpenLowering.localsBlock_compileOpen_expr_cons_inv`,
    `OpenLowering.localsBlock_compileOpen_let_cons_inv`, and
-   `OpenLowering.localsBlock_compileOpen_assign_cons_inv`. The remaining work
-   is generalizing this checked sequencing shape to function calls, loops,
-   switch/conditionals, and then composing the result into the whole-program
-   imported-Yul-to-open-EVM theorem.
+   `OpenLowering.localsBlock_compileOpen_assign_cons_inv`. Those splits now
+   cross the actual Functions-to-Locals compiler boundary for regular heads via
+   `OpenLowering.functionsBlock_toLocals_compileOpen_expr_cons_inv`,
+   `OpenLowering.functionsBlock_toLocals_compileOpen_let_cons_inv`, and
+   `OpenLowering.functionsBlock_toLocals_compileOpen_assign_cons_inv`.
+   Emitted-code sequencing now also has checked head/tail segment splits for
+   compiled `.code` heads and locals `codeStmt` heads:
+   `OpenLowering.structuredBlock_compileFromCtx_code_cons_code_eq`,
+   `OpenLowering.codeSegment_structuredBlock_code_cons_split`,
+   `OpenLowering.expressionsStmtList_toStructured_codeStmt_append`, and
+   `OpenLowering.codeSegment_expressions_codeStmt_cons_split`. Finally, the
+   regular-head open block sequencing lemmas now have PC-aware variants
+   `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail_pc`,
+   `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail_pc`,
+   and
+   `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc`,
+   so recursive tails can be proved from their actual tail segment starts
+   instead of receiving only a stack relation. The remaining work is assembling
+   these pieces into the internal recursive block theorem, then generalizing the
+   checked sequencing shape to function calls, loops, switch/conditionals, and
+   composing the result into the whole-program imported-Yul-to-open-EVM
+   theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
