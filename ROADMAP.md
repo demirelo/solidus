@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:47 CEST.
+Last updated: 2026-06-03 03:52 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -106,9 +106,16 @@ Execution order:
    the operator-level fact `CallKind.ofBasicOp? op = some kind` plus evaluated
    argument arity, it derives concrete `CallOperands`, exposes the same
    compiler/EVM open call, and continues through the assembly source-open fuel
-   runner. The remaining work is lifting these primitive atoms through full
-   expressions, blocks, calls, and control constructs, then composing the result
-   into the whole-program imported-Yul-to-open-EVM theorem.
+   runner. These primitive atoms now also have checked actual-state and
+   `StackPrefixRel` adapters:
+   `OpenLowering.compilerOpenPrimitive_no_callCreate_state_openRunNResult_continue`,
+   `OpenLowering.compilerOpenPrimitive_callKind_state_openRunNResult_continue`,
+   `OpenLowering.compilerOpenPrimitive_no_callCreate_stackPrefix_openRunNResult_continue`,
+   and
+   `OpenLowering.compilerOpenPrimitive_callKind_stackPrefix_openRunNResult_continue`.
+   The remaining work is lifting these stack-prefix primitive atoms through
+   full expressions, blocks, calls, and control constructs, then composing the
+   result into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -196,7 +203,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   lowering's natural `op`/`values` view via
   `OpenLowering.compilerOpenPrimitive_callKind_openRunNResult_continue`, which
   derives operands from the arity fact instead of requiring them as a caller
-  premise. The remaining public gap is proving the CALL-capable
+  premise. The primitive bridge now also matches the closed expression
+  induction's `StackPrefixRel` shape, including locals preservation through
+  primitive CALL responses, so the next proof should recurse through
+  `CompilerOpen.LocalsExpr.eval`/`evalSeq` rather than add direct let/assign
+  CALL scaffolding. The remaining public gap is proving the CALL-capable
   compiler-open/function-block theorem, then composing the public imported-Yul
   dispatcher result through it.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
