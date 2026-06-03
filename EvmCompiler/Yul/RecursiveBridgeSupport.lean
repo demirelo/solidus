@@ -274357,6 +274357,118 @@ theorem callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical
             (op := op) (Reference.Safe.CallSafe.primitive_of_safe hSafe)
             hBasic)
 
+/--
+Dispatcher-body specialization of the canonical open CALL frontier.
+
+This is the next public-spine adapter after the frontier package: callers no
+longer need to instantiate the generic sequence frontier by hand for the root
+dispatcher statement list and initial empty layout.
+-/
+theorem checkedOpenDispatcherSeqPath_canonical
+    {cfg : Reference.StateRelConfig}
+    {outcomeRel : Reference.OutcomeRel}
+    {program : Program}
+    {asm : Assembly.Program} {target : Assembly.TargetProgram}
+    {shared : EvmYul.SharedState .Yul}
+    {store : EvmYul.Yul.VarStore}
+    {sourceFuel : Nat} {initial : EVMState}
+    {referenceResult : Reference.Result}
+    {compileFuel : Nat}
+    {allowed : Except Reference.Exception Reference.State → Prop}
+    (hTop :
+      RecursiveBridgeCALLTopAssumptions cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured outcomeRel program asm
+        target shared store sourceFuel initial referenceResult)
+    (hBodyFuelAdequate :
+      EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceOpenInternalUserCallBodyFuelAdequateUpTo
+        cfg program.contract sourceFuel)
+    (hAllowed :
+      ∀ {sourceResult}, allowed sourceResult →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultRelatable
+          sourceResult)
+    (hSupported :
+      ∀ {sourceResult}, allowed sourceResult →
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.SourceResultOutcomeLayoutSupported
+          Functions.Source.Ctx.initial [] [] sourceResult) :
+    ∃ functionProgram : Functions.Program,
+      program.toObjects? =
+        some { root := Objects.Object.mk "root" functionProgram [] [] } ∧
+        EvmCompiler.Yul.Reference.SourceBridgeFacts.CheckedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx
+          cfg (Stmt.names program.contract.dispatcher) [] []
+          (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+          (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+          Locals.Source.PrimitiveSemantics.structured functionProgram
+          Functions.Source.Ctx.initial sourceFuel compileFuel
+          [program.contract.dispatcher] (some program.contract) allowed := by
+  rcases
+      hTop.callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical
+        hBodyFuelAdequate with
+    ⟨functionProgram, hToObjects, context, hFrontiers⟩
+  rcases context.dispatcher_facts with
+    ⟨hSafeDispatcher, hScopedDispatcher, hOkDispatcher⟩
+  have hSafeStmts :
+      Reference.Safe.CallSafe.stmts [program.contract.dispatcher] := by
+    change
+      Reference.Safe.CallSafe.stmt program.contract.dispatcher ∧
+        Reference.Safe.CallSafe.stmts []
+    exact ⟨hSafeDispatcher, trivial⟩
+  have hScopedStmts :
+      Reference.SourceBridgeFacts.ControlFlow.ScopedStmts false false false
+        [program.contract.dispatcher] := by
+    change
+      Reference.SourceBridgeFacts.ControlFlow.ScopedStmt false false false
+          program.contract.dispatcher ∧
+        Reference.SourceBridgeFacts.ControlFlow.ScopedStmts false false false []
+    exact ⟨hScopedDispatcher, trivial⟩
+  have hOkStmts :
+      Reference.SourceBridgeFacts.UserCallArity.StmtsOk program.contract
+        [program.contract.dispatcher] := by
+    change
+      Reference.SourceBridgeFacts.UserCallArity.StmtOk program.contract
+          program.contract.dispatcher ∧
+        Reference.SourceBridgeFacts.UserCallArity.StmtsOk program.contract []
+    exact ⟨hOkDispatcher, trivial⟩
+  have hSourceScoped :
+      Reference.SourceBridgeFacts.SourceLexical.StmtsScoped []
+        [program.contract.dispatcher] := by
+    change
+      Reference.SourceBridgeFacts.SourceLexical.StmtScoped []
+          program.contract.dispatcher ∧
+        Reference.SourceBridgeFacts.SourceLexical.StmtsScoped
+          (Reference.SourceBridgeFacts.SourceLexical.StmtOutLayout []
+            program.contract.dispatcher) []
+    exact ⟨context.dispatcher_source_scoped, trivial⟩
+  have hReserved :
+      Reference.SourceBridgeFacts.SourceNamesReserved
+        (Stmt.names program.contract.dispatcher)
+        (Stmt.List.names [program.contract.dispatcher]) := by
+    intro name hMem
+    simpa [Stmt.List.names] using hMem
+  have hScopeContains :
+      ∀ name : Name, name ∈ ([] : List Name) →
+        name ∈ Functions.Source.Ctx.initial.scope := by
+    intro name hMem
+    cases hMem
+  have hSeqFrontier :
+      Reference.SourceBridgeFacts.CALLOpenSeqPathLoweringFrontierAt cfg
+        (RecursiveBridgeTerminalObservationContracts.canonicalTerminalRel cfg)
+        (RecursiveBridgeTerminalObservationContracts.canonicalRevertRel cfg)
+        Locals.Source.PrimitiveSemantics.structured program functionProgram
+        sourceFuel :=
+    hFrontiers.1 (sourceFuelRec := sourceFuel) (Nat.le_refl sourceFuel)
+  refine ⟨functionProgram, hToObjects, ?_⟩
+  exact
+    hSeqFrontier
+      (reserved := Stmt.names program.contract.dispatcher) (layout := [])
+      (outcomeLayout := []) (ctx := Functions.Source.Ctx.initial)
+      (compileFuel := compileFuel)
+      (sourceStmts := [program.contract.dispatcher]) (allowed := allowed)
+      (canBreak := false) (canContinue := false) (canLeave := false)
+      hSafeStmts hScopedStmts hOkStmts hSourceScoped hReserved hAllowed
+      hSupported hScopeContains
+
 end RecursiveBridgeCALLTopAssumptions
 
 /--
