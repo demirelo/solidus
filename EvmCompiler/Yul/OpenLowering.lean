@@ -644,6 +644,161 @@ theorem functionsBlock_toLocals_compileOpen_assign_cons_inv
     ?_, hStmts⟩
   simpa [Functions.Block.toLocals] using hRest
 
+theorem localsBlock_compileOpen_append_inv
+    {ctx finalCtx : Locals.Ctx}
+    {pre rest : List Locals.Stmt}
+    {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx { stmts := pre ++ rest } =
+        some (stmts, finalCtx)) :
+    ∃ prefixStmts midCtx restStmts,
+      Locals.Block.compileOpen ctx { stmts := pre } =
+        some (prefixStmts, midCtx) ∧
+        Locals.Block.compileOpen midCtx { stmts := rest } =
+          some (restStmts, finalCtx) ∧
+        stmts = prefixStmts ++ restStmts := by
+  induction pre generalizing ctx finalCtx stmts with
+  | nil =>
+      refine ⟨[], ctx, stmts, ?_, ?_, ?_⟩
+      · simp [Locals.Block.compileOpen]
+      · simpa using hCompile
+      · rfl
+  | cons stmt pre ih =>
+      unfold Locals.Block.compileOpen at hCompile
+      cases hStmt : Locals.Stmt.compile ctx stmt with
+      | none =>
+          simp [hStmt] at hCompile
+      | some stmtResult =>
+          rcases stmtResult with ⟨stmtStmts, ctxAfterStmt⟩
+          cases hTail :
+              Locals.Block.compileOpen ctxAfterStmt
+                { stmts := pre ++ rest } with
+          | none =>
+              simp [hStmt, hTail] at hCompile
+          | some tailResult =>
+              rcases tailResult with ⟨tailStmts, tailCtx⟩
+              simp [hStmt, hTail] at hCompile
+              rcases hCompile with ⟨hStmts, hTailCtx⟩
+              subst tailCtx
+              rcases ih hTail with
+                ⟨prefixStmts, midCtx, restStmts, hPrefix, hRest,
+                  hTailStmts⟩
+              refine
+                ⟨stmtStmts ++ prefixStmts, midCtx, restStmts, ?_, hRest,
+                  ?_⟩
+              · unfold Locals.Block.compileOpen
+                simp [hStmt, hPrefix]
+              · calc
+                  stmts = stmtStmts ++ tailStmts := hStmts.symm
+                  _ = stmtStmts ++ (prefixStmts ++ restStmts) := by
+                    rw [hTailStmts]
+                  _ = (stmtStmts ++ prefixStmts) ++ restStmts := by
+                    simp [List.append_assoc]
+
+theorem functionsBlock_toLocals_compileOpen_call_cons_inv
+    {returns : List Name} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {rest : List Functions.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          (Functions.Block.toLocals returns
+            { stmts := Functions.Stmt.call targets functionName args :: rest }) =
+        some (stmts, finalCtx)) :
+    ∃ callStmts callCtx restStmts,
+      Locals.Block.compileOpen ctx
+          { stmts :=
+              Functions.Lower.evalArgs args ++
+                [Locals.Stmt.call functionName] ++
+                Functions.Lower.assignReturnedTops targets } =
+        some (callStmts, callCtx) ∧
+        Locals.Block.compileOpen callCtx
+          (Functions.Block.toLocals returns { stmts := rest }) =
+          some (restStmts, finalCtx) ∧
+        stmts = callStmts ++ restStmts := by
+  have hCompile' :
+      Locals.Block.compileOpen ctx
+          { stmts :=
+              (Functions.Lower.evalArgs args ++
+                  [Locals.Stmt.call functionName] ++
+                  Functions.Lower.assignReturnedTops targets) ++
+                Functions.StmtList.toLocals returns rest } =
+        some (stmts, finalCtx) := by
+    simpa [Functions.Block.toLocals, Functions.StmtList.toLocals,
+      Functions.Stmt.toLocals] using hCompile
+  rcases localsBlock_compileOpen_append_inv hCompile' with
+    ⟨callStmts, callCtx, restStmts, hCall, hRest, hStmts⟩
+  refine ⟨callStmts, callCtx, restStmts, hCall, ?_, hStmts⟩
+  simpa [Functions.Block.toLocals] using hRest
+
+theorem functionsBlock_toLocals_compileOpen_call_cons_parts_inv
+    {returns : List Name} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {rest : List Functions.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          (Functions.Block.toLocals returns
+            { stmts := Functions.Stmt.call targets functionName args :: rest }) =
+        some (stmts, finalCtx)) :
+    ∃ argStmts argCtx assignStmts afterAssignCtx restStmts,
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.evalArgs args } =
+        some (argStmts, argCtx) ∧
+        Locals.Block.compileOpen argCtx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+          some (assignStmts, afterAssignCtx) ∧
+        Locals.Block.compileOpen afterAssignCtx
+          (Functions.Block.toLocals returns { stmts := rest }) =
+          some (restStmts, finalCtx) ∧
+        stmts =
+          argStmts ++ [Expressions.Stmt.call functionName] ++
+            assignStmts ++ restStmts := by
+  rcases functionsBlock_toLocals_compileOpen_call_cons_inv hCompile with
+    ⟨callPrefixStmts, afterCallPrefixCtx, restStmts, hCallPrefix,
+      hRest, hStmts⟩
+  have hCallPrefix' :
+      Locals.Block.compileOpen ctx
+          { stmts :=
+              Functions.Lower.evalArgs args ++
+                ([Locals.Stmt.call functionName] ++
+                  Functions.Lower.assignReturnedTops targets) } =
+        some (callPrefixStmts, afterCallPrefixCtx) := by
+    simpa [List.append_assoc] using hCallPrefix
+  rcases
+      localsBlock_compileOpen_append_inv
+        (pre := Functions.Lower.evalArgs args) hCallPrefix' with
+    ⟨argStmts, argCtx, callAssignStmts, hArgs, hCallAssign,
+      hCallPrefixStmts⟩
+  rcases
+      localsBlock_compileOpen_append_inv
+        (pre := [Locals.Stmt.call functionName]) hCallAssign with
+    ⟨callStmts, afterCallCtx, assignStmts, hCall, hAssign,
+      hCallAssignStmts⟩
+  have hCallExact :
+      [Expressions.Stmt.call functionName] = callStmts ∧
+        argCtx = afterCallCtx := by
+    simpa [Locals.Block.compileOpen, Locals.Stmt.compile] using hCall
+  rcases hCallExact with ⟨hCallStmts, hAfterCallCtx⟩
+  subst callStmts
+  subst afterCallCtx
+  exact
+    ⟨argStmts, argCtx, assignStmts, afterCallPrefixCtx, restStmts,
+      hArgs, hAssign, hRest, by
+        calc
+          stmts = callPrefixStmts ++ restStmts := hStmts
+          _ = (argStmts ++ callAssignStmts) ++ restStmts := by
+            rw [hCallPrefixStmts]
+          _ =
+              (argStmts ++
+                ([Expressions.Stmt.call functionName] ++ assignStmts)) ++
+                restStmts := by
+            rw [hCallAssignStmts]
+          _ =
+              argStmts ++ [Expressions.Stmt.call functionName] ++
+                assignStmts ++ restStmts := by
+            simp [List.append_assoc]⟩
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :

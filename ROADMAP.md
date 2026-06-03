@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:58 CEST.
+Last updated: 2026-06-03 06:04 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -292,9 +292,17 @@ Execution order:
    under the local support predicate
    `OpenLowering.FunctionsStmtListRegularOpenSupported`, so callers no longer
    have to manually thread regular-head tail callbacks for expression, `let`,
-   and assignment statement lists. The next frontier is extending the same
-   open-result shape beyond regular heads to function calls, loops,
-   switch/conditionals, and the whole-program imported-Yul-to-open-EVM theorem.
+   and assignment statement lists. Procedure-call head compiler evidence is now
+   structurally exposed by
+   `OpenLowering.localsBlock_compileOpen_append_inv`,
+   `OpenLowering.functionsBlock_toLocals_compileOpen_call_cons_inv`, and
+   `OpenLowering.functionsBlock_toLocals_compileOpen_call_cons_parts_inv`: the
+   actual `Functions.Stmt.call` lowering splits into argument evaluation, the
+   internal `Expressions.Stmt.call`, returned-value assignment, and the compiled
+   tail. The next frontier is proving the semantic procedure-call head
+   composition at this open-result invariant, then extending the same shape to
+   loops, switch/conditionals, and the whole-program imported-Yul-to-open-EVM
+   theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
