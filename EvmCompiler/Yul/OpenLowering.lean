@@ -318,6 +318,115 @@ theorem localsExprSeq_compileCode_cons_inv
           simp [hHead, hTail] at hCompile
           exact ⟨headCode, tailCode, rfl, rfl, hCompile.symm⟩
 
+theorem localsBlock_compileOpen_expr_cons_inv
+    {ctx finalCtx : Locals.Ctx} {expr : Locals.Expr 0}
+    {rest : List Locals.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          { stmts := Locals.Stmt.expr expr :: rest } =
+        some (stmts, finalCtx)) :
+    ∃ code restStmts,
+      Locals.Expr.compileCode ctx 0 expr = some code ∧
+        Locals.Block.compileOpen ctx { stmts := rest } =
+          some (restStmts, finalCtx) ∧
+        stmts = Locals.codeStmt code ++ restStmts := by
+  unfold Locals.Block.compileOpen at hCompile
+  cases hCode : Locals.Expr.compileCode ctx 0 expr with
+  | none =>
+      simp [Locals.Stmt.compile, hCode] at hCompile
+  | some code =>
+      cases hRest :
+          Locals.Block.compileOpen ctx { stmts := rest } with
+      | none =>
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+      | some restResult =>
+          rcases restResult with ⟨restStmts, restCtx⟩
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+          rcases hCompile with ⟨hStmts, hFinalCtx⟩
+          exact
+            ⟨code, restStmts, rfl,
+              by simp [hFinalCtx], hStmts.symm⟩
+
+theorem localsBlock_compileOpen_let_cons_inv
+    {ctx finalCtx : Locals.Ctx} {name : Name}
+    {value : Locals.Expr 1}
+    {rest : List Locals.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          { stmts := Locals.Stmt.let_ name value :: rest } =
+        some (stmts, finalCtx)) :
+    ∃ code restStmts,
+      Locals.Expr.compileCode ctx 0 value = some code ∧
+        Locals.Block.compileOpen (ctx.withLayout (name :: ctx.layout))
+          { stmts := rest } = some (restStmts, finalCtx) ∧
+        stmts = Locals.codeStmt code ++ restStmts := by
+  unfold Locals.Block.compileOpen at hCompile
+  cases hCode : Locals.Expr.compileCode ctx 0 value with
+  | none =>
+      simp [Locals.Stmt.compile, hCode] at hCompile
+  | some code =>
+      cases hRest :
+          Locals.Block.compileOpen
+            (ctx.withLayout (name :: ctx.layout)) { stmts := rest } with
+      | none =>
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+      | some restResult =>
+          rcases restResult with ⟨restStmts, restCtx⟩
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+          rcases hCompile with ⟨hStmts, hFinalCtx⟩
+          exact
+            ⟨code, restStmts, rfl,
+              by simp [hFinalCtx], hStmts.symm⟩
+
+theorem localsBlock_compileOpen_assign_cons_inv
+    {ctx finalCtx : Locals.Ctx} {name : Name}
+    {value : Locals.Expr 1}
+    {rest : List Locals.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          { stmts := Locals.Stmt.assign name value :: rest } =
+        some (stmts, finalCtx)) :
+    ∃ depth valueCode swapOp restStmts,
+      Locals.Layout.lookupDepth? name ctx.layout = some depth ∧
+        Locals.Expr.compileCode ctx 0 value = some valueCode ∧
+        Locals.StackOp.swap? depth = some swapOp ∧
+        Locals.Block.compileOpen ctx { stmts := rest } =
+          some (restStmts, finalCtx) ∧
+        stmts =
+          Locals.codeStmt
+            (valueCode ++
+              [Structured.BasicInstr.op swapOp,
+                Structured.BasicInstr.op Structured.BasicOp.pop]) ++
+            restStmts := by
+  unfold Locals.Block.compileOpen at hCompile
+  cases hDepth : Locals.Layout.lookupDepth? name ctx.layout with
+  | none =>
+      simp [Locals.Stmt.compile, hDepth] at hCompile
+  | some depth =>
+      cases hValue :
+          Locals.Expr.compileCode ctx 0 value with
+      | none =>
+          simp [Locals.Stmt.compile, hDepth, hValue] at hCompile
+      | some valueCode =>
+          cases hSwap : Locals.StackOp.swap? depth with
+          | none =>
+              simp [Locals.Stmt.compile, hDepth, hValue, hSwap] at hCompile
+          | some swapOp =>
+              cases hRest :
+                  Locals.Block.compileOpen ctx { stmts := rest } with
+              | none =>
+                  simp [Locals.Stmt.compile, hDepth, hValue, hSwap, hRest]
+                    at hCompile
+              | some restResult =>
+                  rcases restResult with ⟨restStmts, restCtx⟩
+                  simp [Locals.Stmt.compile, hDepth, hValue, hSwap, hRest]
+                    at hCompile
+                  rcases hCompile with ⟨hStmts, hFinalCtx⟩
+                  exact
+                    ⟨depth, valueCode, swapOp, restStmts, rfl, rfl,
+                      hSwap, by simp [hFinalCtx],
+                      hStmts.symm⟩
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
