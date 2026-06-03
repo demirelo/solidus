@@ -1732,6 +1732,105 @@ theorem codeSegment_structured_call_compile_callSiteCode_of_lookup
           Structured.Preservation.CodeSegment.cast_code,
           Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
 
+theorem codeSegment_functions_call_cons_callSite_parts_split_of_compileOpen
+    {returns : List Name} {localsCtx finalLocalsCtx : Locals.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {rest : List Functions.Stmt}
+    {compiledStmts : List Expressions.Stmt}
+    {asm : Assembly.Program} {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {proc : Structured.Proc} {callArgs : EvmYul.Stack Word}
+    (hCompile :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := Functions.Stmt.call targets functionName args :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hLookup :
+      Structured.ProcList.lookup? functionName structuredCtx.procs =
+        some proc)
+    (hArgsLen : callArgs.length = proc.argc)
+    (segment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code) :
+    ∃ argStmts argCtx assignStmts afterAssignCtx restStmts,
+      ∃ argSegment :
+          Structured.Preservation.CodeSegment asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured argStmts }
+              structuredCtx supply).code,
+        ∃ callSiteSegment :
+            Structured.Preservation.CodeSegment asm
+              (Structured.Preservation.ProcedurePreservation.callSiteCode
+                proc callArgs (Structured.Stmt.callToken supply)
+                (Structured.LabelSupply.label supply 0)),
+          ∃ assignSegment :
+              Structured.Preservation.CodeSegment asm
+                (Structured.Block.compileFromCtx
+                  { stmts := Expressions.StmtList.toStructured assignStmts }
+                  structuredCtx
+                  (Structured.Stmt.compileFromCtxCore
+                    (.call functionName) structuredCtx supply).next).code,
+            ∃ tailSegment :
+                Structured.Preservation.CodeSegment asm
+                  (Structured.Block.compileFromCtx
+                    { stmts := Expressions.StmtList.toStructured restStmts }
+                    structuredCtx
+                    (Structured.Stmt.compileFromCtxCore
+                      (.call functionName) structuredCtx supply).next).code,
+              Locals.Block.compileOpen localsCtx
+                  { stmts := Functions.Lower.evalArgs args } =
+                some (argStmts, argCtx) ∧
+              Locals.Block.compileOpen argCtx
+                  { stmts := Functions.Lower.assignReturnedTops targets } =
+                some (assignStmts, afterAssignCtx) ∧
+              Locals.Block.compileOpen afterAssignCtx
+                  (Functions.Block.toLocals returns { stmts := rest }) =
+                some (restStmts, finalLocalsCtx) ∧
+              Structured.Preservation.CodeSegment.startPc argSegment =
+                Structured.Preservation.CodeSegment.startPc segment ∧
+              Structured.Preservation.CodeSegment.startPc callSiteSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc argSegment ∧
+              Structured.Preservation.CodeSegment.startPc assignSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc
+                  callSiteSegment ∧
+              Structured.Preservation.CodeSegment.startPc tailSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc
+                  assignSegment ∧
+              Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  rcases
+      codeSegment_functions_call_cons_parts_split_of_compileOpen
+        hCompile segment with
+    ⟨argStmts, argCtx, assignStmts, afterAssignCtx, restStmts,
+      argSegment, callSegment, assignSegment, tailSegment,
+      hArgsCompile, hAssignCompile, hRestCompile,
+      hArgStart, hCallStart, hAssignStart, hTailStart, hTailFall⟩
+  rcases
+      codeSegment_structured_call_compile_callSiteCode_of_lookup
+        (args := callArgs) hLookup hArgsLen callSegment with
+    ⟨callSiteSegment, hCallSiteStart, hCallSiteFall⟩
+  refine
+    ⟨argStmts, argCtx, assignStmts, afterAssignCtx, restStmts,
+      argSegment, callSiteSegment, assignSegment, tailSegment,
+      hArgsCompile, hAssignCompile, hRestCompile, hArgStart, ?_, ?_,
+      hTailStart, hTailFall⟩
+  · calc
+      Structured.Preservation.CodeSegment.startPc callSiteSegment =
+          Structured.Preservation.CodeSegment.startPc callSegment :=
+        hCallSiteStart
+      _ = Structured.Preservation.CodeSegment.fallthroughPc argSegment :=
+        hCallStart
+  · calc
+      Structured.Preservation.CodeSegment.startPc assignSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc callSegment :=
+        hAssignStart
+      _ = Structured.Preservation.CodeSegment.fallthroughPc
+            callSiteSegment :=
+        hCallSiteFall.symm
+
 theorem openRunNResult_source_local_instr_no_call_running_continue
     {pre post : Assembly.Program} {instr : Assembly.Instr}
     {state mid : EvmYul.EVM.State}
