@@ -412,6 +412,32 @@ theorem openRunListResult_resolves_closed_of_no_callCreate
     openRunListResult_resolves_closed_of_forall_no_callCreate
       (all_false_of_codeUsesCallCreate_false hCode) hRun
 
+theorem openRunListResult_single_prim_call
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse) :
+    OpenExternal.OpenResultResolves
+      (openRunListResult [Assembly.TargetInstr.prim op] state)
+      [{ site := call.site, response := response }]
+      (.ok
+        (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+  rw [openRunListResult_cons]
+  have hStep :=
+    openStepInstrResult_resolves_prim_call hKind hCall response
+  have hRest :
+      OpenExternal.OpenResultResolves
+        (openRunListResult []
+          (EvmYul.EVM.State.incrPC (call.resume response)))
+        []
+        (.ok
+          (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+    exact OpenExternal.OpenResultResolves.done
+  simpa [openRunListResult_nil] using
+    OpenExternal.OpenResultResolves.bind_ok hStep hRest
+
 def openStep (target : Assembly.TargetProgram) (state : EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
   match target.fetch state.pc.toNat with
