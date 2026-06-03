@@ -336,8 +336,16 @@ Execution order:
    and
    `OpenLowering.codeSegment_functions_call_cons_parts_split_of_compileOpen`
    expose all four target segments from the actual `Functions.Stmt.call`
-   `compileOpen` evidence. The next frontier is composing these target
-   segments with open recursive callee-body preservation at
+   `compileOpen` evidence. The internal call-site semantic prelude is now
+   named as well:
+   `OpenLowering.structured_callJumpCode_usesCallCreate_false`,
+   `OpenLowering.structured_callSiteCode_usesCallCreate_false`,
+   `OpenLowering.structured_compile_call_code_usesCallCreate_false`, and
+   `OpenLowering.codeSegment_structured_call_compile_callSiteCode_of_lookup`
+   prove the generated internal procedure-call site is empty-trace target
+   plumbing and cast the actual compiled segment to the dynamic `callSiteCode`
+   shape used by structured call-frame preservation. The next frontier is
+   composing these target segments with open recursive callee-body preservation at
    `FunctionsBlockCompiledOpenResultRel`, then extending the same shape to
    loops, switch/conditionals, and the
    whole-program imported-Yul-to-open-EVM theorem.

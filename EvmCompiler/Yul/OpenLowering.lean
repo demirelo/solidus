@@ -1614,6 +1614,124 @@ theorem codeSegment_functions_call_cons_parts_split_of_compileOpen
       hArgStart, hCallStart, hAssignStart.trans hAfterCallStart, hTailStart,
       hTailFallAfterCall.trans hAfterCallFall⟩
 
+theorem structured_callJumpCode_usesCallCreate_false
+    (proc : Structured.Proc) (args : EvmYul.Stack Word)
+    (token : Word) :
+    Assembly.Program.usesCallCreate
+      (Structured.Preservation.ProcedurePreservation.callJumpCode
+        proc args token) =
+        false := by
+  have hSink :
+      Assembly.Program.usesCallCreate
+        (Structured.StackShuffle.sinkTopUnder args.length) = false :=
+    Structured.CompilerFacts.GeneratedNoCallCreate.sinkTopUnder args.length
+  have hPushSink :
+      Assembly.Program.usesCallCreate
+        ([Assembly.Instr.push token] ++
+          Structured.StackShuffle.sinkTopUnder args.length) = false :=
+    Assembly.Program.usesCallCreate_append_eq_false
+      (by simp [Assembly.Program.usesCallCreate,
+        Assembly.Instr.usesCallCreate])
+      hSink
+  have hJump :
+      Assembly.Program.usesCallCreate
+        [Assembly.Instr.jump (Structured.ProcLabel.entry proc.name)] =
+          false := by
+    simp [Assembly.Program.usesCallCreate, Assembly.Instr.usesCallCreate]
+  simpa [Structured.Preservation.ProcedurePreservation.callJumpCode] using
+    Assembly.Program.usesCallCreate_append_eq_false hPushSink hJump
+
+theorem structured_callSiteCode_usesCallCreate_false
+    (proc : Structured.Proc) (args : EvmYul.Stack Word)
+    (token : Word) (returnLabel : Assembly.Label) :
+    Assembly.Program.usesCallCreate
+      (Structured.Preservation.ProcedurePreservation.callSiteCode
+        proc args token returnLabel) =
+        false := by
+  have hCall :=
+    structured_callJumpCode_usesCallCreate_false proc args token
+  have hLabel :
+      Assembly.Program.usesCallCreate [Assembly.Instr.label returnLabel] =
+        false := by
+    simp [Assembly.Program.usesCallCreate, Assembly.Instr.usesCallCreate]
+  simpa [Structured.Preservation.ProcedurePreservation.callSiteCode] using
+    Assembly.Program.usesCallCreate_append_eq_false hCall hLabel
+
+theorem structured_compile_call_code_usesCallCreate_false
+    {ctx : Structured.CompileContext} {supply : Structured.LabelSupply}
+    {name : Name} :
+    Assembly.Program.usesCallCreate
+      (Structured.Stmt.compileFromCtxCore (.call name) ctx supply).code =
+        false := by
+  cases hLookup : Structured.ProcList.lookup? name ctx.procs with
+  | none =>
+      simp [Structured.Stmt.compileFromCtxCore, hLookup,
+        Assembly.Program.usesCallCreate, Assembly.Instr.usesCallCreate,
+        Assembly.PrimOp.isCallCreate]
+  | some proc =>
+      have hSink :
+          Assembly.Program.usesCallCreate
+            (Structured.StackShuffle.sinkTopUnder proc.argc) = false :=
+        Structured.CompilerFacts.GeneratedNoCallCreate.sinkTopUnder proc.argc
+      have hPushSink :
+          Assembly.Program.usesCallCreate
+            ([Assembly.Instr.push (Structured.Stmt.callToken supply)] ++
+              Structured.StackShuffle.sinkTopUnder proc.argc) = false :=
+        Assembly.Program.usesCallCreate_append_eq_false
+          (by simp [Assembly.Program.usesCallCreate,
+            Assembly.Instr.usesCallCreate])
+          hSink
+      have hJumpLabel :
+          Assembly.Program.usesCallCreate
+            [ Assembly.Instr.jump (Structured.ProcLabel.entry name)
+            , Assembly.Instr.label (Structured.LabelSupply.label supply 0) ] =
+              false := by
+        simp [Assembly.Program.usesCallCreate, Assembly.Instr.usesCallCreate]
+      simpa [Structured.Stmt.compileFromCtxCore, hLookup,
+        List.append_assoc] using
+        Assembly.Program.usesCallCreate_append_eq_false hPushSink hJumpLabel
+
+theorem codeSegment_structured_call_compile_callSiteCode_of_lookup
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {supply : Structured.LabelSupply} {name : Name}
+    {proc : Structured.Proc} {args : EvmYul.Stack Word}
+    (hLookup : Structured.ProcList.lookup? name ctx.procs = some proc)
+    (hArgsLen : args.length = proc.argc)
+    (callSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Stmt.compileFromCtxCore (.call name) ctx supply).code) :
+    ∃ callSiteSegment :
+        Structured.Preservation.CodeSegment asm
+          (Structured.Preservation.ProcedurePreservation.callSiteCode
+            proc args (Structured.Stmt.callToken supply)
+            (Structured.LabelSupply.label supply 0)),
+      Structured.Preservation.CodeSegment.startPc callSiteSegment =
+        Structured.Preservation.CodeSegment.startPc callSegment ∧
+      Structured.Preservation.CodeSegment.fallthroughPc callSiteSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc callSegment := by
+  have hCodeEq :
+      (Structured.Stmt.compileFromCtxCore (.call name) ctx supply).code =
+        Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args (Structured.Stmt.callToken supply)
+          (Structured.LabelSupply.label supply 0) :=
+    Structured.Preservation.ProcedurePreservation.compile_call_code_eq_callSiteCode
+      (ctx := ctx) (supply := supply) (name := name) (proc := proc)
+      (args := args) hLookup hArgsLen
+  let callSiteSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args (Structured.Stmt.callToken supply)
+          (Structured.LabelSupply.label supply 0)) :=
+    Structured.Preservation.CodeSegment.cast_code hCodeEq callSegment
+  refine ⟨callSiteSegment, ?_, ?_⟩
+  · simp [callSiteSegment, Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  · cases callSegment with
+    | mk pre post hAsm hFits =>
+        simp [callSiteSegment,
+          Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
