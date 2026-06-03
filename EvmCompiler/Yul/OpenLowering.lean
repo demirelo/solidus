@@ -9757,6 +9757,67 @@ theorem of_frameStateRel_stateRel
       _ = values.reverse ++ base.evm.stack ++ suffix := by
             simp [List.append_assoc]
 
+theorem of_attached_returnedFrameStateRel_stateRel
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State}
+    {base bodyState returned : Locals.RunState}
+    {target : EvmYul.EVM.State}
+    {values tokens stack : List Word} {frame : Structured.ReturnDest}
+    (hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+    (hReturned :
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns) source
+        values bodyState)
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+        some stack)
+    (hFrameStack : frame.callerStack = base.evm.stack)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel
+        (returned.withEVM { bodyState.evm with stack := stack })
+        target tokens) :
+    ∃ suffix,
+      StackPrefixSuffixErasedRel layout source values.reverse suffix target := by
+  rcases hBaseRel with ⟨hLowerRel, _hReturns⟩
+  rcases hLowerRel with ⟨_hBaseShared, hStoreRel⟩
+  rcases hReturned with ⟨hReturnedShared, hReturnedStack, _hReturnedReturns⟩
+  rcases hFrameRel.hidden_suffix with
+    ⟨suffix, hTargetStack, _hMaterialize⟩
+  have hAttachedStack :
+      stack = values.reverse ++ base.evm.stack := by
+    have hStackEq :=
+      Structured.Preservation.Frame.StackFrameFacts.attachReturns?_eq hAttach
+    calc
+      stack = bodyState.evm.stack ++ frame.callerStack := hStackEq
+      _ = values.reverse ++ frame.callerStack := by
+            rw [hReturnedStack]
+      _ = values.reverse ++ base.evm.stack := by
+            rw [hFrameStack]
+  refine ⟨suffix, ?_⟩
+  refine ⟨?_, base.evm.stack, ?_, hStoreRel⟩
+  · calc
+      Structured.Preservation.eraseControl target =
+          Structured.Preservation.eraseControl
+            { (returned.withEVM
+                { bodyState.evm with stack := stack }).evm with
+              stack := target.stack } := hFrameRel.dataRel
+      _ = Structured.Preservation.eraseControl
+            { target with toSharedState := source.shared } := by
+          cases target
+          cases bodyState
+          cases returned
+          cases source
+          cases hReturnedShared
+          simp [Structured.RunState.withEVM,
+            Structured.Preservation.eraseControl, Assembly.eraseGas]
+  · calc
+      target.stack = stack ++ suffix := by
+            simpa [Structured.RunState.withEVM] using hTargetStack
+      _ = (values.reverse ++ base.evm.stack) ++ suffix := by
+            rw [hAttachedStack]
+      _ = values.reverse ++ base.evm.stack ++ suffix := by
+            simp [List.append_assoc]
+
 end StackPrefixSuffixErasedRel
 
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
@@ -11128,6 +11189,125 @@ theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_frameStateRel_openRu
         (program := pre ++ [Assembly.Instr.label label] ++ post)
         segment hAssignPc with
     ⟨assignFuel, evmAfter, suffix, hAfterRel, hAfterPc, hAssignCont⟩
+  refine ⟨assignFuel + 1, evmAfter, suffix, hAfterRel, hAfterPc, ?_⟩
+  intro tailFuel tailTrace result hTail
+  have hAssignRun := hAssignCont hTail
+  have hFull :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult
+          (pre ++ [Assembly.Instr.label label] ++ post)
+          ((assignFuel + tailFuel) + 1) state)
+        tailTrace result :=
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt (by simp [Assembly.Instr.usesCallCreate]) hLabelStep hAssignRun
+  simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hFull
+
+theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State}
+    {base bodyState returned : Locals.RunState}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values tokens stack : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {frame : Structured.ReturnDest}
+    {label : Assembly.Label} {pre post : Assembly.Program}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+    (hReturned :
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns) source
+        values bodyState)
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+        some stack)
+    (hFrameStack : frame.callerStack = base.evm.stack)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel
+        (returned.withEVM { bodyState.evm with stack := stack })
+        state tokens)
+    (hFit : Structured.Preservation.PCFits pre)
+    (segment :
+      Structured.Preservation.CodeSegment
+        (pre ++ [Assembly.Instr.label label] ++ post)
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Assembly.Program.pcAfter pre)
+    (hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment =
+        Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label])) :
+    ∃ labelAssignFuel evmAfter suffix,
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label label] ++ post)
+            tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label label] ++ post)
+            (labelAssignFuel + tailFuel) state)
+          tailTrace result := by
+  let returnSource :=
+    returned.withEVM { bodyState.evm with stack := stack }
+  rcases
+      Structured.Preservation.Frame.StateRel.label_stepResult_at
+        (label := label) (pre := pre) (post := post)
+        (source := returnSource) (target := state) (tokens := tokens)
+        hFit hPc hFrameRel with
+    ⟨afterLabel, hLabelStep, hRelAfterLabel, hPcAfterLabel⟩
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.label label] ++ post) state.pc.toNat =
+        some (Assembly.Program.byteLength pre, Assembly.Instr.label label) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre post (Assembly.Instr.label label) 0
+  have hAssignPc :
+      afterLabel.pc = Structured.Preservation.CodeSegment.startPc segment := by
+    rw [hPcAfterLabel, hSegmentStart]
+  rcases
+      StackPrefixSuffixErasedRel.of_attached_returnedFrameStateRel_stateRel
+        (layout := layout) (hiddenReturns := hiddenReturns)
+        (source := source) (base := base) (bodyState := bodyState)
+        (returned := returned) (target := afterLabel) (values := values)
+        (tokens := tokens) (stack := stack) (frame := frame)
+        hBaseRel hReturned hAttach hFrameStack hRelAfterLabel with
+    ⟨suffix, hPrefixRel⟩
+  rcases
+      compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen
+        (layout := layout) (source := source) (state := afterLabel)
+        (ctx := ctx) (finalCtx := finalCtx) (targets := targets)
+        (values := values) (suffix := suffix) (store' := store')
+        (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+        (supply := supply) hCtxLayout hNoDup hTargetsNoDup hTargets
+        hAssign hCompileBlock hPrefixRel
+        (program := pre ++ [Assembly.Instr.label label] ++ post)
+        segment hAssignPc with
+    ⟨assignFuel, evmAfter, hAfterRel, hAfterPc, hAssignCont⟩
   refine ⟨assignFuel + 1, evmAfter, suffix, hAfterRel, hAfterPc, ?_⟩
   intro tailFuel tailTrace result hTail
   have hAssignRun := hAssignCont hTail
