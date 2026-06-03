@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:57 CEST.
+Last updated: 2026-06-03 03:59 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -120,6 +120,11 @@ Execution order:
    CALL-kind primitives while preserving `StackPrefixRel` and target tail
    continuation. Its supported-primitive premise records the current ordinary
    CALL boundary instead of classifying CREATE-family operations as no-CALL.
+   The `.prim` expression case now has the checked composition theorem
+   `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args`:
+   recursive argument-sequence lowering reaches the primitive instruction, the
+   primitive dispatcher handles the source open resolution, and the target
+   trace composes as argument trace plus primitive trace plus arbitrary tail.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.
@@ -217,6 +222,8 @@ let/assign CALL scaffolding, or a concrete external-world model.
   CALL scaffolding. The primitive branch of that recursion now has a checked
   open-resolution dispatcher,
   `OpenLowering.compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok`.
+  The first expression-level `.prim` composition theorem is also checked:
+  `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args`.
   The remaining public gap is proving the CALL-capable
   compiler-open/function-block theorem, then composing the public imported-Yul
   dispatcher result through it.

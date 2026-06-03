@@ -915,6 +915,104 @@ theorem compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
         ⟨_hSource, hTarget⟩
       simpa [hTrace] using hTarget
 
+theorem compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {op : Structured.BasicOp}
+    {args : Locals.ExprSeq (Expressions.Structured.BasicOp.inputs op)}
+    (hSupported :
+      op.toPrimOp.isCallCreate = false ∨
+        ∃ kind : OpenExternal.CallKind,
+          OpenExternal.CallKind.ofBasicOp? op = some kind)
+    (stackPrefix : List Word)
+    (program : Assembly.Program)
+    (primitiveTailFuel expressionFuel : Nat)
+    (hArgsLength :
+      ∀ {argsTrace : OpenExternal.OpenTrace}
+        {compilerAfterArgs : Objects.Source.State} {argValues : List Word},
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim args compiler)
+          argsTrace (.ok (compilerAfterArgs, argValues)) →
+        argValues.length = Expressions.Structured.BasicOp.inputs op)
+    (hArgsSound :
+      ∀ {argsTrace : OpenExternal.OpenTrace}
+        {compilerAfterArgs : Objects.Source.State} {argValues : List Word},
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+            prim args compiler)
+          argsTrace (.ok (compilerAfterArgs, argValues)) →
+        ∃ evmAfterArgs : EvmYul.EVM.State,
+        ∃ pc : Nat,
+          Locals.SourceLowering.StackPrefixRel layout compilerAfterArgs
+            (argValues.reverse ++ stackPrefix) evmAfterArgs ∧
+          Assembly.Program.instrAtPc program evmAfterArgs.pc.toNat =
+            some (pc, Assembly.Instr.prim op.toPrimOp) ∧
+          ∀ {tailTrace : OpenExternal.OpenTrace}
+            {result : Except EVMException Assembly.StepResult},
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program
+                (primitiveTailFuel + 1) evmAfterArgs)
+              tailTrace result →
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult program expressionFuel state)
+              (argsTrace ++ tailTrace) result)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval
+          prim (.prim op args) compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program primitiveTailFuel
+            evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program expressionFuel state)
+          (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.eval] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hArgsError | hArgsOk
+  · rcases hArgsError with ⟨err, _hArgs, hResult⟩
+    cases hResult
+  · rcases hArgsOk with
+      ⟨argsTrace, primTrace, argResult, hTrace, hResolveArgs,
+        hResolvePrim⟩
+    rcases argResult with ⟨compilerAfterArgs, argValues⟩
+    rcases hArgsSound hResolveArgs with
+      ⟨evmAfterArgs, pc, hArgsPrefix, hAt, hArgsCont⟩
+    have hArgValuesLen :
+        argValues.length = Expressions.Structured.BasicOp.inputs op :=
+      hArgsLength hResolveArgs
+    rcases
+        compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok
+          (prim := prim) hPrim (layout := layout)
+          (compiler := compilerAfterArgs) (compilerAfter := compilerAfter)
+          (state := evmAfterArgs) op hSupported argValues hArgValuesLen
+          stackPrefix hArgsPrefix program pc primitiveTailFuel hAt
+          hResolvePrim with
+      ⟨evmAfter, hAfterPrefix, hPrimCont⟩
+    refine ⟨evmAfter, hAfterPrefix, ?_⟩
+    intro tailTrace result hRest
+    have hPrimitiveAndTail :
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (primitiveTailFuel + 1) evmAfterArgs)
+          (primTrace ++ tailTrace) result :=
+      hPrimCont hRest
+    have hFull := hArgsCont hPrimitiveAndTail
+    subst trace
+    simpa [List.append_assoc] using hFull
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)
