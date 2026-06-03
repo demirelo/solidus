@@ -3567,6 +3567,12 @@ def spillReloadCode (offset value : Word) : Structured.Code :=
     Structured.BasicInstr.push offset,
     Structured.BasicInstr.op Structured.BasicOp.mload ]
 
+def spillTopReloadCode (offset : Word) : Structured.Code :=
+  [ Structured.BasicInstr.push offset,
+    Structured.BasicInstr.op Structured.BasicOp.mstore,
+    Structured.BasicInstr.push offset,
+    Structured.BasicInstr.op Structured.BasicOp.mload ]
+
 theorem run_spillReloadCode (state : EVMState) (offset value : Word) :
     ∃ final,
       Structured.Code.run (spillReloadCode offset value) state = .ok final ∧
@@ -3599,6 +3605,46 @@ theorem run_spillReloadCode (state : EVMState) (offset value : Word) :
       EvmYul.EVM.binaryMachineStateOp, EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, EvmYul.Stack.push, EvmYul.Stack.pop,
       EvmYul.Stack.pop2, Id.run, state1, state2, state3, state4, loaded,
+      final]
+  · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, loaded, final]
+  · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, loaded, final]
+
+theorem run_spillTopReloadCode (state : EVMState)
+    (baseStack : EvmYul.Stack Word) (offset value : Word) :
+    ∃ final,
+      Structured.Code.run (spillTopReloadCode offset)
+          { state with stack := value :: baseStack } =
+        .ok final ∧
+      final.stack =
+        ((state.toMachineState.mstore offset value).mload offset).1 ::
+          baseStack ∧
+      final.toMachineState =
+        ((state.toMachineState.mstore offset value).mload offset).2 := by
+  let start : EVMState := { state with stack := value :: baseStack }
+  let state1 : EVMState :=
+    start.replaceStackAndIncrPC (offset :: value :: baseStack) (pcΔ := 33)
+  let state2 : EVMState :=
+    ({ state1 with
+      toMachineState := state.toMachineState.mstore offset value } :
+      EVMState).replaceStackAndIncrPC baseStack
+  let state3 : EVMState :=
+    state2.replaceStackAndIncrPC (offset :: baseStack) (pcΔ := 33)
+  let loaded : Word × EvmYul.MachineState :=
+    (state.toMachineState.mstore offset value).mload offset
+  let final : EVMState :=
+    ({ state3 with toMachineState := loaded.2 } :
+      EVMState).replaceStackAndIncrPC (loaded.1 :: baseStack)
+  refine ⟨final, ?_, ?_, ?_⟩
+  · simp [spillTopReloadCode, Structured.Code.run,
+      Structured.BasicInstr.step, Structured.BasicOp.step,
+      Structured.BasicOp.toPrimOp, Assembly.Target.stepInstr,
+      Assembly.PrimOp.step, Assembly.PrimOp.continuingStep?,
+      Assembly.PrimStep.run, EvmYul.EVM.binaryMachineStateOp,
+      EvmYul.EVM.State.replaceStackAndIncrPC,
+      EvmYul.EVM.State.incrPC, EvmYul.Stack.push, EvmYul.Stack.pop,
+      EvmYul.Stack.pop2, Id.run, start, state1, state2, state3, loaded,
       final]
   · simp [EvmYul.EVM.State.replaceStackAndIncrPC,
       EvmYul.EVM.State.incrPC, loaded, final]
@@ -3648,6 +3694,49 @@ theorem run_spillReloadCode_target_scratch_slot_of_ready?
       final.stack = value :: target.stack ∧
       MemoryByteEqOutsideScratch range source final.toMachineState :=
   run_spillReloadCode_target_scratch_slot hSpec hWordBytes hRel
+    (ScratchRange.ready?_sound hReady) hSlot
+
+theorem run_spillTopReloadCode_target_scratch_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source : EvmYul.MachineState} {target : EVMState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target.toMachineState)
+    (hReady : ScratchRegionReady target.toMachineState range.base range.words)
+    (hSlot : slot < range.words) :
+    ∃ final,
+      Structured.Code.run (spillTopReloadCode (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      MemoryByteEqOutsideScratch range source final.toMachineState := by
+  rcases run_spillTopReloadCode target target.stack (range.word slot) value with
+    ⟨final, hRun, hStack, hMachine⟩
+  have hMacro :=
+    mload_after_mstore_target_scratch_slot hSpec hWordBytes
+      (value := value) hRel hReady hSlot
+  refine ⟨final, hRun, ?_, ?_⟩
+  · rw [hStack, hMacro.1]
+  · rw [hMachine]
+    exact hMacro.2
+
+theorem run_spillTopReloadCode_target_scratch_slot_of_ready?
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source : EvmYul.MachineState} {target : EVMState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target.toMachineState)
+    (hReady : ScratchRange.ready? target.toMachineState range = true)
+    (hSlot : slot < range.words) :
+    ∃ final,
+      Structured.Code.run (spillTopReloadCode (range.word slot))
+          { target with stack := value :: target.stack } =
+        .ok final ∧
+      final.stack = value :: target.stack ∧
+      MemoryByteEqOutsideScratch range source final.toMachineState :=
+  run_spillTopReloadCode_target_scratch_slot hSpec hWordBytes hRel
     (ScratchRange.ready?_sound hReady) hSlot
 
 end MemoryByteEqOutsideScratch

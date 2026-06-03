@@ -7460,13 +7460,19 @@ storage scratch assumption.
     `MemoryByteEqOutsideScratch.mload_after_mstore_target_scratch_slot` theorem
     also proves that a later target-only load from that scratch slot returns
     the stored word and leaves the strengthened relation intact.  The emitted
-    five-instruction spill/reload sequence is now checked too:
+    literal five-instruction store/reload sequence is checked too:
     `spillReloadCode`, `run_spillReloadCode`, and
     `MemoryByteEqOutsideScratch.run_spillReloadCode_target_scratch_slot` prove
     that `push value; push offset; mstore; push offset; mload` actually runs
     under `Structured.Code.run`, reloads the spilled value, and preserves the
-    private-scratch relation for ready scratch slots.  Remaining work is the
-    public theorem split and compiler wiring for spill-aware emitted code.
+    private-scratch relation for ready scratch slots.  The runtime-top
+    compiler macro shape is checked as well: `spillTopReloadCode`,
+    `run_spillTopReloadCode`, and
+    `MemoryByteEqOutsideScratch.run_spillTopReloadCode_target_scratch_slot`
+    prove that, starting with the runtime value already on top of the stack,
+    `push offset; mstore; push offset; mload` reloads that value and preserves
+    the private-scratch relation.  Remaining work is the public theorem split
+    and compiler wiring for spill-aware emitted code.
   Until that route is fully checked, the shippable path remains conservative:
   dead-drop, SWAP16-reachable promotion, and rejection of genuinely-live
   deeper-than-window locals.
