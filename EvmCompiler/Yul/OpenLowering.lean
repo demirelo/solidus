@@ -9942,6 +9942,40 @@ theorem sourceDirect_returnedStackRel_callSite_parts
         rw [hFrameStack]
   · exact hRetc.trans hFrameRetc
 
+theorem sourceOpen_callPostState_withShared_parts
+    {prim : Objects.Source.PrimitiveSemantics}
+    {program : Functions.Program} {ctx ctxFinal : Functions.Source.Ctx}
+    {tailFuel : Nat} {rest : List Functions.Stmt}
+    {sourceAfterArgs : Objects.Source.State}
+    {sharedAfterCall : EvmYul.SharedState .EVM}
+    {targets : List Name} {values : List Word}
+    {returnStore : Functions.Source.Store}
+    {sourceOutcome : Functions.Source.Outcome}
+    {tailTrace : OpenExternal.OpenTrace}
+    (hAssign :
+      Functions.Source.Store.assignMany targets values sourceAfterArgs.vars =
+        some returnStore)
+    (hTail :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim program ctx tailFuel { stmts := rest }
+          { shared := sharedAfterCall, vars := returnStore })
+        tailTrace (.ok (sourceOutcome, ctxFinal))) :
+    (sourceAfterArgs.withShared sharedAfterCall).vars = sourceAfterArgs.vars ∧
+      Functions.Source.Store.assignMany targets values
+          (sourceAfterArgs.withShared sharedAfterCall).vars =
+        some returnStore ∧
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim program ctx tailFuel { stmts := rest }
+          ((sourceAfterArgs.withShared sharedAfterCall).withVars returnStore))
+        tailTrace (.ok (sourceOutcome, ctxFinal)) := by
+  refine ⟨?_, ?_, ?_⟩
+  · simp [Locals.Source.State.withShared]
+  · simpa [Locals.Source.State.withShared] using hAssign
+  · simpa [Locals.Source.State.withShared, Locals.Source.State.withVars] using
+      hTail
+
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
     {layout : List Name} {source : Objects.Source.State}
     {state : EvmYul.EVM.State}
