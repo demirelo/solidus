@@ -5145,6 +5145,448 @@ theorem openRunNResult_body_leave_then_exit_dispatch_continue
     OpenAssembly.Source.openRunNResult_resolves_running_continue
       hBodyRun hTail
 
+theorem openRunNResult_callSite_body_regular_then_exit_dispatch_continue
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {returnDest : Nat} {bodyCtx : Structured.CompileContext}
+    {source bodyState returned : Structured.RunState}
+    {target afterBody : EvmYul.EVM.State}
+    {args callerStack stack : EvmYul.Stack Word}
+    {frame : Structured.ReturnDest}
+    {tokens : List Word} {token : Word}
+    {asm : Assembly.Program}
+    {bodyFuel tailFuel : Nat}
+    {bodyTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (callSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites))
+    (hSplit :
+      Structured.StackFrame.splitArgs? proc.argc source.evm.stack =
+        some (args, callerStack))
+    (hArgBound : args.length ≤ 16)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hBodyRun :
+      ∀ entryTarget : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          ((source.withEVM { source.evm with stack := args }).pushReturn
+            callerStack proc.retc)
+          entryTarget (token :: tokens) →
+        entryTarget.pc =
+          Structured.Preservation.CodeSegment.startPc
+            (codeSegment_procSegment_bodyCode procSeg) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm bodyFuel entryTarget)
+          bodyTrace (.ok (.running afterBody)))
+    (hBodyRel :
+      Structured.Preservation.CompiledOutcomeRel asm bodyCtx
+        (Structured.Preservation.CodeSegment.fallthroughPc
+          (codeSegment_procSegment_bodyCode procSeg))
+        (Structured.Outcome.regular bodyState) (.running afterBody)
+        (token :: tokens))
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+        some stack)
+    (hReturns : bodyState.returns = frame :: returned.returns)
+    (hRetc : bodyState.evm.stack.length = proc.retc)
+    (hMem :
+      site ∈ sites.filter (Structured.CallSite.forProc proc.name))
+    (hNoDup :
+      ((sites.filter (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hBound : proc.retc < 16)
+    (hExact : Structured.Preservation.ExactLabels asm)
+    (hReturnLabel :
+      Assembly.Program.labelPc asm site.returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          (returned.withEVM { bodyState.evm with stack := stack })
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm tailFuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult asm
+        ((Structured.Preservation.ProcedurePreservation.callJumpCode
+          proc args token).length +
+          ((bodyFuel +
+            (returnDispatchSelectedTableFuel proc.retc
+              (sites.filter (Structured.CallSite.forProc proc.name)) site
+              tailFuel + 1)) + 1))
+        target)
+      (bodyTrace ++ tailTrace) result := by
+  let bodySeg := codeSegment_procSegment_bodyCode procSeg
+  let bodyCode :=
+    Structured.Preservation.ProcedurePreservation.bodyCode program proc
+      bodySupply
+  let dispatchCode :=
+    Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+      dispatchSupply
+  let entryCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.entry proc.name)]
+  let exitCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)]
+  let preExit := procSeg.pre ++ entryCode ++ bodyCode
+  let expandedAsm := preExit ++ exitCode ++ dispatchCode ++ procSeg.post
+  have hAsmExpanded : asm = expandedAsm := by
+    simpa [expandedAsm, preExit, entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hAsm
+  have hFitsFull :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom procSeg.pre
+        (entryCode ++ bodyCode ++ exitCode ++ dispatchCode) := by
+    simpa [entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hFits
+  have hFitsFull' :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom procSeg.pre
+        ((entryCode ++ bodyCode) ++ (exitCode ++ dispatchCode)) := by
+    simpa [List.append_assoc] using hFitsFull
+  have hFitsAfterBody :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom preExit
+        (exitCode ++ dispatchCode) := by
+    simpa [preExit, List.append_assoc] using
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := procSeg.pre) (first := entryCode ++ bodyCode)
+        (second := exitCode ++ dispatchCode) hFitsFull'
+  have hFitsExit :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom preExit exitCode :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.left hFitsAfterBody
+  have hFitsDispatch :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom (preExit ++ exitCode)
+        dispatchCode :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.right hFitsAfterBody
+  have hExactExpanded :
+      Structured.Preservation.ExactLabels expandedAsm :=
+    Structured.Preservation.ExactLabels.cast_asm hAsmExpanded hExact
+  have hReturnLabelExpanded :
+      Assembly.Program.labelPc expandedAsm site.returnLabel = some returnDest := by
+    rw [← hAsmExpanded]
+    exact hReturnLabel
+  have hFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc bodySeg =
+        Assembly.Program.pcAfter preExit := by
+    simp [bodySeg, codeSegment_procSegment_bodyCode,
+      Structured.Preservation.CodeSegment.fallthroughPc,
+      preExit, entryCode, bodyCode, List.append_assoc]
+  have hBodyRelPc :
+      Structured.Preservation.CompiledOutcomeRel asm bodyCtx
+        (Assembly.Program.pcAfter preExit)
+        (Structured.Outcome.regular bodyState) (.running afterBody)
+        (token :: tokens) := by
+    simpa [hFallthrough] using hBodyRel
+  have hBodyRelExpanded :
+      Structured.Preservation.CompiledOutcomeRel expandedAsm bodyCtx
+        (Assembly.Program.pcAfter preExit)
+        (Structured.Outcome.regular bodyState) (.running afterBody)
+        (token :: tokens) := by
+    simpa [← hAsmExpanded] using hBodyRelPc
+  exact
+    openRunNResult_structured_callSite_body_continue
+      (program := program) (proc := proc) (bodySupply := bodySupply)
+      (dispatchSupply := dispatchSupply) (sites := sites) (site := site)
+      (source := source) (target := target) (args := args)
+      (callerStack := callerStack) (tokens := tokens) (token := token)
+      (asm := asm)
+      (fuel :=
+        bodyFuel +
+          (returnDispatchSelectedTableFuel proc.retc
+            (sites.filter (Structured.CallSite.forProc proc.name)) site
+            tailFuel + 1))
+      (tailTrace := bodyTrace ++ tailTrace) (result := result)
+      callSeg procSeg hSplit hArgBound hPc hRel hExact
+      (by
+        intro entryTarget hEntryRel hEntryPc
+        have hBodyRunExpanded :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult expandedAsm bodyFuel
+                entryTarget)
+              bodyTrace (.ok (.running afterBody)) := by
+          simpa [← hAsmExpanded] using
+            hBodyRun entryTarget hEntryRel hEntryPc
+        have hTail :=
+          openRunNResult_body_regular_then_exit_dispatch_continue
+            (proc := proc) (dispatchSupply := dispatchSupply)
+            (sites := sites) (site := site) (returnDest := returnDest)
+            (bodyCtx := bodyCtx) (bodyState := bodyState)
+            (returned := returned) (stack := stack) (frame := frame)
+            (entryTarget := entryTarget) (afterBody := afterBody)
+            (tokens := tokens) (token := token) (preExit := preExit)
+            (post := procSeg.post) (bodyFuel := bodyFuel)
+            (tailFuel := tailFuel) (bodyTrace := bodyTrace)
+            (tailTrace := tailTrace) (result := result)
+            (by
+              simpa [expandedAsm, exitCode] using hBodyRunExpanded)
+            (by
+              simpa [expandedAsm, exitCode, dispatchCode] using
+                hBodyRelExpanded)
+            hAttach hReturns hRetc hMem hNoDup hToken hBound
+            (by simpa [exitCode] using hFitsExit)
+            (by simpa [exitCode, dispatchCode] using hFitsDispatch)
+            (by simpa [expandedAsm, exitCode, dispatchCode] using
+              hExactExpanded)
+            (by simpa [expandedAsm, exitCode, dispatchCode] using
+              hReturnLabelExpanded)
+            (by
+              intro final hFinalRel hFinalPc
+              have hTailRun := hRest final hFinalRel hFinalPc
+              have hTailRunExpanded :
+                  OpenExternal.OpenResultResolves
+                    (OpenAssembly.Source.openRunNResult expandedAsm tailFuel
+                      final)
+                    tailTrace result := by
+                rw [← hAsmExpanded]
+                exact hTailRun
+              simpa [expandedAsm, exitCode, dispatchCode, List.append_assoc]
+                using hTailRunExpanded)
+        have hTailExpanded :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult expandedAsm
+                (bodyFuel +
+                  (returnDispatchSelectedTableFuel proc.retc
+                    (sites.filter (Structured.CallSite.forProc proc.name)) site
+                    tailFuel + 1))
+                entryTarget)
+              (bodyTrace ++ tailTrace) result := by
+          simpa [expandedAsm, exitCode, dispatchCode, List.append_assoc]
+            using hTail
+        rw [← hAsmExpanded] at hTailExpanded
+        exact hTailExpanded)
+
+theorem openRunNResult_callSite_body_leave_then_exit_dispatch_continue
+    {program : Structured.Program} {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {returnDest : Nat} {bodyCtx : Structured.CompileContext}
+    {source bodyState returned : Structured.RunState}
+    {target afterBody : EvmYul.EVM.State}
+    {args callerStack stack : EvmYul.Stack Word}
+    {frame : Structured.ReturnDest}
+    {tokens : List Word} {token : Word}
+    {asm : Assembly.Program}
+    {bodyFuel tailFuel : Nat}
+    {bodyTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (callSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc args token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment program
+          proc bodySupply dispatchSupply sites))
+    (hSplit :
+      Structured.StackFrame.splitArgs? proc.argc source.evm.stack =
+        some (args, callerStack))
+    (hArgBound : args.length ≤ 16)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc callSeg)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hBodyRun :
+      ∀ entryTarget : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          ((source.withEVM { source.evm with stack := args }).pushReturn
+            callerStack proc.retc)
+          entryTarget (token :: tokens) →
+        entryTarget.pc =
+          Structured.Preservation.CodeSegment.startPc
+            (codeSegment_procSegment_bodyCode procSeg) →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm bodyFuel entryTarget)
+          bodyTrace (.ok (.running afterBody)))
+    (hBodyRel :
+      Structured.Preservation.CompiledOutcomeRel asm bodyCtx
+        (Structured.Preservation.CodeSegment.fallthroughPc
+          (codeSegment_procSegment_bodyCode procSeg))
+        (Structured.Outcome.leave bodyState) (.running afterBody)
+        (token :: tokens))
+    (hCtxLeave :
+      bodyCtx.leaveLabel? = some (Structured.ProcLabel.exit proc.name))
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+        some stack)
+    (hReturns : bodyState.returns = frame :: returned.returns)
+    (hRetc : bodyState.evm.stack.length = proc.retc)
+    (hMem :
+      site ∈ sites.filter (Structured.CallSite.forProc proc.name))
+    (hNoDup :
+      ((sites.filter (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hBound : proc.retc < 16)
+    (hExact : Structured.Preservation.ExactLabels asm)
+    (hReturnLabel :
+      Assembly.Program.labelPc asm site.returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          (returned.withEVM { bodyState.evm with stack := stack })
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult asm tailFuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult asm
+        ((Structured.Preservation.ProcedurePreservation.callJumpCode
+          proc args token).length +
+          ((bodyFuel +
+            (returnDispatchSelectedTableFuel proc.retc
+              (sites.filter (Structured.CallSite.forProc proc.name)) site
+              tailFuel + 1)) + 1))
+        target)
+      (bodyTrace ++ tailTrace) result := by
+  let bodySeg := codeSegment_procSegment_bodyCode procSeg
+  let bodyCode :=
+    Structured.Preservation.ProcedurePreservation.bodyCode program proc
+      bodySupply
+  let dispatchCode :=
+    Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+      dispatchSupply
+  let entryCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.entry proc.name)]
+  let exitCode : Assembly.Program :=
+    [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)]
+  let preExit := procSeg.pre ++ entryCode ++ bodyCode
+  let expandedAsm := preExit ++ exitCode ++ dispatchCode ++ procSeg.post
+  have hAsmExpanded : asm = expandedAsm := by
+    simpa [expandedAsm, preExit, entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hAsm
+  have hFitsFull :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom procSeg.pre
+        (entryCode ++ bodyCode ++ exitCode ++ dispatchCode) := by
+    simpa [entryCode, exitCode, bodyCode, dispatchCode,
+      Structured.Preservation.ProcedurePreservation.procSegment,
+      List.append_assoc] using procSeg.hFits
+  have hFitsFull' :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom procSeg.pre
+        ((entryCode ++ bodyCode) ++ (exitCode ++ dispatchCode)) := by
+    simpa [List.append_assoc] using hFitsFull
+  have hFitsAfterBody :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom preExit
+        (exitCode ++ dispatchCode) := by
+    simpa [preExit, List.append_assoc] using
+      Structured.Preservation.AssemblyProgram.PCFitsFrom.right
+        (pre := procSeg.pre) (first := entryCode ++ bodyCode)
+        (second := exitCode ++ dispatchCode) hFitsFull'
+  have hFitsExit :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom preExit exitCode :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.left hFitsAfterBody
+  have hFitsDispatch :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom (preExit ++ exitCode)
+        dispatchCode :=
+    Structured.Preservation.AssemblyProgram.PCFitsFrom.right hFitsAfterBody
+  have hExactExpanded :
+      Structured.Preservation.ExactLabels expandedAsm :=
+    Structured.Preservation.ExactLabels.cast_asm hAsmExpanded hExact
+  have hReturnLabelExpanded :
+      Assembly.Program.labelPc expandedAsm site.returnLabel = some returnDest := by
+    rw [← hAsmExpanded]
+    exact hReturnLabel
+  have hFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc bodySeg =
+        Assembly.Program.pcAfter preExit := by
+    simp [bodySeg, codeSegment_procSegment_bodyCode,
+      Structured.Preservation.CodeSegment.fallthroughPc,
+      preExit, entryCode, bodyCode, List.append_assoc]
+  have hBodyRelPc :
+      Structured.Preservation.CompiledOutcomeRel asm bodyCtx
+        (Assembly.Program.pcAfter preExit)
+        (Structured.Outcome.leave bodyState) (.running afterBody)
+        (token :: tokens) := by
+    simpa [hFallthrough] using hBodyRel
+  have hBodyRelExpanded :
+      Structured.Preservation.CompiledOutcomeRel expandedAsm bodyCtx
+        (Assembly.Program.pcAfter preExit)
+        (Structured.Outcome.leave bodyState) (.running afterBody)
+        (token :: tokens) := by
+    simpa [← hAsmExpanded] using hBodyRelPc
+  exact
+    openRunNResult_structured_callSite_body_continue
+      (program := program) (proc := proc) (bodySupply := bodySupply)
+      (dispatchSupply := dispatchSupply) (sites := sites) (site := site)
+      (source := source) (target := target) (args := args)
+      (callerStack := callerStack) (tokens := tokens) (token := token)
+      (asm := asm)
+      (fuel :=
+        bodyFuel +
+          (returnDispatchSelectedTableFuel proc.retc
+            (sites.filter (Structured.CallSite.forProc proc.name)) site
+            tailFuel + 1))
+      (tailTrace := bodyTrace ++ tailTrace) (result := result)
+      callSeg procSeg hSplit hArgBound hPc hRel hExact
+      (by
+        intro entryTarget hEntryRel hEntryPc
+        have hBodyRunExpanded :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult expandedAsm bodyFuel
+                entryTarget)
+              bodyTrace (.ok (.running afterBody)) := by
+          simpa [← hAsmExpanded] using
+            hBodyRun entryTarget hEntryRel hEntryPc
+        have hTail :=
+          openRunNResult_body_leave_then_exit_dispatch_continue
+            (proc := proc) (dispatchSupply := dispatchSupply)
+            (sites := sites) (site := site) (returnDest := returnDest)
+            (bodyCtx := bodyCtx) (bodyState := bodyState)
+            (returned := returned) (stack := stack) (frame := frame)
+            (entryTarget := entryTarget) (afterBody := afterBody)
+            (tokens := tokens) (token := token) (preExit := preExit)
+            (post := procSeg.post) (bodyFuel := bodyFuel)
+            (tailFuel := tailFuel) (bodyTrace := bodyTrace)
+            (tailTrace := tailTrace) (result := result)
+            (by
+              simpa [expandedAsm, exitCode] using hBodyRunExpanded)
+            (by
+              simpa [expandedAsm, exitCode, dispatchCode] using
+                hBodyRelExpanded)
+            hCtxLeave hAttach hReturns hRetc hMem hNoDup hToken hBound
+            (by simpa [exitCode] using hFitsExit)
+            (by simpa [exitCode, dispatchCode] using hFitsDispatch)
+            (by simpa [expandedAsm, exitCode, dispatchCode] using
+              hExactExpanded)
+            (by simpa [expandedAsm, exitCode, dispatchCode] using
+              hReturnLabelExpanded)
+            (by
+              intro final hFinalRel hFinalPc
+              have hTailRun := hRest final hFinalRel hFinalPc
+              have hTailRunExpanded :
+                  OpenExternal.OpenResultResolves
+                    (OpenAssembly.Source.openRunNResult expandedAsm tailFuel
+                      final)
+                    tailTrace result := by
+                rw [← hAsmExpanded]
+                exact hTailRun
+              simpa [expandedAsm, exitCode, dispatchCode, List.append_assoc]
+                using hTailRunExpanded)
+        have hTailExpanded :
+            OpenExternal.OpenResultResolves
+              (OpenAssembly.Source.openRunNResult expandedAsm
+                (bodyFuel +
+                  (returnDispatchSelectedTableFuel proc.retc
+                    (sites.filter (Structured.CallSite.forProc proc.name)) site
+                    tailFuel + 1))
+                entryTarget)
+              (bodyTrace ++ tailTrace) result := by
+          simpa [expandedAsm, exitCode, dispatchCode, List.append_assoc]
+            using hTail
+        rw [← hAsmExpanded] at hTailExpanded
+        exact hTailExpanded)
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :

@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:52 CEST.
+Last updated: 2026-06-03 07:57 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -154,12 +154,17 @@ Execution order:
    `openRunNResult_body_leave_then_exit_dispatch_continue` now consume a checked
    open callee-body run plus its `CompiledOutcomeRel` and continue through the
    exit-label/return-dispatch bridge for both source-returning body modes.
+   The caller-entry compositions are now checked too:
+   `openRunNResult_callSite_body_regular_then_exit_dispatch_continue` and
+   `openRunNResult_callSite_body_leave_then_exit_dispatch_continue` consume the
+   actual emitted call-site segment, the generated procedure segment, a
+   recursive body-run continuation at the generated body segment, and continue
+   through return dispatch in one open replay.
    `FunctionsBlockCompiledOpenResultRel.source_regular_running_compiledOutcomeRel`
    and `.source_leave_running_compiledOutcomeRel` now extract the required
    concrete running target body outcome from the recursive function-block open
-   result relation. The next return-side step is to combine the generated
-   body-entry bridge with the recursive callee-body run, then run returned
-   assignment and syntactic tail. The
+   result relation. The next procedure-call step is to run the caller-side
+   returned assignment and syntactic tail after return dispatch. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
