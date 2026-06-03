@@ -9673,6 +9673,92 @@ def StackPrefixSuffixRel (layout : List Name) (source : Objects.Source.State)
       evm.stack = stackPrefix ++ baseStack ++ suffix ∧
         Locals.SourceLowering.StackStoreRel layout source.vars baseStack
 
+def StackPrefixSuffixErasedRel (layout : List Name)
+    (source : Objects.Source.State) (stackPrefix suffix : List Word)
+    (evm : EvmYul.EVM.State) : Prop :=
+  Structured.Preservation.eraseControl evm =
+      Structured.Preservation.eraseControl
+        { evm with toSharedState := source.shared } ∧
+    ∃ baseStack : EvmYul.Stack Word,
+      evm.stack = stackPrefix ++ baseStack ++ suffix ∧
+        Locals.SourceLowering.StackStoreRel layout source.vars baseStack
+
+namespace StackPrefixSuffixErasedRel
+
+theorem exactWithTargetShared
+    {layout : List Name} {source : Objects.Source.State}
+    {stackPrefix suffix : List Word} {evm : EvmYul.EVM.State}
+    (hRel :
+      StackPrefixSuffixErasedRel layout source stackPrefix suffix evm) :
+    StackPrefixSuffixRel layout
+      { source with shared := evm.toSharedState } stackPrefix suffix evm := by
+  rcases hRel with ⟨_hErase, baseStack, hStack, hStoreRel⟩
+  exact ⟨rfl, baseStack, hStack, by simpa using hStoreRel⟩
+
+theorem of_exactWithTargetShared
+    {layout : List Name} {source : Objects.Source.State}
+    {stackPrefix suffix : List Word} {start evm : EvmYul.EVM.State}
+    (hErase :
+      Structured.Preservation.eraseControl start =
+        Structured.Preservation.eraseControl
+          { start with toSharedState := source.shared })
+    (hRel :
+      StackPrefixSuffixRel layout
+        { source with shared := start.toSharedState } stackPrefix suffix evm) :
+    StackPrefixSuffixErasedRel layout source stackPrefix suffix evm := by
+  rcases hRel with ⟨hShared, baseStack, hStack, hStoreRel⟩
+  refine ⟨?_, baseStack, hStack, by simpa using hStoreRel⟩
+  cases start
+  cases evm
+  simp [Structured.Preservation.eraseControl, Assembly.eraseGas] at hErase hShared ⊢
+  cases hShared
+  exact hErase
+
+theorem of_frameStateRel_stateRel
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {base : Locals.RunState}
+    {target : EvmYul.EVM.State} {values tokens : List Word}
+    (hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel
+        (base.withEVM
+          { base.evm with stack := values.reverse ++ base.evm.stack })
+        target tokens) :
+    ∃ suffix,
+      StackPrefixSuffixErasedRel layout source values.reverse suffix target := by
+  rcases hBaseRel with ⟨hLowerRel, _hReturns⟩
+  rcases hLowerRel with ⟨hBaseShared, hStoreRel⟩
+  rcases hFrameRel.hidden_suffix with
+    ⟨suffix, hTargetStack, _hMaterialize⟩
+  refine ⟨suffix, ?_⟩
+  refine ⟨?_, base.evm.stack, ?_, hStoreRel⟩
+  · calc
+      Structured.Preservation.eraseControl target =
+          Structured.Preservation.eraseControl
+            { (base.withEVM
+                { base.evm with stack := values.reverse ++ base.evm.stack }).evm with
+              stack := target.stack } := hFrameRel.dataRel
+      _ = Structured.Preservation.eraseControl
+            { target with toSharedState := source.shared } := by
+          cases target
+          cases base
+          cases source
+          cases hBaseShared
+          simp [Structured.RunState.withEVM,
+            Structured.Preservation.eraseControl, Assembly.eraseGas]
+  · calc
+      target.stack =
+          (base.withEVM
+            { base.evm with stack := values.reverse ++ base.evm.stack }).evm.stack ++
+            suffix := hTargetStack
+      _ = (values.reverse ++ base.evm.stack) ++ suffix := by
+            simp [Structured.RunState.withEVM]
+      _ = values.reverse ++ base.evm.stack ++ suffix := by
+            simp [List.append_assoc]
+
+end StackPrefixSuffixErasedRel
+
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
     {layout : List Name} {source : Objects.Source.State}
     {state : EvmYul.EVM.State}
@@ -10723,6 +10809,164 @@ theorem compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffix_openRunNResult
       (supply := supply) hCtxLayout hNoDup hTargetsReverse hAssignReverse
       (by simpa [Functions.Lower.assignReturnedTops] using hCompileBlock)
       hPrefixRel program segment hPc
+
+theorem compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {names : List Name} {values suffix : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ names →
+        ∃ idx, layout[idx]? = some name ∧ names.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany names values source.vars = some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTopsRev names } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      StackPrefixSuffixErasedRel layout source values suffix state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  let sourceExact : Objects.Source.State :=
+    { source with shared := state.toSharedState }
+  have hExactPrefix :
+      StackPrefixSuffixRel layout sourceExact values suffix state := by
+    simpa [sourceExact] using
+      StackPrefixSuffixErasedRel.exactWithTargetShared hPrefixRel
+  have hAssignExact :
+      Functions.Source.Store.assignMany names values sourceExact.vars =
+        some store' := by
+    simpa [sourceExact] using hAssign
+  rcases
+      compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen
+        (layout := layout) (source := sourceExact) (state := state)
+        (ctx := ctx) (finalCtx := finalCtx) (names := names)
+        (values := values) (suffix := suffix) (store' := store')
+        (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+        (supply := supply) hCtxLayout hNoDup hTargets hAssignExact
+        hCompileBlock hExactPrefix program segment hPc with
+    ⟨assignFuel, evmAfter, hExactAfter, hAfterPc, hCont⟩
+  have hEraseFinal :
+      Structured.Preservation.eraseControl state =
+        Structured.Preservation.eraseControl
+          { state with toSharedState := (source.withVars store').shared } := by
+    simpa [Locals.Source.State.withVars] using hPrefixRel.1
+  have hErasedAfter :
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter := by
+    exact
+      StackPrefixSuffixErasedRel.of_exactWithTargetShared
+        (source := source.withVars store') (start := state)
+        hEraseFinal
+        (by
+          simpa [sourceExact, Locals.Source.State.withVars] using hExactAfter)
+  exact ⟨assignFuel, evmAfter, hErasedAfter, hAfterPc, hCont⟩
+
+theorem compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {source : Objects.Source.State}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values suffix : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hPrefixRel :
+      StackPrefixSuffixErasedRel layout source values.reverse suffix state)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter,
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  let sourceExact : Objects.Source.State :=
+    { source with shared := state.toSharedState }
+  have hExactPrefix :
+      StackPrefixSuffixRel layout sourceExact values.reverse suffix state := by
+    simpa [sourceExact] using
+      StackPrefixSuffixErasedRel.exactWithTargetShared hPrefixRel
+  have hAssignExact :
+      Functions.Source.Store.assignMany targets values sourceExact.vars =
+        some store' := by
+    simpa [sourceExact] using hAssign
+  rcases
+      compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen
+        (layout := layout) (source := sourceExact) (state := state)
+        (ctx := ctx) (finalCtx := finalCtx) (targets := targets)
+        (values := values) (suffix := suffix) (store' := store')
+        (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+        (supply := supply) hCtxLayout hNoDup hTargetsNoDup hTargets
+        hAssignExact hCompileBlock hExactPrefix program segment hPc with
+    ⟨assignFuel, evmAfter, hExactAfter, hAfterPc, hCont⟩
+  have hEraseFinal :
+      Structured.Preservation.eraseControl state =
+        Structured.Preservation.eraseControl
+          { state with toSharedState := (source.withVars store').shared } := by
+    simpa [Locals.Source.State.withVars] using hPrefixRel.1
+  have hErasedAfter :
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter := by
+    exact
+      StackPrefixSuffixErasedRel.of_exactWithTargetShared
+        (source := source.withVars store') (start := state)
+        hEraseFinal
+        (by
+          simpa [sourceExact, Locals.Source.State.withVars] using hExactAfter)
+  exact ⟨assignFuel, evmAfter, hErasedAfter, hAfterPc, hCont⟩
 
 theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode
     {prim : Objects.Source.PrimitiveSemantics}
