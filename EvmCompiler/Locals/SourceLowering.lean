@@ -3,6 +3,7 @@ import EvmCompiler.Locals.Semantics
 import EvmCompiler.Locals.StackLowering
 import EvmCompiler.Locals.Preservation
 import EvmYul.Semantics
+import Mathlib.Data.Array.Extract
 
 set_option linter.unusedSimpArgs false
 set_option linter.unnecessarySimpa false
@@ -125,25 +126,13 @@ end CleanupScopeRel
 
 namespace Scope
 
-theorem stmt_outEnv_cleanupScopeRel (env : List Name) (stmt : Stmt) :
-    CleanupScopeRel (Scope.Stmt.outEnv env stmt) env := by
-  cases stmt <;> simp [Scope.Stmt.outEnv]
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.cons (CleanupScopeRel.refl env)
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
-  · exact CleanupScopeRel.refl env
+  theorem stmt_outEnv_cleanupScopeRel (env : List Name) (stmt : Stmt) :
+      CleanupScopeRel (Scope.Stmt.outEnv env stmt) env := by
+    cases stmt <;> simp [Scope.Stmt.outEnv]
+    all_goals
+      first
+      | exact CleanupScopeRel.refl env
+      | exact CleanupScopeRel.cons (CleanupScopeRel.refl env)
 
 theorem stmtList_outEnv_cleanupScopeRel :
     ∀ (env : List Name) (stmts : List Stmt),
@@ -372,6 +361,72 @@ theorem assign {layout : List Name} {store : Source.Store}
         (StackLowering.getElem?_replace_ne (value := value)
           hStackOld hStackAtJ hNeIdx)
 
+theorem promoteAt {layout : List Name} {store : Source.Store}
+    {stack : EvmYul.Stack Word} {name : Name} {value : Word}
+    {idx : Nat}
+    (hName : layout[idx]? = some name)
+    (hStackAt : stack[idx]? = some value)
+    (hStore : store name = some value)
+    (hRel : StackStoreRel layout store stack) :
+    StackStoreRel (name :: layout.take idx ++ layout.drop (idx + 1)) store
+      (value :: stack.take idx ++ stack.drop (idx + 1)) := by
+  rcases hRel with ⟨hLen, hLookup⟩
+  rcases List.getElem?_eq_some_iff.mp hName with ⟨hIdxLtLayout, _hNameEq⟩
+  rcases List.getElem?_eq_some_iff.mp hStackAt with ⟨hIdxLtStack, _hStackEq⟩
+  constructor
+  · simp [List.length_take, Nat.min_eq_left (Nat.le_of_lt hIdxLtLayout),
+      Nat.min_eq_left (Nat.le_of_lt hIdxLtStack), hLen]
+  · intro j sourceName hLayout
+    cases j with
+    | zero =>
+        simp at hLayout
+        subst sourceName
+        simp [hStore]
+    | succ j =>
+        have hTailLayout :
+            (layout.take idx ++ layout.drop (idx + 1))[j]? =
+              some sourceName := by
+          simpa using hLayout
+        by_cases hBefore : j < idx
+        · have hLayoutOrig : layout[j]? = some sourceName := by
+            rw [List.getElem?_append_left] at hTailLayout
+            · simpa [List.getElem?_take, hBefore] using hTailLayout
+            · simp [List.length_take,
+                Nat.min_eq_left (Nat.le_of_lt hIdxLtLayout), hBefore]
+          have hStackOrig := hLookup hLayoutOrig
+          have hStackTail :
+              (stack.take idx ++ stack.drop (idx + 1))[j]? =
+                stack[j]? := by
+            rw [List.getElem?_append_left]
+            · simp [List.getElem?_take, hBefore]
+            · simp [List.length_take,
+                Nat.min_eq_left (Nat.le_of_lt hIdxLtStack), hBefore]
+          simp [hStackTail, hStackOrig]
+        · have hIdxLe : idx ≤ j := by omega
+          have hTakeLenLayout : (layout.take idx).length = idx := by
+            simp [List.length_take, Nat.min_eq_left (Nat.le_of_lt hIdxLtLayout)]
+          have hTailDrop :
+              (layout.drop (idx + 1))[j - idx]? = some sourceName := by
+            rw [List.getElem?_append_right] at hTailLayout
+            · simpa [hTakeLenLayout] using hTailLayout
+            · simpa [hTakeLenLayout] using hIdxLe
+          have hLayoutOrig : layout[j + 1]? = some sourceName := by
+            rw [List.getElem?_drop] at hTailDrop
+            have hIndex : idx + 1 + (j - idx) = j + 1 := by omega
+            simpa [hIndex] using hTailDrop
+          have hStackOrig := hLookup hLayoutOrig
+          have hTakeLenStack : (stack.take idx).length = idx := by
+            simp [List.length_take, Nat.min_eq_left (Nat.le_of_lt hIdxLtStack)]
+          have hStackTail :
+              (stack.take idx ++ stack.drop (idx + 1))[j]? =
+                stack[j + 1]? := by
+            rw [List.getElem?_append_right]
+            · rw [List.getElem?_drop]
+              have hIndex : idx + 1 + (j - idx) = j + 1 := by omega
+              simp [hTakeLenStack, hIndex]
+            · simpa [hTakeLenStack] using hIdxLe
+          simp [hStackTail, hStackOrig]
+
 end StackStoreRel
 
 namespace Cleanup
@@ -436,6 +491,20 @@ structure LoweringStateRel (sourceCtx : Source.Ctx) (targetCtx : Ctx)
 
 namespace StateRel
 
+theorem target_shared {layout : List Name} {source : Source.State}
+    {target : RunState}
+    (hRel : StateRel layout source target) :
+    target.evm.toSharedState = source.shared :=
+  hRel.1
+
+theorem target_shared_eq_of_same_source
+    {layout₁ layout₂ : List Name} {source : Source.State}
+    {target₁ target₂ : RunState}
+    (hRel₁ : StateRel layout₁ source target₁)
+    (hRel₂ : StateRel layout₂ source target₂) :
+    target₁.evm.toSharedState = target₂.evm.toSharedState :=
+  hRel₁.1.trans hRel₂.1.symm
+
 theorem initial {initial : EVMState} (hStack : initial.stack = []) :
     StateRel [] (Source.Program.initialState initial.toSharedState)
       (Structured.Program.initialState initial) := by
@@ -448,6 +517,3153 @@ theorem initial {initial : EVMState} (hStack : initial.stack = []) :
     · intro idx name hName
       simp at hName
 
+namespace SpillScratch
+
+def ZeroPaddingSpec : Prop :=
+  ∀ n : USize,
+    (ffi.ByteArray.zeroes n).size = n.toNat ∧
+      ∀ (idx : Nat) (hIdx : idx < (ffi.ByteArray.zeroes n).size),
+        (ffi.ByteArray.zeroes n)[idx] = (0 : UInt8)
+
+theorem zeroPadding_size (hSpec : ZeroPaddingSpec) (n : USize) :
+    (ffi.ByteArray.zeroes n).size = n.toNat :=
+  (hSpec n).1
+
+theorem zeroPadding_data_size_of_noOverflow (hSpec : ZeroPaddingSpec)
+    {n : Nat} (hNoOverflow : n < USize.size) :
+    (ffi.ByteArray.zeroes (OfNat.ofNat n)).data.size = n := by
+  have hToNat : (OfNat.ofNat n : USize).toNat = n := by
+    simp [USize.toNat, BitVec.toNat_ofNat]
+    exact Nat.mod_eq_of_lt hNoOverflow
+  have hSize := zeroPadding_size hSpec (OfNat.ofNat n : USize)
+  simpa [ByteArray.size, hToNat] using hSize
+
+theorem zeroPadding_get (hSpec : ZeroPaddingSpec) (n : USize)
+    {idx : Nat} (hIdx : idx < (ffi.ByteArray.zeroes n).size) :
+    (ffi.ByteArray.zeroes n)[idx] = (0 : UInt8) :=
+  (hSpec n).2 idx hIdx
+
+theorem zeroPadding_data_toList (hSpec : ZeroPaddingSpec) (n : USize) :
+    (ffi.ByteArray.zeroes n).data.toList = List.replicate n.toNat 0 := by
+  apply List.ext_getElem
+  · change (ffi.ByteArray.zeroes n).size = (List.replicate n.toNat 0).length
+    rw [zeroPadding_size hSpec]
+    simp
+  · intro i hLeft _hRight
+    rw [Array.getElem_toList]
+    rw [List.getElem_replicate]
+    exact zeroPadding_get hSpec n (by simpa [ByteArray.size] using hLeft)
+
+theorem zeroPadding_zero_eq_empty (hSpec : ZeroPaddingSpec) :
+    ffi.ByteArray.zeroes 0 = ByteArray.empty := by
+  apply ByteArray.ext
+  have hSize := zeroPadding_size hSpec 0
+  simp [ByteArray.size] at hSize ⊢
+  exact hSize
+
+def WordByteEncodingSpec : Prop :=
+  ∀ value : Word, value.toByteArray.size = 32
+
+theorem list_toByteArray_loop_size (xs : List UInt8) (acc : ByteArray) :
+    (List.toByteArray.loop xs acc).size = acc.size + xs.length := by
+  induction xs generalizing acc with
+  | nil =>
+      simp [List.toByteArray.loop]
+  | cons _ xs ih =>
+      simp [List.toByteArray.loop, ih, ByteArray.size_push]
+      omega
+
+theorem list_toByteArray_size (xs : List UInt8) :
+    (List.toByteArray xs).size = xs.length := by
+  simpa [List.toByteArray, ByteArray.size_empty] using
+    list_toByteArray_loop_size xs ByteArray.empty
+
+theorem list_toByteArray_loop_data_toList
+    (xs : List UInt8) (acc : ByteArray) :
+    (List.toByteArray.loop xs acc).data.toList = acc.data.toList ++ xs := by
+  induction xs generalizing acc with
+  | nil =>
+      simp [List.toByteArray.loop]
+  | cons x xs ih =>
+      rw [List.toByteArray.loop]
+      rw [ih]
+      simp [ByteArray.push, Array.toList_push]
+
+theorem list_toByteArray_data_toList (xs : List UInt8) :
+    (List.toByteArray xs).data.toList = xs := by
+  simpa [List.toByteArray] using
+    list_toByteArray_loop_data_toList xs ByteArray.empty
+
+theorem byteArray_get!_eq_data_getElem (bytes : ByteArray) {i : Nat}
+    (hIdx : i < bytes.size) :
+    bytes.get! i = bytes.data[i] := by
+  cases bytes with
+  | mk data =>
+      simp [ByteArray.size] at hIdx
+      simp [ByteArray.get!, hIdx]
+
+theorem byteArray_toList_loop_eq_drop
+    (bytes : ByteArray) (i : Nat) (r : List UInt8) :
+    ByteArray.toList.loop bytes i r =
+      r.reverse ++ bytes.data.toList.drop i := by
+  rw [ByteArray.toList.loop.eq_def]
+  split_ifs with hLt
+  · rw [byteArray_toList_loop_eq_drop bytes (i + 1) (bytes.get! i :: r)]
+    rw [List.reverse_cons]
+    have hDrop : bytes.data.toList.drop i =
+        bytes.data.toList[i] :: bytes.data.toList.drop (i + 1) :=
+      List.drop_eq_getElem_cons (by simpa [ByteArray.size] using hLt)
+    rw [hDrop]
+    rw [byteArray_get!_eq_data_getElem bytes hLt]
+    rw [Array.getElem_toList]
+    simp [List.append_assoc]
+  · have hSizeLe : bytes.data.toList.length ≤ i := by
+      simp [ByteArray.size] at hLt ⊢
+      omega
+    simp [List.drop_eq_nil_of_le hSizeLe]
+
+theorem byteArray_toList_eq_data_toList (bytes : ByteArray) :
+    bytes.toList = bytes.data.toList := by
+  simpa [ByteArray.toList] using
+    byteArray_toList_loop_eq_drop bytes 0 []
+
+theorem usize_wordPadding_toNat_add {n : Nat} (hLen : n ≤ 32) :
+    ({ toBitVec := 32 - (n : BitVec System.Platform.numBits) } : USize).toNat +
+        n = 32 := by
+  have hSize32 : 32 < 2 ^ System.Platform.numBits := by
+    change 32 < USize.size
+    cases USize.size_eq <;> simp_all
+  have hLenLt : n < 2 ^ System.Platform.numBits :=
+    Nat.lt_of_le_of_lt hLen hSize32
+  simp [USize.toNat, BitVec.toNat_sub, BitVec.toNat_ofNat,
+    Nat.mod_eq_of_lt hLenLt, Nat.mod_eq_of_lt hSize32]
+  have hNoWrap :
+      2 ^ System.Platform.numBits - n + 32 =
+        2 ^ System.Platform.numBits + (32 - n) := by
+    omega
+  rw [hNoWrap, Nat.add_mod_left]
+  rw [Nat.mod_eq_of_lt]
+  · omega
+  · omega
+
+theorem wordByteEncoding_of_zeroPadding
+    (hSpec : ZeroPaddingSpec) : WordByteEncodingSpec := by
+  intro value
+  unfold EvmYul.UInt256.toByteArray BE
+  rw [ByteArray.size_append]
+  rw [zeroPadding_size hSpec]
+  simp only [Function.comp_apply, list_toByteArray_size]
+  have hLen := EvmYul.toBytesBigEndian_length_le_of_UInt256 value
+  exact usize_wordPadding_toNat_add hLen
+
+def WordByteRoundTripSpec : Prop :=
+  ∀ bytes : ByteArray, bytes.size = 32 →
+    (EvmYul.UInt256.ofNat
+        (EvmYul.fromByteArrayBigEndian bytes)).toByteArray = bytes
+
+theorem wordByteRoundTrip_of_zeroPadding
+    (hSpec : ZeroPaddingSpec) : WordByteRoundTripSpec := by
+  intro bytes hSize
+  apply ByteArray.ext
+  apply Array.ext'
+  unfold EvmYul.UInt256.toByteArray BE EvmYul.fromByteArrayBigEndian
+  rw [ByteArray.data_append]
+  rw [Array.toList_append]
+  rw [zeroPadding_data_toList hSpec]
+  simp only [Function.comp_apply]
+  rw [list_toByteArray_size]
+  rw [list_toByteArray_data_toList]
+  rw [byteArray_toList_eq_data_toList]
+  have hLen : bytes.data.toList.length = 32 := by
+    simpa [ByteArray.size] using hSize
+  have hRound :=
+    EvmYul.zeroPadBytes_toBytesBigEndian_ofNat_fromBytesBigEndian_eq_of_length_eq_32
+      (bs := bytes.data.toList) hLen
+  have hToBytesLen :=
+    EvmYul.toBytesBigEndian_length_le_of_UInt256
+      (EvmYul.UInt256.ofNat
+        (EvmYul.fromBytesBigEndian bytes.data.toList))
+  have hPadEq :
+      ({ toBitVec :=
+          32 -
+            ((EvmYul.toBytesBigEndian
+              (EvmYul.UInt256.ofNat
+                (EvmYul.fromBytesBigEndian bytes.data.toList)).toNat).length :
+                BitVec System.Platform.numBits) } : USize).toNat =
+        32 -
+          (EvmYul.toBytesBigEndian
+            (EvmYul.UInt256.ofNat
+              (EvmYul.fromBytesBigEndian bytes.data.toList)).toNat).length := by
+    have hAdd := usize_wordPadding_toNat_add hToBytesLen
+    omega
+  rw [hPadEq]
+  exact hRound
+
+structure WordByteEncodingModelSpec : Prop where
+  size : WordByteEncodingSpec
+  roundTrip32 : WordByteRoundTripSpec
+
+theorem wordByteEncodingModel_of_zeroPadding
+    (hSpec : ZeroPaddingSpec) : WordByteEncodingModelSpec where
+  size := wordByteEncoding_of_zeroPadding hSpec
+  roundTrip32 := wordByteRoundTrip_of_zeroPadding hSpec
+
+theorem word_fromByteArrayBigEndian_toByteArray
+    (hSpec : ZeroPaddingSpec) (value : Word) :
+    EvmYul.fromByteArrayBigEndian value.toByteArray = value.toNat := by
+  unfold EvmYul.UInt256.toByteArray BE EvmYul.fromByteArrayBigEndian
+  rw [byteArray_toList_eq_data_toList]
+  rw [ByteArray.data_append]
+  rw [Array.toList_append]
+  rw [zeroPadding_data_toList hSpec]
+  simp only [Function.comp_apply, list_toByteArray_data_toList]
+  unfold EvmYul.fromBytesBigEndian EvmYul.toBytesBigEndian
+  simp [List.reverse_append]
+
+def ByteDisjoint (a lenA b lenB : Nat) : Prop :=
+  a + lenA ≤ b ∨ b + lenB ≤ a
+
+namespace ByteDisjoint
+
+def check (a lenA b lenB : Nat) : Bool :=
+  decide (a + lenA ≤ b) || decide (b + lenB ≤ a)
+
+theorem check_sound {a lenA b lenB : Nat}
+    (hCheck : check a lenA b lenB = true) :
+    ByteDisjoint a lenA b lenB := by
+  unfold check at hCheck
+  simp only [Bool.or_eq_true, decide_eq_true_eq] at hCheck
+  exact hCheck
+
+theorem check_complete {a lenA b lenB : Nat}
+    (hDisjoint : ByteDisjoint a lenA b lenB) :
+    check a lenA b lenB = true := by
+  unfold check
+  simp only [Bool.or_eq_true, decide_eq_true_eq]
+  exact hDisjoint
+
+theorem check_eq_true {a lenA b lenB : Nat} :
+    check a lenA b lenB = true ↔ ByteDisjoint a lenA b lenB := by
+  constructor
+  · exact check_sound
+  · exact check_complete
+
+end ByteDisjoint
+
+theorem ByteDisjoint.symm {a lenA b lenB : Nat}
+    (hDisjoint : ByteDisjoint a lenA b lenB) :
+    ByteDisjoint b lenB a lenA := by
+  rcases hDisjoint with hLeft | hRight
+  · exact Or.inr hLeft
+  · exact Or.inl hRight
+
+theorem ByteDisjoint.byte_of_mem_left {a lenA b lenB idx : Nat}
+    (hDisjoint : ByteDisjoint a lenA b lenB)
+    (hStart : a ≤ idx)
+    (hEnd : idx < a + lenA) :
+    ByteDisjoint idx 1 b lenB := by
+  rcases hDisjoint with hBefore | hAfter
+  · exact Or.inl (by omega)
+  · exact Or.inr (by omega)
+
+theorem byteArray_readWithPadding32_allocated (hSpec : ZeroPaddingSpec)
+    {memory : ByteArray} {offset : Nat}
+    (hAllocated : offset + 32 ≤ memory.size) :
+    memory.readWithPadding offset 32 =
+      { data := memory.data.extract offset (offset + 32) } := by
+  cases memory with
+  | mk memoryData =>
+      let mem : ByteArray := { data := memoryData }
+      change mem.readWithPadding offset 32 =
+        { data := memoryData.extract offset (offset + 32) }
+      let read : ByteArray := { data := memoryData.extract offset (offset + 32) }
+      have hRead : mem.readWithoutPadding offset 32 = read := by
+        apply ByteArray.ext
+        have hNotPast : ¬ mem.size ≤ offset := by
+          simp [mem, ByteArray.size] at hAllocated ⊢
+          omega
+        have hMin : min 32 mem.size = 32 := by
+          simp [mem, ByteArray.size] at hAllocated ⊢
+          omega
+        simp [read, mem, ByteArray.readWithoutPadding, hNotPast, hMin]
+      have hReadSize : read.size = 32 := by
+        simp [read, ByteArray.size] at hAllocated ⊢
+        omega
+      have hPadding :
+          ffi.ByteArray.zeroes
+              ((OfNat.ofNat 32 : USize) - OfNat.ofNat read.size) =
+            ByteArray.empty := by
+        rw [hReadSize]
+        simpa using zeroPadding_zero_eq_empty hSpec
+      rw [ByteArray.readWithPadding]
+      simp [hRead, hReadSize, hPadding, read]
+      rw [zeroPadding_zero_eq_empty hSpec]
+      apply ByteArray.ext
+      simp [ByteArray.empty]
+
+theorem byteArray_extract32_allocated_size {memory : ByteArray}
+    {offset : Nat}
+    (hAllocated : offset + 32 ≤ memory.size) :
+    ({ data := memory.data.extract offset (offset + 32) } :
+      ByteArray).size = 32 := by
+  cases memory with
+  | mk memoryData =>
+      simp [ByteArray.size] at hAllocated ⊢
+      omega
+
+theorem byteArray_write32_noPadding (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : 32 ≤ source.size)
+    (hDest : offset + 32 ≤ dest.size) :
+    source.write 0 dest offset 32 =
+      { data :=
+          dest.data.extract 0 offset ++
+            source.data.extract 0 32 ++
+              dest.data.extract (offset + 32) dest.data.size } := by
+  cases dest with
+  | mk destData =>
+  cases source with
+  | mk sourceData =>
+  apply ByteArray.ext
+  simp [ByteArray.write, ByteArray.copySlice, ByteArray.size] at hSource hDest ⊢
+  have hSourceDataNonempty : sourceData ≠ #[] := by
+    intro h
+    subst sourceData
+    simp at hSource
+  have hMinSource : min 32 sourceData.size = 32 := by omega
+  have hEnd : min destData.size (offset + 32) = offset + 32 := by omega
+  have hSourcePadding : min destData.size (offset + 32) -
+      (offset + min 32 sourceData.size) = 0 := by
+    omega
+  have hDestPadding : offset - destData.size = 0 := by omega
+  have hZeroData : (ffi.ByteArray.zeroes 0).data = #[] := by
+    have h := zeroPadding_zero_eq_empty hSpec
+    simpa [ByteArray.empty] using congrArg ByteArray.data h
+  have hSourcePaddingData :
+      (ffi.ByteArray.zeroes
+        (OfNat.ofNat (min destData.size (offset + 32) -
+          (offset + min 32 sourceData.size)))).data = #[] := by
+    rw [hSourcePadding]
+    exact hZeroData
+  have hDestPaddingData :
+      (ffi.ByteArray.zeroes (OfNat.ofNat (offset - destData.size))).data =
+        #[] := by
+    rw [hDestPadding]
+    exact hZeroData
+  simp [hSourceDataNonempty, hMinSource, hEnd, hDestPadding,
+    hSourcePaddingData, hDestPaddingData]
+
+theorem byteArray_write32_noPadding_exact (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size) :
+    source.write 0 dest offset 32 =
+      { data :=
+          dest.data.extract 0 offset ++ source.data ++
+            dest.data.extract (offset + 32) dest.data.size } := by
+  rw [byteArray_write32_noPadding hSpec (by omega) hDest]
+  cases source with
+  | mk sourceData =>
+      apply ByteArray.ext
+      simp [ByteArray.size] at hSource ⊢
+      have hExtract : sourceData.extract 0 32 = sourceData := by
+        simpa [hSource] using (Array.extract_size (xs := sourceData))
+      simp [hExtract]
+
+theorem byteArray_write32_noPadding_size {dest source : ByteArray}
+    {offset : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size) :
+    ({ data :=
+        dest.data.extract 0 offset ++ source.data ++
+          dest.data.extract (offset + 32) dest.data.size } : ByteArray).size =
+      dest.size := by
+  cases dest with
+  | mk destData =>
+  cases source with
+  | mk sourceData =>
+  simp [ByteArray.size, Array.size_append] at hSource hDest ⊢
+  omega
+
+theorem byteArray_write32_size (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size) :
+    (source.write 0 dest offset 32).size = dest.size := by
+  rw [byteArray_write32_noPadding_exact hSpec hSource hDest]
+  exact byteArray_write32_noPadding_size hSource hDest
+
+theorem byteArray_write32_size_general (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hPadNoOverflow : offset - dest.size < USize.size) :
+    (source.write 0 dest offset 32).size =
+      max dest.size (offset + 32) := by
+  cases dest with
+  | mk destData =>
+  cases source with
+  | mk sourceData =>
+  simp [ByteArray.write, ByteArray.copySlice, ByteArray.size] at hSource ⊢
+  have hSourceDataNonempty : sourceData ≠ #[] := by
+    intro h
+    subst sourceData
+    simp at hSource
+  have hMinSource : min 32 sourceData.size = 32 := by omega
+  have hEndPadding :
+      min destData.size (offset + 32) - (offset + 32) = 0 := by
+    omega
+  have hSourcePaddingSize :
+      (ffi.ByteArray.zeroes
+        (OfNat.ofNat
+          (min destData.size (offset + 32) -
+            (offset + min 32 sourceData.size)))).data.size = 0 := by
+    rw [hMinSource, hEndPadding]
+    simpa [ByteArray.size] using zeroPadding_size hSpec 0
+  have hDestPaddingSize :
+      (ffi.ByteArray.zeroes (OfNat.ofNat (offset - destData.size))).data.size =
+        offset - destData.size := by
+    have hToNat :
+        (OfNat.ofNat (offset - destData.size) : USize).toNat =
+          offset - destData.size := by
+      simp [USize.toNat, BitVec.toNat_ofNat]
+      exact Nat.mod_eq_of_lt (by
+        simpa [ByteArray.size] using hPadNoOverflow)
+    have hSize :=
+      zeroPadding_size hSpec
+        (OfNat.ofNat (offset - destData.size) : USize)
+    simpa [ByteArray.size, hToNat] using hSize
+  simp [hSourceDataNonempty, hMinSource, hSourcePaddingSize,
+    hDestPaddingSize, Array.size_append]
+  omega
+
+theorem byteArray_write32_expanding_exact (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hPadNoOverflow : offset - dest.size < USize.size)
+    (hExpanding : ¬ offset + 32 ≤ dest.size) :
+    source.write 0 dest offset 32 =
+      { data :=
+          (dest.data ++
+            (ffi.ByteArray.zeroes
+              (OfNat.ofNat (offset - dest.size))).data).extract 0 offset ++
+            source.data } := by
+  cases dest with
+  | mk destData =>
+  cases source with
+  | mk sourceData =>
+  apply ByteArray.ext
+  simp [ByteArray.write, ByteArray.copySlice, ByteArray.size] at hSource hExpanding ⊢
+  have hSourceDataNonempty : sourceData ≠ #[] := by
+    intro h
+    subst sourceData
+    simp at hSource
+  have hMinSource : min 32 sourceData.size = 32 := by
+    omega
+  have hEndPadding :
+      min destData.size (offset + 32) - (offset + 32) = 0 := by
+    omega
+  have hSourcePaddingData :
+      (ffi.ByteArray.zeroes
+        (OfNat.ofNat
+          (min destData.size (offset + 32) -
+            (offset + min 32 sourceData.size)))).data = #[] := by
+    rw [hMinSource, hEndPadding]
+    have h := zeroPadding_zero_eq_empty hSpec
+    simpa [ByteArray.empty] using congrArg ByteArray.data h
+  have hDestPaddingSize :
+      (ffi.ByteArray.zeroes (OfNat.ofNat (offset - destData.size))).data.size =
+        offset - destData.size :=
+    zeroPadding_data_size_of_noOverflow hSpec
+      (by simpa [ByteArray.size] using hPadNoOverflow)
+  have hDestPadExtractEmpty :
+      (ffi.ByteArray.zeroes (OfNat.ofNat (offset - destData.size))).data.extract
+        (offset + 32 - destData.size) = #[] := by
+    rw [Array.extract_eq_empty_iff]
+    rw [hDestPaddingSize]
+    omega
+  have hDestSuffixEmpty :
+      destData.extract (offset + 32)
+          (destData.size +
+            (ffi.ByteArray.zeroes
+              (OfNat.ofNat (offset - destData.size))).data.size) =
+        #[] := by
+    rw [Array.extract_eq_empty_iff]
+    rw [hDestPaddingSize]
+    omega
+  have hSourceExtract : sourceData.extract 0 32 = sourceData := by
+    simpa [hSource] using (Array.extract_size (xs := sourceData))
+  simp [hSourceDataNonempty, hMinSource, hSourcePaddingData,
+    hDestSuffixEmpty, hDestPadExtractEmpty, hSourceExtract]
+
+theorem byteArray_write32_get_mem_expanding (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hPadNoOverflow : offset - dest.size < USize.size)
+    (hExpanding : ¬ offset + 32 ≤ dest.size)
+    (hStart : offset ≤ idx)
+    (hEnd : idx < offset + 32)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx =
+      source[idx - offset]'(by
+        simpa [ByteArray.size] using (show idx - offset < source.data.size by
+          simp [ByteArray.size] at hSource
+          omega)) := by
+  let written : ByteArray :=
+    { data :=
+        (dest.data ++
+          (ffi.ByteArray.zeroes
+            (OfNat.ofNat (offset - dest.size))).data).extract 0 offset ++
+          source.data }
+  have hExact :=
+    byteArray_write32_expanding_exact hSpec hSource hPadNoOverflow hExpanding
+  have hWrittenIdx : idx < written.size := by
+    simpa [written, hExact] using hIdx
+  let pad :=
+    (ffi.ByteArray.zeroes (OfNat.ofNat (offset - dest.size))).data
+  let pre := (dest.data ++ pad).extract 0 offset
+  have hPadSize : pad.size = offset - dest.data.size := by
+    dsimp [pad]
+    exact zeroPadding_data_size_of_noOverflow hSpec
+      (by simpa [ByteArray.size] using hPadNoOverflow)
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp [hPadSize]
+    omega
+  have hSourceIdx : idx - offset < source.data.size := by
+    have hSourceDataSize : source.data.size = 32 := by
+      simpa [ByteArray.size] using hSource
+    omega
+  have hArr :
+      written.data[idx]'(by simpa [ByteArray.size] using hWrittenIdx) =
+        source.data[idx - offset]'hSourceIdx := by
+    dsimp [written, pre, pad]
+    change (pre ++ source.data)[idx] = source.data[idx - offset]
+    rw [Array.getElem_append_right (show pre.size ≤ idx by omega)]
+    congr
+  simpa [written, ByteArray.getElem_eq_data_getElem, hExact] using hArr
+
+theorem byteArray_write32_get_before_old_expanding (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hPadNoOverflow : offset - dest.size < USize.size)
+    (hExpanding : ¬ offset + 32 ≤ dest.size)
+    (hBefore : idx < offset)
+    (hOld : idx < dest.size)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx =
+      dest[idx]'hOld := by
+  let written : ByteArray :=
+    { data :=
+        (dest.data ++
+          (ffi.ByteArray.zeroes
+            (OfNat.ofNat (offset - dest.size))).data).extract 0 offset ++
+          source.data }
+  have hExact :=
+    byteArray_write32_expanding_exact hSpec hSource hPadNoOverflow hExpanding
+  have hWrittenIdx : idx < written.size := by
+    simpa [written, hExact] using hIdx
+  let pad :=
+    (ffi.ByteArray.zeroes (OfNat.ofNat (offset - dest.size))).data
+  let pre := (dest.data ++ pad).extract 0 offset
+  have hPadSize : pad.size = offset - dest.data.size := by
+    dsimp [pad]
+    exact zeroPadding_data_size_of_noOverflow hSpec
+      (by simpa [ByteArray.size] using hPadNoOverflow)
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp [hPadSize]
+    omega
+  have hOldData : idx < dest.data.size := by
+    simpa [ByteArray.size] using hOld
+  have hArr :
+      written.data[idx]'(by simpa [ByteArray.size] using hWrittenIdx) =
+        dest.data[idx]'hOldData := by
+    dsimp [written, pre, pad]
+    change (pre ++ source.data)[idx] = dest.data[idx]
+    rw [Array.getElem_append_left (show idx < pre.size by omega)]
+    dsimp [pre]
+    rw [Array.getElem_extract]
+    simp only [Nat.zero_add]
+    rw [Array.getElem_append_left hOldData]
+  simpa [written, ByteArray.getElem_eq_data_getElem, hExact] using hArr
+
+theorem byteArray_write32_get_gap_zero_expanding (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hPadNoOverflow : offset - dest.size < USize.size)
+    (hExpanding : ¬ offset + 32 ≤ dest.size)
+    (hGapStart : dest.size ≤ idx)
+    (hBefore : idx < offset)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx = (0 : UInt8) := by
+  let written : ByteArray :=
+    { data :=
+        (dest.data ++
+          (ffi.ByteArray.zeroes
+            (OfNat.ofNat (offset - dest.size))).data).extract 0 offset ++
+          source.data }
+  have hExact :=
+    byteArray_write32_expanding_exact hSpec hSource hPadNoOverflow hExpanding
+  have hWrittenIdx : idx < written.size := by
+    simpa [written, hExact] using hIdx
+  let padBytes :=
+    ffi.ByteArray.zeroes (OfNat.ofNat (offset - dest.size) : USize)
+  let pad := padBytes.data
+  let pre := (dest.data ++ pad).extract 0 offset
+  have hGapStartData : dest.data.size ≤ idx := by
+    simpa [ByteArray.size] using hGapStart
+  have hPadSize : pad.size = offset - dest.data.size := by
+    dsimp [pad, padBytes]
+    exact zeroPadding_data_size_of_noOverflow hSpec
+      (by simpa [ByteArray.size] using hPadNoOverflow)
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp [hPadSize]
+    omega
+  have hArr :
+      written.data[idx]'(by simpa [ByteArray.size] using hWrittenIdx) =
+        (0 : UInt8) := by
+    dsimp [written, pre, pad]
+    change (pre ++ source.data)[idx] = 0
+    rw [Array.getElem_append_left (show idx < pre.size by omega)]
+    dsimp [pre]
+    rw [Array.getElem_extract]
+    simp only [Nat.zero_add]
+    rw [Array.getElem_append_right hGapStartData]
+    have hPadIdx : idx - dest.data.size < padBytes.size := by
+      have hPadBytesSize : padBytes.size = offset - dest.data.size := by
+        simpa [pad, ByteArray.size] using hPadSize
+      rw [hPadBytesSize]
+      omega
+    have hZero :=
+      zeroPadding_get hSpec
+        (OfNat.ofNat (offset - dest.size) : USize) hPadIdx
+    simpa [padBytes, pad, ByteArray.getElem_eq_data_getElem] using hZero
+  simpa [written, ByteArray.getElem_eq_data_getElem, hExact] using hArr
+
+theorem array_write32_splice_get_mem
+    {destData sourceData : Array UInt8} {offset idx : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size)
+    (hStart : offset ≤ idx)
+    (hEnd : idx < offset + 32)
+    (hIdx :
+      idx <
+        (destData.extract 0 offset ++ sourceData ++
+          destData.extract (offset + 32) destData.size).size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size)[idx]'hIdx =
+      sourceData[idx - offset]'(by omega) := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  change
+    ((pre ++ sourceData) ++ post)[idx] =
+      sourceData[idx - offset]
+  have hOuter : idx < (pre ++ sourceData).size := by
+    simp [Array.size_append, hPreSize, hSource]
+    omega
+  rw [Array.getElem_append_left hOuter]
+  rw [Array.getElem_append_right (show pre.size ≤ idx by omega)]
+  congr
+
+theorem array_write32_splice_get_before
+    {destData sourceData : Array UInt8} {offset idx : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size)
+    (hBefore : idx < offset)
+    (hIdx :
+      idx <
+        (destData.extract 0 offset ++ sourceData ++
+          destData.extract (offset + 32) destData.size).size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size)[idx]'hIdx =
+      destData[idx]'(by omega) := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hIdxDest : idx < destData.size := by
+    omega
+  change
+    ((pre ++ sourceData) ++ post)[idx] =
+      destData[idx]'hIdxDest
+  have hOuter : idx < (pre ++ sourceData).size := by
+    simp [Array.size_append, hPreSize, hSource]
+    omega
+  rw [Array.getElem_append_left hOuter]
+  rw [Array.getElem_append_left (show idx < pre.size by omega)]
+  dsimp [pre]
+  rw [Array.getElem_extract]
+  congr
+  omega
+
+theorem array_write32_splice_get_after
+    {destData sourceData : Array UInt8} {offset idx : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size)
+    (hAfter : offset + 32 ≤ idx)
+    (hIdx :
+      idx <
+        (destData.extract 0 offset ++ sourceData ++
+          destData.extract (offset + 32) destData.size).size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size)[idx]'hIdx =
+      destData[idx]'(by
+        have hSpliceSize :
+            (destData.extract 0 offset ++ sourceData ++
+              destData.extract (offset + 32) destData.size).size =
+              destData.size := by
+          simp [Array.size_append] at hSource hDest ⊢
+          omega
+        omega) := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hLeftSize : (pre ++ sourceData).size = offset + 32 := by
+    simp [Array.size_append, hPreSize, hSource]
+  have hSpliceSize : ((pre ++ sourceData) ++ post).size = destData.size := by
+    dsimp [post]
+    simp [Array.size_append, hLeftSize]
+    omega
+  change idx < ((pre ++ sourceData) ++ post).size at hIdx
+  have hIdxDest : idx < destData.size := by
+    rwa [hSpliceSize] at hIdx
+  change
+    ((pre ++ sourceData) ++ post)[idx] =
+      destData[idx]'hIdxDest
+  rw [Array.getElem_append_right (show (pre ++ sourceData).size ≤ idx by
+    omega)]
+  dsimp [post]
+  rw [Array.getElem_extract]
+  congr
+  omega
+
+theorem byteArray_write32_get_mem (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size)
+    (hStart : offset ≤ idx)
+    (hEnd : idx < offset + 32)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx =
+      source[idx - offset]'(by
+        simpa [ByteArray.size] using (show idx - offset < source.data.size by
+          simp [ByteArray.size] at hSource
+          omega)) := by
+  have hIdxDest : idx < dest.size := by
+    have hSize := byteArray_write32_size hSpec hSource hDest
+    rwa [hSize] at hIdx
+  have hSpliceIdx :
+      idx <
+        (dest.data.extract 0 offset ++ source.data ++
+          dest.data.extract (offset + 32) dest.data.size).size := by
+    simp [ByteArray.size, Array.size_append] at hSource hDest hIdxDest ⊢
+    omega
+  have hArr :=
+    array_write32_splice_get_mem
+      (destData := dest.data) (sourceData := source.data)
+      (offset := offset) (idx := idx)
+      (by simpa [ByteArray.size] using hSource)
+      (by simpa [ByteArray.size] using hDest)
+      hStart hEnd hSpliceIdx
+  simpa [ByteArray.getElem_eq_data_getElem, ByteArray.size,
+    byteArray_write32_noPadding_exact hSpec hSource hDest] using hArr
+
+theorem byteArray_write32_get_before (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size)
+    (hBefore : idx < offset)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx =
+      dest[idx]'(by
+        have hSize := byteArray_write32_size hSpec hSource hDest
+        rw [hSize] at hIdx
+        exact hIdx) := by
+  have hIdxDest : idx < dest.size := by
+    have hSize := byteArray_write32_size hSpec hSource hDest
+    rwa [hSize] at hIdx
+  have hSpliceIdx :
+      idx <
+        (dest.data.extract 0 offset ++ source.data ++
+          dest.data.extract (offset + 32) dest.data.size).size := by
+    simp [ByteArray.size, Array.size_append] at hSource hDest hIdxDest ⊢
+    omega
+  have hArr :=
+    array_write32_splice_get_before
+      (destData := dest.data) (sourceData := source.data)
+      (offset := offset) (idx := idx)
+      (by simpa [ByteArray.size] using hSource)
+      (by simpa [ByteArray.size] using hDest)
+      hBefore hSpliceIdx
+  simpa [ByteArray.getElem_eq_data_getElem, ByteArray.size,
+    byteArray_write32_noPadding_exact hSpec hSource hDest] using hArr
+
+theorem byteArray_write32_get_after (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset idx : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size)
+    (hAfter : offset + 32 ≤ idx)
+    (hIdx : idx < (source.write 0 dest offset 32).size) :
+    (source.write 0 dest offset 32)[idx]'hIdx =
+      dest[idx]'(by
+        have hSize := byteArray_write32_size hSpec hSource hDest
+        rw [hSize] at hIdx
+        exact hIdx) := by
+  have hIdxDest : idx < dest.size := by
+    have hSize := byteArray_write32_size hSpec hSource hDest
+    rwa [hSize] at hIdx
+  have hSpliceIdx :
+      idx <
+        (dest.data.extract 0 offset ++ source.data ++
+          dest.data.extract (offset + 32) dest.data.size).size := by
+    simp [ByteArray.size, Array.size_append] at hSource hDest hIdxDest ⊢
+    omega
+  have hArr :=
+    array_write32_splice_get_after
+      (destData := dest.data) (sourceData := source.data)
+      (offset := offset) (idx := idx)
+      (by simpa [ByteArray.size] using hSource)
+      (by simpa [ByteArray.size] using hDest)
+      hAfter hSpliceIdx
+  simpa [ByteArray.getElem_eq_data_getElem, ByteArray.size,
+    byteArray_write32_noPadding_exact hSpec hSource hDest] using hArr
+
+theorem byteArray_write32_byte_eq_noExpansion
+    (hSpec : ZeroPaddingSpec)
+    {target source bytes : ByteArray} {writeOffset idx : Nat}
+    (hBytes : bytes.size = 32)
+    (hTargetAlloc : writeOffset + 32 ≤ target.size)
+    (hSourceAlloc : writeOffset + 32 ≤ source.size)
+    (hByteEq :
+      ∀ (hTarget : idx < target.size)
+        (hSource : idx < source.size),
+          target[idx]'hTarget = source[idx]'hSource)
+    (hTargetIdx : idx < (bytes.write 0 target writeOffset 32).size)
+    (hSourceIdx : idx < (bytes.write 0 source writeOffset 32).size) :
+    (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx =
+      (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx := by
+  have hTargetIdxOld : idx < target.size := by
+    have hSize := byteArray_write32_size hSpec hBytes hTargetAlloc
+    rwa [hSize] at hTargetIdx
+  have hSourceIdxOld : idx < source.size := by
+    have hSize := byteArray_write32_size hSpec hBytes hSourceAlloc
+    rwa [hSize] at hSourceIdx
+  by_cases hBefore : idx < writeOffset
+  · calc
+      (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+          = target[idx]'hTargetIdxOld :=
+            byteArray_write32_get_before hSpec hBytes hTargetAlloc
+              hBefore hTargetIdx
+      _ = source[idx]'hSourceIdxOld :=
+            hByteEq hTargetIdxOld hSourceIdxOld
+      _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+            (byteArray_write32_get_before hSpec hBytes hSourceAlloc
+              hBefore hSourceIdx).symm
+  · by_cases hInWrite : idx < writeOffset + 32
+    · have hStart : writeOffset ≤ idx := by omega
+      calc
+        (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+            = bytes[idx - writeOffset]'(by
+                simpa [ByteArray.size] using
+                  (show idx - writeOffset < bytes.data.size by
+                    simp [ByteArray.size] at hBytes
+                    omega)) :=
+              byteArray_write32_get_mem hSpec hBytes hTargetAlloc
+                hStart hInWrite hTargetIdx
+        _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+              (byteArray_write32_get_mem hSpec hBytes hSourceAlloc
+                hStart hInWrite hSourceIdx).symm
+    · have hAfter : writeOffset + 32 ≤ idx := by omega
+      calc
+        (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+            = target[idx]'hTargetIdxOld :=
+              byteArray_write32_get_after hSpec hBytes hTargetAlloc
+                hAfter hTargetIdx
+        _ = source[idx]'hSourceIdxOld :=
+              hByteEq hTargetIdxOld hSourceIdxOld
+        _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+              (byteArray_write32_get_after hSpec hBytes hSourceAlloc
+                hAfter hSourceIdx).symm
+
+theorem byteArray_write32_byte_eq_boundedExpansion
+    (hSpec : ZeroPaddingSpec)
+    {target source bytes : ByteArray} {writeOffset idx : Nat}
+    (hBytes : bytes.size = 32)
+    (hSize : target.size = source.size)
+    (hPadNoOverflow : writeOffset - target.size < USize.size)
+    (hByteEq :
+      ∀ (hTarget : idx < target.size)
+        (hSource : idx < source.size),
+          target[idx]'hTarget = source[idx]'hSource)
+    (hTargetIdx : idx < (bytes.write 0 target writeOffset 32).size)
+    (hSourceIdx : idx < (bytes.write 0 source writeOffset 32).size) :
+    (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx =
+      (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx := by
+  have hSourcePadNoOverflow : writeOffset - source.size < USize.size := by
+    simpa [← hSize] using hPadNoOverflow
+  by_cases hTargetAlloc : writeOffset + 32 ≤ target.size
+  · have hSourceAlloc : writeOffset + 32 ≤ source.size := by
+      simpa [← hSize] using hTargetAlloc
+    exact
+      byteArray_write32_byte_eq_noExpansion hSpec hBytes hTargetAlloc
+        hSourceAlloc hByteEq hTargetIdx hSourceIdx
+  · have hSourceExpanding : ¬ writeOffset + 32 ≤ source.size := by
+      intro h
+      exact hTargetAlloc (by simpa [← hSize] using h)
+    by_cases hBefore : idx < writeOffset
+    · by_cases hOldTarget : idx < target.size
+      · have hOldSource : idx < source.size := by
+          simpa [← hSize] using hOldTarget
+        calc
+          (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+              = target[idx]'hOldTarget :=
+                byteArray_write32_get_before_old_expanding hSpec hBytes
+                  hPadNoOverflow hTargetAlloc hBefore hOldTarget hTargetIdx
+          _ = source[idx]'hOldSource := hByteEq hOldTarget hOldSource
+          _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+                (byteArray_write32_get_before_old_expanding hSpec hBytes
+                  hSourcePadNoOverflow hSourceExpanding hBefore hOldSource
+                  hSourceIdx).symm
+      · have hGapTarget : target.size ≤ idx := by
+          omega
+        have hGapSource : source.size ≤ idx := by
+          rw [← hSize]
+          exact hGapTarget
+        calc
+          (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+              = (0 : UInt8) :=
+                byteArray_write32_get_gap_zero_expanding hSpec hBytes
+                  hPadNoOverflow hTargetAlloc hGapTarget hBefore hTargetIdx
+          _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+                (byteArray_write32_get_gap_zero_expanding hSpec hBytes
+                  hSourcePadNoOverflow hSourceExpanding hGapSource hBefore
+                  hSourceIdx).symm
+    · by_cases hInWrite : idx < writeOffset + 32
+      · have hStart : writeOffset ≤ idx := by
+          omega
+        calc
+          (bytes.write 0 target writeOffset 32)[idx]'hTargetIdx
+              = bytes[idx - writeOffset]'(by
+                  simpa [ByteArray.size] using
+                    (show idx - writeOffset < bytes.data.size by
+                      simp [ByteArray.size] at hBytes
+                      omega)) :=
+                byteArray_write32_get_mem_expanding hSpec hBytes
+                  hPadNoOverflow hTargetAlloc hStart hInWrite hTargetIdx
+          _ = (bytes.write 0 source writeOffset 32)[idx]'hSourceIdx :=
+                (byteArray_write32_get_mem_expanding hSpec hBytes
+                  hSourcePadNoOverflow hSourceExpanding hStart hInWrite
+                  hSourceIdx).symm
+      · have hTargetSize :=
+          byteArray_write32_size_general hSpec hBytes hPadNoOverflow
+        have hTargetIdxMax : idx < max target.size (writeOffset + 32) := by
+          simpa [hTargetSize] using hTargetIdx
+        have hAfter : writeOffset + 32 ≤ idx := by
+          omega
+        have hMax :
+            max target.size (writeOffset + 32) = writeOffset + 32 := by
+          apply max_eq_right
+          omega
+        omega
+
+theorem array_extract_word_prefix {destData sourceData : Array UInt8}
+    {offset : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size).extract 0 offset =
+      destData.extract 0 offset := by
+  simp [Array.extract_append, Array.extract_extract]
+  omega
+
+theorem array_extract_word_splice_before
+    {destData sourceData : Array UInt8} {offset readOffset len : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size)
+    (hBefore : readOffset + len ≤ offset) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size).extract readOffset
+        (readOffset + len) =
+      destData.extract readOffset (readOffset + len) := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hEndPre : readOffset + len ≤ pre.size := by
+    omega
+  change ((pre ++ sourceData) ++ post).extract readOffset
+      (readOffset + len) = destData.extract readOffset (readOffset + len)
+  calc
+    ((pre ++ sourceData) ++ post).extract readOffset (readOffset + len)
+        = (pre ++ sourceData).extract readOffset (readOffset + len) := by
+            rw [Array.extract_append_left']
+            simp [Array.size_append, hPreSize]
+            omega
+    _ = pre.extract readOffset (readOffset + len) := by
+            rw [Array.extract_append_left' hEndPre]
+    _ = destData.extract readOffset (readOffset + len) := by
+            dsimp [pre]
+            rw [Array.extract_extract]
+            congr <;> omega
+
+theorem array_extract_word_suffix {destData sourceData : Array UInt8}
+    {offset : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size).extract (offset + 32)
+        (destData.extract 0 offset ++ sourceData ++
+          destData.extract (offset + 32) destData.size).size =
+      destData.extract (offset + 32) destData.size := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hLeftSize : (pre ++ sourceData).size = offset + 32 := by
+    simp [Array.size_append, hPreSize, hSource]
+  change ((pre ++ sourceData) ++ post).extract (offset + 32)
+      (((pre ++ sourceData) ++ post).size) = post
+  rw [show offset + 32 = (pre ++ sourceData).size by
+    exact hLeftSize.symm]
+  rw [show ((pre ++ sourceData) ++ post).size =
+      (pre ++ sourceData).size + post.size by
+        simp [Array.size_append]
+        omega]
+  rw [Array.extract_append_right]
+  exact Array.extract_size
+
+theorem array_extract_word_middle {destData sourceData : Array UInt8}
+    {offset : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size).extract offset
+        (offset + 32) =
+      sourceData := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hLeftEnd : offset + 32 = pre.size + sourceData.size := by
+    omega
+  change ((pre ++ sourceData) ++ post).extract offset (offset + 32) =
+    sourceData
+  rw [show offset = pre.size by omega]
+  rw [show pre.size + 32 = pre.size + sourceData.size by omega]
+  calc
+    ((pre ++ sourceData) ++ post).extract pre.size
+        (pre.size + sourceData.size)
+        = (pre ++ sourceData).extract pre.size
+            (pre.size + sourceData.size) := by
+            rw [Array.extract_append_left']
+            simp [Array.size_append]
+    _ = sourceData := by
+            rw [Array.extract_append_right]
+            exact Array.extract_size
+
+theorem array_extract_word_splice_after
+    {destData sourceData : Array UInt8} {offset readOffset len : Nat}
+    (hSource : sourceData.size = 32)
+    (hDest : offset + 32 ≤ destData.size)
+    (hAfter : offset + 32 ≤ readOffset) :
+    (destData.extract 0 offset ++ sourceData ++
+        destData.extract (offset + 32) destData.size).extract readOffset
+        (readOffset + len) =
+      destData.extract readOffset (readOffset + len) := by
+  let pre := destData.extract 0 offset
+  let post := destData.extract (offset + 32) destData.size
+  have hPreSize : pre.size = offset := by
+    dsimp [pre]
+    simp
+    omega
+  have hLeftSize : (pre ++ sourceData).size = offset + 32 := by
+    simp [Array.size_append, hPreSize, hSource]
+  change ((pre ++ sourceData) ++ post).extract readOffset
+      (readOffset + len) = destData.extract readOffset (readOffset + len)
+  calc
+    ((pre ++ sourceData) ++ post).extract readOffset (readOffset + len)
+        = post.extract (readOffset - (pre ++ sourceData).size)
+            (readOffset + len - (pre ++ sourceData).size) := by
+            rw [Array.extract_append_right']
+            omega
+    _ = destData.extract readOffset (readOffset + len) := by
+            dsimp [post]
+            rw [Array.extract_extract]
+            have hStart :
+                offset + 32 + (readOffset - (pre ++ sourceData).size) =
+                  readOffset := by
+              omega
+            by_cases hEnd : readOffset + len ≤ destData.size
+            · have hStop :
+                  min
+                      (offset + 32 +
+                        (readOffset + len - (pre ++ sourceData).size))
+                      destData.size =
+                    readOffset + len := by
+                omega
+              rw [hStart, hStop]
+            · have hStop :
+                  min
+                      (offset + 32 +
+                        (readOffset + len - (pre ++ sourceData).size))
+                      destData.size =
+                    destData.size := by
+                omega
+              rw [hStart, hStop]
+              exact (Array.extract_eq_of_size_le_end
+                (a := destData) (p := readOffset)
+                (l := readOffset + len) (by omega)).symm
+
+theorem array_extract_word_splice {α : Type} (xs : Array α)
+    (offset : Nat) :
+    xs.extract 0 offset ++ xs.extract offset (offset + 32) ++
+        xs.extract (offset + 32) xs.size = xs := by
+  apply Array.toList_inj.mp
+  simp [Array.toList_extract]
+
+theorem byteArray_readWithoutPadding_write32_eq_of_byteDisjoint
+    (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {writeOffset readOffset len : Nat}
+    (hSource : source.size = 32)
+    (hDest : writeOffset + 32 ≤ dest.size)
+    (hDisjoint : ByteDisjoint readOffset len writeOffset 32) :
+    (source.write 0 dest writeOffset 32).readWithoutPadding readOffset len =
+      dest.readWithoutPadding readOffset len := by
+  rw [byteArray_write32_noPadding_exact hSpec hSource hDest]
+  have hWrittenSize :
+      ({ data :=
+          dest.data.extract 0 writeOffset ++ source.data ++
+            dest.data.extract (writeOffset + 32) dest.data.size } :
+        ByteArray).size = dest.size :=
+    byteArray_write32_noPadding_size hSource hDest
+  unfold ByteArray.readWithoutPadding
+  rw [hWrittenSize]
+  by_cases hPast : readOffset ≥ dest.size
+  · simp [hPast]
+  · simp [hPast]
+    rcases hDisjoint with hBefore | hAfter
+    · apply ByteArray.ext
+      simpa [ByteArray.size, Array.append_assoc] using
+        (array_extract_word_splice_before
+          (destData := dest.data) (sourceData := source.data)
+          (offset := writeOffset) (readOffset := readOffset)
+          (len := min len dest.size)
+          (by simpa [ByteArray.size] using hSource)
+          (by simpa [ByteArray.size] using hDest)
+          (by
+            have hMin : min len dest.size ≤ len := Nat.min_le_left _ _
+            omega))
+    · apply ByteArray.ext
+      simpa [ByteArray.size, Array.append_assoc] using
+        (array_extract_word_splice_after
+          (destData := dest.data) (sourceData := source.data)
+          (offset := writeOffset) (readOffset := readOffset)
+          (len := min len dest.size)
+          (by simpa [ByteArray.size] using hSource)
+          (by simpa [ByteArray.size] using hDest)
+            hAfter)
+
+theorem byteArray_write32_getElem_eq_of_byteDisjoint
+    (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {writeOffset idx : Nat}
+    (hSource : source.size = 32)
+    (hDest : writeOffset + 32 ≤ dest.size)
+    (hDisjoint : ByteDisjoint idx 1 writeOffset 32)
+    (hWrittenIdx : idx < (source.write 0 dest writeOffset 32).size)
+    (hDestIdx : idx < dest.size) :
+    (source.write 0 dest writeOffset 32)[idx]'hWrittenIdx =
+      dest[idx]'hDestIdx := by
+  rcases hDisjoint with hBeforeEnd | hAfter
+  · have hBefore : idx < writeOffset := by
+      omega
+    simpa [ByteArray.getElem_eq_data_getElem] using
+      byteArray_write32_get_before hSpec hSource hDest hBefore hWrittenIdx
+  · simpa [ByteArray.getElem_eq_data_getElem] using
+      byteArray_write32_get_after hSpec hSource hDest hAfter hWrittenIdx
+
+theorem byteArray_readWithPadding_write32_eq_of_byteDisjoint
+    (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {writeOffset readOffset len : Nat}
+    (hSource : source.size = 32)
+    (hDest : writeOffset + 32 ≤ dest.size)
+    (hDisjoint : ByteDisjoint readOffset len writeOffset 32) :
+    (source.write 0 dest writeOffset 32).readWithPadding readOffset len =
+      dest.readWithPadding readOffset len := by
+  have hRead :=
+    byteArray_readWithoutPadding_write32_eq_of_byteDisjoint hSpec
+      hSource hDest hDisjoint
+  have hWrittenSize :=
+    byteArray_write32_size hSpec hSource hDest
+  unfold ByteArray.readWithPadding
+  by_cases hLarge : len ≥ 2 ^ 64
+  · have hIf : 2 ^ 64 ≤ len := hLarge
+    rw [if_pos hIf, if_pos hIf]
+  · have hIf : ¬ 2 ^ 64 ≤ len := by
+      omega
+    rw [if_neg hIf, if_neg hIf]
+    simpa [hRead]
+
+theorem byteArray_readWithPadding32_write32_same
+    (hSpec : ZeroPaddingSpec)
+    {dest source : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hDest : offset + 32 ≤ dest.size) :
+    (source.write 0 dest offset 32).readWithPadding offset 32 =
+      source := by
+  rw [byteArray_write32_noPadding_exact hSpec hSource hDest]
+  have hWrittenSize :
+      ({ data :=
+          dest.data.extract 0 offset ++ source.data ++
+            dest.data.extract (offset + 32) dest.data.size } :
+        ByteArray).size = dest.size :=
+    byteArray_write32_noPadding_size hSource hDest
+  have hWrittenAllocated :
+      offset + 32 ≤
+        ({ data :=
+          dest.data.extract 0 offset ++ source.data ++
+            dest.data.extract (offset + 32) dest.data.size } :
+        ByteArray).size := by
+    rw [hWrittenSize]
+    exact hDest
+  rw [byteArray_readWithPadding32_allocated hSpec hWrittenAllocated]
+  apply ByteArray.ext
+  simpa [ByteArray.size, Array.append_assoc] using
+    (array_extract_word_middle
+      (destData := dest.data) (sourceData := source.data)
+      (offset := offset)
+      (by simpa [ByteArray.size] using hSource)
+      (by simpa [ByteArray.size] using hDest))
+
+theorem byteArray_write32_restore_exact (hSpec : ZeroPaddingSpec)
+    {dest source restore : ByteArray} {offset : Nat}
+    (hSource : source.size = 32)
+    (hRestore : restore.size = 32)
+    (hDest : offset + 32 ≤ dest.size)
+    (hRestoreBytes : restore.data =
+      dest.data.extract offset (offset + 32)) :
+    restore.write 0 (source.write 0 dest offset 32) offset 32 = dest := by
+  have hInner :=
+    byteArray_write32_noPadding_exact hSpec hSource hDest
+  rw [hInner]
+  have hOuterDest : offset + 32 ≤
+      ({ data :=
+          dest.data.extract 0 offset ++ source.data ++
+            dest.data.extract (offset + 32) dest.data.size } :
+        ByteArray).size := by
+    rw [byteArray_write32_noPadding_size hSource hDest]
+    exact hDest
+  rw [byteArray_write32_noPadding_exact hSpec hRestore hOuterDest]
+  apply ByteArray.ext
+  rw [hRestoreBytes]
+  rw [array_extract_word_prefix
+    (by simpa [ByteArray.size] using hSource) hDest]
+  rw [array_extract_word_suffix
+    (by simpa [ByteArray.size] using hSource) hDest]
+  exact array_extract_word_splice dest.data offset
+
+def ScratchWordReserved (machine : EvmYul.MachineState)
+    (offset : Word) : Prop :=
+  EvmYul.UInt256.ofNat
+      (EvmYul.MachineState.M machine.activeWords.toNat offset.toNat 32) =
+    machine.activeWords
+
+def ScratchWordWithinActiveNat (machine : EvmYul.MachineState)
+    (offset : Word) : Prop :=
+  offset.toNat + 32 ≤ machine.activeWords.toNat * 32
+
+def ScratchActiveBytesNoOverflow (machine : EvmYul.MachineState) : Prop :=
+  machine.activeWords.toNat * 32 < EvmYul.UInt256.size
+
+structure ScratchRange where
+  base : Nat
+  words : Nat
+
+namespace ScratchRange
+
+def byteLen (range : ScratchRange) : Nat :=
+  32 * range.words
+
+def endExclusive (range : ScratchRange) : Nat :=
+  range.base + range.byteLen
+
+def slot (range : ScratchRange) (idx : Nat) : Nat :=
+  range.base + 32 * idx
+
+def word (range : ScratchRange) (idx : Nat) : Word :=
+  EvmYul.UInt256.ofNat (range.slot idx)
+
+end ScratchRange
+
+namespace ScratchRange
+
+def disjointBytes (range : ScratchRange) (offset len : Nat) : Prop :=
+  ByteDisjoint offset len range.base range.byteLen
+
+def disjointBytes? (range : ScratchRange) (offset len : Nat) : Bool :=
+  ByteDisjoint.check offset len range.base range.byteLen
+
+theorem disjointBytes?_sound {range : ScratchRange}
+    {offset len : Nat}
+    (hCheck : range.disjointBytes? offset len = true) :
+    range.disjointBytes offset len := by
+  exact ByteDisjoint.check_sound hCheck
+
+theorem disjointBytes?_complete {range : ScratchRange}
+    {offset len : Nat}
+    (hDisjoint : range.disjointBytes offset len) :
+    range.disjointBytes? offset len = true := by
+  exact ByteDisjoint.check_complete hDisjoint
+
+theorem disjointBytes?_eq_true {range : ScratchRange}
+    {offset len : Nat} :
+    range.disjointBytes? offset len = true ↔
+      range.disjointBytes offset len := by
+  constructor
+  · exact disjointBytes?_sound
+  · exact disjointBytes?_complete
+
+theorem disjointBytes_of_before {range : ScratchRange}
+    {offset len : Nat}
+    (hEnd : offset + len ≤ range.base) :
+    range.disjointBytes offset len :=
+  Or.inl hEnd
+
+theorem disjointBytes_of_after {range : ScratchRange}
+    {offset len : Nat}
+    (hStart : range.endExclusive ≤ offset) :
+    range.disjointBytes offset len := by
+  exact Or.inr hStart
+
+theorem slot_start_le_endExclusive {range : ScratchRange} {slot : Nat}
+    (hSlot : slot < range.words) :
+    range.slot slot + 32 ≤ range.endExclusive := by
+  unfold ScratchRange.slot ScratchRange.endExclusive ScratchRange.byteLen
+  omega
+
+theorem base_le_slot {range : ScratchRange} {slot : Nat} :
+    range.base ≤ range.slot slot := by
+  unfold ScratchRange.slot
+  omega
+
+theorem byteDisjoint_slot_of_disjointBytes {range : ScratchRange}
+    {offset len slot : Nat}
+    (hDisjoint : range.disjointBytes offset len)
+    (hSlot : slot < range.words) :
+    ByteDisjoint offset len (range.slot slot) 32 := by
+  rcases hDisjoint with hBefore | hAfter
+  · exact Or.inl (le_trans hBefore base_le_slot)
+  · exact Or.inr (le_trans (slot_start_le_endExclusive hSlot) hAfter)
+
+end ScratchRange
+
+def scratchRegionWord (base slot : Nat) : Word :=
+  EvmYul.UInt256.ofNat (base + 32 * slot)
+
+theorem ScratchRange.word_eq_scratchRegionWord
+    (range : ScratchRange) (slot : Nat) :
+    range.word slot = scratchRegionWord range.base slot := rfl
+
+def ScratchRegionAllocatedNat (machine : EvmYul.MachineState)
+    (base count : Nat) : Prop :=
+  base + 32 * count ≤ machine.memory.size
+
+def ScratchRegionWithinActiveNat (machine : EvmYul.MachineState)
+    (base count : Nat) : Prop :=
+  base + 32 * count ≤ machine.activeWords.toNat * 32
+
+structure ScratchRegionReady (machine : EvmYul.MachineState)
+    (base count : Nat) : Prop where
+  allocated : ScratchRegionAllocatedNat machine base count
+  withinActive : ScratchRegionWithinActiveNat machine base count
+  activeNoOverflow : ScratchActiveBytesNoOverflow machine
+
+def scratchRegionReady? (machine : EvmYul.MachineState)
+    (base count : Nat) : Bool :=
+  decide (base + 32 * count ≤ machine.memory.size) &&
+    decide (base + 32 * count ≤ machine.activeWords.toNat * 32) &&
+      decide (machine.activeWords.toNat * 32 < EvmYul.UInt256.size)
+
+theorem scratchRegionReady?_sound {machine : EvmYul.MachineState}
+    {base count : Nat}
+    (hReady : scratchRegionReady? machine base count = true) :
+    ScratchRegionReady machine base count := by
+  unfold scratchRegionReady? at hReady
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hReady
+  exact
+    { allocated := by
+        simpa [ScratchRegionAllocatedNat] using hReady.1.1
+      withinActive := by
+        simpa [ScratchRegionWithinActiveNat] using hReady.1.2
+      activeNoOverflow := by
+        simpa [ScratchActiveBytesNoOverflow] using hReady.2 }
+
+theorem scratchRegionReady?_complete {machine : EvmYul.MachineState}
+    {base count : Nat}
+    (hReady : ScratchRegionReady machine base count) :
+    scratchRegionReady? machine base count = true := by
+  unfold scratchRegionReady?
+  simp only [Bool.and_eq_true, decide_eq_true_eq]
+  exact
+    ⟨⟨by
+        simpa [ScratchRegionAllocatedNat] using hReady.allocated,
+      by
+        simpa [ScratchRegionWithinActiveNat] using hReady.withinActive⟩,
+    by
+      simpa [ScratchActiveBytesNoOverflow] using hReady.activeNoOverflow⟩
+
+theorem scratchRegionReady?_eq_true {machine : EvmYul.MachineState}
+    {base count : Nat} :
+    scratchRegionReady? machine base count = true ↔
+      ScratchRegionReady machine base count := by
+  constructor
+  · exact scratchRegionReady?_sound
+  · exact scratchRegionReady?_complete
+
+namespace ScratchRange
+
+def ready? (machine : EvmYul.MachineState)
+    (range : ScratchRange) : Bool :=
+  scratchRegionReady? machine range.base range.words
+
+theorem ready?_sound {machine : EvmYul.MachineState}
+    {range : ScratchRange}
+    (hReady : ready? machine range = true) :
+    ScratchRegionReady machine range.base range.words :=
+  scratchRegionReady?_sound hReady
+
+theorem ready?_complete {machine : EvmYul.MachineState}
+    {range : ScratchRange}
+    (hReady : ScratchRegionReady machine range.base range.words) :
+    ready? machine range = true :=
+  scratchRegionReady?_complete hReady
+
+theorem ready?_eq_true {machine : EvmYul.MachineState}
+    {range : ScratchRange} :
+    ready? machine range = true ↔
+      ScratchRegionReady machine range.base range.words := by
+  constructor
+  · exact ready?_sound
+  · exact ready?_complete
+
+end ScratchRange
+
+namespace SourceNoMemoryTouch
+
+def basicOp? : Structured.BasicOp → Bool
+  | .calldatacopy | .codecopy | .extcodecopy | .returndatacopy => false
+  | .mload | .mstore | .mstore8 => false
+  | .mcopy | .keccak256 => false
+  | .log0 | .log1 | .log2 | .log3 | .log4 => false
+  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
+      false
+  | _ => true
+
+def BasicOpMemoryTouching : Structured.BasicOp → Prop
+  | .calldatacopy | .codecopy | .extcodecopy | .returndatacopy => True
+  | .mload | .mstore | .mstore8 => True
+  | .mcopy | .keccak256 => True
+  | .log0 | .log1 | .log2 | .log3 | .log4 => True
+  | .create | .call | .callcode | .delegatecall | .create2 | .staticcall =>
+      True
+  | _ => False
+
+theorem basicOp?_sound {op : Structured.BasicOp}
+    (hCheck : basicOp? op = true) :
+    ¬ BasicOpMemoryTouching op := by
+  cases op <;> simp [basicOp?, BasicOpMemoryTouching] at hCheck ⊢
+
+def haltKind? : Assembly.HaltKind → Bool
+  | .return | .revert => false
+  | _ => true
+
+def HaltKindMemoryTouching : Assembly.HaltKind → Prop
+  | .return | .revert => True
+  | _ => False
+
+theorem haltKind?_sound {kind : Assembly.HaltKind}
+    (hCheck : haltKind? kind = true) :
+    ¬ HaltKindMemoryTouching kind := by
+  cases kind <;> simp [haltKind?, HaltKindMemoryTouching] at hCheck ⊢
+
+mutual
+  def expr? {results : Nat} : Expr results → Bool
+    | .lit _value => true
+    | .var _name => true
+    | .code _code => false
+    | .prim op args => basicOp? op && exprSeq? args
+
+  def exprSeq? {results : Nat} : ExprSeq results → Bool
+    | .nil => true
+    | .cons head tail => expr? head && exprSeq? tail
+end
+
+mutual
+  def block? : Block → Bool
+    | ⟨stmts⟩ => stmtList? stmts
+
+  def stmt? : Stmt → Bool
+    | .expr expr => expr? expr
+    | .exprs exprs => exprSeq? exprs
+    | .let_ _name value => expr? value
+    | .assign _name value => expr? value
+    | .assignTop _name => true
+    | .assignTopWithOffset _offset _name => true
+    | .promoteName _name => true
+    | .cleanupTo _targetLayout => true
+    | .block body => block? body
+    | .if_ cond body => expr? cond && block? body
+    | .switch scrutinee cases defaultBody =>
+        expr? scrutinee && caseList? cases && default? defaultBody
+    | .for_ init cond post body =>
+        block? init && expr? cond && block? post && block? body
+    | .brk => true
+    | .cont => true
+    | .leave => true
+    | .call _name => true
+    | .terminal kind => haltKind? kind
+    | .terminalArgs kind args => haltKind? kind && exprSeq? args
+
+  def stmtList? : List Stmt → Bool
+    | [] => true
+    | stmt :: rest => stmt? stmt && stmtList? rest
+
+  def caseList? : List (Word × Block) → Bool
+    | [] => true
+    | (_value, body) :: rest => block? body && caseList? rest
+
+  def default? : Option Block → Bool
+    | none => true
+    | some body => block? body
+end
+
+def proc? (proc : Proc) : Bool :=
+  block? proc.body
+
+def procList? : List Proc → Bool
+  | [] => true
+  | proc :: rest => proc? proc && procList? rest
+
+def program? (program : Program) : Bool :=
+  procList? program.procs && block? program.body
+
+end SourceNoMemoryTouch
+
+namespace SpillLayout
+
+inductive LocalLocation where
+  | stack (depth : Nat)
+  | scratch (slot : Nat)
+  deriving DecidableEq, Repr
+
+abbrev Binding := Name × LocalLocation
+abbrev Layout := List Binding
+
+def names (layout : Layout) : List Name :=
+  layout.map Prod.fst
+
+def scratchSlot? : LocalLocation → Option Nat
+  | .stack _ => none
+  | .scratch slot => some slot
+
+def scratchSlots (layout : Layout) : List Nat :=
+  layout.filterMap fun binding => scratchSlot? binding.2
+
+def BindingOk (range : ScratchRange) (stackLayout : List Name)
+    (binding : Binding) : Prop :=
+  match binding with
+  | (name, .stack depth) => stackLayout[depth]? = some name
+  | (_name, .scratch slot) => slot < range.words
+
+structure WellFormed (range : ScratchRange) (sourceScope stackLayout : List Name)
+    (layout : Layout) : Prop where
+  names_eq : names layout = sourceScope
+  names_nodup : List.Nodup (names layout)
+  bindings_ok :
+    ∀ binding, binding ∈ layout → BindingOk range stackLayout binding
+  scratch_slots_nodup : List.Nodup (scratchSlots layout)
+
+namespace WellFormed
+
+theorem stack_binding {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : Layout} (hLayout : WellFormed range sourceScope stackLayout layout)
+    {name : Name} {depth : Nat}
+    (hBinding : (name, LocalLocation.stack depth) ∈ layout) :
+    stackLayout[depth]? = some name :=
+  hLayout.bindings_ok (name, LocalLocation.stack depth) hBinding
+
+theorem scratch_binding {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : Layout} (hLayout : WellFormed range sourceScope stackLayout layout)
+    {name : Name} {slot : Nat}
+    (hBinding : (name, LocalLocation.scratch slot) ∈ layout) :
+    slot < range.words :=
+  hLayout.bindings_ok (name, LocalLocation.scratch slot) hBinding
+
+theorem sourceScope_nodup {range : ScratchRange}
+    {sourceScope stackLayout : List Name} {layout : Layout}
+    (hLayout : WellFormed range sourceScope stackLayout layout) :
+    List.Nodup sourceScope := by
+  rw [← hLayout.names_eq]
+  exact hLayout.names_nodup
+
+end WellFormed
+
+def nodup? {α : Type} [DecidableEq α] : List α → Bool
+  | [] => true
+  | head :: tail => decide (head ∉ tail) && nodup? tail
+
+theorem nodup?_sound {α : Type} [DecidableEq α] {xs : List α}
+    (hCheck : nodup? xs = true) :
+    List.Nodup xs := by
+  induction xs with
+  | nil =>
+      simp
+  | cons head tail ih =>
+      simp [nodup?] at hCheck
+      exact List.Nodup.cons hCheck.1 (ih hCheck.2)
+
+theorem nodup?_complete {α : Type} [DecidableEq α] {xs : List α}
+    (hNodup : List.Nodup xs) :
+    nodup? xs = true := by
+  induction xs with
+  | nil =>
+      simp [nodup?]
+  | cons head tail ih =>
+      simp at hNodup
+      simp [nodup?, hNodup.1, ih hNodup.2]
+
+theorem nodup?_eq_true {α : Type} [DecidableEq α] {xs : List α} :
+    nodup? xs = true ↔ List.Nodup xs := by
+  constructor
+  · exact nodup?_sound
+  · exact nodup?_complete
+
+def namesEq? : Layout → List Name → Bool
+  | [], [] => true
+  | [], _ :: _ => false
+  | _ :: _, [] => false
+  | binding :: bindings, name :: sourceNames =>
+      decide (binding.1 = name) && namesEq? bindings sourceNames
+
+theorem namesEq?_sound {layout : Layout} {sourceScope : List Name}
+    (hCheck : namesEq? layout sourceScope = true) :
+    names layout = sourceScope := by
+  induction layout generalizing sourceScope with
+  | nil =>
+      cases sourceScope <;> simp [namesEq?, names] at hCheck ⊢
+  | cons binding rest ih =>
+      cases sourceScope with
+      | nil =>
+          simp [namesEq?] at hCheck
+      | cons name sourceRest =>
+          simp [namesEq?, names] at hCheck ⊢
+          exact ⟨hCheck.1, ih hCheck.2⟩
+
+theorem namesEq?_complete {layout : Layout} {sourceScope : List Name}
+    (hNames : names layout = sourceScope) :
+    namesEq? layout sourceScope = true := by
+  induction layout generalizing sourceScope with
+  | nil =>
+      cases sourceScope <;> simp [namesEq?, names] at hNames ⊢
+  | cons binding rest ih =>
+      cases sourceScope with
+      | nil =>
+          simp [names] at hNames
+      | cons name sourceRest =>
+          simp [names] at hNames
+          simp [namesEq?, hNames.1, ih hNames.2]
+
+theorem namesEq?_eq_true {layout : Layout} {sourceScope : List Name} :
+    namesEq? layout sourceScope = true ↔ names layout = sourceScope := by
+  constructor
+  · exact namesEq?_sound
+  · exact namesEq?_complete
+
+def bindingOk? (range : ScratchRange) (stackLayout : List Name)
+    (binding : Binding) : Bool :=
+  match binding with
+  | (name, .stack depth) =>
+      match stackLayout[depth]? with
+      | some actual => decide (actual = name)
+      | none => false
+  | (_name, .scratch slot) => decide (slot < range.words)
+
+theorem bindingOk?_sound {range : ScratchRange} {stackLayout : List Name}
+    {binding : Binding} (hCheck : bindingOk? range stackLayout binding = true) :
+    BindingOk range stackLayout binding := by
+  rcases binding with ⟨name, location⟩
+  cases location with
+  | stack depth =>
+      simp [bindingOk?, BindingOk] at hCheck ⊢
+      split at hCheck
+      · simp_all
+      · contradiction
+  | scratch slot =>
+      simpa [bindingOk?, BindingOk] using hCheck
+
+theorem bindingOk?_complete {range : ScratchRange} {stackLayout : List Name}
+    {binding : Binding} (hOk : BindingOk range stackLayout binding) :
+    bindingOk? range stackLayout binding = true := by
+  rcases binding with ⟨name, location⟩
+  cases location with
+  | stack depth =>
+      simp [bindingOk?, BindingOk] at hOk ⊢
+      rw [hOk]
+      simp
+  | scratch slot =>
+      simpa [bindingOk?, BindingOk] using hOk
+
+theorem bindingOk?_eq_true {range : ScratchRange} {stackLayout : List Name}
+    {binding : Binding} :
+    bindingOk? range stackLayout binding = true ↔
+      BindingOk range stackLayout binding := by
+  constructor
+  · exact bindingOk?_sound
+  · exact bindingOk?_complete
+
+def bindingsOk? (range : ScratchRange) (stackLayout : List Name) :
+    Layout → Bool
+  | [] => true
+  | binding :: rest =>
+      bindingOk? range stackLayout binding && bindingsOk? range stackLayout rest
+
+theorem bindingsOk?_sound {range : ScratchRange} {stackLayout : List Name}
+    {layout : Layout} (hCheck : bindingsOk? range stackLayout layout = true) :
+    ∀ binding, binding ∈ layout → BindingOk range stackLayout binding := by
+  induction layout with
+  | nil =>
+      simp
+  | cons head tail ih =>
+      simp [bindingsOk?] at hCheck
+      intro binding hMem
+      simp at hMem
+      rcases hMem with hHead | hTail
+      · rw [hHead]
+        exact bindingOk?_sound hCheck.1
+      · exact ih hCheck.2 binding hTail
+
+theorem bindingsOk?_complete {range : ScratchRange} {stackLayout : List Name}
+    {layout : Layout}
+    (hOk : ∀ binding, binding ∈ layout → BindingOk range stackLayout binding) :
+    bindingsOk? range stackLayout layout = true := by
+  induction layout with
+  | nil =>
+      simp [bindingsOk?]
+  | cons head tail ih =>
+      simp [bindingsOk?, bindingOk?_complete (hOk head (by simp)),
+        ih (by
+          intro binding hMem
+          exact hOk binding (by simp [hMem]))]
+
+theorem bindingsOk?_eq_true {range : ScratchRange} {stackLayout : List Name}
+    {layout : Layout} :
+    bindingsOk? range stackLayout layout = true ↔
+      ∀ binding, binding ∈ layout → BindingOk range stackLayout binding := by
+  constructor
+  · exact bindingsOk?_sound
+  · exact bindingsOk?_complete
+
+def checked? (range : ScratchRange) (sourceScope stackLayout : List Name)
+    (layout : Layout) : Bool :=
+  namesEq? layout sourceScope &&
+    nodup? (names layout) &&
+    bindingsOk? range stackLayout layout &&
+    nodup? (scratchSlots layout)
+
+theorem checked?_sound {range : ScratchRange} {sourceScope stackLayout : List Name}
+    {layout : Layout}
+    (hCheck : checked? range sourceScope stackLayout layout = true) :
+    WellFormed range sourceScope stackLayout layout := by
+  simp [checked?] at hCheck
+  rcases hCheck with ⟨⟨⟨hNames, hNamesNodup⟩, hBindings⟩, hScratchNodup⟩
+  exact
+    { names_eq := namesEq?_sound hNames
+      names_nodup := nodup?_sound hNamesNodup
+      bindings_ok := bindingsOk?_sound hBindings
+      scratch_slots_nodup := nodup?_sound hScratchNodup }
+
+theorem checked?_complete {range : ScratchRange}
+    {sourceScope stackLayout : List Name} {layout : Layout}
+    (hLayout : WellFormed range sourceScope stackLayout layout) :
+    checked? range sourceScope stackLayout layout = true := by
+  simp [checked?, namesEq?_complete hLayout.names_eq,
+    nodup?_complete hLayout.names_nodup,
+    bindingsOk?_complete hLayout.bindings_ok,
+    nodup?_complete hLayout.scratch_slots_nodup]
+
+theorem checked?_eq_true {range : ScratchRange}
+    {sourceScope stackLayout : List Name} {layout : Layout} :
+    checked? range sourceScope stackLayout layout = true ↔
+      WellFormed range sourceScope stackLayout layout := by
+  constructor
+  · exact checked?_sound
+  · exact checked?_complete
+
+end SpillLayout
+
+structure MemoryEqOutsideScratch (range : ScratchRange)
+    (source target : EvmYul.MachineState) : Prop where
+  activeWords_eq : target.activeWords = source.activeWords
+  memory_size_eq : target.memory.size = source.memory.size
+  readWithPadding_eq_outside :
+    ∀ offset len,
+      range.disjointBytes offset len →
+        target.memory.readWithPadding offset len =
+          source.memory.readWithPadding offset len
+
+namespace MemoryEqOutsideScratch
+
+theorem refl (range : ScratchRange) (machine : EvmYul.MachineState) :
+    MemoryEqOutsideScratch range machine machine where
+  activeWords_eq := rfl
+  memory_size_eq := rfl
+  readWithPadding_eq_outside := by
+    intro _offset _len _hDisjoint
+    rfl
+
+theorem symm {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target) :
+    MemoryEqOutsideScratch range target source where
+  activeWords_eq := hRel.activeWords_eq.symm
+  memory_size_eq := hRel.memory_size_eq.symm
+  readWithPadding_eq_outside := by
+    intro offset len hDisjoint
+    exact (hRel.readWithPadding_eq_outside offset len hDisjoint).symm
+
+theorem msize_eq {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target) :
+    target.msize = source.msize := by
+  simp [EvmYul.MachineState.msize, hRel.activeWords_eq]
+
+theorem lookupMemory_eq_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target)
+    {offset : Word}
+    (hDisjoint : range.disjointBytes offset.toNat 32) :
+    target.lookupMemory offset = source.lookupMemory offset := by
+  unfold EvmYul.MachineState.lookupMemory
+  rw [hRel.memory_size_eq, hRel.activeWords_eq]
+  by_cases hReadable :
+      offset.toNat ≥ source.memory.size ∨
+        offset ≥ source.activeWords * ⟨32⟩
+  · simp [hReadable]
+  · simp [hReadable, hRel.readWithPadding_eq_outside offset.toNat 32
+      hDisjoint]
+
+theorem mload_value_eq_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target)
+    {offset : Word}
+    (hDisjoint : range.disjointBytes offset.toNat 32) :
+    (target.mload offset).1 = (source.mload offset).1 := by
+  simp [EvmYul.MachineState.mload,
+    lookupMemory_eq_of_disjoint hRel hDisjoint]
+
+theorem mload_rel_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target)
+    {offset : Word}
+    (_hDisjoint : range.disjointBytes offset.toNat 32) :
+    MemoryEqOutsideScratch range
+      (source.mload offset).2 (target.mload offset).2 where
+  activeWords_eq := by
+    simp [EvmYul.MachineState.mload, hRel.activeWords_eq]
+  memory_size_eq := by
+    simp [EvmYul.MachineState.mload, hRel.memory_size_eq]
+  readWithPadding_eq_outside := by
+    intro readOffset len hReadDisjoint
+    simpa [EvmYul.MachineState.mload] using
+      hRel.readWithPadding_eq_outside readOffset len hReadDisjoint
+
+theorem mload_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryEqOutsideScratch range source target)
+    {offset : Word}
+    (hDisjoint : range.disjointBytes offset.toNat 32) :
+    (target.mload offset).1 = (source.mload offset).1 ∧
+      MemoryEqOutsideScratch range
+        (source.mload offset).2 (target.mload offset).2 :=
+  ⟨mload_value_eq_of_disjoint hRel hDisjoint,
+    mload_rel_of_disjoint hRel hDisjoint⟩
+
+end MemoryEqOutsideScratch
+
+structure MemoryByteEqOutsideScratch (range : ScratchRange)
+    (source target : EvmYul.MachineState) : Prop where
+  obs : MemoryEqOutsideScratch range source target
+  byte_eq_outside :
+    ∀ idx (_hDisjoint : range.disjointBytes idx 1)
+      (hTarget : idx < target.memory.size)
+      (hSource : idx < source.memory.size),
+        target.memory[idx]'hTarget = source.memory[idx]'hSource
+
+namespace MemoryByteEqOutsideScratch
+
+theorem toMemoryEqOutsideScratch {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target) :
+    MemoryEqOutsideScratch range source target :=
+  hRel.obs
+
+theorem refl (range : ScratchRange) (machine : EvmYul.MachineState) :
+    MemoryByteEqOutsideScratch range machine machine where
+  obs := MemoryEqOutsideScratch.refl range machine
+  byte_eq_outside := by
+    intro _idx _hDisjoint _hTarget _hSource
+    rfl
+
+theorem symm {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target) :
+    MemoryByteEqOutsideScratch range target source where
+  obs := MemoryEqOutsideScratch.symm hRel.obs
+  byte_eq_outside := by
+    intro idx hDisjoint hSource hTarget
+    exact (hRel.byte_eq_outside idx hDisjoint hTarget hSource).symm
+
+theorem activeWords_eq {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target) :
+    target.activeWords = source.activeWords :=
+  hRel.obs.activeWords_eq
+
+theorem memory_size_eq {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target) :
+    target.memory.size = source.memory.size :=
+  hRel.obs.memory_size_eq
+
+theorem byteArray_readWithoutPadding_eq_of_disjoint_byte_eq
+    {range : ScratchRange}
+    {source target : ByteArray}
+    (hSize : target.size = source.size)
+    (hByteEq :
+      ∀ idx (_hDisjoint : range.disjointBytes idx 1)
+        (hTarget : idx < target.size)
+        (hSource : idx < source.size),
+          target[idx]'hTarget = source[idx]'hSource)
+    {offset len : Nat}
+    (hDisjoint : range.disjointBytes offset len) :
+    target.readWithoutPadding offset len =
+      source.readWithoutPadding offset len := by
+  unfold ByteArray.readWithoutPadding
+  by_cases hPastSource : offset ≥ source.size
+  · have hPastTarget : offset ≥ target.size := by
+      rw [hSize]
+      exact hPastSource
+    simp [hPastSource, hPastTarget]
+  · have hPastTarget : ¬ offset ≥ target.size := by
+      rw [hSize]
+      exact hPastSource
+    simp [hPastSource, hPastTarget]
+    apply ByteArray.ext
+    apply Array.ext
+    · have hDataSize : target.data.size = source.data.size := by
+        simpa [ByteArray.size] using hSize
+      simp [ByteArray.size, ByteArray.data_extract, hDataSize]
+    · intro idx hTargetIdx hSourceIdx
+      let clip :=
+        min (offset + min len target.size) target.size
+      have hOffsetLtTarget : offset < target.size := by
+        omega
+      have hOffsetLeClip : offset ≤ clip := by
+        dsimp [clip]
+        apply le_min
+        · omega
+        · omega
+      have hTargetIdxClip : idx < clip - offset := by
+        dsimp [clip]
+        simpa [ByteArray.size, ByteArray.data_extract] using hTargetIdx
+      have hClipLt : offset + idx < clip := by
+        omega
+      have hTargetMem : offset + idx < target.size := by
+        exact lt_of_lt_of_le hClipLt (by
+          dsimp [clip]
+          exact Nat.min_le_right _ _)
+      have hIdxLtLen : idx < len := by
+        have hOffIdxLtOffMin :
+            offset + idx < offset + min len target.size := by
+          exact lt_of_lt_of_le hClipLt (by
+            dsimp [clip]
+            exact Nat.min_le_left _ _)
+        have hMinLeLen : min len target.size ≤ len :=
+          Nat.min_le_left _ _
+        omega
+      have hSourceMem : offset + idx < source.size := by
+        rw [← hSize]
+        exact hTargetMem
+      have hByteDisjoint :
+          range.disjointBytes (offset + idx) 1 := by
+        exact ByteDisjoint.byte_of_mem_left hDisjoint
+          (by omega)
+          (by
+            have hMinLe : min len target.size ≤ len :=
+              Nat.min_le_left _ _
+            omega)
+      have hByteEqAt :=
+        hByteEq (offset + idx) hByteDisjoint hTargetMem hSourceMem
+      have hDataEq :
+          target.data[offset + idx] = source.data[offset + idx] := by
+        simpa [ByteArray.getElem_eq_data_getElem] using hByteEqAt
+      simpa [ByteArray.data_extract, Array.getElem_extract] using hDataEq
+
+theorem byteArray_readWithPadding_eq_of_disjoint_byte_eq
+    {range : ScratchRange}
+    {source target : ByteArray}
+    (hSize : target.size = source.size)
+    (hByteEq :
+      ∀ idx (_hDisjoint : range.disjointBytes idx 1)
+        (hTarget : idx < target.size)
+        (hSource : idx < source.size),
+          target[idx]'hTarget = source[idx]'hSource)
+    {offset len : Nat}
+    (hDisjoint : range.disjointBytes offset len) :
+    target.readWithPadding offset len =
+      source.readWithPadding offset len := by
+  have hRead :=
+    byteArray_readWithoutPadding_eq_of_disjoint_byte_eq
+      hSize hByteEq hDisjoint
+  unfold ByteArray.readWithPadding
+  by_cases hLarge : len ≥ 2 ^ 64
+  · have hIf : 2 ^ 64 ≤ len := hLarge
+    rw [if_pos hIf, if_pos hIf]
+  · have hIf : ¬ 2 ^ 64 ≤ len := by omega
+    rw [if_neg hIf, if_neg hIf]
+    simpa [hRead]
+
+theorem readWithoutPadding_eq_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    {offset len : Nat}
+      (hDisjoint : range.disjointBytes offset len) :
+      target.memory.readWithoutPadding offset len =
+        source.memory.readWithoutPadding offset len := by
+    exact byteArray_readWithoutPadding_eq_of_disjoint_byte_eq
+      hRel.memory_size_eq hRel.byte_eq_outside hDisjoint
+
+theorem readWithPadding_eq_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    {offset len : Nat}
+      (hDisjoint : range.disjointBytes offset len) :
+      target.memory.readWithPadding offset len =
+        source.memory.readWithPadding offset len := by
+    exact byteArray_readWithPadding_eq_of_disjoint_byte_eq
+      hRel.memory_size_eq hRel.byte_eq_outside hDisjoint
+
+theorem mload_of_disjoint {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    {offset : Word}
+    (hDisjoint : range.disjointBytes offset.toNat 32) :
+    (target.mload offset).1 = (source.mload offset).1 ∧
+      MemoryByteEqOutsideScratch range
+        (source.mload offset).2 (target.mload offset).2 := by
+  refine
+    ⟨MemoryEqOutsideScratch.mload_value_eq_of_disjoint hRel.obs hDisjoint,
+      ?_⟩
+  constructor
+  · exact MemoryEqOutsideScratch.mload_rel_of_disjoint hRel.obs hDisjoint
+  · intro idx hIdxDisjoint hTarget hSource
+    simpa [EvmYul.MachineState.mload] using
+      hRel.byte_eq_outside idx hIdxDisjoint hTarget hSource
+
+set_option maxHeartbeats 800000 in
+theorem mstore_pair_noExpansion
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {offset value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hTargetAllocated : offset.toNat + 32 ≤ target.memory.size) :
+    MemoryByteEqOutsideScratch range
+      (source.mstore offset value) (target.mstore offset value) := by
+  have hSourceAllocated : offset.toNat + 32 ≤ source.memory.size := by
+    rw [← hRel.memory_size_eq]
+    exact hTargetAllocated
+  have hMemorySize :
+      (target.mstore offset value).memory.size =
+        (source.mstore offset value).memory.size := by
+    have hTargetSize :=
+      byteArray_write32_size hSpec (hWordBytes value) hTargetAllocated
+    have hSourceSize :=
+      byteArray_write32_size hSpec (hWordBytes value) hSourceAllocated
+    calc
+      (target.mstore offset value).memory.size
+          = target.memory.size := by
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hTargetSize
+      _ = source.memory.size := hRel.memory_size_eq
+      _ = (source.mstore offset value).memory.size := by
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hSourceSize.symm
+  have hByteEq :
+      ∀ idx (_hDisjoint : range.disjointBytes idx 1)
+        (hTarget : idx < (target.mstore offset value).memory.size)
+        (hSource : idx < (source.mstore offset value).memory.size),
+          (target.mstore offset value).memory[idx]'hTarget =
+            (source.mstore offset value).memory[idx]'hSource := by
+    intro idx hIdxDisjoint hTarget hSource
+    have hTargetWriteIdx :
+        idx < (value.toByteArray.write 0 target.memory offset.toNat 32).size := by
+      simpa [EvmYul.MachineState.mstore,
+        EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hTarget
+    have hSourceWriteIdx :
+        idx < (value.toByteArray.write 0 source.memory offset.toNat 32).size := by
+      simpa [EvmYul.MachineState.mstore,
+        EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hSource
+    have hWriteEq :=
+      byteArray_write32_byte_eq_noExpansion hSpec
+        (hWordBytes value) hTargetAllocated hSourceAllocated
+        (fun hTargetOld hSourceOld =>
+          hRel.byte_eq_outside idx hIdxDisjoint hTargetOld hSourceOld)
+        hTargetWriteIdx hSourceWriteIdx
+    simpa [EvmYul.MachineState.mstore,
+      EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hWriteEq
+  exact
+    { obs :=
+        { activeWords_eq := by
+            have hActiveBase :=
+              congrArg
+                (fun active : Word =>
+                  EvmYul.UInt256.ofNat
+                    (EvmYul.MachineState.M active.toNat offset.toNat 32))
+                hRel.activeWords_eq
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hActiveBase
+          memory_size_eq := hMemorySize
+          readWithPadding_eq_outside := by
+            intro readOffset len hReadDisjoint
+            exact byteArray_readWithPadding_eq_of_disjoint_byte_eq
+              hMemorySize hByteEq hReadDisjoint }
+      byte_eq_outside := hByteEq }
+
+set_option maxHeartbeats 800000 in
+theorem mstore_pair_boundedExpansion
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {offset value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hTargetPadNoOverflow :
+      offset.toNat - target.memory.size < USize.size) :
+    MemoryByteEqOutsideScratch range
+      (source.mstore offset value) (target.mstore offset value) := by
+  have hSourcePadNoOverflow :
+      offset.toNat - source.memory.size < USize.size := by
+    simpa [← hRel.memory_size_eq] using hTargetPadNoOverflow
+  have hMemorySize :
+      (target.mstore offset value).memory.size =
+        (source.mstore offset value).memory.size := by
+    have hTargetSize :=
+      byteArray_write32_size_general hSpec (hWordBytes value)
+        hTargetPadNoOverflow
+    have hSourceSize :=
+      byteArray_write32_size_general hSpec (hWordBytes value)
+        hSourcePadNoOverflow
+    calc
+      (target.mstore offset value).memory.size
+          = max target.memory.size (offset.toNat + 32) := by
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hTargetSize
+      _ = max source.memory.size (offset.toNat + 32) := by
+            rw [hRel.memory_size_eq]
+      _ = (source.mstore offset value).memory.size := by
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hSourceSize.symm
+  have hByteEq :
+      ∀ idx (_hDisjoint : range.disjointBytes idx 1)
+        (hTarget : idx < (target.mstore offset value).memory.size)
+        (hSource : idx < (source.mstore offset value).memory.size),
+          (target.mstore offset value).memory[idx]'hTarget =
+            (source.mstore offset value).memory[idx]'hSource := by
+    intro idx hIdxDisjoint hTarget hSource
+    have hTargetWriteIdx :
+        idx < (value.toByteArray.write 0 target.memory offset.toNat 32).size := by
+      simpa [EvmYul.MachineState.mstore,
+        EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hTarget
+    have hSourceWriteIdx :
+        idx < (value.toByteArray.write 0 source.memory offset.toNat 32).size := by
+      simpa [EvmYul.MachineState.mstore,
+        EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hSource
+    have hWriteEq :=
+      byteArray_write32_byte_eq_boundedExpansion hSpec
+        (hWordBytes value) hRel.memory_size_eq hTargetPadNoOverflow
+        (fun hTargetOld hSourceOld =>
+          hRel.byte_eq_outside idx hIdxDisjoint hTargetOld hSourceOld)
+        hTargetWriteIdx hSourceWriteIdx
+    simpa [EvmYul.MachineState.mstore,
+      EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hWriteEq
+  exact
+    { obs :=
+        { activeWords_eq := by
+            have hActiveBase :=
+              congrArg
+                (fun active : Word =>
+                  EvmYul.UInt256.ofNat
+                    (EvmYul.MachineState.M active.toNat offset.toNat 32))
+                hRel.activeWords_eq
+            simpa [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+              hActiveBase
+          memory_size_eq := hMemorySize
+          readWithPadding_eq_outside := by
+            intro readOffset len hReadDisjoint
+            exact byteArray_readWithPadding_eq_of_disjoint_byte_eq
+              hMemorySize hByteEq hReadDisjoint }
+      byte_eq_outside := hByteEq }
+
+end MemoryByteEqOutsideScratch
+
+theorem scratchRegion_slot_end_le_region_end {base count slot : Nat}
+    (hSlot : slot < count) :
+    base + 32 * slot + 32 ≤ base + 32 * count := by
+  omega
+
+theorem scratchRegion_slot_end_le_slot_start {base left right : Nat}
+    (hLt : left < right) :
+    base + 32 * left + 32 ≤ base + 32 * right := by
+  omega
+
+theorem word_ofNat_toNat (word : Word) :
+    EvmYul.UInt256.ofNat word.toNat = word := by
+  cases word with
+  | mk val =>
+      apply congrArg EvmYul.UInt256.mk
+      apply Fin.ext
+      simp [EvmYul.UInt256.toNat]
+
+theorem word_mul32_toNat_of_noOverflow {word : Word}
+    (hNoOverflow : word.toNat * 32 < EvmYul.UInt256.size) :
+    (word * (⟨32⟩ : Word)).toNat = word.toNat * 32 := by
+  change (word.val *
+    (OfNat.ofNat 32 : Fin EvmYul.UInt256.size)).val = word.toNat * 32
+  rw [Fin.val_mul]
+  simp [EvmYul.UInt256.toNat]
+  exact Nat.mod_eq_of_lt hNoOverflow
+
+theorem machineM_word32_of_withinActiveNat
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hWithin : ScratchWordWithinActiveNat machine offset) :
+    EvmYul.MachineState.M machine.activeWords.toNat offset.toNat 32 =
+      machine.activeWords.toNat := by
+  unfold ScratchWordWithinActiveNat at hWithin
+  unfold EvmYul.MachineState.M
+  have hDiv : (offset.toNat + 32 + 31) / 32 ≤
+      machine.activeWords.toNat := by
+    rw [Nat.div_le_iff_le_mul (by decide : 0 < 32)]
+    omega
+  exact max_eq_left hDiv
+
+theorem scratchWordReserved_of_withinActiveNat
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hWithin : ScratchWordWithinActiveNat machine offset) :
+    ScratchWordReserved machine offset := by
+  unfold ScratchWordReserved
+  rw [machineM_word32_of_withinActiveNat hWithin]
+  exact word_ofNat_toNat machine.activeWords
+
+def ScratchWordAllocated (machine : EvmYul.MachineState)
+    (offset : Word) : Prop :=
+  offset.toNat + 32 ≤ machine.memory.size
+
+def ScratchWordReadable (machine : EvmYul.MachineState)
+    (offset : Word) : Prop :=
+  ¬ (offset.toNat ≥ machine.memory.size ∨
+      offset ≥ machine.activeWords * ⟨32⟩)
+
+theorem scratchWordReadable_of_allocated_withinActiveNat
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hWithin : ScratchWordWithinActiveNat machine offset)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine) :
+    ScratchWordReadable machine offset := by
+  intro hBad
+  rcases hBad with hPastMemory | hPastActive
+  · unfold ScratchWordAllocated at hAllocated
+    omega
+  · have hActiveBytes :
+        (machine.activeWords * (⟨32⟩ : Word)).toNat =
+          machine.activeWords.toNat * 32 :=
+      word_mul32_toNat_of_noOverflow hNoOverflow
+    have hPastActiveNat :
+        machine.activeWords.toNat * 32 ≤ offset.toNat := by
+      rw [← hActiveBytes]
+      simpa [EvmYul.UInt256.toNat] using hPastActive
+    unfold ScratchWordWithinActiveNat at hWithin
+    omega
+
+theorem scratchRegionWord_toNat_of_withinActiveNat
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    (scratchRegionWord base slot).toNat = base + 32 * slot := by
+  unfold scratchRegionWord
+  apply EvmYul.UInt256.toNat_ofNat_of_lt
+  unfold ScratchRegionWithinActiveNat at hWithin
+  unfold ScratchActiveBytesNoOverflow at hNoOverflow
+  have hEnd :
+      base + 32 * slot + 32 ≤ base + 32 * count :=
+    scratchRegion_slot_end_le_region_end hSlot
+  omega
+
+theorem ScratchRange.word_toNat_of_ready
+    {machine : EvmYul.MachineState} {range : ScratchRange} {slot : Nat}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hSlot : slot < range.words) :
+    (range.word slot).toNat = range.slot slot := by
+  simpa [ScratchRange.word_eq_scratchRegionWord, ScratchRange.slot] using
+    scratchRegionWord_toNat_of_withinActiveNat
+      hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem ScratchRange.byteDisjoint_word_slot_of_disjointBytes
+    {machine : EvmYul.MachineState} {range : ScratchRange}
+    {offset len slot : Nat}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hDisjoint : range.disjointBytes offset len)
+    (hSlot : slot < range.words) :
+    ByteDisjoint offset len (range.word slot).toNat 32 := by
+  rw [word_toNat_of_ready hReady hSlot]
+  exact byteDisjoint_slot_of_disjointBytes hDisjoint hSlot
+
+theorem scratchRegionWord_slot_end_le_slot_start_of_withinActiveNat
+    {machine : EvmYul.MachineState} {base count left right : Nat}
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hLeft : left < count)
+    (hRight : right < count)
+    (hLt : left < right) :
+    (scratchRegionWord base left).toNat + 32 ≤
+      (scratchRegionWord base right).toNat := by
+  rw [scratchRegionWord_toNat_of_withinActiveNat
+    hWithin hNoOverflow hLeft]
+  rw [scratchRegionWord_toNat_of_withinActiveNat
+    hWithin hNoOverflow hRight]
+  exact scratchRegion_slot_end_le_slot_start hLt
+
+theorem scratchWordAllocated_of_regionNat
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hAllocated : ScratchRegionAllocatedNat machine base count)
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    ScratchWordAllocated machine (scratchRegionWord base slot) := by
+  unfold ScratchWordAllocated
+  rw [scratchRegionWord_toNat_of_withinActiveNat
+    hWithin hNoOverflow hSlot]
+  unfold ScratchRegionAllocatedNat at hAllocated
+  have hEnd :
+      base + 32 * slot + 32 ≤ base + 32 * count :=
+    scratchRegion_slot_end_le_region_end hSlot
+  omega
+
+theorem scratchWordWithinActiveNat_of_regionNat
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    ScratchWordWithinActiveNat machine (scratchRegionWord base slot) := by
+  unfold ScratchWordWithinActiveNat
+  rw [scratchRegionWord_toNat_of_withinActiveNat
+    hWithin hNoOverflow hSlot]
+  unfold ScratchRegionWithinActiveNat at hWithin
+  have hEnd :
+      base + 32 * slot + 32 ≤ base + 32 * count :=
+    scratchRegion_slot_end_le_region_end hSlot
+  omega
+
+theorem scratchWordReadable_of_regionNat
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hAllocated : ScratchRegionAllocatedNat machine base count)
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    ScratchWordReadable machine (scratchRegionWord base slot) :=
+  scratchWordReadable_of_allocated_withinActiveNat
+    (scratchWordAllocated_of_regionNat
+      hAllocated hWithin hNoOverflow hSlot)
+    (scratchWordWithinActiveNat_of_regionNat
+      hWithin hNoOverflow hSlot)
+    hNoOverflow
+
+structure ScratchWordBytesCanonical (machine : EvmYul.MachineState)
+    (offset : Word) : Prop where
+  size : (machine.lookupMemory offset).toByteArray.size = 32
+  data :
+    (machine.lookupMemory offset).toByteArray.data =
+      machine.memory.data.extract offset.toNat (offset.toNat + 32)
+
+theorem scratchWordBytesCanonical_of_readable
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hReadable : ScratchWordReadable machine offset) :
+    ScratchWordBytesCanonical machine offset := by
+  let bytes : ByteArray :=
+    { data := machine.memory.data.extract offset.toNat (offset.toNat + 32) }
+  have hRead :
+      machine.memory.readWithPadding offset.toNat 32 = bytes := by
+    simpa [bytes] using
+      byteArray_readWithPadding32_allocated hSpec hAllocated
+  have hBytesSize : bytes.size = 32 := by
+    simpa [bytes] using
+      byteArray_extract32_allocated_size hAllocated
+  have hLookup :
+      machine.lookupMemory offset =
+        EvmYul.UInt256.ofNat
+          (EvmYul.fromByteArrayBigEndian
+            (machine.memory.readWithPadding offset.toNat 32)) := by
+    unfold EvmYul.MachineState.lookupMemory
+    rw [if_neg hReadable]
+  have hLookupBytes : (machine.lookupMemory offset).toByteArray = bytes := by
+    rw [hLookup, hRead]
+    exact hEncoding.roundTrip32 bytes hBytesSize
+  constructor
+  · simpa [hLookupBytes] using hBytesSize
+  · simpa [bytes] using congrArg ByteArray.data hLookupBytes
+
+def ScratchWordMemoryRestoreObligation
+    (machine : EvmYul.MachineState) (offset : Word) : Prop :=
+  ∀ value : Word,
+    (machine.lookupMemory offset).toByteArray.write 0
+      (value.toByteArray.write 0 machine.memory offset.toNat 32)
+        offset.toNat 32 =
+      machine.memory
+
+theorem memoryRestore_of_wordBytesCanonical
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hCanonical : ScratchWordBytesCanonical machine offset) :
+    ScratchWordMemoryRestoreObligation machine offset := by
+  intro value
+  exact
+    byteArray_write32_restore_exact hSpec
+      (hWordBytes value)
+      hCanonical.size
+      hAllocated
+      hCanonical.data
+
+theorem memoryRestore_of_readable
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hReadable : ScratchWordReadable machine offset) :
+    ScratchWordMemoryRestoreObligation machine offset :=
+  memoryRestore_of_wordBytesCanonical hSpec hEncoding.size hAllocated
+    (scratchWordBytesCanonical_of_readable hSpec hEncoding hAllocated
+      hReadable)
+
+theorem memoryRestore_of_allocated_withinActiveNat
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hWithin : ScratchWordWithinActiveNat machine offset)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine) :
+    ScratchWordMemoryRestoreObligation machine offset :=
+  memoryRestore_of_readable hSpec hEncoding hAllocated
+    (scratchWordReadable_of_allocated_withinActiveNat
+      hAllocated hWithin hNoOverflow)
+
+theorem memoryRestore_of_regionNat
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hAllocated : ScratchRegionAllocatedNat machine base count)
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    ScratchWordMemoryRestoreObligation machine
+      (scratchRegionWord base slot) :=
+  memoryRestore_of_readable hSpec hEncoding
+    (scratchWordAllocated_of_regionNat
+      hAllocated hWithin hNoOverflow hSlot)
+    (scratchWordReadable_of_regionNat
+      hAllocated hWithin hNoOverflow hSlot)
+
+theorem mload_activeWords {machine : EvmYul.MachineState}
+    {offset : Word}
+    (hScratch : ScratchWordReserved machine offset) :
+    (machine.mload offset).2.activeWords = machine.activeWords := by
+  simpa [ScratchWordReserved, EvmYul.MachineState.mload] using hScratch
+
+theorem mload_activeWords_eq_iff_reserved
+    {machine : EvmYul.MachineState} {offset : Word} :
+    (machine.mload offset).2.activeWords = machine.activeWords ↔
+      ScratchWordReserved machine offset := by
+  simp [ScratchWordReserved, EvmYul.MachineState.mload]
+
+theorem mload_machine_eq {machine : EvmYul.MachineState}
+    {offset : Word}
+    (hScratch : ScratchWordReserved machine offset) :
+    (machine.mload offset).2 = machine := by
+  cases machine
+  simp [ScratchWordReserved, EvmYul.MachineState.mload] at hScratch ⊢
+  exact hScratch
+
+theorem mload_evm_shared_eq {state : EVMState}
+    {offset : Word}
+    (hScratch : ScratchWordReserved state.toMachineState offset) :
+    ({ state with
+        toMachineState := (state.toMachineState.mload offset).2 } :
+      EVMState).toSharedState = state.toSharedState := by
+  rw [mload_machine_eq hScratch]
+
+theorem mload_replaceStackAndIncrPC_shared_eq {state : EVMState}
+    {offset : Word} {stack : EvmYul.Stack Word}
+    (hScratch : ScratchWordReserved state.toMachineState offset) :
+    (({ state with
+        toMachineState := (state.toMachineState.mload offset).2 } :
+      EVMState).replaceStackAndIncrPC stack).toSharedState =
+      state.toSharedState := by
+  rw [mload_machine_eq hScratch]
+  simp [EvmYul.EVM.State.replaceStackAndIncrPC,
+    EvmYul.EVM.State.incrPC]
+
+theorem mstore_activeWords {machine : EvmYul.MachineState}
+    {offset value : Word}
+    (hScratch : ScratchWordReserved machine offset) :
+    (machine.mstore offset value).activeWords = machine.activeWords := by
+  simpa [ScratchWordReserved, EvmYul.MachineState.mstore,
+    EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hScratch
+
+theorem mstore_activeWords_eq_iff_reserved
+    {machine : EvmYul.MachineState} {offset value : Word} :
+    (machine.mstore offset value).activeWords = machine.activeWords ↔
+      ScratchWordReserved machine offset := by
+  simp [ScratchWordReserved, EvmYul.MachineState.mstore,
+    EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+
+theorem lookupMemory_mstore_same_of_allocated_readable
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {offset value : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hReadableAfter :
+      ScratchWordReadable (machine.mstore offset value) offset) :
+    (machine.mstore offset value).lookupMemory offset = value := by
+  have hRead :
+      (machine.mstore offset value).memory.readWithPadding offset.toNat 32 =
+        value.toByteArray := by
+    calc
+      (machine.mstore offset value).memory.readWithPadding offset.toNat 32
+          =
+        (value.toByteArray.write 0 machine.memory offset.toNat 32).readWithPadding
+          offset.toNat 32 := by
+            simp [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+      _ = value.toByteArray :=
+            byteArray_readWithPadding32_write32_same hSpec
+              (hWordBytes value) hAllocated
+  unfold EvmYul.MachineState.lookupMemory
+  rw [if_neg hReadableAfter]
+  rw [hRead]
+  change EvmYul.UInt256.ofNat
+      (EvmYul.fromByteArrayBigEndian value.toByteArray) = value
+  rw [word_fromByteArrayBigEndian_toByteArray hSpec]
+  exact word_ofNat_toNat value
+
+/--
+Target-side proof obligation for a memory-backed spill slot.
+
+This is not an accepted-program premise: it records the byte-level restoration
+fact that a future spill macro must derive before memory spilling can be wired
+into the compiler path.
+-/
+def ScratchWordOverwriteRestoreObligation
+    (machine : EvmYul.MachineState) (offset : Word) : Prop :=
+  ∀ value : Word,
+    (machine.mstore offset value).writeWord offset
+        (machine.lookupMemory offset) =
+      machine
+
+theorem overwriteRestore_of_memoryRestore {machine : EvmYul.MachineState}
+    {offset : Word}
+    (hScratch : ScratchWordReserved machine offset)
+    (hMemory : ScratchWordMemoryRestoreObligation machine offset) :
+    ScratchWordOverwriteRestoreObligation machine offset := by
+  intro value
+  cases machine
+  simp [ScratchWordOverwriteRestoreObligation,
+    ScratchWordMemoryRestoreObligation, EvmYul.MachineState.mstore,
+    EvmYul.MachineState.writeWord, EvmYul.writeBytes,
+    EvmYul.MachineState.lookupMemory] at hScratch hMemory ⊢
+  exact ⟨hScratch, hMemory value⟩
+
+theorem overwriteRestore_of_allocated_withinActiveNat
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {offset : Word}
+    (hAllocated : ScratchWordAllocated machine offset)
+    (hWithin : ScratchWordWithinActiveNat machine offset)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine) :
+    ScratchWordOverwriteRestoreObligation machine offset :=
+  overwriteRestore_of_memoryRestore
+    (scratchWordReserved_of_withinActiveNat hWithin)
+    (memoryRestore_of_allocated_withinActiveNat hSpec hEncoding
+      hAllocated hWithin hNoOverflow)
+
+theorem overwriteRestore_of_regionNat
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hAllocated : ScratchRegionAllocatedNat machine base count)
+    (hWithin :
+      ScratchRegionWithinActiveNat machine base count)
+    (hNoOverflow : ScratchActiveBytesNoOverflow machine)
+    (hSlot : slot < count) :
+    ScratchWordOverwriteRestoreObligation machine
+      (scratchRegionWord base slot) :=
+  overwriteRestore_of_memoryRestore
+    (scratchWordReserved_of_withinActiveNat
+      (scratchWordWithinActiveNat_of_regionNat
+        hWithin hNoOverflow hSlot))
+    (memoryRestore_of_regionNat hSpec hEncoding
+      hAllocated hWithin hNoOverflow hSlot)
+
+namespace ScratchRegionReady
+
+theorem scratchWordAllocated
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordAllocated machine (scratchRegionWord base slot) :=
+  scratchWordAllocated_of_regionNat
+    hReady.allocated hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem scratchWordWithinActiveNat
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordWithinActiveNat machine (scratchRegionWord base slot) :=
+  scratchWordWithinActiveNat_of_regionNat
+    hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem scratchWordReserved
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordReserved machine (scratchRegionWord base slot) :=
+  scratchWordReserved_of_withinActiveNat
+    (scratchWordWithinActiveNat hReady hSlot)
+
+theorem scratchWordReadable
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordReadable machine (scratchRegionWord base slot) :=
+  scratchWordReadable_of_regionNat
+    hReady.allocated hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem scratchWordSlotEndLeSlotStart
+    {machine : EvmYul.MachineState} {base count left right : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hLeft : left < count)
+    (hRight : right < count)
+    (hLt : left < right) :
+    (scratchRegionWord base left).toNat + 32 ≤
+      (scratchRegionWord base right).toNat :=
+  scratchRegionWord_slot_end_le_slot_start_of_withinActiveNat
+    hReady.withinActive hReady.activeNoOverflow hLeft hRight hLt
+
+theorem scratchWordMemoryRestore
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordMemoryRestoreObligation machine
+      (scratchRegionWord base slot) :=
+  memoryRestore_of_regionNat hSpec hEncoding
+    hReady.allocated hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem scratchWordOverwriteRestore
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchWordOverwriteRestoreObligation machine
+      (scratchRegionWord base slot) :=
+  overwriteRestore_of_regionNat hSpec hEncoding
+    hReady.allocated hReady.withinActive hReady.activeNoOverflow hSlot
+
+theorem mload_slot
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchRegionReady
+      (machine.mload (scratchRegionWord base slot)).2 base count := by
+  rw [mload_machine_eq (scratchWordReserved hReady hSlot)]
+  exact hReady
+
+theorem mstore_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    {value : Word}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    ScratchRegionReady
+      (machine.mstore (scratchRegionWord base slot) value) base count := by
+  let offset := scratchRegionWord base slot
+  have hAllocatedSlot : ScratchWordAllocated machine offset :=
+    scratchWordAllocated hReady hSlot
+  have hReservedSlot : ScratchWordReserved machine offset :=
+    scratchWordReserved hReady hSlot
+  have hMemorySize :
+      (machine.mstore offset value).memory.size = machine.memory.size := by
+    simpa [offset, EvmYul.MachineState.mstore,
+      EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+      byteArray_write32_size hSpec
+        (hWordBytes value) hAllocatedSlot
+  have hActive :
+      (machine.mstore offset value).activeWords = machine.activeWords := by
+    simpa [offset, ScratchWordReserved, EvmYul.MachineState.mstore,
+      EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+      hReservedSlot
+  constructor
+  · unfold ScratchRegionAllocatedNat
+    rw [hMemorySize]
+    exact hReady.allocated
+  · unfold ScratchRegionWithinActiveNat
+    rw [hActive]
+    exact hReady.withinActive
+  · unfold ScratchActiveBytesNoOverflow
+    rw [hActive]
+    exact hReady.activeNoOverflow
+
+  theorem lookupMemory_mstore_slot_same
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    {value : Word}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    (machine.mstore (scratchRegionWord base slot) value).lookupMemory
+        (scratchRegionWord base slot) =
+      value := by
+  apply lookupMemory_mstore_same_of_allocated_readable hSpec hWordBytes
+  · exact scratchWordAllocated hReady hSlot
+  · exact scratchWordReadable
+      (mstore_slot hSpec hWordBytes hReady hSlot) hSlot
+
+theorem lookupMemory_mstore_range_slot_same
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {range : ScratchRange} {slot : Nat}
+    {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hSlot : slot < range.words) :
+    (machine.mstore (range.word slot) value).lookupMemory
+        (range.word slot) =
+      value := by
+  simpa [ScratchRange.word_eq_scratchRegionWord] using
+    ScratchRegionReady.lookupMemory_mstore_slot_same hSpec hWordBytes
+      hReady hSlot
+
+theorem mload_mstore_range_slot_value
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {range : ScratchRange} {slot : Nat}
+    {value : Word}
+    (hReady : ScratchRegionReady machine range.base range.words)
+    (hSlot : slot < range.words) :
+    ((machine.mstore (range.word slot) value).mload
+        (range.word slot)).1 =
+      value := by
+  simp [EvmYul.MachineState.mload,
+    lookupMemory_mstore_range_slot_same hSpec hWordBytes hReady hSlot]
+
+end ScratchRegionReady
+
+theorem scratchRegionReady?_mload_slot
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    (hReady : scratchRegionReady? machine base count = true)
+    (hSlot : slot < count) :
+    scratchRegionReady?
+      (machine.mload (scratchRegionWord base slot)).2 base count = true :=
+  scratchRegionReady?_complete
+    (ScratchRegionReady.mload_slot (scratchRegionReady?_sound hReady) hSlot)
+
+theorem scratchRegionReady?_mstore_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    {value : Word}
+    (hReady : scratchRegionReady? machine base count = true)
+    (hSlot : slot < count) :
+    scratchRegionReady?
+      (machine.mstore (scratchRegionWord base slot) value) base count =
+        true :=
+  scratchRegionReady?_complete
+    (ScratchRegionReady.mstore_slot hSpec hWordBytes
+      (scratchRegionReady?_sound hReady) hSlot)
+
+namespace MemoryEqOutsideScratch
+
+theorem mstore_target_scratch_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryEqOutsideScratch range source target)
+    (hReady : ScratchRegionReady target range.base range.words)
+    (hSlot : slot < range.words) :
+    MemoryEqOutsideScratch range source
+      (target.mstore (range.word slot) value) where
+  activeWords_eq := by
+    have hReserved :
+        ScratchWordReserved target (range.word slot) := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordReserved hReady hSlot
+    rw [mstore_activeWords hReserved]
+    exact hRel.activeWords_eq
+  memory_size_eq := by
+    have hAllocated :
+        ScratchWordAllocated target (range.word slot) := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordAllocated hReady hSlot
+    calc
+      (target.mstore (range.word slot) value).memory.size
+          =
+        (value.toByteArray.write 0 target.memory (range.word slot).toNat 32).size := by
+            simp [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+      _ = target.memory.size :=
+            byteArray_write32_size hSpec (hWordBytes value) hAllocated
+      _ = source.memory.size := hRel.memory_size_eq
+  readWithPadding_eq_outside := by
+    intro readOffset len hReadDisjoint
+    have hAllocated :
+        ScratchWordAllocated target (range.word slot) := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordAllocated hReady hSlot
+    have hWriteDisjoint :
+        ByteDisjoint readOffset len (range.word slot).toNat 32 :=
+      ScratchRange.byteDisjoint_word_slot_of_disjointBytes
+        hReady hReadDisjoint hSlot
+    have hWrite :
+        (value.toByteArray.write 0 target.memory
+            (range.word slot).toNat 32).readWithPadding readOffset len =
+          target.memory.readWithPadding readOffset len :=
+      byteArray_readWithPadding_write32_eq_of_byteDisjoint hSpec
+        (dest := target.memory) (source := value.toByteArray)
+        (writeOffset := (range.word slot).toNat)
+        (readOffset := readOffset) (len := len)
+        (hWordBytes value) hAllocated hWriteDisjoint
+    calc
+      (target.mstore (range.word slot) value).memory.readWithPadding
+          readOffset len
+          =
+        (value.toByteArray.write 0 target.memory
+            (range.word slot).toNat 32).readWithPadding readOffset len := by
+            simp [EvmYul.MachineState.mstore,
+              EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+      _ = target.memory.readWithPadding readOffset len := hWrite
+      _ = source.memory.readWithPadding readOffset len :=
+            hRel.readWithPadding_eq_outside readOffset len hReadDisjoint
+
+theorem mstore_target_scratch_slot_of_ready?
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryEqOutsideScratch range source target)
+    (hReady : range.ready? target = true)
+    (hSlot : slot < range.words) :
+    MemoryEqOutsideScratch range source
+      (target.mstore (range.word slot) value) :=
+  mstore_target_scratch_slot hSpec hWordBytes hRel
+    (ScratchRange.ready?_sound hReady) hSlot
+
+end MemoryEqOutsideScratch
+
+namespace MemoryByteEqOutsideScratch
+
+set_option maxHeartbeats 1200000 in
+theorem mstore_target_scratch_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hReady : ScratchRegionReady target range.base range.words)
+    (hSlot : slot < range.words) :
+    MemoryByteEqOutsideScratch range source
+      (target.mstore (range.word slot) value) := by
+  constructor
+  · exact MemoryEqOutsideScratch.mstore_target_scratch_slot hSpec hWordBytes
+      hRel.obs hReady hSlot
+  · intro idx hDisjoint hTargetAfter hSource
+    have hAllocated :
+        ScratchWordAllocated target (range.word slot) := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordAllocated hReady hSlot
+    have hTargetAfterSize :
+        (target.mstore (range.word slot) value).memory.size =
+          target.memory.size := by
+      calc
+        (target.mstore (range.word slot) value).memory.size
+            =
+          (value.toByteArray.write 0 target.memory
+            (range.word slot).toNat 32).size := by
+              simp [EvmYul.MachineState.mstore,
+                EvmYul.MachineState.writeWord, EvmYul.writeBytes]
+        _ = target.memory.size :=
+              byteArray_write32_size hSpec (hWordBytes value) hAllocated
+    have hTarget : idx < target.memory.size := by
+      rwa [hTargetAfterSize] at hTargetAfter
+    have hWriteDisjoint :
+        ByteDisjoint idx 1 (range.word slot).toNat 32 :=
+      ScratchRange.byteDisjoint_word_slot_of_disjointBytes
+        hReady hDisjoint hSlot
+    have hWrittenIdx :
+        idx <
+          (value.toByteArray.write 0 target.memory
+            (range.word slot).toNat 32).size := by
+      simpa [EvmYul.MachineState.mstore,
+        EvmYul.MachineState.writeWord, EvmYul.writeBytes] using
+        hTargetAfter
+    have hWriteByte :
+        (target.mstore (range.word slot) value).memory[idx]'hTargetAfter =
+          target.memory[idx]'hTarget := by
+      have hRaw :=
+        byteArray_write32_getElem_eq_of_byteDisjoint hSpec
+          (dest := target.memory) (source := value.toByteArray)
+          (writeOffset := (range.word slot).toNat) (idx := idx)
+          (hWordBytes value) hAllocated hWriteDisjoint hWrittenIdx hTarget
+      have hRawData :
+          (value.toByteArray.write 0 target.memory
+              (range.word slot).toNat 32).data[idx]'(by
+                simpa [ByteArray.size] using hWrittenIdx) =
+            target.memory.data[idx]'(by
+              simpa [ByteArray.size] using hTarget) := by
+        simpa [ByteArray.getElem_eq_data_getElem] using hRaw
+      have hMstoreData :
+          (target.mstore (range.word slot) value).memory.data[idx]'(by
+              simpa [ByteArray.size] using hTargetAfter) =
+            target.memory.data[idx]'(by
+              simpa [ByteArray.size] using hTarget) := by
+        simpa [EvmYul.MachineState.mstore,
+          EvmYul.MachineState.writeWord, EvmYul.writeBytes] using hRawData
+      simpa [ByteArray.getElem_eq_data_getElem] using hMstoreData
+    exact hWriteByte.trans
+      (hRel.byte_eq_outside idx hDisjoint hTarget hSource)
+
+theorem mstore_target_scratch_slot_of_ready?
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hReady : range.ready? target = true)
+    (hSlot : slot < range.words) :
+    MemoryByteEqOutsideScratch range source
+      (target.mstore (range.word slot) value) :=
+  mstore_target_scratch_slot hSpec hWordBytes hRel
+    (ScratchRange.ready?_sound hReady) hSlot
+
+theorem mload_after_mstore_target_scratch_slot
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hReady : ScratchRegionReady target range.base range.words)
+    (hSlot : slot < range.words) :
+    ((target.mstore (range.word slot) value).mload
+        (range.word slot)).1 =
+      value ∧
+      MemoryByteEqOutsideScratch range source
+        ((target.mstore (range.word slot) value).mload
+          (range.word slot)).2 := by
+  constructor
+  · exact ScratchRegionReady.mload_mstore_range_slot_value
+      hSpec hWordBytes hReady hSlot
+  · have hStoreRel :
+        MemoryByteEqOutsideScratch range source
+          (target.mstore (range.word slot) value) :=
+      mstore_target_scratch_slot hSpec hWordBytes hRel hReady hSlot
+    have hStoreReady :
+        ScratchRegionReady
+          (target.mstore (range.word slot) value)
+          range.base range.words := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.mstore_slot hSpec hWordBytes hReady hSlot
+    have hReserved :
+        ScratchWordReserved
+          (target.mstore (range.word slot) value)
+          (range.word slot) := by
+      simpa [ScratchRange.word_eq_scratchRegionWord] using
+        ScratchRegionReady.scratchWordReserved hStoreReady hSlot
+    rw [mload_machine_eq hReserved]
+    exact hStoreRel
+
+theorem mload_after_mstore_target_scratch_slot_of_ready?
+    (hSpec : ZeroPaddingSpec)
+    (hWordBytes : WordByteEncodingSpec)
+    {range : ScratchRange}
+    {source target : EvmYul.MachineState}
+    {slot : Nat} {value : Word}
+    (hRel : MemoryByteEqOutsideScratch range source target)
+    (hReady : range.ready? target = true)
+    (hSlot : slot < range.words) :
+    ((target.mstore (range.word slot) value).mload
+        (range.word slot)).1 =
+      value ∧
+      MemoryByteEqOutsideScratch range source
+        ((target.mstore (range.word slot) value).mload
+          (range.word slot)).2 :=
+  mload_after_mstore_target_scratch_slot hSpec hWordBytes hRel
+    (ScratchRange.ready?_sound hReady) hSlot
+
+end MemoryByteEqOutsideScratch
+
+theorem mstore_scratch_reserved {machine : EvmYul.MachineState}
+    {offset value : Word}
+    (hScratch : ScratchWordReserved machine offset) :
+    ScratchWordReserved (machine.mstore offset value) offset := by
+  unfold ScratchWordReserved
+  rw [mstore_activeWords hScratch]
+  exact hScratch
+
+theorem mstore_restore_loaded_machine_eq
+    {machine : EvmYul.MachineState} {offset value : Word}
+    (hScratch : ScratchWordReserved machine offset)
+    (hRestore :
+      ScratchWordOverwriteRestoreObligation machine offset) :
+    (machine.mstore offset value).mstore offset (machine.mload offset).1 =
+      machine := by
+  have hWrite : (machine.mstore offset value).writeWord offset
+      (machine.lookupMemory offset) = machine :=
+    hRestore value
+  rw [show (machine.mload offset).1 = machine.lookupMemory offset by
+    simp [EvmYul.MachineState.mload]]
+  change ({ (machine.mstore offset value).writeWord offset
+        (machine.lookupMemory offset) with
+      activeWords :=
+        EvmYul.UInt256.ofNat
+          (EvmYul.MachineState.M
+            ((machine.mstore offset value).writeWord offset
+              (machine.lookupMemory offset)).activeWords.toNat
+            offset.toNat 32) } : EvmYul.MachineState) = machine
+  rw [hWrite]
+  cases machine
+  simp [ScratchWordReserved] at hScratch ⊢
+  exact hScratch
+
+theorem mstore_restore_loaded_machine_eq_of_memoryRestore
+    {machine : EvmYul.MachineState} {offset value : Word}
+    (hScratch : ScratchWordReserved machine offset)
+    (hMemory : ScratchWordMemoryRestoreObligation machine offset) :
+    (machine.mstore offset value).mstore offset (machine.mload offset).1 =
+      machine :=
+  mstore_restore_loaded_machine_eq hScratch
+    (overwriteRestore_of_memoryRestore hScratch hMemory)
+
+theorem mstore_restore_loaded_evm_shared_eq
+    {state : EVMState} {offset value : Word}
+    (hScratch : ScratchWordReserved state.toMachineState offset)
+    (hRestore :
+      ScratchWordOverwriteRestoreObligation state.toMachineState offset) :
+    ({ state with
+        toMachineState :=
+          (state.toMachineState.mstore offset value).mstore offset
+            (state.toMachineState.mload offset).1 } :
+      EVMState).toSharedState = state.toSharedState := by
+  rw [mstore_restore_loaded_machine_eq hScratch hRestore]
+
+theorem mstore_restore_loaded_evm_shared_eq_of_memoryRestore
+    {state : EVMState} {offset value : Word}
+    (hScratch : ScratchWordReserved state.toMachineState offset)
+    (hMemory :
+      ScratchWordMemoryRestoreObligation state.toMachineState offset) :
+    ({ state with
+        toMachineState :=
+          (state.toMachineState.mstore offset value).mstore offset
+            (state.toMachineState.mload offset).1 } :
+      EVMState).toSharedState = state.toSharedState := by
+  rw [mstore_restore_loaded_machine_eq_of_memoryRestore hScratch hMemory]
+
+namespace ScratchRegionReady
+
+theorem slot_mstore_restore_loaded_machine_eq
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {machine : EvmYul.MachineState} {base count slot : Nat}
+    {value : Word}
+    (hReady : ScratchRegionReady machine base count)
+    (hSlot : slot < count) :
+    (machine.mstore (scratchRegionWord base slot) value).mstore
+        (scratchRegionWord base slot)
+        (machine.mload (scratchRegionWord base slot)).1 =
+      machine :=
+  mstore_restore_loaded_machine_eq
+    (scratchWordReserved hReady hSlot)
+    (scratchWordOverwriteRestore hSpec hEncoding hReady hSlot)
+
+theorem slot_mstore_restore_loaded_evm_shared_eq
+    (hSpec : ZeroPaddingSpec)
+    (hEncoding : WordByteEncodingModelSpec)
+    {state : EVMState} {base count slot : Nat} {value : Word}
+    (hReady : ScratchRegionReady state.toMachineState base count)
+    (hSlot : slot < count) :
+    ({ state with
+        toMachineState :=
+          (state.toMachineState.mstore
+              (scratchRegionWord base slot) value).mstore
+            (scratchRegionWord base slot)
+            (state.toMachineState.mload (scratchRegionWord base slot)).1 } :
+      EVMState).toSharedState = state.toSharedState :=
+  mstore_restore_loaded_evm_shared_eq
+    (scratchWordReserved hReady hSlot)
+    (scratchWordOverwriteRestore hSpec hEncoding hReady hSlot)
+
+end ScratchRegionReady
+
+end SpillScratch
+
 theorem insert {layout : List Name} {source : Source.State}
     {target : RunState} {name : Name} {value : Word}
     (hFresh : name ∉ layout)
@@ -457,6 +3673,28 @@ theorem insert {layout : List Name} {source : Source.State}
   rcases hRel with ⟨hShared, hStack⟩
   exact ⟨hShared,
     StackStoreRel.cons_insert hFresh hStack⟩
+
+theorem promoteAt {layout : List Name} {source : Source.State}
+    {target promotedTarget : RunState} {name : Name} {value : Word}
+    {idx : Nat}
+    (hName : layout[idx]? = some name)
+    (hStackAt : target.evm.stack[idx]? = some value)
+    (hStore : source.vars name = some value)
+    (hShared :
+      promotedTarget.evm.toSharedState = target.evm.toSharedState)
+    (hStack :
+      promotedTarget.evm.stack =
+        value :: target.evm.stack.take idx ++
+          target.evm.stack.drop (idx + 1))
+    (hRel : StateRel layout source target) :
+    StateRel (name :: layout.take idx ++ layout.drop (idx + 1)) source
+      promotedTarget := by
+  rcases hRel with ⟨hSourceShared, hStackRel⟩
+  constructor
+  · rw [hShared]
+    exact hSourceShared
+  · rw [hStack]
+    exact StackStoreRel.promoteAt hName hStackAt hStore hStackRel
 
 theorem restrictTo_suffix {pre scope : List Name} {source : Source.State}
     {target cleaned : RunState}
@@ -1695,8 +4933,12 @@ mutual
               ⟨hOwned, hLexical.2⟩⟩
     | assignTop name =>
         simp [Source.Stmt.SourceOwned] at hOwned
-    | assignTopWithOffset offset name =>
-        simp [Source.Stmt.SourceOwned] at hOwned
+      | assignTopWithOffset offset name =>
+          simp [Source.Stmt.SourceOwned] at hOwned
+      | promoteName name =>
+          simp [Source.Stmt.SourceOwned] at hOwned
+      | cleanupTo targetLayout =>
+          simp [Source.Stmt.SourceOwned] at hOwned
     | block body =>
         change Source.Block.SourceOwned body at hOwned
         change Lexical.BlockScoped env body at hLexical
@@ -1885,9 +5127,11 @@ def Holds : Stmt → Prop
   | .cont => True
   | .terminal _kind => True
   | .terminalArgs _kind _args => True
-  | .exprs _exprs => False
-  | .assignTop _name => False
-  | .assignTopWithOffset _offset _name => False
+    | .exprs _exprs => False
+    | .assignTop _name => False
+    | .assignTopWithOffset _offset _name => False
+    | .promoteName _name => False
+    | .cleanupTo _targetLayout => False
   | .block _body => False
   | .if_ _cond _body => False
   | .switch _scrutinee _cases _defaultBody => False
@@ -1941,9 +5185,11 @@ mutual
     | .expr expr => AtomicLowerable env (.expr expr)
     | .exprs _exprs => False
     | .let_ name value => AtomicLowerable env (.let_ name value)
-    | .assign name value => AtomicLowerable env (.assign name value)
-    | .assignTop _name => False
-    | .assignTopWithOffset _offset _name => False
+      | .assign name value => AtomicLowerable env (.assign name value)
+      | .assignTop _name => False
+      | .assignTopWithOffset _offset _name => False
+      | .promoteName _name => False
+      | .cleanupTo _targetLayout => False
     | .block body => BlockLowerable env body
     | .if_ cond body =>
         Scope.ExprScoped env cond ∧ Access.ExprBound env 0 cond ∧
@@ -2020,8 +5266,12 @@ mutual
         exact hLower.2.1
     | assignTop name =>
         cases hLower
-    | assignTopWithOffset offset name =>
-        cases hLower
+      | assignTopWithOffset offset name =>
+          cases hLower
+      | promoteName name =>
+          cases hLower
+      | cleanupTo targetLayout =>
+          cases hLower
     | block body =>
         exact blockLowerable_scoped hLower
     | if_ cond body =>
@@ -2718,6 +5968,83 @@ theorem stackOp_swap?_step_eq_swap {n : Nat}
   rcases hCases with
     h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h <;>
     subst n <;> refine ⟨_, rfl, rfl⟩
+
+theorem structuredCode_run_append (left right : Structured.Code)
+    (state : EVMState) :
+    Structured.Code.run (left ++ right) state =
+      (do
+        let state' ← Structured.Code.run left state
+        Structured.Code.run right state') := by
+  induction left generalizing state with
+  | nil =>
+      rfl
+  | cons instr rest ih =>
+      simp [Structured.Code.run, ih]
+
+theorem swapRestoreUpTo_run_exists (state : EVMState) :
+    ∀ {front suffix : List Word} {token : Word},
+      front.length ≤ 16 →
+        ∃ code final,
+          Locals.Ctx.swapRestoreUpTo? front.length = some code ∧
+          Structured.Code.run code
+              { state with stack := front ++ [token] ++ suffix } =
+            .ok final ∧
+          final.stack = token :: front ++ suffix ∧
+          final.toSharedState = state.toSharedState := by
+  intro front
+  induction front using List.reverseRecOn generalizing state with
+  | nil =>
+      intro suffix token _hBound
+      refine ⟨[], { state with stack := token :: suffix }, ?_, ?_, ?_, ?_⟩
+      · rfl
+      · simp [Structured.Code.run]
+      · rfl
+      · rfl
+  | append_singleton front last ih =>
+      intro suffix token hBound
+      have hSwapBound : front.length + 1 ≤ 16 := by
+        simpa [List.length_append, Nat.add_comm] using hBound
+      have hFrontBound : front.length ≤ 16 := by omega
+      rcases ih (state := state)
+          (suffix := token :: suffix) (token := last) hFrontBound with
+        ⟨restore, mid, hRestoreCode, hRestoreRun, hMidStack,
+          hMidShared⟩
+      rcases
+          stackOp_swap?_step_eq_swap
+            (n := front.length + 1) (by omega) hSwapBound mid with
+        ⟨swapOp, hSwapOp, hSwapStep⟩
+      let final :=
+        mid.replaceStackAndIncrPC (token :: front ++ [last] ++ suffix)
+      have hMidRecord :
+          { mid with stack := last :: front ++ [token] ++ suffix } = mid := by
+        have hStack :
+            last :: front ++ [token] ++ suffix = mid.stack := by
+          rw [hMidStack]
+          simp [List.append_assoc]
+        rw [hStack]
+      have hSwapRun :
+          Structured.BasicInstr.step (Structured.BasicInstr.op swapOp) mid =
+            .ok final := by
+        rw [Structured.BasicInstr.step, hSwapStep]
+        rw [← hMidRecord]
+        simpa [final, List.append_assoc] using
+          Structured.Preservation.StackShuffle.swap_snoc
+            (state := mid) (front := front) (suffix := suffix)
+            (top := last) (last := token)
+      refine ⟨restore ++ [Structured.BasicInstr.op swapOp], final, ?_,
+        ?_, ?_, ?_⟩
+      · simp [Locals.Ctx.swapRestoreUpTo?, hRestoreCode, hSwapOp]
+      · rw [structuredCode_run_append]
+        have hRestoreRun' :
+            Structured.Code.run restore
+                { state with stack := front ++ last :: token :: suffix } =
+              .ok mid := by
+          simpa [List.append_assoc] using hRestoreRun
+        simp [hRestoreRun', Structured.Code.run, hSwapRun]
+      · simp [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC]
+      · simpa [final, EvmYul.EVM.State.replaceStackAndIncrPC,
+          EvmYul.EVM.State.incrPC] using hMidShared
 
 theorem evm_swap_assign_get? {state : EVMState}
     {locals : EvmYul.Stack Word} {idx : Nat} {old value : Word}
@@ -3584,8 +6911,12 @@ theorem stmtLowerable_regular_handlerScopesEq
               exact HandlerScopesEq.refl sourceCtx
   | assignTop name =>
       cases hLower
-  | assignTopWithOffset offset name =>
-      cases hLower
+    | assignTopWithOffset offset name =>
+        cases hLower
+    | promoteName name =>
+        cases hLower
+    | cleanupTo targetLayout =>
+        cases hLower
   | block body =>
       cases hScoped : Source.Block.runScoped prim program sourceCtx body fuel
           source with
@@ -4702,8 +8033,12 @@ theorem atomic_from_scoped_source_run {prim : Source.PrimitiveSemantics}
           hRel hSourceRun
   | assignTop name =>
       cases hAtomic
-  | assignTopWithOffset offset name =>
-      cases hAtomic
+    | assignTopWithOffset offset name =>
+        cases hAtomic
+    | promoteName name =>
+        cases hAtomic
+    | cleanupTo targetLayout =>
+        cases hAtomic
   | block body =>
       cases hAtomic
   | if_ cond body =>
@@ -5997,8 +9332,12 @@ theorem atomic_from_scoped_source_run {prim : Source.PrimitiveSemantics}
           hRel hSourceRun
   | assignTop name =>
       cases hAtomic
-  | assignTopWithOffset offset name =>
-      cases hAtomic
+    | assignTopWithOffset offset name =>
+        cases hAtomic
+    | promoteName name =>
+        cases hAtomic
+    | cleanupTo targetLayout =>
+        cases hAtomic
   | block body =>
       cases hAtomic
   | if_ cond body =>
@@ -6104,8 +9443,12 @@ theorem atomic_regular_handlerScopesEq {prim : Source.PrimitiveSemantics}
               exact HandlerScopesEq.refl sourceCtx
   | assignTop name =>
       cases hAtomic
-  | assignTopWithOffset offset name =>
-      cases hAtomic
+    | assignTopWithOffset offset name =>
+        cases hAtomic
+    | promoteName name =>
+        cases hAtomic
+    | cleanupTo targetLayout =>
+        cases hAtomic
   | block body =>
       cases hAtomic
   | if_ cond body =>
@@ -7999,6 +11342,10 @@ mutual
         cases hLower
     | assignTopWithOffset offset name =>
         cases hLower
+    | promoteName name =>
+        cases hLower
+    | cleanupTo targetLayout =>
+        cases hLower
     | block body =>
         cases hSourceScoped :
             Source.Block.runScoped prim program sourceCtx body fuel source with
@@ -8610,6 +11957,42 @@ theorem compile_preserves_of_compileAccepted
     ⟨targetFuel, targetOutcome, hTargetRun, directOutcome, hSourceRel,
       hDirectRel⟩
 
+theorem compile_preserves_of_compileAccepted_endPc
+    {prim : PrimitiveSemantics}
+    (hPrim : SourceLowering.PrimitiveSound prim)
+    {program : Locals.Program} {lower : Expressions.Program}
+    {asm : Assembly.Program} {fuel : Nat} {initial : EVMState}
+    {sourceOutcome : Outcome}
+    (hAccepted : CompileAccepted program)
+    (hLower : program.toExpressions? = some lower)
+    (hCompile :
+      Structured.Preservation.ProcedurePreservation.compileChecked?
+        lower.toStructured = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceRun :
+      Program.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases
+      run_toDirect_exists (prim := prim) hPrim (program := program)
+        (fuel := fuel) (initial := initial) (sourceOutcome := sourceOutcome)
+        hAccepted hInitialStack hSourceRun with
+    ⟨directOutcome, hDirectRun, hSourceRel⟩
+  rcases
+      Locals.Program.compile_preserves_endPc
+        (program := program) (lower := lower) (asm := asm)
+        (fuel := fuel) (initial := initial) (outcome := directOutcome)
+        hLower hCompile hInitialPc
+        (by simpa [Locals.Program.run] using hDirectRun) with
+    ⟨targetFuel, targetOutcome, hTargetRun, hDirectRel, hEndPc⟩
+  exact
+    ⟨targetFuel, targetOutcome, hTargetRun, ⟨directOutcome, hSourceRel,
+      hDirectRel⟩, hEndPc⟩
+
 theorem compile_preserves_checked_of_compileAccepted
     {prim : PrimitiveSemantics}
     (hPrim : SourceLowering.PrimitiveSound prim)
@@ -8629,6 +12012,28 @@ theorem compile_preserves_checked_of_compileAccepted
     ⟨lower, hLower, hStructuredCompile⟩
   exact
     compile_preserves_of_compileAccepted hPrim hAccepted hLower
+      hStructuredCompile hInitialPc hInitialStack hSourceRun
+
+theorem compile_preserves_checked_of_compileAccepted_endPc
+    {prim : PrimitiveSemantics}
+    (hPrim : SourceLowering.PrimitiveSound prim)
+    {program : Locals.Program} {asm : Assembly.Program} {fuel : Nat}
+    {initial : EVMState} {sourceOutcome : Outcome}
+    (hCompile : compileChecked? program = some asm)
+    (hAccepted : CompileAccepted program)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = [])
+    (hSourceRun :
+      Program.run prim fuel program initial = .ok sourceOutcome) :
+    ∃ targetFuel targetOutcome,
+      Assembly.Source.runNResult asm targetFuel initial =
+        .ok targetOutcome ∧
+      WholeProgramOutcomeRel sourceOutcome targetOutcome ∧
+      Structured.Preservation.TargetOutcomeEndPc asm targetOutcome := by
+  rcases compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hStructuredCompile⟩
+  exact
+    compile_preserves_of_compileAccepted_endPc hPrim hAccepted hLower
       hStructuredCompile hInitialPc hInitialStack hSourceRun
 
 end Program

@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 07:57 CEST.
+Last updated: 2026-06-03 12:02 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -116,6 +116,84 @@ Execution order:
    `openRunNResult_structured_callSite_body_continue` now consumes the actual
    emitted call-site segment plus procedure segment and reaches that generated
    body segment in one open replay.
+   The high-level function-call block splitter now also packages the exact
+   generated call-site segment:
+   `codeSegment_functions_call_cons_callSite_parts_split_of_compileOpen`
+   combines the actual `Functions.Stmt.call` compiler split, structured proc
+   lookup, and evaluated argument-count equality to expose `evalArgs`, emitted
+   `callSiteCode`, returned-assignment, and tail segments with their PC
+   handoff facts.
+   Source function lookup now has a deterministic compiler-artifact bridge too:
+   `functionsProgram_toExpressions?_structured_proc_lookup` carries
+   `Functions.FunList.find?` through `Functions.Program.toExpressions?`,
+   locals proc lowering, and expressions-to-structured lowering to produce the
+   matching `Structured.ProcList.lookup?` fact for the emitted structured
+   program. Its field companion
+   `functionsProgram_toExpressions?_structured_proc_lookup_parts` additionally
+   exposes the emitted proc `name`, `argc`, and `retc` equalities needed to turn
+   source argument/return lengths into generated call-site/proc wrapper
+   premises. The combined splitter
+   `codeSegment_functions_call_cons_callSite_parts_split_of_source_lookup` now
+   consumes source function lookup, deterministic program lowering, structured
+   context proc equality, evaluated argument length, and the actual call-head
+   compile proof to expose the emitted proc facts plus eval-args/call-site/
+   returned-assignment/tail segments in one package.
+   The argument-to-call-source boundary is now packaged too:
+   `sourceDirect_prefixedStateRel_of_stackPrefixRel` turns an argument replay
+   `StackPrefixRel` into the direct-source prefixed call-source relation,
+   `sourceDirect_stackPrefixRel_callSource_parts_withShared` exposes the
+   argument split plus post-call shared-state caller base, and
+   `compilerOpenFunctionsArgList_callSource_parts_withShared_of_compileOpen`
+   consumes actual emitted argument-evaluation code to produce the no-hidden
+   call-source `Frame.StateRel`, split arguments, caller base, and fallthrough
+   PC facts for the next call-head composition.
+   The regular callee-body return side now has its first package too:
+   `FunctionsBlockCompiledOpenResultRel.source_regular_running_return_cleanup_parts`
+   extracts the recursive body `StateRel`, builds the source/direct
+   `ReturnValuesRel` from the source return lookup, and exposes the direct
+   generated `pushReturns` plus `runCleanupToPreserving` run and resulting
+   `ReturnedStackRel` needed by the procedure-body return cleanup replay.
+   The compiler side of that cleanup boundary is now split:
+   `localsBlock_compileToPreserving_parts` exposes `compileToPreserving` as
+   raw `compileOpen` followed by `cleanupToPreserving?`, and
+   `codeSegment_localsBlock_compileToPreserving_split` splits the emitted
+   body segment into raw body code followed by the generated preserving-cleanup
+   code with exact PC handoff facts.
+   The cleanup replay atom is now checked as well:
+   `locals_runCleanupToPreserving_runState_of_cleanupToPreserving` and
+   `structuredCode_run_of_runState` expose the direct cleanup run as the
+   underlying structured-code EVM run, while
+   `openRunNResult_source_code_no_call_running_continue`,
+   `openRunNResult_codeSegment_no_call_running_continue`, and
+   `openRunNResult_cleanupToPreserving_runState_continue` replay generated
+   no-CALL code/cleanup segments locally in the source-open assembly runner
+   without requiring the whole surrounding program to be no-CALL.
+   The hidden-return-frame foundation for the frame-relative cleanup replay is
+   now checked too: generated `PUSH`, `DUP`, `SWAP`, `swapRestoreUpTo?`, and
+   `cleanupToPreserving?` code is `Code.FrameSafe`, generated `DUP`/`SWAP` and
+   recursive preserving-cleanup segments are now `Code.RunnerSafe`, and no-CALL
+   structured-code runs expose their segment fallthrough PC. The frame-relative
+   local-open replay bridge is now checked too:
+   `openRunNResult_source_code_no_call_relAt_running_continue` replays
+   runner-safe no-CALL code from a `RelAt` target with an arbitrary open tail,
+   `openRunNResult_source_code_no_call_frameStateRel_running_continue` lifts
+   that to materialized hidden return frames, and
+   `openRunNResult_cleanupToPreserving_frameStateRel_continue` specializes it
+   to generated preserving cleanup. The next adjacent composition is to combine
+   the recursive regular callee-body result, generated `pushReturns`, the
+   direct source return cleanup parts, and this frame-relative cleanup replay
+   into the procedure-call return continuation. The first `pushReturns` bridge
+   is now checked: `functionsDirect_pushReturns_runState_of_returnExprs_compileCode`
+   exposes successful direct `pushReturns` as a structured-code run for the
+   compiled `returnExprs` code, and
+   `functionsLower_pushReturns_compileOpen_parts` exposes the emitted
+   `Lower.pushReturns` shape. The generated `returnExprs` DUP-only code now
+   also has checked `FrameSafe`, `RunnerSafe`, and no-CALL facts:
+   `structuredCode_frameSafe_returnExprs_compileCode`,
+   `structuredCode_runnerSafe_returnExprs_compileCode`, and
+   `structuredCode_noCall_returnExprs_compileCode`. The next missing atom is
+   the local-open replay wrapper for generated `pushReturns` under
+   `Frame.StateRel`, then composition of pushReturns plus cleanup.
    On the
    return side, the proof must stay instruction-/segment-local rather than use a
    whole-program no-CALL adapter, because the surrounding assembly can contain
@@ -163,8 +241,98 @@ Execution order:
    `FunctionsBlockCompiledOpenResultRel.source_regular_running_compiledOutcomeRel`
    and `.source_leave_running_compiledOutcomeRel` now extract the required
    concrete running target body outcome from the recursive function-block open
-   result relation. The next procedure-call step is to run the caller-side
-   returned assignment and syntactic tail after return dispatch. The
+   result relation. The caller-side returned-assignment replay is now checked
+   for actual compiler output too:
+   `compilerOpenAssignTopWithOffset_stackPrefix_openRunNResult_continue_fallthrough`
+   handles the offset `SWAP`/`POP` atom that leaves later returned values on top
+   of the stack,
+   `compilerOpenFunctionsAssignReturnedTopsRev_stackPrefix_openRunNResult_continue_fallthrough_of_compileOpen`
+   inducts over the generated reverse assignment list, and
+   `compilerOpenFunctionsAssignReturnedTops_stackPrefix_openRunNResult_continue_fallthrough_of_compileOpen`
+   wraps the real `Functions.Lower.assignReturnedTops targets` compiler output.
+   The same generated assignment replay is now checked for hidden outer-frame
+   suffixes under the live locals stack via `StackPrefixSuffixRel`,
+   `compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough`,
+   `compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen`,
+   and
+   `compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffix_openRunNResult_continue_fallthrough_of_compileOpen`.
+   This has now been lifted to the structured-frame observation boundary via
+   `StackPrefixSuffixErasedRel`,
+   `StackPrefixSuffixErasedRel.of_frameStateRel_stateRel`,
+   `compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen`,
+   and
+   `compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen`.
+   Return-dispatch `Frame.StateRel` states now feed this assignment replay
+   directly through
+   `compilerOpenFunctionsAssignReturnedTops_frameStateRel_openRunNResult_continue_fallthrough_of_compileOpen`,
+   exposing the post-assignment hidden suffix for the syntactic tail.
+   The return-label handoff is also checked:
+   `compilerOpenFunctionsAssignReturnedTops_returnLabel_frameStateRel_openRunNResult_continue_fallthrough_of_compileOpen`
+   replays the generated return label, then the generated returned-assignment
+   block, with arbitrary open tail continuation.
+   The attached returned-frame variant is now checked too:
+   `StackPrefixSuffixErasedRel.of_attached_returnedFrameStateRel_stateRel`
+   extracts the caller assignment prefix from a return-dispatch
+   `Frame.StateRel` over `returned.withEVM { bodyState.evm with stack := stack }`,
+   and
+   `compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_openRunNResult_continue_fallthrough_of_compileOpen`
+   replays the generated return label, generated returned-assignment block, and
+   arbitrary open tail continuation from that attached-frame boundary. These
+   attached-frame adapters now deliberately separate the pre-call caller
+   store/layout state from the post-callee shared state, using an explicit
+   caller-vars equality instead of requiring exact `StateRel` across a
+   shared-state-changing callee. The
+   actual emitted call-site handoff is checked too:
+   `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_continue_of_compileOpen`
+   derives the return-label PC from `ExactLabels`, consumes the emitted
+   `callSiteCode` segment plus generated assignment segment, and exposes the
+   deterministic label-plus-assignment fuel `2 * targets.length + 1`. This
+   avoids forcing exact `toSharedState` equality and instead uses the gas-erased
+   frame relation plus `ReturnedStackRel`/`attachReturns?`.
+   The first consuming call-site/body wrappers are now checked:
+   `openRunNResult_callSite_body_regular_then_return_assign_continue` and
+   `openRunNResult_callSite_body_leave_then_return_assign_continue` compose
+   recursive body replay, exit dispatch, returned assignment, and an arbitrary
+   open syntactic tail while preserving that pre-call/post-callee state split
+   and now also distinguish the argument-bearing `callSource` used for
+   `splitArgs?`/prologue from the `callerBase` stack used by returned-value
+   assignment. The next procedure-call step is feeding those wrappers from
+   source call-head inversion, using the body-result facts to supply the
+   returned values, argument split, caller base, caller vars-equality, and frame
+   attachment premises. The first small source-head input helper is now checked:
+   `sourceDirect_prefixedStateRel_splitArgs_callerBase` extracts the
+   `splitArgs?` fact, caller-base `StateRel`, and exact caller stack equation
+   from a prefixed argument-stack relation. The helper
+   `sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared` now extracts
+   the same call-site split while rebuilding the caller-base target at the
+   post-call shared state, so returned assignment can consume
+   `sourceAfterArgs.withShared sharedAfterCall` without replaying this plumbing.
+   The helper
+   `sourceDirect_returnedStackRel_of_shared_eq` now also casts returned-stack
+   relations from the callee body source state to the caller post-call source
+   state when their shared state is equal, preserving the needed caller-vars
+   split without forcing an exact pre-call `StateRel`. The follow-up helper
+   `sourceDirect_returnedStackRel_attach_parts` now extracts the generated
+   return-attachment stack, returned-frame tail, and return-count stack length
+   from `ReturnedStackRel`, reducing the remaining procedure-call wrapper
+   obligations to source lookup length and frame identity facts.
+   `sourceDirect_returnedStackRel_callSite_parts` packages that last local
+   handoff for call sites: given returned-stack evidence plus values length,
+   frame retc, and caller-stack alignment, it produces the exact attach,
+   returned-tail, and proc-retc stack facts required by the checked
+   call-site/body/return-assignment wrappers. The source-tail side is now
+   packaged too: `sourceOpen_callPostState_withShared_parts` derives the
+   caller-vars equality, assignment over the post-call `withShared` source, and
+   tail run over `(sourceAfterArgs.withShared sharedAfterCall).withVars
+   returnStore` from the source call inversion's raw assignment/tail state.
+   The body-result extractors now preserve the direct-source facts needed for
+   that bridge:
+   `FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_compiledOutcomeRel`
+   exposes the regular body `StateRel`, and
+   `FunctionsBlockCompiledOpenResultRel.source_leave_running_returnedStackRel_compiledOutcomeRel`
+   exposes leave return values plus `ReturnedStackRel`. Do not force this
+   handoff through exact `toSharedState` equality, because the structured
+   procedure frame relation deliberately erases gas. The
    compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
@@ -828,10 +996,23 @@ Finite-trace correction:
   `CALLOpenSeqKontPathRecursiveAt`, the matching frontier, and the
   frontiers-to-recursive adapter are available for generated-control internal
   mode paths.
-  Current audit: productive `For` heads are not yet wired into the canonical
-  one-head open CALL frontier. The attempted exact branch referenced a missing
-  open-loop helper and has been backed out; fuel-4 loop out-of-fuel remains a
-  known boundary to re-express when the productive loop helper is rebuilt.
+  Current audit: productive `For` heads are now wired into the canonical
+  one-head open CALL frontier and the all-bounds ordinary/typed CALL frontier.
+  The live route is
+  `checkedOpenSeqPathLoweringSoundWhenFreshNamesAtCompileFuelHiddenCtx_cons_frontier_structural_single_expr_dispatch_of_programCALL_recursive`,
+  the canonical terminal/frontier wrappers, and
+  `callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical_of_programCALL`,
+  consuming the checked lower Functions live-layout recursive loop-open
+  callback family through `loopOpenBlock_succ_of_callback_families` and the
+  paired all-fuel constructors `allFuel_callback_families`,
+  `anyEntry_allFuel`, `loopOpenBlock_allFuel`, and `openBlock_allFuel`. The
+  older private structural dispatcher still carries an `hOther` parameter, but
+  it is no longer the canonical CALL route. The remaining work is below the
+  source-to-compiler-open dispatcher boundary, at
+  `FunctionsBlockToAssemblySourceOpenSoundAt`: replay the lowered
+  function-block execution through assembly source-open semantics, starting
+  with procedure-call return assignment/tail replay and then the remaining
+  non-regular/control heads.
   The generated loop's internal body `layout` callbacks are now retargeted to
   the open-kont done relation, with selected regular/`break`/`continue` body
   results converted back to ordinary layout relations only at branch use sites.
@@ -862,9 +1043,7 @@ Finite-trace correction:
   blocks.  The same open checkpoint invariant discharges post and recursive
   no-`break`/no-`continue` selected paths from scoping, using empty-layout
   containment because checkpoint legality is independent of store-domain
-  exactness.  The remaining hard piece is constructing the raw recursive
-  `runForLoop` path callback from recursive loop preservation; the older closed
-  branch contracts still feed the
+  exactness. The older closed branch contracts still feed the
   closed/hidden-scope route and should not be treated as CALL-spine coverage.
   The source singleton `execSeq` normalization for a `.For` head is checked,
   so the recursive sequence proof can now be aligned with the raw loop
@@ -974,19 +1153,24 @@ Checked base we can rely on:
   successor post-block fuel from `CALLOpenSeqPathRecursiveAt`, parameterized by
   the selected post outcome layout, with explicit support for post terminal/
   `leave` exits and the imported Yul `.Block` cleanup bridge.
+- [x] Derive the Functions live-layout loop-open successor and paired all-fuel
+  callback family: `loopOpenBlock_succ_of_callback_families`,
+  `allFuel_callback_families`, `anyEntry_allFuel`, `loopOpenBlock_allFuel`, and
+  `openBlock_allFuel` now construct recursive loop callbacks by source-fuel
+  induction instead of exposing them as a public premise.
 - [ ] Remove or replace the residual generated-loop open contract bundle after
   the checked constructor derives exact-domain, no-break/no-continue, and
   raw-recursive-loop obligations from CALL-safe/scoped loop facts plus
   recursive seq/kont frontiers.
-- [ ] Wire productive `.For` heads into the open finite-path dispatcher. The
-  full-fuel-4 condition out-of-fuel edge is now handled in the checked fuel
-  frontier, so this item is down to the successor recursive loop case.
-- [ ] Build the successor/all-bounds finite-path frontier from the canonical
-  one-head loop-aware dispatcher. First remove the remaining live `hOther`
-  fallback by covering or rejecting every residual statement-head case, then
-  apply the existing finite-path sequence induction while threading both
-  `CALLOpenSeqPathRecursiveAt` and `CALLOpenSeqKontPathRecursiveAt` from
-  smaller frontier bounds.
+- [x] Wire productive `.For` heads into the open finite-path dispatcher. The
+  checked one-head dispatcher now consumes the generated-loop helper through the
+  all-fuel loop callback family; the residual `hOther` fallback is only in an
+  older private structural scaffold, not the canonical CALL route.
+- [x] Build the successor/all-bounds finite-path frontier from the canonical
+  one-head loop-aware dispatcher. Checked by
+  `callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical_of_programCALL`,
+  which produces ordinary and typed frontiers by source-fuel induction while
+  threading sequence, typed-kont, and loop recursive hypotheses.
 - [x] Source-side singleton, append-singleton, reverse-cons, and `consResult`
   open-bind equations for scheduled `YulOpen.evalArgs`.
 - [x] Target-side open append equations for generated preludes, including
@@ -7080,10 +7264,16 @@ storage scratch assumption.
 	  and the scoped public-root wrapper names.
 	  Exact frame-word note: the path-summed hidden-return headroom surface is
 	  already checked in `Functions.CallDepth.SourceFrameWordSumResourceBound` and
-	  pinned in `LayerAudit`; the remaining exactness work is to prefer that
-	  source-facing sum route through the Yul public compile gates instead of the
-	  max-frame-size-by-depth compatibility route wherever the CALL-owned bridge
-	  build permits it.
+	  still pinned in compatibility tripwires; the preferred public no-CALL Yul
+	  gas-aware roots now use the executable live no-internal-CALL compile gate
+	  plus inferred assembly stack-bound check, rather than the stale
+	  checked-compile `FrameWordSum` route.
+	  Live public-gate checkpoint: the function layer now has checked assembly
+	  preservation for the executable live-layout/no-internal-CALL compile gate,
+	  `Functions.LiveLayout.SourceTarget.Program.compileLiveNoInternalCallChecked_preserves`.
+	  This route has now been lifted through Objects/Yul/Reference and selected
+	  in `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` and
+	  `recursiveBridgeTopToGasAwareEVMNoOutOfGas`.
 - [x] Add regression examples:
   audit tripwires cover the key many-dead-locals acceptance case for the
   executable checker, plus the still-rejected genuinely deep live read without
@@ -7144,21 +7334,136 @@ storage scratch assumption.
   `ScratchRegionAllocatedNat`, `ScratchRegionWithinActiveNat`, and
   `scratchRegionWord` derive each slot's allocation, within-active bound,
   readability, memory-restore obligation, and whole-machine
-  overwrite/restore obligation via `overwriteRestore_of_regionNat`.  A future
-  spill scheduler can therefore discharge per-slot byte facts from one checked
-  region contract instead of re-proving them ad hoc.  The remaining acceptance
-  decision is whether a memory-spill route may require a source-facing
-  preallocated/within-active scratch-region premise; under the current exact
-  state theorem, it cannot soundly widen compilation for arbitrary starting
+  overwrite/restore obligation via `overwriteRestore_of_regionNat`.  That
+  surface now also has a checked contract and executable gate:
+  `ScratchRegionReady` bundles allocation, within-active, and active-word
+  no-overflow facts; `scratchRegionReady?` has sound/complete/iff lemmas; and
+  `ScratchRegionReady` exposes slot-level reservation/readability/restore
+  projections plus restored-`mstore` shared-state preservation.  `LayerAudit`
+  now pins that the executable gate rejects zero-active and active-but-unallocated
+  machines, while accepting an active one-word region with 32 allocated bytes.
+  The region contract is also stable under generated reads and writes to checked
+  slots: `ScratchRegionReady.mload_slot`/`scratchRegionReady?_mload_slot` and
+  `ScratchRegionReady.mstore_slot`/`scratchRegionReady?_mstore_slot` prove both
+  the Prop-level and executable readiness facts survive `mload` and `mstore`
+  inside the ready region.  A future spill scheduler can therefore discharge
+  per-slot byte facts from one checked region contract and keep reusing that
+  contract across multiple scratch reads/writes instead of re-proving readiness
+  ad hoc.  Ordered slot non-overlap is also checked:
+  `ScratchRegionReady.scratchWordSlotEndLeSlotStart` proves an earlier 32-byte
+  scratch slot ends before a later slot starts, giving future multi-slot spill
+  proofs the arithmetic fact needed to keep saved words independent.  The first
+  private-scratch boundary interface is now present too: `ScratchRange`,
+  `ByteDisjoint`, `ScratchRange.disjointBytes`, and `ScratchRange.ready?`
+  package the byte-range/no-touch shape recommended by the oracle while reusing
+  the existing executable readiness contract.  The first outside-scratch
+  relation skeleton, `MemoryEqOutsideScratch`, now records equal `activeWords`,
+  equal memory size, and equal `readWithPadding` observations for byte ranges
+  disjoint from the scratch range, with checked reflexivity/symmetry and
+	  `MSIZE` equality.  Disjoint source/target `MLOAD` is now checked too:
+	  `MemoryEqOutsideScratch.mload_of_disjoint` proves equal loaded words and
+	  preserves the outside-scratch relation when the 32-byte read range is
+	  byte-disjoint from scratch.  The bridge from whole-range disjointness to
+	  concrete scratch-slot disjointness is also checked:
+	  `ScratchRange.byteDisjoint_slot_of_disjointBytes` and
+	  `ScratchRange.byteDisjoint_word_slot_of_disjointBytes` show that a range
+	  disjoint from the entire scratch range is disjoint from each Nat/`Word`
+	  scratch slot.  Target-only scratch writes now preserve outside-scratch
+	  observations too: byte-array lemmas
+	  `byteArray_readWithoutPadding_write32_eq_of_byteDisjoint` and
+	  `byteArray_readWithPadding_write32_eq_of_byteDisjoint` prove a disjoint
+	  read is unchanged by a 32-byte write, and
+	  `MemoryEqOutsideScratch.mstore_target_scratch_slot`/
+	  `mstore_target_scratch_slot_of_ready?` lift that fact to `MSTORE` into a
+	  ready scratch slot on the target side.  The reload side now has checked
+	  slot-value facts as well: `word_fromByteArrayBigEndian_toByteArray`,
+	  `byteArray_readWithPadding32_write32_same`,
+	  `lookupMemory_mstore_same_of_allocated_readable`,
+	  `ScratchRegionReady.lookupMemory_mstore_range_slot_same`, and
+	  `ScratchRegionReady.mload_mstore_range_slot_value` prove that writing a
+	  word into a ready scratch slot and then reading that slot returns exactly
+	  the written word.  The ordinary-write bridge now has the right strengthened
+	  relation shape: `MemoryByteEqOutsideScratch` carries the existing
+	  outside-scratch observations plus byte equality outside the private range,
+	  projects back to `MemoryEqOutsideScratch`, and preserves both components
+	  across disjoint `MLOAD`.  This is the relation future ordinary source/target
+	  `MSTORE` preservation should target, since overlapping post-write reads need
+	  byte equality rather than only whole-range observations.  The remaining
+	  acceptance
+	  decision is whether a memory-spill route may require a source-facing
+	  preallocated/within-active scratch-region premise; under the current exact
+	  state theorem, it cannot soundly widen compilation for arbitrary starting
   machine states with no active/allocated scratch memory.  Because the existing
   Locals/Functions/Yul preservation stack threads exact
   `toSharedState` equality, switching to an observational memory relation would
-  be a deliberate cross-layer refactor rather than a local scheduler tweak.  The
+  be a deliberate cross-layer refactor rather than a local scheduler tweak.
+  A naive recursive `DUPN`-style macro that saves top stack words into memory
+  does not avoid this boundary: if it does not restore scratch bytes exactly,
+  source Yul can observe the changed memory with `MLOAD`/`MSIZE`; if it tries
+  to restore exact old scratch words, those old words need their own private
+  storage discipline rather than just the ordinary source stack.  The
   current stack-only realization is
   now named `Locals.Ctx.promoteNameStackOnly?`, and the pure layout move is
   separated as `LiveLayout.Layout.promoteNameUnbounded?`; `LayerAudit` checks
   that an 18th-slot name has a valid unbounded layout promotion while both the
   stack-only layout helper and Locals backend still reject it.
+- [x] Deep-locals spill architecture decision:
+  oracle
+  `resp_076a4060dc6ff6c8006a1fd481bf408192b65d3191ea099e5b` completed with a
+  decisive boundary: arbitrary-scale memory spilling is not compatible with
+  arbitrary initial scratch bytes plus exact final/shared-memory equality.
+  `ScratchRegionReady` proves the region is safe to touch, but every
+  overwritten arbitrary scratch word must still be remembered somewhere; using
+  memory to reduce stack depth without a private relation only moves the
+  capacity problem.  Therefore the exact public theorem remains stack-only and
+  conservative.  A known-zero/known-word scratch variant may support exact
+  restoration for explicitly restricted initial states, but it is not the
+  arbitrary-state solution.  The arbitrary-depth route is an explicit
+  private-scratch boundary: define source/target memory equality outside a
+  `ScratchRange`, prove all source memory observations and writes respect a
+  no-touch/separation predicate or are translated, extend the layout relation
+  with stack-vs-spill locations, prove spill-prefix/reload-under-top macro
+  theorems under that relation, and expose the scratch/no-touch condition
+  honestly at the public theorem boundary.
+- [x] Ask the oracle for the top-16 exact-spill boundary:
+  the requested
+  `proof_requests/top16_exact_spill_oracle.md`/oracle
+  `resp_076a4060dc6ff6c8006a1fd481bf408192b65d3191ea099e5b` supplied the
+  critique above.
+  - [ ] Build the private-scratch theorem route:
+    the next widening beyond stack-only promotion must now follow the checked
+    private-scratch route.  The initial `ScratchRange`/`ByteDisjoint`/ready-adapter
+    interface, `MemoryEqOutsideScratch` skeleton, disjoint `MLOAD`, and
+    target-side scratch `MSTORE` preservation plus ready-slot reload value facts
+    are checked.  The stronger `MemoryByteEqOutsideScratch` relation is also
+    checked through reflexivity/symmetry/projection, disjoint `MLOAD`,
+    disjoint `readWithoutPadding`/`readWithPadding` equality, and paired
+    no-expansion ordinary `MSTORE` via
+    `MemoryByteEqOutsideScratch.mstore_pair_noExpansion`, and paired expanding
+    ordinary `MSTORE` via `MemoryByteEqOutsideScratch.mstore_pair_boundedExpansion`.
+    The expanding path carries an explicit `USize` padding no-wrap premise,
+    which is required by Lean's concrete `ByteArray.write` implementation.
+    The executable byte-range no-touch checker `ByteDisjoint.check`/`ScratchRange.disjointBytes?`
+    is checked with soundness/completeness pins.  The conservative source
+    no-memory-touch checker `SourceNoMemoryTouch.program?` is also checked
+    through operation/terminal soundness pins and audit tripwires; it rejects
+    memory-reading/writing primitives instead of proving dynamic range
+    separation.  The spill-aware local-location/layout relation
+    `SpillLayout.WellFormed` and executable `SpillLayout.checked?` are checked
+    with soundness/completeness plus audit tripwires for stack bindings, scratch
+    bounds, and duplicate scratch slots.  The first compositional macro fact is
+    checked on the target-only scratch-write side:
+    `byteArray_write32_getElem_eq_of_byteDisjoint` and
+    `MemoryByteEqOutsideScratch.mstore_target_scratch_slot` show a compiler
+    write into a ready private scratch slot preserves the strengthened
+    outside-scratch byte relation.  The combined
+    `MemoryByteEqOutsideScratch.mload_after_mstore_target_scratch_slot` theorem
+    also proves that a later target-only load from that scratch slot returns
+    the stored word and leaves the strengthened relation intact.  Remaining
+    work is emitted-code spill/reload sequencing and public theorem split.
+  Until that route is fully checked, the shippable path remains conservative:
+  dead-drop, SWAP16-reachable promotion, and rejection of genuinely-live
+  deeper-than-window locals.
 
 ### Acceptance Power Ladder
 
