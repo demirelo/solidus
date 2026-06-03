@@ -4111,6 +4111,230 @@ theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthroug
       simp [Nat.add_assoc]
     simpa [hFuel] using hFull
 
+theorem compilerOpenFunctionsStmt_expr_openRunNResult_continue_fallthrough_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {expr : Functions.Expr 0}
+    {localsCtx : Locals.Ctx} {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State} {code : Structured.Code}
+    (hOwned : Locals.Source.Expr.SourceOwned expr)
+    (hSupported : LocalsExprOpenSupported expr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 expr)
+    (hCompile : Locals.Expr.compileCode localsCtx 0 expr = some code)
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run
+          prim programSource sourceCtx sourceFuel (.expr expr) compiler)
+        trace (.ok (Functions.Source.Outcome.regular compilerAfter,
+          ctxAfter))) :
+    ctxAfter = sourceCtx ∧
+      ∃ evmAfter : EvmYul.EVM.State,
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter ∧
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+        ∀ {tailTrace : OpenExternal.OpenTrace}
+          {result : Except EVMException Assembly.StepResult},
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace result →
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program
+              (code.length + tailFuel) state)
+            (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hEvalError | hEvalOk
+  · rcases hEvalError with ⟨err, _hEval, hResult⟩
+    cases hResult
+  · rcases hEvalOk with
+      ⟨evalTrace, doneTrace, evalResult, hTrace, hEval, hDone⟩
+    rcases evalResult with ⟨compilerAfterEval, valuesAfter⟩
+    cases hDone
+    subst trace
+    constructor
+    · rfl
+    · rcases
+        compilerOpenLocalsExpr_zero_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+          hPrim hOwned hSupported hAccess hCompile hCtxLayout hNoDup
+          program tailFuel segment hPc hPrefixRel hEval with
+        ⟨evmAfter, hRel, hAfterPc, hCont⟩
+      refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+      intro tailTrace result hRest
+      have hFull := hCont hRest
+      simpa [List.append_assoc] using hFull
+
+theorem compilerOpenFunctionsStmt_let_openRunNResult_continue_fallthrough_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {name : Name} {valueExpr : Functions.Expr 1}
+    {localsCtx : Locals.Ctx} {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State} {code : Structured.Code}
+    (hOwned : Locals.Source.Expr.SourceOwned valueExpr)
+    (hSupported : LocalsExprOpenSupported valueExpr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 valueExpr)
+    (hCompile : Locals.Expr.compileCode localsCtx 0 valueExpr = some code)
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hFresh : name ∉ layout)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run
+          prim programSource sourceCtx sourceFuel (.let_ name valueExpr)
+          compiler)
+        trace (.ok (Functions.Source.Outcome.regular compilerAfter,
+          ctxAfter))) :
+    ctxAfter = { sourceCtx with scope := name :: sourceCtx.scope } ∧
+      ∃ evmAfter : EvmYul.EVM.State,
+        Locals.SourceLowering.StackPrefixRel (name :: layout)
+          compilerAfter [] evmAfter ∧
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+        ∀ {tailTrace : OpenExternal.OpenTrace}
+          {result : Except EVMException Assembly.StepResult},
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace result →
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program
+              (code.length + tailFuel) state)
+            (trace ++ tailTrace) result := by
+  rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hEvalError | hEvalOk
+  · rcases hEvalError with ⟨err, _hEval, hResult⟩
+    cases hResult
+  · rcases hEvalOk with
+      ⟨evalTrace, doneTrace, evalResult, hTrace, hEval, hDone⟩
+    rcases evalResult with ⟨compilerAfterValue, value⟩
+    cases hDone
+    subst trace
+    constructor
+    · rfl
+    · rcases
+        compilerOpenLocalsExpr_evalOne_insert_openRunNResult_continue_fallthrough_of_compileCode
+          hPrim hOwned hSupported hAccess hCompile hCtxLayout hNoDup hFresh
+          program tailFuel segment hPc hPrefixRel hEval with
+        ⟨evmAfter, hRel, hAfterPc, hCont⟩
+      refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+      intro tailTrace result hRest
+      have hFull := hCont hRest
+      simpa [List.append_assoc] using hFull
+
+theorem compilerOpenFunctionsStmt_assign_openRunNResult_continue_fallthrough_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {name : Name} {valueExpr : Functions.Expr 1}
+    {localsCtx : Locals.Ctx} {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State} {valueCode : Structured.Code}
+    {idx : Nat} {swapOp : Structured.BasicOp}
+    (hOwned : Locals.Source.Expr.SourceOwned valueExpr)
+    (hSupported : LocalsExprOpenSupported valueExpr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 valueExpr)
+    (hCompile : Locals.Expr.compileCode localsCtx 0 valueExpr =
+      some valueCode)
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hName : layout[idx]? = some name)
+    (hBound : idx + 1 ≤ 16)
+    (hSwap : Locals.StackOp.swap? (idx + 1) = some swapOp)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (valueCode ++
+          [Structured.BasicInstr.op swapOp,
+            Structured.BasicInstr.op Structured.BasicOp.pop]).toAssembly)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run
+          prim programSource sourceCtx sourceFuel (.assign name valueExpr)
+          compiler)
+        trace (.ok (Functions.Source.Outcome.regular compilerAfter,
+          ctxAfter))) :
+    ctxAfter = sourceCtx ∧
+      ∃ evmAfter : EvmYul.EVM.State,
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter ∧
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+        ∀ {tailTrace : OpenExternal.OpenTrace}
+          {result : Except EVMException Assembly.StepResult},
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace result →
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program
+              ((valueCode ++
+                [Structured.BasicInstr.op swapOp,
+                  Structured.BasicInstr.op Structured.BasicOp.pop]).length +
+                tailFuel) state)
+            (trace ++ tailTrace) result := by
+  have hContains : compiler.vars.contains name = true := by
+    rcases hPrefixRel with ⟨_hShared, baseStack, _hStack, hStoreRel⟩
+    exact Locals.SourceLowering.StackStoreRel.contains_of_layout
+      hStoreRel hName
+  rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run] at hResolve
+  simp [hContains] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hEvalError | hEvalOk
+  · rcases hEvalError with ⟨err, _hEval, hResult⟩
+    cases hResult
+  · rcases hEvalOk with
+      ⟨evalTrace, doneTrace, evalResult, hTrace, hEval, hDone⟩
+    rcases evalResult with ⟨compilerAfterValue, value⟩
+    cases hDone
+    subst trace
+    constructor
+    · rfl
+    · rcases
+        compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode
+          hPrim hOwned hSupported hAccess hCompile hCtxLayout hNoDup
+          hName hBound hSwap program tailFuel segment hPc hPrefixRel
+          hEval with
+        ⟨evmAfter, hRel, hAfterPc, hCont⟩
+      refine ⟨evmAfter, hRel, hAfterPc, ?_⟩
+      intro tailTrace result hRest
+      have hFull := hCont hRest
+      simpa [List.append_assoc] using hFull
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)

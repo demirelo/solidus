@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:59 CEST.
+Last updated: 2026-06-03 05:02 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -214,9 +214,15 @@ Execution order:
    source-layout store relation, while
    `OpenLowering.compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode`
    composes that tail after a one-result RHS expression trace. The remaining
-   work is lifting this statement boundary through statement/block sequencing,
-   function calls, loops, switch/conditionals, and then composing the result
-   into the whole-program imported-Yul-to-open-EVM theorem.
+   expression statement, `let`, and assignment heads are now tied to actual
+   `FunctionsOpen.Stmt.run` source traces by
+   `OpenLowering.compilerOpenFunctionsStmt_expr_openRunNResult_continue_fallthrough_of_compileCode`,
+   `OpenLowering.compilerOpenFunctionsStmt_let_openRunNResult_continue_fallthrough_of_compileCode`,
+   and
+   `OpenLowering.compilerOpenFunctionsStmt_assign_openRunNResult_continue_fallthrough_of_compileCode`.
+   The remaining work is lifting these statement heads through statement/block
+   sequencing, function calls, loops, switch/conditionals, and then composing
+   the result into the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
