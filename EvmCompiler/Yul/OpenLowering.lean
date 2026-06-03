@@ -2353,6 +2353,99 @@ theorem codeSegment_localsBlock_compileToPreserving_split
   · exact hBodyStart.trans hSegmentStart
   · exact hCleanupFall.trans hSegmentFall
 
+theorem codeSegment_localsBlock_compileToPreserving_append_pushReturns_split
+    {ctx : Locals.Ctx} {preserve targetDepth : Nat}
+    {raw : List Locals.Stmt} {returns : List Name}
+    {lower : Expressions.Block}
+    {asm : Assembly.Program} {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompile :
+      Locals.Block.compileToPreserving ctx preserve targetDepth
+        { stmts := raw ++ Functions.Lower.pushReturns returns } =
+        some lower)
+    (segment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.stmts }
+          structuredCtx supply).code) :
+    ∃ rawStmts pushCtx pushStmts finalCtx cleanup,
+      Locals.Block.compileOpen ctx { stmts := raw } =
+        some (rawStmts, pushCtx) ∧
+        Locals.Block.compileOpen pushCtx
+          { stmts := Functions.Lower.pushReturns returns } =
+          some (pushStmts, finalCtx) ∧
+        finalCtx.cleanupToPreserving? preserve targetDepth = some cleanup ∧
+        ∃ rawSegment :
+            Structured.Preservation.CodeSegment asm
+              (Structured.Block.compileFromCtx
+                { stmts := Expressions.StmtList.toStructured rawStmts }
+                structuredCtx supply).code,
+          ∃ returnTailSegment :
+              Structured.Preservation.CodeSegment asm
+                (Structured.Block.compileFromCtx
+                  { stmts :=
+                      Expressions.StmtList.toStructured
+                        (pushStmts ++ Locals.codeStmt cleanup) }
+                  structuredCtx
+                  (Structured.Block.compileFromCtx
+                    { stmts := Expressions.StmtList.toStructured rawStmts }
+                    structuredCtx supply).next).code,
+            Structured.Preservation.CodeSegment.startPc rawSegment =
+              Structured.Preservation.CodeSegment.startPc segment ∧
+            Structured.Preservation.CodeSegment.startPc returnTailSegment =
+              Structured.Preservation.CodeSegment.fallthroughPc
+                rawSegment ∧
+            Structured.Preservation.CodeSegment.fallthroughPc
+                returnTailSegment =
+              Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  rcases
+      localsBlock_compileToPreserving_parts hCompile with
+    ⟨bodyStmts, finalCtx, cleanup, hOpen, hCleanup, hLowerStmts⟩
+  rcases localsBlock_compileOpen_append_inv hOpen with
+    ⟨rawStmts, pushCtx, pushStmts, hRawOpen, hPushOpen, hBodyStmts⟩
+  have hCodeEq :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.stmts }
+          structuredCtx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (rawStmts ++ (pushStmts ++ Locals.codeStmt cleanup)) }
+          structuredCtx supply).code := by
+    simp [hLowerStmts, hBodyStmts, List.append_assoc]
+  let segment' :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (rawStmts ++ (pushStmts ++ Locals.codeStmt cleanup)) }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hCodeEq segment
+  have hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment' =
+        Structured.Preservation.CodeSegment.startPc segment := by
+    simp [segment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hSegmentFall :
+      Structured.Preservation.CodeSegment.fallthroughPc segment' =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    cases segment with
+    | mk pre post hAsm hFits =>
+        simp [segment', Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
+  rcases
+      codeSegment_expressionsStmtList_append_split
+        (left := rawStmts)
+        (right := pushStmts ++ Locals.codeStmt cleanup)
+        segment' with
+    ⟨rawSegment, returnTailSegment, hRawStart, hTailStart, hTailFall⟩
+  refine
+    ⟨rawStmts, pushCtx, pushStmts, finalCtx, cleanup,
+      hRawOpen, hPushOpen, hCleanup, rawSegment, returnTailSegment,
+      ?_, hTailStart, ?_⟩
+  · exact hRawStart.trans hSegmentStart
+  · exact hTailFall.trans hSegmentFall
+
 theorem locals_runCleanupToPreserving_runState_of_cleanupToPreserving
     {ctx : Locals.Ctx} {preserve targetDepth : Nat}
     {cleanup : Structured.Code} {state final : Locals.RunState}
