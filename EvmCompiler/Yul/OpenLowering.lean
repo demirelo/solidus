@@ -9913,6 +9913,35 @@ theorem sourceDirect_returnedStackRel_attach_parts
       _ = values.length := by simp
       _ = frame.retc := hLen
 
+theorem sourceDirect_returnedStackRel_callSite_parts
+    {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State}
+    {values : List Word} {bodyState callerBase : Locals.RunState}
+    {frame : Structured.ReturnDest} {proc : Structured.Proc}
+    (hRel :
+      Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+        source values bodyState)
+    (hValuesLen : values.length = proc.retc)
+    (hFrameRetc : frame.retc = proc.retc)
+    (hFrameStack : frame.callerStack = callerBase.evm.stack) :
+    ∃ returned : Locals.RunState, ∃ stack : EvmYul.Stack Word,
+      stack = values.reverse ++ callerBase.evm.stack ∧
+        Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+          some stack ∧
+        bodyState.returns = frame :: returned.returns ∧
+        bodyState.evm.stack.length = proc.retc ∧
+        frame.callerStack = callerBase.evm.stack := by
+  have hLen : values.length = frame.retc :=
+    hValuesLen.trans hFrameRetc.symm
+  rcases sourceDirect_returnedStackRel_attach_parts hRel hLen with
+    ⟨returned, stack, hStack, hAttach, hReturns, hRetc⟩
+  refine ⟨returned, stack, ?_, hAttach, hReturns, ?_, hFrameStack⟩
+  · calc
+      stack = values.reverse ++ frame.callerStack := hStack
+      _ = values.reverse ++ callerBase.evm.stack := by
+        rw [hFrameStack]
+  · exact hRetc.trans hFrameRetc
+
 theorem compilerOpenAssignTopWithOffset_stackPrefixSuffix_openRunNResult_continue_fallthrough
     {layout : List Name} {source : Objects.Source.State}
     {state : EvmYul.EVM.State}
