@@ -1324,6 +1324,296 @@ theorem codeSegment_functions_call_after_args_call_split_of_compileOpen
       _ = Structured.Preservation.CodeSegment.fallthroughPc segment :=
         hSegmentFall
 
+theorem compilerOpenFunctionsAssignReturnedTopsRev_compileOpen_structured_next
+    {names : List Name}
+    {localsCtx finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.assignReturnedTopsRev names } =
+        some (compiledStmts, finalLocalsCtx)) :
+    (Structured.Block.compileFromCtx
+      { stmts := Expressions.StmtList.toStructured compiledStmts }
+      structuredCtx supply).next = supply := by
+  induction names generalizing localsCtx finalLocalsCtx compiledStmts supply with
+  | nil =>
+      have hCompileNil :
+          compiledStmts = [] ∧ localsCtx = finalLocalsCtx := by
+        simpa [Functions.Lower.assignReturnedTopsRev,
+          Locals.Block.compileOpen] using hCompileBlock
+      rcases hCompileNil with ⟨hCompiledStmts, _hFinalCtx⟩
+      subst compiledStmts
+      simp [Expressions.StmtList.toStructured,
+        Structured.Block.compileFromCtx]
+  | cons name rest ih =>
+      unfold Functions.Lower.assignReturnedTopsRev at hCompileBlock
+      unfold Locals.Block.compileOpen at hCompileBlock
+      cases hDepth :
+          Locals.Layout.lookupDepth? name localsCtx.layout with
+      | none =>
+          simp [Locals.Stmt.compile, hDepth] at hCompileBlock
+      | some depth =>
+          cases hSwap : Locals.StackOp.swap? (rest.length + depth) with
+          | none =>
+              simp [Locals.Stmt.compile, hDepth, hSwap] at hCompileBlock
+          | some swapOp =>
+              cases hRest :
+                  Locals.Block.compileOpen localsCtx
+                    { stmts := Functions.Lower.assignReturnedTopsRev rest } with
+              | none =>
+                  simp [Locals.Stmt.compile, hDepth, hSwap, hRest]
+                    at hCompileBlock
+              | some restResult =>
+                  rcases restResult with ⟨restStmts, restCtx⟩
+                  simp [Locals.Stmt.compile, hDepth, hSwap, hRest]
+                    at hCompileBlock
+                  rcases hCompileBlock with ⟨hCompiledStmts, _hFinalCtx⟩
+                  have hRestNext :
+                      (Structured.Block.compileFromCtx
+                        { stmts :=
+                            Expressions.StmtList.toStructured restStmts }
+                        structuredCtx supply).next = supply :=
+                    ih (localsCtx := localsCtx) (finalLocalsCtx := restCtx)
+                      (compiledStmts := restStmts)
+                      (supply := supply) hRest
+                  rw [← hCompiledStmts]
+                  simp [Locals.codeStmt,
+                    Expressions.StmtList.toStructured,
+                    Expressions.Stmt.toStructured,
+                    Structured.Block.compileFromCtx,
+                    Structured.Stmt.compileFromCtxCore,
+                    Structured.CompileResult.append, hRestNext]
+
+theorem compilerOpenFunctionsAssignReturnedTops_compileOpen_structured_next
+    {targets : List Name}
+    {localsCtx finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalLocalsCtx)) :
+    (Structured.Block.compileFromCtx
+      { stmts := Expressions.StmtList.toStructured compiledStmts }
+      structuredCtx supply).next = supply := by
+  simpa [Functions.Lower.assignReturnedTops] using
+    compilerOpenFunctionsAssignReturnedTopsRev_compileOpen_structured_next
+      (structuredCtx := structuredCtx) (supply := supply) hCompileBlock
+
+theorem codeSegment_functions_call_after_assign_tail_split_of_compileOpen
+    {targets : List Name}
+    {localsCtx afterAssignCtx : Locals.Ctx}
+    {assignStmts afterCallStmts restStmts : List Expressions.Stmt}
+    {asm : Assembly.Program} {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompileAssign :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (assignStmts, afterAssignCtx))
+    (hAfterCallStmts :
+      afterCallStmts = assignStmts ++ restStmts)
+    (afterCallSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured afterCallStmts }
+          structuredCtx supply).code) :
+    ∃ assignSegment :
+        Structured.Preservation.CodeSegment asm
+          (Structured.Block.compileFromCtx
+            { stmts := Expressions.StmtList.toStructured assignStmts }
+            structuredCtx supply).code,
+      ∃ restSegment :
+          Structured.Preservation.CodeSegment asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured restStmts }
+              structuredCtx supply).code,
+        Structured.Preservation.CodeSegment.startPc assignSegment =
+          Structured.Preservation.CodeSegment.startPc afterCallSegment ∧
+        Structured.Preservation.CodeSegment.startPc restSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc assignSegment ∧
+        Structured.Preservation.CodeSegment.fallthroughPc restSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc afterCallSegment := by
+  have hCodeEq :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured afterCallStmts }
+          structuredCtx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (assignStmts ++ restStmts) }
+          structuredCtx supply).code := by
+    rw [hAfterCallStmts]
+  let afterCallSegment' :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (assignStmts ++ restStmts) }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hCodeEq afterCallSegment
+  have hAfterCallStart :
+      Structured.Preservation.CodeSegment.startPc afterCallSegment' =
+        Structured.Preservation.CodeSegment.startPc afterCallSegment := by
+    simp [afterCallSegment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hAfterCallFall :
+      Structured.Preservation.CodeSegment.fallthroughPc afterCallSegment' =
+        Structured.Preservation.CodeSegment.fallthroughPc afterCallSegment := by
+    cases afterCallSegment with
+    | mk pre post hAsm hFits =>
+        simp [afterCallSegment', Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
+  rcases codeSegment_expressionsStmtList_append_split afterCallSegment' with
+    ⟨assignSegment, restSegmentRaw, hAssignStart, hRestStart,
+      hRestRawFall⟩
+  have hAssignNext :
+      (Structured.Block.compileFromCtx
+        { stmts := Expressions.StmtList.toStructured assignStmts }
+        structuredCtx supply).next = supply :=
+    compilerOpenFunctionsAssignReturnedTops_compileOpen_structured_next
+      (structuredCtx := structuredCtx) (supply := supply) hCompileAssign
+  have hRestCodeEq :
+      (Structured.Block.compileFromCtx
+        { stmts := Expressions.StmtList.toStructured restStmts }
+        structuredCtx
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured assignStmts }
+          structuredCtx supply).next).code =
+      (Structured.Block.compileFromCtx
+        { stmts := Expressions.StmtList.toStructured restStmts }
+        structuredCtx supply).code := by
+    rw [hAssignNext]
+  let restSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured restStmts }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hRestCodeEq restSegmentRaw
+  have hRestStart' :
+      Structured.Preservation.CodeSegment.startPc restSegment =
+        Structured.Preservation.CodeSegment.startPc restSegmentRaw := by
+    simp [restSegment, Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hRestFall' :
+      Structured.Preservation.CodeSegment.fallthroughPc restSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc restSegmentRaw := by
+    cases restSegmentRaw with
+    | mk pre post hAsm hFits =>
+        simp [restSegment, Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hRestCodeEq]
+  refine ⟨assignSegment, restSegment, ?_, ?_, ?_⟩
+  · exact hAssignStart.trans hAfterCallStart
+  · calc
+      Structured.Preservation.CodeSegment.startPc restSegment =
+          Structured.Preservation.CodeSegment.startPc restSegmentRaw :=
+        hRestStart'
+      _ = Structured.Preservation.CodeSegment.fallthroughPc assignSegment :=
+        hRestStart
+  · calc
+      Structured.Preservation.CodeSegment.fallthroughPc restSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc restSegmentRaw :=
+        hRestFall'
+      _ = Structured.Preservation.CodeSegment.fallthroughPc afterCallSegment' :=
+        hRestRawFall
+      _ = Structured.Preservation.CodeSegment.fallthroughPc afterCallSegment :=
+        hAfterCallFall
+
+theorem codeSegment_functions_call_cons_parts_split_of_compileOpen
+    {returns : List Name} {localsCtx finalLocalsCtx : Locals.Ctx}
+    {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {rest : List Functions.Stmt}
+    {compiledStmts : List Expressions.Stmt}
+    {asm : Assembly.Program} {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCompile :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := Functions.Stmt.call targets functionName args :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (segment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code) :
+    ∃ argStmts argCtx assignStmts afterAssignCtx restStmts,
+      ∃ argSegment :
+          Structured.Preservation.CodeSegment asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured argStmts }
+              structuredCtx supply).code,
+        ∃ callSegment :
+            Structured.Preservation.CodeSegment asm
+              (Structured.Stmt.compileFromCtxCore
+                (.call functionName) structuredCtx supply).code,
+          ∃ assignSegment :
+              Structured.Preservation.CodeSegment asm
+                (Structured.Block.compileFromCtx
+                  { stmts := Expressions.StmtList.toStructured assignStmts }
+                  structuredCtx
+                  (Structured.Stmt.compileFromCtxCore
+                    (.call functionName) structuredCtx supply).next).code,
+            ∃ tailSegment :
+                Structured.Preservation.CodeSegment asm
+                  (Structured.Block.compileFromCtx
+                    { stmts := Expressions.StmtList.toStructured restStmts }
+                    structuredCtx
+                    (Structured.Stmt.compileFromCtxCore
+                      (.call functionName) structuredCtx supply).next).code,
+              Locals.Block.compileOpen localsCtx
+                  { stmts := Functions.Lower.evalArgs args } =
+                some (argStmts, argCtx) ∧
+              Locals.Block.compileOpen argCtx
+                  { stmts := Functions.Lower.assignReturnedTops targets } =
+                some (assignStmts, afterAssignCtx) ∧
+              Locals.Block.compileOpen afterAssignCtx
+                  (Functions.Block.toLocals returns { stmts := rest }) =
+                some (restStmts, finalLocalsCtx) ∧
+              Structured.Preservation.CodeSegment.startPc argSegment =
+                Structured.Preservation.CodeSegment.startPc segment ∧
+              Structured.Preservation.CodeSegment.startPc callSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc argSegment ∧
+              Structured.Preservation.CodeSegment.startPc assignSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc callSegment ∧
+              Structured.Preservation.CodeSegment.startPc tailSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc assignSegment ∧
+              Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+                Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  rcases functionsBlock_toLocals_compileOpen_call_cons_parts_inv hCompile with
+    ⟨argStmts, argCtx, assignStmts, afterAssignCtx, restStmts,
+      hArgsCompile, hAssignCompile, hRestCompile, hCompiledStmts⟩
+  have hCallAfterStmts :
+      compiledStmts =
+        argStmts ++
+          (Expressions.Stmt.call functionName ::
+            (assignStmts ++ restStmts)) := by
+    rw [hCompiledStmts]
+    simp [List.append_assoc]
+  rcases
+      codeSegment_functions_call_after_args_call_split_of_compileOpen
+        (structuredCtx := structuredCtx) (supply := supply)
+        hArgsCompile hCallAfterStmts segment with
+    ⟨argSegment, callSegment, afterCallSegment,
+      hArgStart, hCallStart, hAfterCallStart, hAfterCallFall⟩
+  rcases
+      codeSegment_functions_call_after_assign_tail_split_of_compileOpen
+        (targets := targets) (structuredCtx := structuredCtx)
+        (supply :=
+          (Structured.Stmt.compileFromCtxCore
+            (.call functionName) structuredCtx supply).next)
+        hAssignCompile (by rfl) afterCallSegment with
+    ⟨assignSegment, tailSegment, hAssignStart, hTailStart,
+      hTailFallAfterCall⟩
+  exact
+    ⟨argStmts, argCtx, assignStmts, afterAssignCtx, restStmts,
+      argSegment, callSegment, assignSegment, tailSegment,
+      hArgsCompile, hAssignCompile, hRestCompile,
+      hArgStart, hCallStart, hAssignStart.trans hAfterCallStart, hTailStart,
+      hTailFallAfterCall.trans hAfterCallFall⟩
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :

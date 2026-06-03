@@ -329,10 +329,17 @@ Execution order:
    `OpenLowering.codeSegment_functions_call_after_args_call_split_of_compileOpen`
    show that the actual compiled procedure-call block reaches the internal
    `Structured.Stmt.call` segment after the checked argument prefix without
-   advancing label supply. The next frontier is composing this target call
-   segment with open recursive callee-body preservation, returned-value
-   assignment, and recursive tail at `FunctionsBlockCompiledOpenResultRel`, then
-   extending the same shape to loops, switch/conditionals, and the
+   advancing label supply. Returned-value assignment and tail segmentation are
+   now packaged too:
+   `OpenLowering.compilerOpenFunctionsAssignReturnedTops_compileOpen_structured_next`,
+   `OpenLowering.codeSegment_functions_call_after_assign_tail_split_of_compileOpen`,
+   and
+   `OpenLowering.codeSegment_functions_call_cons_parts_split_of_compileOpen`
+   expose all four target segments from the actual `Functions.Stmt.call`
+   `compileOpen` evidence. The next frontier is composing these target
+   segments with open recursive callee-body preservation at
+   `FunctionsBlockCompiledOpenResultRel`, then extending the same shape to
+   loops, switch/conditionals, and the
    whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
