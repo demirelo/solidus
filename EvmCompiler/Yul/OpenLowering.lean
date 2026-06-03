@@ -10968,6 +10968,74 @@ theorem compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunN
           simpa [sourceExact, Locals.Source.State.withVars] using hExactAfter)
   exact ⟨assignFuel, evmAfter, hErasedAfter, hAfterPc, hCont⟩
 
+theorem compilerOpenFunctionsAssignReturnedTops_frameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {base : Locals.RunState}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values tokens : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel
+        (base.withEVM
+          { base.evm with stack := values.reverse ++ base.evm.stack })
+        state tokens)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment) :
+    ∃ assignFuel evmAfter suffix,
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program
+            (assignFuel + tailFuel) state)
+          tailTrace result := by
+  rcases
+      StackPrefixSuffixErasedRel.of_frameStateRel_stateRel
+        (layout := layout) (hiddenReturns := hiddenReturns)
+        (source := source) (base := base) (target := state)
+        (values := values) (tokens := tokens) hBaseRel hFrameRel with
+    ⟨suffix, hPrefixRel⟩
+  rcases
+      compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileOpen
+        (layout := layout) (source := source) (state := state)
+        (ctx := ctx) (finalCtx := finalCtx) (targets := targets)
+        (values := values) (suffix := suffix) (store' := store')
+        (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+        (supply := supply) hCtxLayout hNoDup hTargetsNoDup hTargets
+        hAssign hCompileBlock hPrefixRel program segment hPc with
+    ⟨assignFuel, evmAfter, hAfterRel, hAfterPc, hCont⟩
+  exact ⟨assignFuel, evmAfter, suffix, hAfterRel, hAfterPc, hCont⟩
+
 theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
