@@ -9871,6 +9871,53 @@ theorem sourceDirect_prefixedStateRel_splitArgs_callerBase
     · simpa [callerBase, Structured.RunState.withEVM] using hReturns
   exact ⟨callerBase, hSplit, hBaseRel, by simpa [hCallerStack] using hStack⟩
 
+theorem sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {callSource : Locals.RunState}
+    {args : EvmYul.Stack Word} {argc : Nat}
+    (sharedAfterCall : EvmYul.SharedState .EVM)
+    (hRel :
+      Functions.SourceDirect.PrefixedStateRel layout hiddenReturns source args
+        callSource)
+    (hArgc : argc = args.length) :
+    ∃ callerBase : Locals.RunState,
+      Structured.StackFrame.splitArgs? argc callSource.evm.stack =
+        some (args, callerBase.evm.stack) ∧
+      Functions.SourceDirect.StateRel layout hiddenReturns
+        (source.withShared sharedAfterCall) callerBase ∧
+      callSource.evm.stack = args ++ callerBase.evm.stack := by
+  rcases hRel with ⟨_hShared, baseStack, hStack, hStoreRel, hReturns⟩
+  let callerBase : Locals.RunState :=
+    callSource.withEVM
+      { callSource.evm with toSharedState := sharedAfterCall, stack := baseStack }
+  have hCallerStack : callerBase.evm.stack = baseStack := by
+    simp [callerBase, Structured.RunState.withEVM]
+  have hSplit :
+      Structured.StackFrame.splitArgs? argc callSource.evm.stack =
+        some (args, callerBase.evm.stack) := by
+    unfold Structured.StackFrame.splitArgs?
+    have hLe : argc ≤ callSource.evm.stack.length := by
+      rw [hStack, hArgc]
+      simp
+    rw [if_pos hLe]
+    have hTake :
+        List.take argc (args ++ baseStack) = args := by
+      simp [hArgc]
+    have hDrop :
+        List.drop argc (args ++ baseStack) = baseStack := by
+      simp [hArgc]
+    simp [hStack, hTake, hDrop, hCallerStack]
+  have hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns
+        (source.withShared sharedAfterCall) callerBase := by
+    constructor
+    · constructor
+      · simp [callerBase, Structured.RunState.withEVM,
+          Locals.Source.State.withShared]
+      · simpa [callerBase, Structured.RunState.withEVM] using hStoreRel
+    · simpa [callerBase, Structured.RunState.withEVM] using hReturns
+  exact ⟨callerBase, hSplit, hBaseRel, by simpa [hCallerStack] using hStack⟩
+
 theorem sourceDirect_returnedStackRel_of_shared_eq
     {hiddenReturns : List Structured.ReturnDest}
     {source source' : Objects.Source.State}
