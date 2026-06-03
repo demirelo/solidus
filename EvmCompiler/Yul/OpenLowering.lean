@@ -1173,6 +1173,54 @@ theorem functionsProgram_toExpressions?_structured_proc_lookup
     simpa [Expressions.Program.toStructured, hExprLookup] using hLookupMap
   exact ⟨exprProc, hExprLookup, hProcLower, hStructuredLookup⟩
 
+theorem functionsProgram_toExpressions?_structured_proc_lookup_parts
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    {name : Name} {fn : Functions.FunDef}
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (hFind :
+      Functions.FunList.find? name programSource.functions = some fn) :
+    ∃ proc,
+      Structured.ProcList.lookup? name lower.toStructured.procs =
+        some proc ∧
+        proc.name = fn.name ∧
+        proc.argc = fn.params.length ∧
+        proc.retc = fn.returns.length := by
+  rcases
+      functionsProgram_toExpressions?_structured_proc_lookup
+        hLower hFind with
+    ⟨exprProc, _hExprLookup, hProcLower, hStructuredLookup⟩
+  have hExprFields :
+      exprProc.name = fn.name ∧
+        exprProc.argc = fn.params.length ∧
+        exprProc.retc = fn.returns.length := by
+    unfold Locals.Proc.toExpressions? at hProcLower
+    cases hBody :
+        Locals.Block.compileToPreserving
+          (Locals.Ctx.procEntryWithLayoutAndRetc
+            (Functions.FunDef.toLocalsProc fn).entryLayout
+            (Functions.FunDef.toLocalsProc fn).retc)
+          (Functions.FunDef.toLocalsProc fn).retc 0
+          (Functions.FunDef.toLocalsProc fn).body with
+    | none =>
+        simp [hBody] at hProcLower
+    | some body =>
+        have hSome :
+            some exprProc =
+              some
+                ({ name := (Functions.FunDef.toLocalsProc fn).name
+                   argc := (Functions.FunDef.toLocalsProc fn).argc
+                   retc := (Functions.FunDef.toLocalsProc fn).retc
+                   body := body } : Expressions.Proc) := by
+          simpa [hBody] using hProcLower.symm
+        cases hSome
+        simp [Functions.FunDef.toLocalsProc]
+  rcases hExprFields with ⟨hExprName, hExprArgc, hExprRetc⟩
+  exact
+    ⟨exprProc.toStructured, hStructuredLookup,
+      by simpa [Expressions.Proc.toStructured] using hExprName,
+      by simpa [Expressions.Proc.toStructured] using hExprArgc,
+      by simpa [Expressions.Proc.toStructured] using hExprRetc⟩
+
 theorem compilerOpenFunctionsArgList_compileOpen_structured_next
     {args : List (Functions.Expr 1)}
     {localsCtx finalLocalsCtx : Locals.Ctx}
