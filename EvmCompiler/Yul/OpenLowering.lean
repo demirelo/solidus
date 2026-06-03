@@ -11036,6 +11036,111 @@ theorem compilerOpenFunctionsAssignReturnedTops_frameStateRel_openRunNResult_con
     ⟨assignFuel, evmAfter, hAfterRel, hAfterPc, hCont⟩
   exact ⟨assignFuel, evmAfter, suffix, hAfterRel, hAfterPc, hCont⟩
 
+theorem compilerOpenFunctionsAssignReturnedTops_returnLabel_frameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {base : Locals.RunState}
+    {state : EvmYul.EVM.State} {ctx finalCtx : Locals.Ctx}
+    {targets : List Name} {values tokens : List Word}
+    {store' : Functions.Source.Store}
+    {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {label : Assembly.Label} {pre post : Assembly.Program}
+    (hCtxLayout : ctx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets values source.vars =
+        some store')
+    (hCompileBlock :
+      Locals.Block.compileOpen ctx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (compiledStmts, finalCtx))
+    (hBaseRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns source base)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel
+        (base.withEVM
+          { base.evm with stack := values.reverse ++ base.evm.stack })
+        state tokens)
+    (hFit : Structured.Preservation.PCFits pre)
+    (segment :
+      Structured.Preservation.CodeSegment
+        (pre ++ [Assembly.Instr.label label] ++ post)
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Assembly.Program.pcAfter pre)
+    (hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment =
+        Assembly.Program.pcAfter (pre ++ [Assembly.Instr.label label])) :
+    ∃ labelAssignFuel evmAfter suffix,
+      StackPrefixSuffixErasedRel layout (source.withVars store') [] suffix
+        evmAfter ∧
+      evmAfter.pc =
+        Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+      ∀ {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label label] ++ post)
+            tailFuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (pre ++ [Assembly.Instr.label label] ++ post)
+            (labelAssignFuel + tailFuel) state)
+          tailTrace result := by
+  let returnSource :=
+    base.withEVM
+      { base.evm with stack := values.reverse ++ base.evm.stack }
+  rcases
+      Structured.Preservation.Frame.StateRel.label_stepResult_at
+        (label := label) (pre := pre) (post := post)
+        (source := returnSource) (target := state) (tokens := tokens)
+        hFit hPc hFrameRel with
+    ⟨afterLabel, hLabelStep, hRelAfterLabel, hPcAfterLabel⟩
+  have hAt :
+      Assembly.Program.instrAtPc
+          (pre ++ [Assembly.Instr.label label] ++ post) state.pc.toNat =
+        some (Assembly.Program.byteLength pre, Assembly.Instr.label label) := by
+    unfold Assembly.Program.instrAtPc
+    rw [hPc, hFit]
+    simpa using
+      Assembly.Program.instrAtPcFrom_append_boundary_cons
+        pre post (Assembly.Instr.label label) 0
+  have hAssignPc :
+      afterLabel.pc = Structured.Preservation.CodeSegment.startPc segment := by
+    rw [hPcAfterLabel, hSegmentStart]
+  rcases
+      compilerOpenFunctionsAssignReturnedTops_frameStateRel_openRunNResult_continue_fallthrough_of_compileOpen
+        (layout := layout) (hiddenReturns := hiddenReturns)
+        (source := source) (base := base) (state := afterLabel)
+        (ctx := ctx) (finalCtx := finalCtx) (targets := targets)
+        (values := values) (tokens := tokens) (store' := store')
+        (compiledStmts := compiledStmts) (structuredCtx := structuredCtx)
+        (supply := supply) hCtxLayout hNoDup hTargetsNoDup hTargets
+        hAssign hCompileBlock hBaseRel hRelAfterLabel
+        (program := pre ++ [Assembly.Instr.label label] ++ post)
+        segment hAssignPc with
+    ⟨assignFuel, evmAfter, suffix, hAfterRel, hAfterPc, hAssignCont⟩
+  refine ⟨assignFuel + 1, evmAfter, suffix, hAfterRel, hAfterPc, ?_⟩
+  intro tailFuel tailTrace result hTail
+  have hAssignRun := hAssignCont hTail
+  have hFull :
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult
+          (pre ++ [Assembly.Instr.label label] ++ post)
+          ((assignFuel + tailFuel) + 1) state)
+        tailTrace result :=
+    OpenAssembly.Source.openRunNResult_current_no_call_running_continue_of_current_instr
+      hAt (by simp [Assembly.Instr.usesCallCreate]) hLabelStep hAssignRun
+  simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hFull
+
 theorem compilerOpenLocalsExpr_evalOne_assign_openRunNResult_continue_fallthrough_of_compileCode
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
