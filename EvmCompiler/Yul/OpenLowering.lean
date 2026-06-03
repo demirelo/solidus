@@ -142,6 +142,38 @@ mutual
           LocalsExprSeqOpenSupported tail
 end
 
+theorem localsExprSeqOpenSupported_mpr {n m : Nat} (h : m = n)
+    (exprs : Locals.ExprSeq n) :
+    LocalsExprSeqOpenSupported
+        (Eq.mpr (congrArg Locals.ExprSeq h) exprs) ↔
+      LocalsExprSeqOpenSupported exprs := by
+  cases h
+  rfl
+
+def FunctionsArgListOpenSupported :
+    List (Functions.Expr 1) → Prop
+  | [] => True
+  | arg :: rest =>
+      LocalsExprOpenSupported arg ∧
+        FunctionsArgListOpenSupported rest
+
+theorem functions_argExprs_openSupported :
+    ∀ {args : List (Functions.Expr 1)},
+      FunctionsArgListOpenSupported args →
+        LocalsExprSeqOpenSupported (Functions.Lower.argExprs args)
+  | [], _hSupported => by
+      simp [Functions.Lower.argExprs, LocalsExprSeqOpenSupported]
+  | arg :: rest, hSupported => by
+      rcases hSupported with ⟨hArg, hRest⟩
+      have hTail :
+          LocalsExprSeqOpenSupported
+            (Functions.Lower.argExprs rest) :=
+        functions_argExprs_openSupported (args := rest) hRest
+      rw [Functions.Lower.argExprs]
+      rw [localsExprSeqOpenSupported_mpr (by simp [Nat.add_comm])
+        (Locals.ExprSeq.cons arg (Functions.Lower.argExprs rest))]
+      simp [LocalsExprSeqOpenSupported, hArg, hTail]
+
 theorem basicOpOpenSupported_of_no_callCreate
     {op : Structured.BasicOp}
     (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
@@ -456,6 +488,36 @@ theorem localsBlock_compileOpen_expr_cons_inv
         stmts = Locals.codeStmt code ++ restStmts := by
   unfold Locals.Block.compileOpen at hCompile
   cases hCode : Locals.Expr.compileCode ctx 0 expr with
+  | none =>
+      simp [Locals.Stmt.compile, hCode] at hCompile
+  | some code =>
+      cases hRest :
+          Locals.Block.compileOpen ctx { stmts := rest } with
+      | none =>
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+      | some restResult =>
+          rcases restResult with ⟨restStmts, restCtx⟩
+          simp [Locals.Stmt.compile, hCode, hRest] at hCompile
+          rcases hCompile with ⟨hStmts, hFinalCtx⟩
+          exact
+            ⟨code, restStmts, rfl,
+              by simp [hFinalCtx], hStmts.symm⟩
+
+theorem localsBlock_compileOpen_exprs_cons_inv
+    {ctx finalCtx : Locals.Ctx} {results : Nat}
+    {exprs : Locals.ExprSeq results}
+    {rest : List Locals.Stmt} {stmts : List Expressions.Stmt}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+          { stmts := Locals.Stmt.exprs exprs :: rest } =
+        some (stmts, finalCtx)) :
+    ∃ code restStmts,
+      Locals.ExprSeq.compileCode ctx 0 exprs = some code ∧
+        Locals.Block.compileOpen ctx { stmts := rest } =
+          some (restStmts, finalCtx) ∧
+        stmts = Locals.codeStmt code ++ restStmts := by
+  unfold Locals.Block.compileOpen at hCompile
+  cases hCode : Locals.ExprSeq.compileCode ctx 0 exprs with
   | none =>
       simp [Locals.Stmt.compile, hCode] at hCompile
   | some code =>
@@ -4001,6 +4063,185 @@ mutual
               subst trace
               simpa [List.append_assoc, hFuel] using hFull
 end
+
+theorem compilerOpenFunctionsArgList_openRunNResult_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {args : List (Functions.Expr 1)}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hOwned :
+      Locals.Source.ExprSeq.SourceOwned (Functions.Lower.argExprs args))
+    (hSupported :
+      LocalsExprSeqOpenSupported (Functions.Lower.argExprs args))
+    (hAccess :
+      Locals.SourceLowering.ExprSeq.Accessible layout 0
+        (Functions.Lower.argExprs args))
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.evalArgs args } =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (stackPrefix : List Word)
+    (hPrefixLen : stackPrefix.length = 0)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix
+        state)
+    {valuesAfter : List Word} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+          prim args compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    finalLocalsCtx = localsCtx ∧
+      ∃ targetFuel evmAfter,
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program targetFuel state)
+          trace (.ok (.running evmAfter)) ∧
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter
+          (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  cases args with
+  | nil =>
+      have hCompileNil :
+          compiledStmts = [] ∧ localsCtx = finalLocalsCtx := by
+        simpa [Functions.Lower.evalArgs, Locals.Block.compileOpen] using
+          hCompileBlock
+      rcases hCompileNil with ⟨hCompiledStmts, hFinalCtx⟩
+      subst compiledStmts
+      subst finalLocalsCtx
+      rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval]
+        at hResolve
+      cases hResolve
+      have hFall :
+          Structured.Preservation.CodeSegment.fallthroughPc segment =
+            Structured.Preservation.CodeSegment.startPc segment := by
+        rcases segment with ⟨pre, post, hAsm, hFits⟩
+        simp [Structured.Preservation.CodeSegment.fallthroughPc,
+          Structured.Preservation.CodeSegment.startPc,
+          Expressions.StmtList.toStructured, Structured.Block.compileFromCtx]
+      refine ⟨rfl, 0, state, ?_, ?_, ?_⟩
+      · rw [OpenAssembly.Source.openRunNResult_zero]
+        exact OpenExternal.OpenResultResolves.done
+      · simpa using hPrefixRel
+      · rw [hFall]
+        exact hPc
+  | cons arg rest =>
+      let args' : List (Functions.Expr 1) := arg :: rest
+      have hCompileCons :
+          Locals.Block.compileOpen localsCtx
+              { stmts :=
+                  [Locals.Stmt.exprs
+                    (Functions.Lower.argExprs args')] } =
+            some (compiledStmts, finalLocalsCtx) := by
+        simpa [Functions.Lower.evalArgs, args'] using hCompileBlock
+      rcases
+          localsBlock_compileOpen_exprs_cons_inv hCompileCons with
+        ⟨code, restStmts, hCode, hRestCompile, hCompiledStmts⟩
+      have hRest :
+          restStmts = [] ∧ localsCtx = finalLocalsCtx := by
+        simpa [Locals.Block.compileOpen] using hRestCompile
+      rcases hRest with ⟨hRestStmts, hFinalCtx⟩
+      subst restStmts
+      subst finalLocalsCtx
+      have hSegmentCode :
+          (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured compiledStmts }
+              structuredCtx supply).code =
+            (Structured.Block.compileFromCtx
+              { stmts :=
+                  Expressions.StmtList.toStructured
+                    (Locals.codeStmt code ++ []) }
+              structuredCtx supply).code := by
+        simp [hCompiledStmts]
+      let segment' :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts :=
+                  Expressions.StmtList.toStructured
+                    (Locals.codeStmt code ++ []) }
+              structuredCtx supply).code :=
+        Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+      rcases codeSegment_expressions_codeStmt_cons_split segment' with
+        ⟨headSegment, tailSegment, hHeadStart, hTailStart, hTailFall⟩
+      have hSegmentStart :
+          Structured.Preservation.CodeSegment.startPc segment' =
+            Structured.Preservation.CodeSegment.startPc segment := by
+        simp [segment', Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.startPc]
+      have hSegmentFall :
+          Structured.Preservation.CodeSegment.fallthroughPc segment' =
+            Structured.Preservation.CodeSegment.fallthroughPc segment := by
+        cases segment with
+        | mk pre post hAsm hFits =>
+            simp [segment', Structured.Preservation.CodeSegment.cast_code,
+              Structured.Preservation.CodeSegment.fallthroughPc,
+              hSegmentCode]
+      have hHeadPc :
+          state.pc =
+            Structured.Preservation.CodeSegment.startPc headSegment := by
+        rw [hPc, ← hSegmentStart, ← hHeadStart]
+      have hEvalSeqResolve :
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+              prim (Functions.Lower.argExprs args') compiler)
+            trace (.ok (compilerAfter, valuesAfter)) :=
+        Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval_argExprs
+          (args := args') hResolve
+      rcases
+          compilerOpenLocalsExprSeq_stackPrefix_openRunNResult_continue_fallthrough_of_compileCode
+            hPrim hOwned hSupported hAccess hCode hCtxLayout hNoDup
+            stackPrefix hPrefixLen program 0 headSegment hHeadPc
+            hPrefixRel hEvalSeqResolve with
+        ⟨evmAfter, hAfterRel, hAfterPc, hCont⟩
+      have hDone :
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program 0 evmAfter)
+            [] (.ok (.running evmAfter)) := by
+        rw [OpenAssembly.Source.openRunNResult_zero]
+        exact OpenExternal.OpenResultResolves.done
+      have hRun :
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program code.length state)
+            trace (.ok (.running evmAfter)) := by
+        simpa using hCont hDone
+      have hTailEmpty :
+          Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+            Structured.Preservation.CodeSegment.startPc tailSegment := by
+        rcases tailSegment with ⟨pre, post, hAsm, hFits⟩
+        simp [Structured.Preservation.CodeSegment.fallthroughPc,
+          Structured.Preservation.CodeSegment.startPc,
+          Expressions.StmtList.toStructured, Structured.Block.compileFromCtx]
+      have hAfterPcFull :
+          evmAfter.pc =
+            Structured.Preservation.CodeSegment.fallthroughPc segment := by
+        calc
+          evmAfter.pc =
+              Structured.Preservation.CodeSegment.fallthroughPc
+                headSegment := hAfterPc
+          _ = Structured.Preservation.CodeSegment.startPc tailSegment :=
+              hTailStart.symm
+          _ = Structured.Preservation.CodeSegment.fallthroughPc tailSegment :=
+              hTailEmpty.symm
+          _ = Structured.Preservation.CodeSegment.fallthroughPc segment' :=
+              hTailFall
+          _ = Structured.Preservation.CodeSegment.fallthroughPc segment :=
+              hSegmentFall
+      exact ⟨rfl, code.length, evmAfter, hRun, hAfterRel, hAfterPcFull⟩
 
 theorem stackPrefixRel_singleton_to_cons_insert
     {layout : List Name} {source : Objects.Source.State}

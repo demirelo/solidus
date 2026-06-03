@@ -287,6 +287,14 @@ mutual
                 .ok (tailResult.1, headResult.2 ++ tailResult.2)
 end
 
+theorem evalSeq_mpr {prim : Objects.Source.PrimitiveSemantics}
+    {n m : Nat} (h : m = n) (exprs : Locals.ExprSeq n)
+    (state : Objects.Source.State) :
+    evalSeq prim (Eq.mpr (congrArg Locals.ExprSeq h) exprs) state =
+      evalSeq prim exprs state := by
+  cases h
+  rfl
+
 def evalOne {results : Nat}
     (prim : Objects.Source.PrimitiveSemantics)
     (expr : Locals.Expr results) (state : Objects.Source.State) :
@@ -296,6 +304,41 @@ def evalOne {results : Nat}
       match result.2 with
       | [value] => .ok (result.1, value)
       | _ => invalid
+
+theorem eval_of_evalOne_resolves_ok
+    {prim : Objects.Source.PrimitiveSemantics}
+    {results : Nat} {expr : Locals.Expr results}
+    {state state' : Objects.Source.State}
+    {value : Word} {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (evalOne prim expr state)
+        trace (.ok (state', value))) :
+    OpenExternal.OpenResultResolves
+      (eval prim expr state)
+      trace (.ok (state', [value])) := by
+  rw [evalOne] at hResolve
+  rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+    hEvalError | hEvalOk
+  · rcases hEvalError with ⟨err, _hEval, hResult⟩
+    cases hResult
+  · rcases hEvalOk with
+      ⟨evalTrace, doneTrace, evalResult, hTrace, hEval, hDone⟩
+    rcases evalResult with ⟨stateAfterEval, values⟩
+    cases values with
+    | nil =>
+        simp [invalid] at hDone
+        cases hDone
+    | cons head tail =>
+        cases tail with
+        | nil =>
+            simp at hDone
+            cases hDone
+            subst trace
+            simpa using hEval
+        | cons _second _rest =>
+            simp [invalid] at hDone
+            cases hDone
 
 def evalCondition
     (prim : Objects.Source.PrimitiveSemantics)
@@ -327,6 +370,106 @@ def eval (prim : Objects.Source.PrimitiveSemantics) :
             (eval prim rest argResult.1)
             fun restResult =>
               .ok (restResult.1, argResult.2 :: restResult.2)
+
+theorem eval_argExprs {prim : Objects.Source.PrimitiveSemantics} :
+    ∀ {args : List (Functions.Expr 1)}
+      {state state' : State} {values : List Word}
+      {trace : OpenExternal.OpenTrace},
+      OpenExternal.OpenResultResolves
+        (eval prim args state)
+        trace (.ok (state', values)) →
+        OpenExternal.OpenResultResolves
+          (LocalsExpr.evalSeq prim (Functions.Lower.argExprs args) state)
+          trace (.ok (state', values))
+  | [], _state, _state', _values, _trace, hResolve => by
+      simpa [eval, Functions.Lower.argExprs, LocalsExpr.evalSeq] using
+        hResolve
+  | arg :: rest, state, state', values, trace, hResolve => by
+      rw [eval] at hResolve
+      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+        hArgError | hArgOk
+      · rcases hArgError with ⟨err, _hArg, hResult⟩
+        cases hResult
+      · rcases hArgOk with
+          ⟨argTrace, restBindTrace, argResult, hTrace, hArg, hRestBind⟩
+        rcases argResult with ⟨stateAfterArg, value⟩
+        rcases OpenExternal.OpenResultResolves.bind_inv hRestBind with
+          hRestError | hRestOk
+        · rcases hRestError with ⟨err, _hRest, hResult⟩
+          cases hResult
+        · rcases hRestOk with
+            ⟨restTrace, doneTrace, restResult, hRestBindTrace, hRest,
+              hDone⟩
+          rcases restResult with ⟨stateAfterRest, restValues⟩
+          cases hDone
+          subst trace
+          subst restBindTrace
+          have hArgEval :
+              OpenExternal.OpenResultResolves
+                (LocalsExpr.eval prim arg state)
+                argTrace (.ok (stateAfterArg, [value])) :=
+            LocalsExpr.eval_of_evalOne_resolves_ok hArg
+          have hRestEval :
+              OpenExternal.OpenResultResolves
+                (LocalsExpr.evalSeq prim (Functions.Lower.argExprs rest)
+                  stateAfterArg)
+                restTrace (.ok (stateAfterRest, restValues)) :=
+            eval_argExprs (args := rest) hRest
+          have hTail :
+              OpenExternal.OpenResultResolves
+                (OpenExternal.OpenResult.bind
+                  (LocalsExpr.evalSeq prim (Functions.Lower.argExprs rest)
+                    stateAfterArg)
+                  fun tailResult =>
+                    .ok (tailResult.1, [value] ++ tailResult.2))
+                restTrace (.ok (stateAfterRest, value :: restValues)) := by
+            have hDoneTail :
+                OpenExternal.OpenResultResolves
+                  (OpenExternal.OpenResult.ok
+                    (ε := Functions.EVMException)
+                    (stateAfterRest, [value] ++ restValues))
+                  []
+                  ((.ok (stateAfterRest, value :: restValues)) :
+                    Except Functions.EVMException (State × List Word)) := by
+              simpa using
+                (OpenExternal.OpenResultResolves.done :
+                  OpenExternal.OpenResultResolves
+                    (OpenExternal.OpenResult.ok
+                      (ε := Functions.EVMException)
+                      (stateAfterRest, [value] ++ restValues))
+                    []
+                    ((.ok (stateAfterRest, [value] ++ restValues)) :
+                      Except Functions.EVMException (State × List Word)))
+            simpa using
+              (OpenExternal.OpenResultResolves.bind_ok
+                (source :=
+                  LocalsExpr.evalSeq prim (Functions.Lower.argExprs rest)
+                    stateAfterArg)
+                (next := fun tailResult : State × List Word =>
+                  OpenExternal.OpenResult.ok
+                    (ε := Functions.EVMException)
+                    (tailResult.1, [value] ++ tailResult.2))
+                hRestEval hDoneTail)
+          have hFull :
+              OpenExternal.OpenResultResolves
+                (OpenExternal.OpenResult.bind
+                  (LocalsExpr.eval prim arg state)
+                  fun headResult =>
+                    OpenExternal.OpenResult.bind
+                      (LocalsExpr.evalSeq prim
+                        (Functions.Lower.argExprs rest) headResult.1)
+                      fun tailResult =>
+                        .ok (tailResult.1,
+                          headResult.2 ++ tailResult.2))
+                (argTrace ++ restTrace)
+                (.ok (stateAfterRest, value :: restValues)) :=
+            by
+              simpa using
+                OpenExternal.OpenResultResolves.bind_ok hArgEval hTail
+          rw [Functions.Lower.argExprs]
+          rw [LocalsExpr.evalSeq_mpr (by simp [Nat.add_comm])
+            (Locals.ExprSeq.cons arg (Functions.Lower.argExprs rest))]
+          simpa [LocalsExpr.evalSeq, List.append_assoc] using hFull
 
 end ArgList
 
