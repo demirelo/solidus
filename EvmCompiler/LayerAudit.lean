@@ -1903,6 +1903,64 @@ example :
   native_decide
 
 example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Locals.Word}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store machine stack layout)
+    {name : Locals.Name} {depth : Nat}
+    (hBinding :
+      (name,
+        Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.stack
+          depth) ∈ layout) :
+    stack[depth]? = store name :=
+  Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel.stack_binding
+    hValues hBinding
+
+example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Locals.Word}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store machine stack layout)
+    {name : Locals.Name} {slot : Nat}
+    (hBinding :
+      (name,
+        Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.scratch
+          slot) ∈ layout) :
+    ∃ value, store name = some value ∧
+      (machine.mload (range.word slot)).1 = value :=
+  Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel.scratch_binding
+    hValues hBinding
+
+example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
+    {sourceScope stackLayout : List Locals.Name}
+    {store : Locals.Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Locals.Word}
+    {layout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.Layout}
+    (hLayout :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.WellFormed
+        range sourceScope stackLayout layout)
+    (hValues :
+      Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel
+        range store machine stack layout)
+    {name : Locals.Name} {slot : Nat}
+    (hBinding :
+      (name,
+        Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.LocalLocation.scratch
+          slot) ∈ layout) :
+    slot < range.words ∧
+      ∃ value, store name = some value ∧
+        (machine.mload (range.word slot)).1 = value :=
+  Locals.SourceLowering.StateRel.SpillScratch.SpillLayout.ValueRel.scratch_binding_of_wellFormed
+    hLayout hValues hBinding
+
+example {range : Locals.SourceLowering.StateRel.SpillScratch.ScratchRange}
     {offset len : Nat}
     (hStart : range.endExclusive ≤ offset) :
     range.disjointBytes offset len :=

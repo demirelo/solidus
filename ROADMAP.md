@@ -7471,8 +7471,13 @@ storage scratch assumption.
     `MemoryByteEqOutsideScratch.run_spillTopReloadCode_target_scratch_slot`
     prove that, starting with the runtime value already on top of the stack,
     `push offset; mstore; push offset; mload` reloads that value and preserves
-    the private-scratch relation.  Remaining work is the public theorem split
-    and compiler wiring for spill-aware emitted code.
+    the private-scratch relation.  The spill-aware value invariant is now
+    checked too: `SpillLayout.BindingValueRel`,
+    `SpillLayout.ValueRel`, and the stack/scratch projection lemmas relate
+    stack-bound and scratch-bound locals to the source store, including the
+    fact that scratch-bound locals load their source value from the assigned
+    private scratch slot.  Remaining work is the public theorem split and
+    compiler wiring for spill-aware emitted code.
   Until that route is fully checked, the shippable path remains conservative:
   dead-drop, SWAP16-reachable promotion, and rejection of genuinely-live
   deeper-than-window locals.

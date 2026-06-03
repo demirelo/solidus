@@ -2123,6 +2123,67 @@ theorem sourceScope_nodup {range : ScratchRange}
 
 end WellFormed
 
+def BindingValueRel (range : ScratchRange) (store : Source.Store)
+    (machine : EvmYul.MachineState) (stack : EvmYul.Stack Word)
+    (binding : Binding) : Prop :=
+  match binding with
+  | (name, LocalLocation.stack depth) =>
+      stack[depth]? = store name
+  | (name, LocalLocation.scratch slot) =>
+      ∃ value, store name = some value ∧
+        (machine.mload (range.word slot)).1 = value
+
+def ValueRel (range : ScratchRange) (store : Source.Store)
+    (machine : EvmYul.MachineState) (stack : EvmYul.Stack Word)
+    (layout : Layout) : Prop :=
+  ∀ binding, binding ∈ layout →
+    BindingValueRel range store machine stack binding
+
+namespace ValueRel
+
+theorem stack_binding {range : ScratchRange} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {layout : Layout} (hValues : ValueRel range store machine stack layout)
+    {name : Name} {depth : Nat}
+    (hBinding : (name, LocalLocation.stack depth) ∈ layout) :
+    stack[depth]? = store name := by
+  exact hValues (name, LocalLocation.stack depth) hBinding
+
+theorem scratch_binding {range : ScratchRange} {store : Source.Store}
+    {machine : EvmYul.MachineState} {stack : EvmYul.Stack Word}
+    {layout : Layout} (hValues : ValueRel range store machine stack layout)
+    {name : Name} {slot : Nat}
+    (hBinding : (name, LocalLocation.scratch slot) ∈ layout) :
+    ∃ value, store name = some value ∧
+      (machine.mload (range.word slot)).1 = value := by
+  exact hValues (name, LocalLocation.scratch slot) hBinding
+
+theorem stack_binding_of_wellFormed {range : ScratchRange}
+    {sourceScope stackLayout : List Name} {layout : Layout}
+    {store : Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Word}
+    (hLayout : WellFormed range sourceScope stackLayout layout)
+    (hValues : ValueRel range store machine stack layout)
+    {name : Name} {depth : Nat}
+    (hBinding : (name, LocalLocation.stack depth) ∈ layout) :
+    stackLayout[depth]? = some name ∧ stack[depth]? = store name :=
+  ⟨hLayout.stack_binding hBinding, stack_binding hValues hBinding⟩
+
+theorem scratch_binding_of_wellFormed {range : ScratchRange}
+    {sourceScope stackLayout : List Name} {layout : Layout}
+    {store : Source.Store} {machine : EvmYul.MachineState}
+    {stack : EvmYul.Stack Word}
+    (hLayout : WellFormed range sourceScope stackLayout layout)
+    (hValues : ValueRel range store machine stack layout)
+    {name : Name} {slot : Nat}
+    (hBinding : (name, LocalLocation.scratch slot) ∈ layout) :
+    slot < range.words ∧
+      ∃ value, store name = some value ∧
+        (machine.mload (range.word slot)).1 = value :=
+  ⟨hLayout.scratch_binding hBinding, scratch_binding hValues hBinding⟩
+
+end ValueRel
+
 def nodup? {α : Type} [DecidableEq α] : List α → Bool
   | [] => true
   | head :: tail => decide (head ∉ tail) && nodup? tail
