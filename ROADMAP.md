@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 06:26 CEST.
+Last updated: 2026-06-03 06:46 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -84,7 +84,13 @@ Execution order:
    through the existing assembly compile proof. Closed no-CALL assembly source
    runs now also embed into this open target tower with the empty trace through
    `Source.openRunNResult_resolves_closed_of_no_callCreate` and the direct
-   no-CALL compile wrappers. The compiler-open source side now also has
+   no-CALL compile wrappers; current-instruction no-CALL source-open steps now
+   also have running/halted wrappers
+   `Source.openRunNResult_current_no_call_running_continue_of_current_instr`
+   and `Source.openRunNResult_current_no_call_halted_of_current_instr`, which
+   let internal procedure-call prologue/return-site instructions compose on the
+   empty trace without requiring the whole assembly program to be no-CALL. The
+   compiler-open source side now also has
    primitive atoms for non-CALL/no-CALL `BasicOp` evaluation as empty-trace
    resolutions. The CALL primitive bridge itself is now checked in
    `OpenLowering.compilerOpenPrimitive_call_stepAtResult`: compiler-open

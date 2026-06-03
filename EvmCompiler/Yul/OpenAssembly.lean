@@ -783,6 +783,51 @@ theorem openStepResult_current_stepAt
   rw [hAt]
   exact hStep
 
+theorem openStepResult_resolves_closed_of_current_instr_no_callCreate
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {instr : Assembly.Instr}
+    {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hStep : Assembly.Source.stepResult program state = .ok result) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      [] (.ok result) := by
+  have hStepAt :
+      Assembly.Source.stepAtResult program pc instr state = .ok result := by
+    unfold Assembly.Source.stepResult at hStep
+    rw [hAt] at hStep
+    exact hStep
+  cases instr with
+  | label name =>
+      exact
+        openStepResult_current_stepAt hAt
+          (openStepAtResult_resolves_closed_of_non_prim
+            (by intro op h; cases h) hStepAt)
+  | prim op =>
+      have hNo : op.isCallCreate = false := by
+        simpa [Assembly.Instr.usesCallCreate] using hNoInstr
+      exact
+        openStepResult_current_stepAt hAt
+          (openStepAtResult_resolves_closed_of_prim_no_callCreate
+            hNo hStepAt)
+  | push value =>
+      exact
+        openStepResult_current_stepAt hAt
+          (openStepAtResult_resolves_closed_of_non_prim
+            (by intro op h; cases h) hStepAt)
+  | jump target =>
+      exact
+        openStepResult_current_stepAt hAt
+          (openStepAtResult_resolves_closed_of_non_prim
+            (by intro op h; cases h) hStepAt)
+  | jumpi target =>
+      exact
+        openStepResult_current_stepAt hAt
+          (openStepAtResult_resolves_closed_of_non_prim
+            (by intro op h; cases h) hStepAt)
+
 theorem openStepResult_resolves_closed_of_no_callCreate
     {program : Assembly.Program} {state : EVMState}
     {result : Assembly.StepResult}
@@ -917,6 +962,50 @@ theorem openRunNResult_resolves_running_continue
             simpa [hFuel, List.append_assoc] using hCombined
         | halted halt =>
             cases hRest
+
+theorem openRunNResult_current_no_call_running_continue_of_current_instr
+    {program : Assembly.Program} {state mid : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr}
+    {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hStep :
+      Assembly.Source.stepResult program state = .ok (.running mid))
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (openRunNResult program fuel mid) tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state) tailTrace result := by
+  have hOpenStep :
+      OpenExternal.OpenResultResolves (openStepResult program state)
+        [] (.ok (.running mid)) :=
+    openStepResult_resolves_closed_of_current_instr_no_callCreate
+      hAt hNoInstr hStep
+  simpa using
+    openRunNResult_resolves_step_running
+      (fuel := fuel) hOpenStep hRest
+
+theorem openRunNResult_current_no_call_halted_of_current_instr
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {pc : Nat} {instr : Assembly.Instr} {halt : Assembly.Halt}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, instr))
+    (hNoInstr : Assembly.Instr.usesCallCreate instr = false)
+    (hStep :
+      Assembly.Source.stepResult program state = .ok (.halted halt)) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      [] (.ok (.halted halt)) := by
+  have hOpenStep :
+      OpenExternal.OpenResultResolves (openStepResult program state)
+        [] (.ok (.halted halt)) :=
+    openStepResult_resolves_closed_of_current_instr_no_callCreate
+      hAt hNoInstr hStep
+  exact openRunNResult_resolves_step_halted hOpenStep
 
 theorem openRunNResult_current_prim_call_continue
     {program : Assembly.Program} {state : EVMState}
