@@ -4772,6 +4772,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -4789,8 +4790,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -4803,8 +4803,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -4857,6 +4856,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -4875,8 +4875,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -4889,8 +4888,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -4950,6 +4948,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -4967,8 +4966,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -4981,8 +4979,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -5039,6 +5036,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail_pc
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -5058,8 +5056,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail_pc
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5072,8 +5069,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail_pc
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -5126,6 +5122,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail_pc
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -5146,8 +5143,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail_pc
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5160,8 +5156,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail_pc
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -5221,6 +5216,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailTrace : OpenExternal.OpenTrace}
         {sourceOutcome : Functions.Source.Outcome}
@@ -5240,8 +5236,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5254,8 +5249,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen] at hResolve
   rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
     hHeadError | hHeadOk
@@ -5323,6 +5317,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailStmts : List Expressions.Stmt}
         {tailFinalCtx : Locals.Ctx}
@@ -5352,8 +5347,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5366,8 +5360,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rcases
       functionsBlock_toLocals_compileOpen_expr_cons_inv hCompileBlock with
     ⟨code, restStmts, hCode, hRestCompile, hCompiledStmts⟩
@@ -5419,8 +5412,7 @@ theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult := by
+          ResultRel sourceOutcome targetResult := by
     intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
       hRel hAfterPc hRest
     have hTailPc :
@@ -5471,6 +5463,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_p
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailStmts : List Expressions.Stmt}
         {tailFinalCtx : Locals.Ctx}
@@ -5502,8 +5495,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_p
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5516,8 +5508,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_p
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rcases
       functionsBlock_toLocals_compileOpen_let_cons_inv hCompileBlock with
     ⟨code, restStmts, hCode, hRestCompile, hCompiledStmts⟩
@@ -5570,8 +5561,7 @@ theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_p
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult := by
+          ResultRel sourceOutcome targetResult := by
     intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
       hRel hAfterPc hRest
     have hTailPc :
@@ -5624,6 +5614,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tai
       state.pc = Structured.Preservation.CodeSegment.startPc segment)
     (hPrefixRel :
       Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {ResultRel : Functions.Source.Outcome → Assembly.StepResult → Prop}
     (hTail :
       ∀ {tailStmts : List Expressions.Stmt}
         {tailFinalCtx : Locals.Ctx}
@@ -5653,8 +5644,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tai
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult)
+          ResultRel sourceOutcome targetResult)
     {trace : OpenExternal.OpenTrace}
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -5667,8 +5657,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tai
       OpenExternal.OpenResultResolves
         (OpenAssembly.Source.openRunNResult program targetFuel state)
         trace (.ok targetResult) ∧
-      Functions.Source.WholeProgramOutcomeRel sourceOutcome
-        targetResult := by
+      ResultRel sourceOutcome targetResult := by
   rcases
       functionsBlock_toLocals_compileOpen_assign_cons_inv hCompileBlock with
     ⟨depth, valueCode, swapOp, restStmts, hDepth, hValue, hSwap,
@@ -5739,8 +5728,7 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tai
           OpenExternal.OpenResultResolves
             (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
             tailTrace (.ok targetResult) ∧
-          Functions.Source.WholeProgramOutcomeRel sourceOutcome
-            targetResult := by
+          ResultRel sourceOutcome targetResult := by
     intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
       hRel hAfterPc hRest
     have hTailPc :

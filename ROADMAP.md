@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:27 CEST.
+Last updated: 2026-06-03 05:32 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -253,10 +253,16 @@ Execution order:
    `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_pc`,
    and
    `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tail_pc`.
-   The remaining work is abstracting this shape into the internal recursive
-   block theorem, then generalizing the checked sequencing shape to function
-   calls, loops, switch/conditionals, and composing the result into the
-   whole-program imported-Yul-to-open-EVM theorem.
+   The regular-head sequencing and compiled-segment wrappers are now
+   continuation-parametric in their final source/target result relation
+   (`ResultRel`) rather than hard-coding
+   `Functions.Source.WholeProgramOutcomeRel`, which keeps the recursive block
+   proof layout-relative internally and reserves the whole-program relation for
+   the outer boundary. The remaining work is instantiating that continuation
+   parameter with the internal block/kont result invariant, then generalizing
+   the checked sequencing shape to function calls, loops, switch/conditionals,
+   and composing the result into the whole-program imported-Yul-to-open-EVM
+   theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
