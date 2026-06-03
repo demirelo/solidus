@@ -4590,6 +4590,142 @@ theorem openRunNResult_source_label_running_continue
       hAt (by simp [Assembly.Instr.usesCallCreate]) hStep
       (hRest afterLabel hRelAfter hPcAfter)
 
+theorem openRunNResult_exit_label_then_dispatch_continue
+    {proc : Structured.Proc}
+    {dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite}
+    {site : Structured.CallSite} {returnDest : Nat}
+    {bodyState returned : Structured.RunState}
+    {stack : EvmYul.Stack Word} {frame : Structured.ReturnDest}
+    {target : EvmYul.EVM.State} {tokens : List Word} {token : Word}
+    {preExit post : Assembly.Program}
+    {fuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hAttach :
+      Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+        some stack)
+    (hReturns : bodyState.returns = frame :: returned.returns)
+    (hRetc : bodyState.evm.stack.length = proc.retc)
+    (hMem :
+      site ∈ sites.filter (Structured.CallSite.forProc proc.name))
+    (hNoDup :
+      ((sites.filter (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hBound : proc.retc < 16)
+    (hFitsExit :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom preExit
+        [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)])
+    (hFitsDispatch :
+      Structured.Preservation.AssemblyProgram.PCFitsFrom
+        (preExit ++
+          [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)])
+        (Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+          dispatchSupply))
+    (hPc : target.pc = Assembly.Program.pcAfter preExit)
+    (hRel :
+      Structured.Preservation.Frame.StateRel bodyState target
+        (token :: tokens))
+    (hExact :
+      Structured.Preservation.ExactLabels
+        (preExit ++
+          [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)] ++
+          Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+            dispatchSupply ++ post))
+    (hReturnLabel :
+      Assembly.Program.labelPc
+        (preExit ++
+          [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)] ++
+          Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+            dispatchSupply ++ post)
+        site.returnLabel = some returnDest)
+    (hRest :
+      ∀ final : EvmYul.EVM.State,
+        Structured.Preservation.Frame.StateRel
+          (returned.withEVM { bodyState.evm with stack := stack })
+          final tokens →
+        final.pc = EvmYul.UInt256.ofNat returnDest →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult
+            (preExit ++
+              [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)] ++
+              Structured.Preservation.ProcedurePreservation.dispatchCode proc
+                sites dispatchSupply ++ post)
+            fuel final)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult
+        (preExit ++
+          [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)] ++
+          Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+            dispatchSupply ++ post)
+        (returnDispatchSelectedTableFuel proc.retc
+          (sites.filter (Structured.CallSite.forProc proc.name)) site fuel + 1)
+        target)
+      tailTrace result := by
+  let dcode :=
+    Structured.Preservation.ProcedurePreservation.dispatchCode proc sites
+      dispatchSupply
+  have hSourceEq :
+      returned.withEVM { bodyState.evm with stack := stack } =
+        { bodyState with
+          evm :=
+            { bodyState.evm with
+              stack := bodyState.evm.stack ++ frame.callerStack }
+          returns := returned.returns } :=
+    Structured.Preservation.Frame.CallFacts.returned_with_attached_eq hAttach
+  have hRun :=
+    openRunNResult_source_label_running_continue
+      (source := bodyState) (target := target)
+      (tokens := token :: tokens)
+      (label := Structured.ProcLabel.exit proc.name)
+      (pre := preExit) (post := dcode ++ post)
+      (fuel := returnDispatchSelectedTableFuel proc.retc
+        (sites.filter (Structured.CallSite.forProc proc.name)) site fuel)
+      (tailTrace := tailTrace) (result := result)
+      (Structured.Preservation.AssemblyProgram.PCFitsFrom.start hFitsExit)
+      hPc hRel
+      (by
+        intro afterExit hAfterRel hAfterPc
+        have hDispatch :=
+          openRunNResult_forProc_selected_source_running_continue
+            (proc := proc) (sites := sites) (supply := dispatchSupply)
+            (site := site) (returnDest := returnDest)
+            (pre := preExit ++
+              [Assembly.Instr.label (Structured.ProcLabel.exit proc.name)])
+            (post := post) (callee := bodyState) (target := afterExit)
+            (tokens := tokens) (token := token) (frame := frame)
+            (returns := returned.returns) (fuel := fuel)
+            (tailTrace := tailTrace) (result := result)
+            hMem hNoDup hToken hRetc
+            (by simpa [dcode,
+              Structured.Preservation.ProcedurePreservation.dispatchCode]
+              using hFitsDispatch)
+            hAfterPc hAfterRel hReturns hBound
+            (by simpa [dcode,
+              Structured.Preservation.ProcedurePreservation.dispatchCode,
+              List.append_assoc] using hExact)
+            (by simpa [dcode,
+              Structured.Preservation.ProcedurePreservation.dispatchCode,
+              List.append_assoc] using hReturnLabel)
+            (by
+              intro final hRelFinal hPcFinal
+              have hRelFinal' :
+                  Structured.Preservation.Frame.StateRel
+                    (returned.withEVM
+                      { bodyState.evm with stack := stack })
+                    final tokens := by
+                simpa [hSourceEq] using hRelFinal
+              simpa [dcode,
+                Structured.Preservation.ProcedurePreservation.dispatchCode,
+                List.append_assoc] using
+                hRest final hRelFinal' hPcFinal)
+        simpa [dcode,
+          Structured.Preservation.ProcedurePreservation.dispatchCode,
+          List.append_assoc] using hDispatch)
+  simpa [dcode, Structured.Preservation.ProcedurePreservation.dispatchCode,
+    List.append_assoc] using hRun
+
 theorem evmState_with_stack_eq_self
     {state : EvmYul.EVM.State} {stack : OpenExternal.Stack}
     (hStack : state.stack = stack) :
