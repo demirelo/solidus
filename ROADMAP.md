@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 04:22 CEST.
+Last updated: 2026-06-03 04:25 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -154,7 +154,19 @@ Execution order:
    `OpenLowering.compilerOpenLocalsExpr_var_stackPrefix_openRunNResult_continue_of_compileCode`.
    This means the remaining mutual expression proof can consume actual
    compiler-generated `CodeSegment`s for the non-recursive bases instead of
-   assuming arbitrary current instructions.
+   assuming arbitrary current instructions. The theorem boundary has also been
+   corrected to be CALL-capable instead of no-CALL-shaped:
+   `OpenLowering.BasicOpOpenSupported`,
+   `OpenLowering.LocalsExprOpenSupported`, and
+   `OpenLowering.LocalsExprSeqOpenSupported` classify ordinary no-CALL
+   primitives plus recognized CALL-family primitives while still excluding
+   source-owned-forbidden raw `.code` expressions and unsupported CREATE-family
+   primitives. The next mutual theorem must strengthen the current
+   stack-prefix continuation result with a fallthrough-PC postcondition:
+   expression/sequence lowering should return `evmAfter.pc =
+   CodeSegment.fallthroughPc segment`. That is the missing invariant that lets
+   `.prim` prove recursive argument lowering ended at the primitive instruction
+   and `ExprSeq.cons` prove the head ended at the tail segment.
    The remaining work is lifting these stack-prefix primitive atoms through
    full expressions, blocks, calls, and control constructs, then composing the
    result into the whole-program imported-Yul-to-open-EVM theorem.

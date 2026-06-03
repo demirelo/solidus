@@ -59,6 +59,82 @@ theorem basicOp_toPrimOp_haltKind?_none (op : Structured.BasicOp) :
     (Assembly.Instr.prim op.toPrimOp).haltKind? = none := by
   cases op <;> rfl
 
+def BasicOpOpenSupported (op : Structured.BasicOp) : Prop :=
+  op.toPrimOp.isCallCreate = false ∨
+    ∃ kind : OpenExternal.CallKind,
+      OpenExternal.CallKind.ofBasicOp? op = some kind
+
+mutual
+  def LocalsExprOpenSupported {results : Nat} :
+      Locals.Expr results → Prop
+    | .lit _value => True
+    | .var _name => True
+    | .code _code => False
+    | .prim op args =>
+        LocalsExprSeqOpenSupported args ∧ BasicOpOpenSupported op
+
+  def LocalsExprSeqOpenSupported {results : Nat} :
+      Locals.ExprSeq results → Prop
+    | .nil => True
+    | .cons head tail =>
+        LocalsExprOpenSupported head ∧
+          LocalsExprSeqOpenSupported tail
+end
+
+theorem basicOpOpenSupported_of_no_callCreate
+    {op : Structured.BasicOp}
+    (hNoCallCreate : op.toPrimOp.isCallCreate = false) :
+    BasicOpOpenSupported op :=
+  Or.inl hNoCallCreate
+
+mutual
+  theorem localsExprOpenSupported_of_sourceOwned_no_callCreate :
+      ∀ {results : Nat} {expr : Locals.Expr results},
+        Locals.Source.Expr.SourceOwned expr →
+        expr.usesCallCreate = false →
+          LocalsExprOpenSupported expr := by
+    intro results expr hOwned hNoCallCreate
+    cases expr with
+    | lit value =>
+        simp [LocalsExprOpenSupported]
+    | var name =>
+        simp [LocalsExprOpenSupported]
+    | code code =>
+        simp [Locals.Source.Expr.SourceOwned] at hOwned
+    | prim op args =>
+        simp [Locals.Source.Expr.SourceOwned] at hOwned
+        have hParts :
+            args.usesCallCreate = false ∧
+              op.toPrimOp.isCallCreate = false := by
+          simpa [Locals.Expr.usesCallCreate] using hNoCallCreate
+        exact
+          ⟨localsExprSeqOpenSupported_of_sourceOwned_no_callCreate
+              hOwned hParts.1,
+            basicOpOpenSupported_of_no_callCreate hParts.2⟩
+
+  theorem localsExprSeqOpenSupported_of_sourceOwned_no_callCreate :
+      ∀ {results : Nat} {exprs : Locals.ExprSeq results},
+        Locals.Source.ExprSeq.SourceOwned exprs →
+        exprs.usesCallCreate = false →
+          LocalsExprSeqOpenSupported exprs := by
+    intro results exprs hOwned hNoCallCreate
+    cases exprs with
+    | nil =>
+        simp [LocalsExprSeqOpenSupported]
+    | @cons left right head tail =>
+        simp [Locals.Source.ExprSeq.SourceOwned] at hOwned
+        rcases hOwned with ⟨hHeadOwned, hTailOwned⟩
+        have hParts :
+            head.usesCallCreate = false ∧
+              tail.usesCallCreate = false := by
+          simpa [Locals.ExprSeq.usesCallCreate] using hNoCallCreate
+        exact
+          ⟨localsExprOpenSupported_of_sourceOwned_no_callCreate
+              hHeadOwned hParts.1,
+            localsExprSeqOpenSupported_of_sourceOwned_no_callCreate
+              hTailOwned hParts.2⟩
+end
+
 theorem codeSegment_instrAtPc_start_cons
     {asm : Assembly.Program} {instr : Assembly.Instr}
     {suffix : Assembly.Program}
@@ -1738,6 +1814,50 @@ theorem compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue
   · simpa using hPrefixRel
   · intro tailTrace result hRest
     simpa using hRest
+
+theorem compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue_of_compileCode
+    {prim : Objects.Source.PrimitiveSemantics}
+    {ctx : Locals.Ctx} {offset : Nat}
+    {layout : List Name}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {code : Structured.Code}
+    (hCompile :
+      Locals.ExprSeq.compileCode ctx offset Locals.ExprSeq.nil = some code)
+    (stackPrefix : List Word)
+    (program : Assembly.Program) (fuel : Nat)
+    (_segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (_hPc :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc _segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler stackPrefix state)
+    {valuesAfter : List Word}
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.LocalsExpr.evalSeq
+          prim Locals.ExprSeq.nil compiler)
+        trace (.ok (compilerAfter, valuesAfter))) :
+    ∃ evmAfter : EvmYul.EVM.State,
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        (valuesAfter.reverse ++ stackPrefix) evmAfter ∧
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {result : Except EVMException Assembly.StepResult},
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel evmAfter)
+          tailTrace result →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program fuel state)
+          (trace ++ tailTrace) result := by
+  have hCode : code = [] :=
+    localsExprSeq_compileCode_nil_eq hCompile
+  exact
+    compilerOpenLocalsExprSeq_nil_stackPrefix_openRunNResult_continue
+      (prim := prim) (layout := layout) (compiler := compiler)
+      (compilerAfter := compilerAfter) (state := state) stackPrefix program
+      fuel hPrefixRel hResolve
 
 theorem compilerOpenLocalsExprSeq_cons_stackPrefix_openRunNResult_continue_of_head_tail
     {prim : Objects.Source.PrimitiveSemantics}
