@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 03:01 CEST.
+Last updated: 2026-06-03 03:03 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -60,8 +60,11 @@ Execution order:
    theorem against the closed runner. Emitted primitive CALL blocks and compiled
    current primitive CALL steps now expose the selected open event, and the
    compiled open fuel runner has the checked CALL-then-tail continuation lemma
-   needed for later instructions and later CALLs. The remaining work is proving
-   the CALL-site preservation bridge from compiler-open blocks down to these open
+   needed for later instructions and later CALLs. `Compiled.OpenTraceResult`
+   now packages multi-step open compiled-assembly traces with constructors for
+   CALL, no-CALL running, and no-CALL halted current blocks, plus a resolver back
+   to `Compiled.openRunNResult`. The remaining work is proving the CALL-site
+   preservation bridge from compiler-open blocks down to these open
    target runners and composing it into the whole-program
    imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
@@ -126,9 +129,11 @@ let/assign CALL scaffolding, or a concrete external-world model.
   target-side primitive/instruction/list/program CALL adapter is Lean-checked
   in `OpenAssembly`, including empty-trace compatibility for no-CALL target
   instruction lists, emitted/current primitive CALL bridge lemmas, and
-  CALL-through-tail fuel composition; the remaining public gap is the CALL-site
-  preservation bridge from compiler-open blocks down to that open target
-  semantics.
+  CALL-through-tail fuel composition. The new
+  `Compiled.OpenTraceResult` wrapper is the intended target-side proof object
+  for multi-step open compiled-assembly runs; the remaining public gap is the
+  CALL-site preservation bridge from compiler-open blocks down to that open
+  target semantics.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL

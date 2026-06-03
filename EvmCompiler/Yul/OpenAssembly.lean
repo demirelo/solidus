@@ -641,6 +641,96 @@ theorem openRunNResult_current_prim_call_continue
     openRunNResult_resolves_step_running
       (fuel := fuel) hStep hRest
 
+inductive OpenTraceResult (program : Assembly.Program) :
+    Nat → EVMState → OpenExternal.OpenTrace → Assembly.StepResult → Prop where
+  | done (state : EVMState) :
+      OpenTraceResult program 0 state [] (.running state)
+  | stepRunning
+      {fuel : Nat} {state mid : EVMState}
+      {headTrace tailTrace : OpenExternal.OpenTrace}
+      {result : Assembly.StepResult}
+      (hStep :
+        OpenExternal.OpenResultResolves (openStepResult program state)
+          headTrace (.ok (.running mid)))
+      (hRest : OpenTraceResult program fuel mid tailTrace result) :
+      OpenTraceResult program (fuel + 1) state
+        (headTrace ++ tailTrace) result
+  | stepHalted
+      {fuel : Nat} {state : EVMState}
+      {headTrace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+      (hStep :
+        OpenExternal.OpenResultResolves (openStepResult program state)
+          headTrace (.ok (.halted halt))) :
+      OpenTraceResult program (fuel + 1) state headTrace (.halted halt)
+
+namespace OpenTraceResult
+
+theorem resolves
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {trace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hTrace : OpenTraceResult program fuel state trace result) :
+    OpenExternal.OpenResultResolves (openRunNResult program fuel state)
+      trace (.ok result) := by
+  induction hTrace with
+  | done state =>
+      exact OpenExternal.OpenResultResolves.done
+  | stepRunning hStep _hRest ih =>
+      exact openRunNResult_resolves_step_running hStep ih
+  | stepHalted hStep =>
+      exact openRunNResult_resolves_step_halted hStep
+
+theorem current_prim_call_continue
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {pc : Nat} {op : Assembly.PrimOp}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    {tailTrace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse)
+    (hRest :
+      OpenTraceResult program fuel
+        (EvmYul.EVM.State.incrPC (call.resume response))
+        tailTrace result) :
+    OpenTraceResult program (fuel + 1) state
+      ({ site := call.site, response := response } :: tailTrace) result := by
+  have hStep :=
+    openStepResult_current_prim_call hAt hKind hCall response
+  simpa using OpenTraceResult.stepRunning hStep hRest
+
+theorem current_no_call_running_continue
+    {program : Assembly.Program} {state mid : EVMState}
+    {fuel : Nat} {code : List Assembly.TargetInstr}
+    {tailTrace : OpenExternal.OpenTrace} {result : Assembly.StepResult}
+    (hEmit : Assembly.emitCurrent? program state = some code)
+    (hCode : Target.codeUsesCallCreate code = false)
+    (hStep :
+      Assembly.Compiled.stepResult program state = .ok (.running mid))
+    (hRest : OpenTraceResult program fuel mid tailTrace result) :
+    OpenTraceResult program (fuel + 1) state tailTrace result := by
+  have hOpenStep :=
+    openStepResult_resolves_closed_of_emitCurrent_no_callCreate
+      hEmit hCode hStep
+  simpa using OpenTraceResult.stepRunning hOpenStep hRest
+
+theorem current_no_call_halted
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {code : List Assembly.TargetInstr} {halt : Assembly.Halt}
+    (hEmit : Assembly.emitCurrent? program state = some code)
+    (hCode : Target.codeUsesCallCreate code = false)
+    (hStep :
+      Assembly.Compiled.stepResult program state = .ok (.halted halt)) :
+    OpenTraceResult program (fuel + 1) state [] (.halted halt) := by
+  have hOpenStep :=
+    openStepResult_resolves_closed_of_emitCurrent_no_callCreate
+      hEmit hCode hStep
+  exact OpenTraceResult.stepHalted hOpenStep
+
+end OpenTraceResult
+
 end Compiled
 
 end OpenAssembly
