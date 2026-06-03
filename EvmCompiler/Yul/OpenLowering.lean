@@ -7093,6 +7093,211 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOpenResult
         FunctionsBlockCompiledOpenResultRel.cast_fallthrough
           hTailFallFull hOpenRel⟩
 
+def FunctionsStmtListRegularOpenSupported (layout : List Name) :
+    List Functions.Stmt → Prop
+  | [] => True
+  | .expr expr :: rest =>
+      Locals.Source.Expr.SourceOwned expr ∧
+        LocalsExprOpenSupported expr ∧
+          Locals.SourceLowering.Expr.Accessible layout 0 expr ∧
+            FunctionsStmtListRegularOpenSupported layout rest
+  | .let_ name valueExpr :: rest =>
+      Locals.Source.Expr.SourceOwned valueExpr ∧
+        LocalsExprOpenSupported valueExpr ∧
+          Locals.SourceLowering.Expr.Accessible layout 0 valueExpr ∧
+            name ∉ layout ∧
+              FunctionsStmtListRegularOpenSupported (name :: layout) rest
+  | .assign name valueExpr :: rest =>
+      Locals.Source.Expr.SourceOwned valueExpr ∧
+        LocalsExprOpenSupported valueExpr ∧
+          Locals.SourceLowering.Expr.Accessible layout 0 valueExpr ∧
+            (∃ idx, layout[idx]? = some name ∧ idx + 1 ≤ 16) ∧
+              FunctionsStmtListRegularOpenSupported layout rest
+  | _ :: _ => False
+
+theorem compilerOpenFunctionsBlock_regular_openRunNResult_compiledOpenResultRel_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxFinal : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {retc : Nat} {returns : List Name}
+    {stmts : List Functions.Stmt}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hSupported : FunctionsStmtListRegularOpenSupported layout stmts)
+    (hCtxRel :
+      Functions.SourceDirect.CtxRel retc sourceCtx localsCtx)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns { stmts := stmts }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx sourceFuel { stmts := stmts }
+          compiler)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    ∃ targetFuel targetResult,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program targetFuel state)
+        trace (.ok targetResult) ∧
+      FunctionsBlockCompiledOpenResultRel program structuredCtx
+        (Structured.Preservation.CodeSegment.fallthroughPc segment)
+        retc returns [] [] (sourceOutcome, ctxFinal) finalLocalsCtx
+        targetResult := by
+  induction stmts generalizing sourceCtx localsCtx finalLocalsCtx layout
+      compiledStmts compiler state sourceFuel ctxFinal trace
+      sourceOutcome with
+  | nil =>
+      exact
+        compilerOpenFunctionsBlock_nil_openRunNResult_openResultRel_of_compileOpen
+          (retc := retc) (returns := returns) hCtxRel hCompileBlock
+          program segment hPc
+          (by simpa [hCtxLayout] using hPrefixRel) hResolve
+  | cons stmt rest ih =>
+      cases sourceFuel with
+      | zero =>
+          rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+            at hResolve
+          cases hResolve
+      | succ sourceFuel' =>
+          cases stmt with
+          | expr expr =>
+              rcases hSupported with
+                ⟨hOwned, hOpenSupported, hAccess, hRestSupported⟩
+              exact
+                compilerOpenFunctionsBlock_expr_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail
+                  hPrim hOwned hOpenSupported hAccess hCompileBlock
+                  hCtxLayout hNoDup program segment hPc hPrefixRel
+                  (hTail := by
+                    intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                      tailCtxAfter compilerAfter evmAfter tailSegment
+                      hRestCompile hRel hTailPc hRestResolve
+                    exact
+                      ih (sourceCtx := sourceCtx)
+                        (ctxFinal := tailCtxAfter)
+                        (sourceFuel := sourceFuel')
+                        (localsCtx := localsCtx)
+                        (finalLocalsCtx := tailFinalCtx)
+                        (layout := layout)
+                        (compiledStmts := tailStmts)
+                        (compiler := compilerAfter)
+                        (state := evmAfter)
+                        (trace := tailTrace)
+                        (sourceOutcome := sourceOutcome)
+                        hRestSupported hCtxRel hRestCompile hCtxLayout
+                        hNoDup tailSegment hTailPc hRel hRestResolve)
+                  hResolve
+          | let_ name valueExpr =>
+              rcases hSupported with
+                ⟨hOwned, hOpenSupported, hAccess, hFresh,
+                  hRestSupported⟩
+              have hCtxLayoutTail :
+                  (localsCtx.withLayout (name :: localsCtx.layout)).layout =
+                    name :: layout := by
+                simp [Locals.Ctx.withLayout, hCtxLayout]
+              have hNoDupTail : (name :: layout).Nodup := by
+                simp [hFresh, hNoDup]
+              exact
+                compilerOpenFunctionsBlock_let_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail
+                  hPrim hOwned hOpenSupported hAccess hCompileBlock
+                  hCtxLayout hNoDup hFresh program segment hPc hPrefixRel
+                  (hTail := by
+                    intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                      tailCtxAfter compilerAfter evmAfter tailSegment
+                      hRestCompile hRel hTailPc hRestResolve
+                    exact
+                      ih
+                        (sourceCtx :=
+                          { sourceCtx with
+                            scope := name :: sourceCtx.scope })
+                        (ctxFinal := tailCtxAfter)
+                        (sourceFuel := sourceFuel')
+                        (localsCtx :=
+                          localsCtx.withLayout
+                            (name :: localsCtx.layout))
+                        (finalLocalsCtx := tailFinalCtx)
+                        (layout := name :: layout)
+                        (compiledStmts := tailStmts)
+                        (compiler := compilerAfter)
+                        (state := evmAfter)
+                        (trace := tailTrace)
+                        (sourceOutcome := sourceOutcome)
+                        hRestSupported
+                        (Functions.SourceDirect.CtxRel.withScopeCons
+                          hCtxRel)
+                        hRestCompile hCtxLayoutTail hNoDupTail
+                        tailSegment hTailPc hRel hRestResolve)
+                  hResolve
+          | assign name valueExpr =>
+              rcases hSupported with
+                ⟨hOwned, hOpenSupported, hAccess, hLookup,
+                  hRestSupported⟩
+              rcases hLookup with ⟨idx, hName, hBound⟩
+              exact
+                compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail
+                  hPrim hOwned hOpenSupported hAccess hCompileBlock
+                  hCtxLayout hNoDup hName hBound program segment hPc
+                  hPrefixRel
+                  (hTail := by
+                    intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                      tailCtxAfter compilerAfter evmAfter tailSegment
+                      hRestCompile hRel hTailPc hRestResolve
+                    exact
+                      ih (sourceCtx := sourceCtx)
+                        (ctxFinal := tailCtxAfter)
+                        (sourceFuel := sourceFuel')
+                        (localsCtx := localsCtx)
+                        (finalLocalsCtx := tailFinalCtx)
+                        (layout := layout)
+                        (compiledStmts := tailStmts)
+                        (compiler := compilerAfter)
+                        (state := evmAfter)
+                        (trace := tailTrace)
+                        (sourceOutcome := sourceOutcome)
+                        hRestSupported hCtxRel hRestCompile hCtxLayout
+                        hNoDup tailSegment hTailPc hRel hRestResolve)
+                  hResolve
+          | block body =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | if_ cond body =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | switch scrutinee cases defaultBody =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | for_ init cond post body =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | brk =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | cont =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | leave =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | call targets functionName args =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | terminal kind =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+          | terminalArgs kind args =>
+              simp [FunctionsStmtListRegularOpenSupported] at hSupported
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)

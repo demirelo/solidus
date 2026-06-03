@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:54 CEST.
+Last updated: 2026-06-03 05:58 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -287,10 +287,14 @@ Execution order:
    `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail`,
    and
    `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_compiledOpenResultRel_of_compileOpen_tail`.
-   The next step is to assemble these cases into the ordinary-block structural
-   recursion theorem, then extend the same open-result shape to function calls,
-   loops, switch/conditionals, and the whole-program imported-Yul-to-open-EVM
-   theorem.
+   These cases are now assembled by the first structural ordinary-block theorem
+   `OpenLowering.compilerOpenFunctionsBlock_regular_openRunNResult_compiledOpenResultRel_of_compileOpen`,
+   under the local support predicate
+   `OpenLowering.FunctionsStmtListRegularOpenSupported`, so callers no longer
+   have to manually thread regular-head tail callbacks for expression, `let`,
+   and assignment statement lists. The next frontier is extending the same
+   open-result shape beyond regular heads to function calls, loops,
+   switch/conditionals, and the whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
