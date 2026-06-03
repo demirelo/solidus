@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 02:53 CEST.
+Last updated: 2026-06-03 02:56 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -56,9 +56,11 @@ Execution order:
    and `Target.openStepInstr` resumes CALL-family instructions with the PC
    increment required by the closed EVM CALL-family step; `Target` and
    `Compiled` open result runners now mirror the closed running/halted control
-   flow. The remaining work is proving the preservation bridge from
-   compiler-open blocks down to these open target runners and composing it into
-   the whole-program imported-Yul-to-open-EVM theorem.
+   flow. Non-CALL target instruction lists now have an empty-trace compatibility
+   theorem against the closed runner. The remaining work is proving the
+   CALL-site preservation bridge from compiler-open blocks down to these open
+   target runners and composing it into the whole-program
+   imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 
@@ -119,8 +121,9 @@ let/assign CALL scaffolding, or a concrete external-world model.
   frontier, while leaving the no-CALL theorem only as a fallback/special case.
   The source-to-compiler-open dispatcher-block result is now wired. The
   target-side primitive/instruction/list/program CALL adapter is Lean-checked
-  in `OpenAssembly`; the remaining public gap is the preservation bridge from
-  compiler-open blocks down to that open target semantics.
+  in `OpenAssembly`, including empty-trace compatibility for no-CALL target
+  instruction lists; the remaining public gap is the CALL-site preservation
+  bridge from compiler-open blocks down to that open target semantics.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
