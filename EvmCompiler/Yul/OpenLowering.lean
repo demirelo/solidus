@@ -10160,6 +10160,17 @@ theorem sourceDirect_prefixedStateRel_splitArgs_callerBase
     · simpa [callerBase, Structured.RunState.withEVM] using hReturns
   exact ⟨callerBase, hSplit, hBaseRel, by simpa [hCallerStack] using hStack⟩
 
+theorem sourceDirect_prefixedStateRel_of_stackPrefixRel
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {stackPrefix : List Word}
+    {evm : EvmYul.EVM.State}
+    (hRel :
+      Locals.SourceLowering.StackPrefixRel layout source stackPrefix evm) :
+    Functions.SourceDirect.PrefixedStateRel layout hiddenReturns source
+      stackPrefix { evm := evm, returns := hiddenReturns } := by
+  rcases hRel with ⟨hShared, baseStack, hStack, hStoreRel⟩
+  exact ⟨hShared, baseStack, hStack, hStoreRel, rfl⟩
+
 theorem sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared
     {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
     {source : Objects.Source.State} {callSource : Locals.RunState}
@@ -10206,6 +10217,130 @@ theorem sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared
       · simpa [callerBase, Structured.RunState.withEVM] using hStoreRel
     · simpa [callerBase, Structured.RunState.withEVM] using hReturns
   exact ⟨callerBase, hSplit, hBaseRel, by simpa [hCallerStack] using hStack⟩
+
+theorem sourceDirect_stackPrefixRel_callSource_parts_withShared
+    {layout : List Name} {hiddenReturns : List Structured.ReturnDest}
+    {source : Objects.Source.State} {args : EvmYul.Stack Word}
+    {evm : EvmYul.EVM.State} {argc : Nat}
+    (sharedAfterCall : EvmYul.SharedState .EVM)
+    (hRel :
+      Locals.SourceLowering.StackPrefixRel layout source args evm)
+    (hArgc : argc = args.length) :
+    ∃ callSource callerBase : Locals.RunState,
+      callSource.evm = evm ∧
+      callSource.returns = hiddenReturns ∧
+      Structured.StackFrame.splitArgs? argc callSource.evm.stack =
+        some (args, callerBase.evm.stack) ∧
+      Functions.SourceDirect.PrefixedStateRel layout hiddenReturns source args
+        callSource ∧
+      Functions.SourceDirect.StateRel layout hiddenReturns
+        (source.withShared sharedAfterCall) callerBase ∧
+      callSource.evm.stack = args ++ callerBase.evm.stack := by
+  let callSource : Locals.RunState :=
+    { evm := evm, returns := hiddenReturns }
+  have hPrefix :
+      Functions.SourceDirect.PrefixedStateRel layout hiddenReturns source args
+        callSource := by
+    simpa [callSource] using
+      (sourceDirect_prefixedStateRel_of_stackPrefixRel
+        (hiddenReturns := hiddenReturns) hRel)
+  rcases
+      sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared
+        sharedAfterCall hPrefix hArgc with
+    ⟨callerBase, hSplit, hBaseRel, hStack⟩
+  exact
+    ⟨callSource, callerBase, by simp [callSource], by simp [callSource],
+      hSplit, hPrefix, hBaseRel, hStack⟩
+
+theorem compilerOpenFunctionsArgList_callSource_parts_withShared_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {args : List (Functions.Expr 1)}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler compilerAfter : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {valuesAfter : List Word} {argc : Nat}
+    (sharedAfterCall : EvmYul.SharedState .EVM)
+    (hOwned :
+      Locals.Source.ExprSeq.SourceOwned (Functions.Lower.argExprs args))
+    (hSupported :
+      LocalsExprSeqOpenSupported (Functions.Lower.argExprs args))
+    (hAccess :
+      Locals.SourceLowering.ExprSeq.Accessible layout 0
+        (Functions.Lower.argExprs args))
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.evalArgs args } =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (program : Assembly.Program)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    {trace : OpenExternal.OpenTrace}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+          prim args compiler)
+        trace (.ok (compilerAfter, valuesAfter)))
+    (hArgc : argc = valuesAfter.length) :
+    finalLocalsCtx = localsCtx ∧
+      ∃ targetFuel evmAfter callSource callerBase,
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program targetFuel state)
+          trace (.ok (.running evmAfter)) ∧
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment ∧
+        callSource.evm = evmAfter ∧
+        callSource.returns = [] ∧
+        Structured.Preservation.Frame.StateRel callSource evmAfter [] ∧
+        Structured.StackFrame.splitArgs? argc callSource.evm.stack =
+          some (valuesAfter.reverse, callerBase.evm.stack) ∧
+        Functions.SourceDirect.PrefixedStateRel layout [] compilerAfter
+          valuesAfter.reverse callSource ∧
+        Functions.SourceDirect.StateRel layout []
+          (compilerAfter.withShared sharedAfterCall) callerBase ∧
+        callSource.evm.stack =
+          valuesAfter.reverse ++ callerBase.evm.stack := by
+  rcases
+      compilerOpenFunctionsArgList_openRunNResult_of_compileOpen
+        hPrim hOwned hSupported hAccess hCompileBlock hCtxLayout hNoDup []
+        rfl program segment hPc hPrefixRel hResolve with
+    ⟨hFinalCtx, targetFuel, evmAfter, hRun, hArgRel, hAfterPc⟩
+  let callSource : Locals.RunState := { evm := evmAfter, returns := [] }
+  have hArgRel' :
+      Locals.SourceLowering.StackPrefixRel layout compilerAfter
+        valuesAfter.reverse evmAfter := by
+    simpa using hArgRel
+  have hPrefix :
+      Functions.SourceDirect.PrefixedStateRel layout [] compilerAfter
+        valuesAfter.reverse callSource := by
+    simpa [callSource] using
+      (sourceDirect_prefixedStateRel_of_stackPrefixRel
+        (hiddenReturns := []) hArgRel')
+  have hArgc' : argc = (valuesAfter.reverse).length := by
+    simpa using hArgc
+  rcases
+      sourceDirect_prefixedStateRel_splitArgs_callerBase_withShared
+        sharedAfterCall hPrefix hArgc' with
+    ⟨callerBase, hSplit, hBaseRel, hStack⟩
+  have hFrame :
+      Structured.Preservation.Frame.StateRel callSource evmAfter [] := by
+    simpa [callSource, Structured.RunState.initial] using
+      (Structured.Preservation.Frame.stateRel_initial evmAfter)
+  refine ⟨hFinalCtx, targetFuel, evmAfter, callSource, callerBase, hRun,
+    hAfterPc, by simp [callSource], by simp [callSource], hFrame, hSplit,
+    hPrefix, hBaseRel, hStack⟩
 
 theorem sourceDirect_returnedStackRel_of_shared_eq
     {hiddenReturns : List Structured.ReturnDest}
