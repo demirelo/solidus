@@ -1618,6 +1618,73 @@ theorem codeSegment_expressions_codeStmt_cons_split
   · simpa [segment', Structured.Preservation.CodeSegment.cast_code,
       Structured.Preservation.CodeSegment.fallthroughPc] using hTailFall
 
+theorem codeSegment_expressions_codeStmt_single_split
+    {asm : Assembly.Program} {ctx : Structured.CompileContext}
+    {supply : Structured.LabelSupply} {code : Structured.Code}
+    (segment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured
+              (Locals.codeStmt code) } ctx supply).code) :
+    ∃ codeSegment :
+        Structured.Preservation.CodeSegment asm code.toAssembly,
+      Structured.Preservation.CodeSegment.startPc codeSegment =
+          Structured.Preservation.CodeSegment.startPc segment ∧
+        Structured.Preservation.CodeSegment.fallthroughPc codeSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+  have hCodeEq :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured
+              (Locals.codeStmt code) } ctx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured
+              (Locals.codeStmt code ++ ([] : List Expressions.Stmt)) }
+          ctx supply).code := by
+    simp
+  let segment' :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured
+              (Locals.codeStmt code ++ ([] : List Expressions.Stmt)) }
+          ctx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hCodeEq segment
+  have hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment' =
+        Structured.Preservation.CodeSegment.startPc segment := by
+    simp [segment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hSegmentFall :
+      Structured.Preservation.CodeSegment.fallthroughPc segment' =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    cases segment with
+    | mk pre post hAsm hFits =>
+        simp [segment', Structured.Preservation.CodeSegment.cast_code,
+          Structured.Preservation.CodeSegment.fallthroughPc, hCodeEq]
+  rcases codeSegment_expressions_codeStmt_cons_split segment' with
+    ⟨codeSegment, emptySegment, hCodeStart, hEmptyStart, hEmptyFall⟩
+  have hEmpty :
+      Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+        Structured.Preservation.CodeSegment.startPc emptySegment := by
+    rcases emptySegment with ⟨pre, post, hAsm, hFits⟩
+    simp [Structured.Preservation.CodeSegment.fallthroughPc,
+      Structured.Preservation.CodeSegment.startPc,
+      Expressions.StmtList.toStructured, Structured.Block.compileFromCtx]
+  refine ⟨codeSegment, ?_, ?_⟩
+  · exact hCodeStart.trans hSegmentStart
+  · calc
+      Structured.Preservation.CodeSegment.fallthroughPc codeSegment =
+          Structured.Preservation.CodeSegment.startPc emptySegment :=
+            hEmptyStart.symm
+      _ =
+          Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+            hEmpty.symm
+      _ =
+          Structured.Preservation.CodeSegment.fallthroughPc segment' :=
+            hEmptyFall
+      _ =
+          Structured.Preservation.CodeSegment.fallthroughPc segment :=
+            hSegmentFall
+
 theorem codeSegment_fallthroughPc_singleton
     {asm : Assembly.Program} {instr : Assembly.Instr}
     (segment :
@@ -3643,6 +3710,236 @@ theorem openRunNResult_codeSegment_no_call_running_continue
       (pre := pre) (post := post) (code := code)
       hNoCall hCodeFits hPc hRun hRest
 
+theorem openRunNResult_codeSegment_no_call_frameStateRel_running_continue
+    {program : Assembly.Program} {code : Structured.Code}
+    {source final : Structured.RunState}
+    {target : EvmYul.EVM.State} {tokens : List Word}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (segment :
+      Structured.Preservation.CodeSegment program code.toAssembly)
+    (hSafe : Structured.Preservation.Code.RunnerSafe code)
+    (hFrame : Structured.Code.FrameSafe code)
+    (hNoCall : Structured.Code.usesCallCreate code = false)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hRel :
+      Structured.Preservation.Frame.StateRel source target tokens)
+    (hRun : Structured.Code.runState code source = .ok final)
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.Frame.StateRel final targetFinal tokens →
+        targetFinal.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel targetFinal)
+          tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (OpenAssembly.Source.openRunNResult program
+        (code.length + tailFuel) target)
+      tailTrace result := by
+  rcases segment with ⟨pre, post, hAsm, hFits⟩
+  subst program
+  have hCodeFits :
+      Structured.Preservation.Code.PCFitsFrom pre code :=
+    Structured.Preservation.Code.PCFitsFrom.of_assembly hFits
+  exact
+    openRunNResult_source_code_no_call_frameStateRel_running_continue
+      (pre := pre) (post := post) (code := code)
+      hSafe hFrame hNoCall hCodeFits hPc hRel hRun
+      (by
+        intro targetFinal hRelFinal hPcFinal
+        exact hRest targetFinal hRelFinal hPcFinal)
+
+theorem openRunNResult_pushReturns_frameStateRel_continue_of_compileOpen
+    {program : Assembly.Program} {ctx finalCtx : Locals.Ctx}
+    {returns : List Name} {stmts : List Expressions.Stmt}
+    {state final : Locals.RunState} {target : EvmYul.EVM.State}
+    {tokens : List Word}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hCompile :
+      Locals.Block.compileOpen ctx
+        { stmts := Functions.Lower.pushReturns returns } =
+        some (stmts, finalCtx))
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured stmts }
+          structuredCtx supply).code)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hRel :
+      Structured.Preservation.Frame.StateRel state target tokens)
+    (hRun :
+      Functions.Direct.pushReturns ctx returns state = .ok final)
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.Frame.StateRel final targetFinal tokens →
+        targetFinal.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel targetFinal)
+          tailTrace result) :
+    ∃ pushFuel,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program
+          (pushFuel + tailFuel) target)
+        tailTrace result := by
+  rcases functionsLower_pushReturns_compileOpen_parts hCompile with
+    ⟨hReturns, hStmts, _hFinalCtx⟩ |
+    ⟨name, rest, code, hReturns, hCode, hStmts, _hFinalCtx⟩
+  · subst returns
+    subst stmts
+    simp [Functions.Direct.pushReturns] at hRun
+    cases hRun
+    have hSegmentCode :
+        (Structured.Block.compileFromCtx
+            { stmts := Expressions.StmtList.toStructured ([] :
+                List Expressions.Stmt) }
+            structuredCtx supply).code = [] := by
+      simp [Expressions.StmtList.toStructured, Structured.Block.compileFromCtx]
+    let emptySegment :
+        Structured.Preservation.CodeSegment program [] :=
+      Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+    have hStart :
+        Structured.Preservation.CodeSegment.startPc emptySegment =
+          Structured.Preservation.CodeSegment.startPc segment := by
+      simp [emptySegment, Structured.Preservation.CodeSegment.cast_code,
+        Structured.Preservation.CodeSegment.startPc]
+    have hFall :
+        Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      cases segment with
+      | mk pre post hAsm hFits =>
+          simp [emptySegment, Structured.Preservation.CodeSegment.cast_code,
+            Structured.Preservation.CodeSegment.fallthroughPc, hSegmentCode]
+    have hEmpty :
+        Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+          Structured.Preservation.CodeSegment.startPc emptySegment :=
+      by
+        rcases emptySegment with ⟨pre, post, hAsm, hFits⟩
+        simp [Structured.Preservation.CodeSegment.fallthroughPc,
+          Structured.Preservation.CodeSegment.startPc]
+    have hPcFall :
+        target.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      calc
+        target.pc =
+            Structured.Preservation.CodeSegment.startPc segment := hPc
+        _ =
+            Structured.Preservation.CodeSegment.startPc emptySegment :=
+              hStart.symm
+        _ =
+            Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+              hEmpty.symm
+        _ =
+            Structured.Preservation.CodeSegment.fallthroughPc segment :=
+              hFall
+    exact ⟨0, by simpa using hRest target hRel hPcFall⟩
+  · subst returns
+    subst stmts
+    have hSegmentCode :
+        (Structured.Block.compileFromCtx
+            { stmts :=
+                Expressions.StmtList.toStructured (Locals.codeStmt code) }
+            structuredCtx supply).code =
+          (Structured.Block.compileFromCtx
+            { stmts :=
+                Expressions.StmtList.toStructured
+                  (Locals.codeStmt code ++ ([] : List Expressions.Stmt)) }
+            structuredCtx supply).code := by
+      simp
+    let segment' :
+        Structured.Preservation.CodeSegment program
+          (Structured.Block.compileFromCtx
+            { stmts :=
+                Expressions.StmtList.toStructured
+                  (Locals.codeStmt code ++ ([] : List Expressions.Stmt)) }
+            structuredCtx supply).code :=
+      Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+    rcases codeSegment_expressions_codeStmt_cons_split segment' with
+      ⟨headSegment, emptySegment, hHeadStart, hEmptyStart, hEmptyFall⟩
+    have hSegmentStart :
+        Structured.Preservation.CodeSegment.startPc segment' =
+          Structured.Preservation.CodeSegment.startPc segment := by
+      simp [segment', Structured.Preservation.CodeSegment.cast_code,
+        Structured.Preservation.CodeSegment.startPc]
+    have hSegmentFall :
+        Structured.Preservation.CodeSegment.fallthroughPc segment' =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      cases segment with
+      | mk pre post hAsm hFits =>
+          simp [segment', Structured.Preservation.CodeSegment.cast_code,
+            Structured.Preservation.CodeSegment.fallthroughPc, hSegmentCode]
+    have hHeadPc :
+        target.pc =
+          Structured.Preservation.CodeSegment.startPc headSegment := by
+      rw [hPc, ← hSegmentStart, ← hHeadStart]
+    have hEmpty :
+        Structured.Preservation.CodeSegment.fallthroughPc emptySegment =
+          Structured.Preservation.CodeSegment.startPc emptySegment :=
+      by
+        rcases emptySegment with ⟨pre, post, hAsm, hFits⟩
+        simp [Structured.Preservation.CodeSegment.fallthroughPc,
+          Structured.Preservation.CodeSegment.startPc,
+          Expressions.StmtList.toStructured, Structured.Block.compileFromCtx]
+    have hHeadFall :
+        Structured.Preservation.CodeSegment.fallthroughPc headSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment := by
+      calc
+        Structured.Preservation.CodeSegment.fallthroughPc headSegment =
+            Structured.Preservation.CodeSegment.startPc emptySegment :=
+              hEmptyStart.symm
+        _ =
+            Structured.Preservation.CodeSegment.fallthroughPc emptySegment :=
+              hEmpty.symm
+        _ =
+            Structured.Preservation.CodeSegment.fallthroughPc segment' :=
+              hEmptyFall
+        _ =
+            Structured.Preservation.CodeSegment.fallthroughPc segment :=
+              hSegmentFall
+    have hRunState :
+        Structured.Code.runState code state = .ok final :=
+      functionsDirect_pushReturns_runState_of_returnExprs_compileCode
+        hCode hRun
+    have hSafe :
+        Structured.Preservation.Code.RunnerSafe code :=
+      structuredCode_runnerSafe_returnExprs_compileCode hCode
+    have hFrame :
+        Structured.Code.FrameSafe code :=
+      structuredCode_frameSafe_returnExprs_compileCode hCode
+    have hNoCall :
+        Structured.Code.usesCallCreate code = false :=
+      structuredCode_noCall_returnExprs_compileCode hCode
+    have hHeadRest :
+        ∀ targetFinal,
+          Structured.Preservation.Frame.StateRel final targetFinal tokens →
+          targetFinal.pc =
+            Structured.Preservation.CodeSegment.fallthroughPc headSegment →
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel targetFinal)
+            tailTrace result := by
+      intro targetFinal hRelFinal hPcFinal
+      exact
+        hRest targetFinal hRelFinal
+          (by
+            calc
+              targetFinal.pc =
+                  Structured.Preservation.CodeSegment.fallthroughPc
+                    headSegment := hPcFinal
+              _ =
+                  Structured.Preservation.CodeSegment.fallthroughPc
+                    segment := hHeadFall)
+    exact
+      ⟨code.length,
+        openRunNResult_codeSegment_no_call_frameStateRel_running_continue
+          headSegment hSafe hFrame hNoCall hHeadPc hRel hRunState
+          hHeadRest⟩
+
 theorem openRunNResult_cleanupToPreserving_runState_continue
     {program : Assembly.Program} {ctx : Locals.Ctx}
     {preserve targetDepth : Nat} {cleanup : Structured.Code}
@@ -3735,6 +4032,111 @@ theorem openRunNResult_cleanupToPreserving_frameStateRel_continue
       (by
         intro targetFinal hRelFinal hPcFinal
         exact hRest targetFinal hRelFinal hPcFinal)
+
+theorem openRunNResult_pushReturns_cleanup_frameStateRel_continue_of_compileOpen
+    {program : Assembly.Program} {ctx finalCtx : Locals.Ctx}
+    {returns : List Name} {pushStmts : List Expressions.Stmt}
+    {cleanup : Structured.Code}
+    {state afterPush final : Locals.RunState}
+    {target : EvmYul.EVM.State} {tokens : List Word}
+    {preserve targetDepth : Nat}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {tailFuel : Nat} {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hCompilePush :
+      Locals.Block.compileOpen ctx
+        { stmts := Functions.Lower.pushReturns returns } =
+        some (pushStmts, finalCtx))
+    (hCleanup :
+      finalCtx.cleanupToPreserving? preserve targetDepth = some cleanup)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (pushStmts ++ Locals.codeStmt cleanup) }
+          structuredCtx supply).code)
+    (hPc :
+      target.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hRel :
+      Structured.Preservation.Frame.StateRel state target tokens)
+    (hPush :
+      Functions.Direct.pushReturns ctx returns state = .ok afterPush)
+    (hCleanupRun :
+      Locals.Direct.Ctx.runCleanupToPreserving finalCtx preserve targetDepth
+        afterPush = .ok final)
+    (hRest :
+      ∀ targetFinal,
+        Structured.Preservation.Frame.StateRel final targetFinal tokens →
+        targetFinal.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc segment →
+        OpenExternal.OpenResultResolves
+          (OpenAssembly.Source.openRunNResult program tailFuel targetFinal)
+          tailTrace result) :
+    ∃ returnFuel,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program
+          (returnFuel + tailFuel) target)
+        tailTrace result := by
+  rcases codeSegment_expressionsStmtList_append_split
+      (left := pushStmts) (right := Locals.codeStmt cleanup)
+      segment with
+    ⟨pushSegment, cleanupBlockSegment, hPushStart, hCleanupBlockStart,
+      hCleanupBlockFall⟩
+  rcases codeSegment_expressions_codeStmt_single_split cleanupBlockSegment with
+    ⟨cleanupSegment, hCleanupStart, hCleanupFall⟩
+  have hPushPc :
+      target.pc =
+        Structured.Preservation.CodeSegment.startPc pushSegment := by
+    rw [hPc, ← hPushStart]
+  have hCleanupStartAtPushFall :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc pushSegment := by
+    exact hCleanupStart.trans hCleanupBlockStart
+  have hCleanupWholeFall :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc segment := by
+    exact hCleanupFall.trans hCleanupBlockFall
+  rcases
+      openRunNResult_pushReturns_frameStateRel_continue_of_compileOpen
+        (ctx := ctx) (finalCtx := finalCtx) (returns := returns)
+        (stmts := pushStmts) (state := state) (final := afterPush)
+        (target := target) (tokens := tokens)
+        (structuredCtx := structuredCtx) (supply := supply)
+        (tailFuel := cleanup.length + tailFuel)
+        (tailTrace := tailTrace) (result := result)
+        hCompilePush pushSegment hPushPc hRel hPush
+        (by
+          intro targetAfterPush hRelAfterPush hAfterPushPc
+          have hCleanupPc :
+              targetAfterPush.pc =
+                Structured.Preservation.CodeSegment.startPc cleanupSegment := by
+            calc
+              targetAfterPush.pc =
+                  Structured.Preservation.CodeSegment.fallthroughPc
+                    pushSegment := hAfterPushPc
+              _ =
+                  Structured.Preservation.CodeSegment.startPc
+                    cleanupSegment := hCleanupStartAtPushFall.symm
+          exact
+            openRunNResult_cleanupToPreserving_frameStateRel_continue
+              hCleanup cleanupSegment hCleanupPc hRelAfterPush hCleanupRun
+              (by
+                intro targetFinal hRelFinal hFinalPc
+                exact
+                  hRest targetFinal hRelFinal
+                    (by
+                      calc
+                        targetFinal.pc =
+                            Structured.Preservation.CodeSegment.fallthroughPc
+                              cleanupSegment := hFinalPc
+                        _ =
+                            Structured.Preservation.CodeSegment.fallthroughPc
+                              segment := hCleanupWholeFall))) with
+    ⟨pushFuel, hRun⟩
+  exact ⟨pushFuel + cleanup.length, by
+    simpa [Nat.add_assoc] using hRun⟩
 
 theorem openRunNResult_source_jumpi_no_call_running_continue
     {pre post : Assembly.Program} {label : Assembly.Label}
