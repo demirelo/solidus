@@ -197,7 +197,124 @@ theorem openStepInstr_resolves_prim_call
   rw [openStepInstr_of_prim_call hKind hCall]
   exact evmInstructionCallResult_resolves call response
 
+theorem prim_haltKind?_none_of_callKind
+    {op : Assembly.PrimOp} {kind : OpenExternal.CallKind}
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind) :
+    op.haltKind? = none := by
+  cases op <;>
+    simp [Assembly.PrimOp.toEVM, OpenExternal.CallKind.ofEVMOperation?,
+      Assembly.PrimOp.haltKind?] at hKind ⊢
+
+def stepResultAfter (instr : Assembly.TargetInstr) (state : EVMState) :
+    Assembly.StepResult :=
+  match instr.haltKind? with
+  | some kind =>
+      .halted { kind := kind, state := state, output := kind.output state }
+  | none =>
+      .running state
+
+def openStepInstrResult (instr : Assembly.TargetInstr) (state : EVMState) :
+    OpenExternal.OpenResult EVMException Assembly.StepResult :=
+  OpenExternal.OpenResult.bind (openStepInstr instr state)
+    (fun state' => .done (.ok (stepResultAfter instr state')))
+
+theorem openStepInstrResult_resolves_prim_call
+    {op : Assembly.PrimOp} {state : EVMState}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse) :
+    OpenExternal.OpenResultResolves (openStepInstrResult (.prim op) state)
+      [{ site := call.site, response := response }]
+    (.ok (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+  unfold openStepInstrResult
+  rw [openStepInstr_of_prim_call hKind hCall]
+  unfold evmInstructionCallResult
+  have hHalt : (Assembly.TargetInstr.prim op).haltKind? = none := by
+    simpa [Assembly.TargetInstr.haltKind?] using
+      prim_haltKind?_none_of_callKind hKind
+  refine OpenExternal.OpenResultResolves.call ?_
+  simpa [OpenExternal.OpenResult.bind, stepResultAfter, hHalt] using
+    (OpenExternal.OpenResultResolves.done :
+      OpenExternal.OpenResultResolves
+        (.done
+          (.ok
+            (Assembly.StepResult.running
+              (EvmYul.EVM.State.incrPC (call.resume response)))))
+        []
+        (.ok
+          (Assembly.StepResult.running
+            (EvmYul.EVM.State.incrPC (call.resume response)))))
+
+def openRunListResult : List Assembly.TargetInstr → EVMState →
+    OpenExternal.OpenResult EVMException Assembly.StepResult
+  | [], state => .done (.ok (.running state))
+  | instr :: rest, state =>
+      OpenExternal.OpenResult.bind (openStepInstrResult instr state)
+        (fun result =>
+          match result with
+          | .running state' => openRunListResult rest state'
+          | .halted halt => .done (.ok (.halted halt)))
+
+theorem openRunListResult_nil (state : EVMState) :
+    openRunListResult [] state = .done (.ok (.running state)) := by
+  rfl
+
+theorem openRunListResult_cons
+    (instr : Assembly.TargetInstr) (rest : List Assembly.TargetInstr)
+    (state : EVMState) :
+    openRunListResult (instr :: rest) state =
+      OpenExternal.OpenResult.bind (openStepInstrResult instr state)
+        (fun result =>
+          match result with
+          | .running state' => openRunListResult rest state'
+          | .halted halt => .done (.ok (.halted halt))) := by
+  rfl
+
+def openStep (target : Assembly.TargetProgram) (state : EVMState) :
+    OpenExternal.OpenResult EVMException EVMState :=
+  match target.fetch state.pc.toNat with
+  | some instr => openStepInstr instr state
+  | none => .done (.error .InvalidInstruction)
+
+def openStepResult (target : Assembly.TargetProgram) (state : EVMState) :
+    OpenExternal.OpenResult EVMException Assembly.StepResult :=
+  match target.fetch state.pc.toNat with
+  | some instr => openStepInstrResult instr state
+  | none => .done (.error .InvalidInstruction)
+
+def openRunNResult (target : Assembly.TargetProgram) :
+    Nat → EVMState → OpenExternal.OpenResult EVMException Assembly.StepResult
+  | 0, state => .done (.ok (.running state))
+  | fuel + 1, state =>
+      OpenExternal.OpenResult.bind (openStepResult target state)
+        (fun result =>
+          match result with
+          | .running state' => openRunNResult target fuel state'
+          | .halted halt => .done (.ok (.halted halt)))
+
 end Target
+
+namespace Compiled
+
+def openStepResult (program : Assembly.Program) (state : EVMState) :
+    OpenExternal.OpenResult EVMException Assembly.StepResult :=
+  match Assembly.emitCurrent? program state with
+  | some code => Target.openRunListResult code state
+  | none => .done (.error .InvalidInstruction)
+
+def openRunNResult (program : Assembly.Program) :
+    Nat → EVMState → OpenExternal.OpenResult EVMException Assembly.StepResult
+  | 0, state => .done (.ok (.running state))
+  | fuel + 1, state =>
+      OpenExternal.OpenResult.bind (openStepResult program state)
+        (fun result =>
+          match result with
+          | .running state' => openRunNResult program fuel state'
+          | .halted halt => .done (.ok (.halted halt)))
+
+end Compiled
 
 end OpenAssembly
 end Yul
