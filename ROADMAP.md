@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 05:24 CEST.
+Last updated: 2026-06-03 05:27 CEST.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -246,11 +246,17 @@ Execution order:
    and
    `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc`,
    so recursive tails can be proved from their actual tail segment starts
-   instead of receiving only a stack relation. The remaining work is assembling
-   these pieces into the internal recursive block theorem, then generalizing the
-   checked sequencing shape to function calls, loops, switch/conditionals, and
-   composing the result into the whole-program imported-Yul-to-open-EVM
-   theorem.
+   instead of receiving only a stack relation. These pieces are now assembled
+   for the three regular heads against actual `compileOpen` output and full
+   emitted block segments by
+   `OpenLowering.compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_pc`,
+   `OpenLowering.compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_pc`,
+   and
+   `OpenLowering.compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tail_pc`.
+   The remaining work is abstracting this shape into the internal recursive
+   block theorem, then generalizing the checked sequencing shape to function
+   calls, loops, switch/conditionals, and composing the result into the
+   whole-program imported-Yul-to-open-EVM theorem.
 5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
    reached from that spine.
 

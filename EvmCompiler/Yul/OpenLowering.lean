@@ -5288,6 +5288,473 @@ theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc
         targetResult, ?_, hOutcomeRel⟩
     exact hHeadCont hTailRun
 
+theorem compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_compileOpen_tail_pc
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxFinal : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {returns : List Name}
+    {expr : Functions.Expr 0} {rest : List Functions.Stmt}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hOwned : Locals.Source.Expr.SourceOwned expr)
+    (hSupported : LocalsExprOpenSupported expr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 expr)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := .expr expr :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    (hTail :
+      ∀ {tailStmts : List Expressions.Stmt}
+        {tailFinalCtx : Locals.Ctx}
+        {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        (tailSegment :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured tailStmts }
+              structuredCtx supply).code) →
+        Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns { stmts := rest }) =
+          some (tailStmts, tailFinalCtx) →
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource sourceCtx sourceFuel { stmts := rest }
+            compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult)
+    {trace : OpenExternal.OpenTrace}
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx (sourceFuel + 1)
+          { stmts := .expr expr :: rest } compiler)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    ∃ targetFuel targetResult,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program targetFuel state)
+        trace (.ok targetResult) ∧
+      Functions.Source.WholeProgramOutcomeRel sourceOutcome
+        targetResult := by
+  rcases
+      functionsBlock_toLocals_compileOpen_expr_cons_inv hCompileBlock with
+    ⟨code, restStmts, hCode, hRestCompile, hCompiledStmts⟩
+  have hSegmentCode :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt code ++ restStmts) }
+          structuredCtx supply).code := by
+    simp [hCompiledStmts]
+  let segment' :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt code ++ restStmts) }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+  rcases codeSegment_expressions_codeStmt_cons_split segment' with
+    ⟨headSegment, tailSegment, hHeadStart, hTailStart, _hTailFall⟩
+  have hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment' =
+        Structured.Preservation.CodeSegment.startPc segment := by
+    simp [segment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hHeadPc :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc headSegment := by
+    rw [hPc, ← hSegmentStart, ← hHeadStart]
+  have hTailForHead :
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc headSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource sourceCtx sourceFuel { stmts := rest }
+            compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult := by
+    intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
+      hRel hAfterPc hRest
+    have hTailPc :
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment := by
+      rw [hAfterPc]
+      exact hTailStart.symm
+    exact hTail tailSegment hRestCompile hRel hTailPc hRest
+  exact
+    compilerOpenFunctionsBlock_expr_cons_openRunNResult_of_tail_pc
+      hPrim hOwned hSupported hAccess hCode hCtxLayout hNoDup program
+      tailFuel headSegment hHeadPc hPrefixRel hTailForHead hResolve
+
+theorem compilerOpenFunctionsBlock_let_cons_openRunNResult_of_compileOpen_tail_pc
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxFinal : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {returns : List Name}
+    {name : Name} {valueExpr : Functions.Expr 1}
+    {rest : List Functions.Stmt}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hOwned : Locals.Source.Expr.SourceOwned valueExpr)
+    (hSupported : LocalsExprOpenSupported valueExpr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 valueExpr)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := .let_ name valueExpr :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hFresh : name ∉ layout)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    (hTail :
+      ∀ {tailStmts : List Expressions.Stmt}
+        {tailFinalCtx : Locals.Ctx}
+        {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        (tailSegment :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured tailStmts }
+              structuredCtx supply).code) →
+        Locals.Block.compileOpen
+          (localsCtx.withLayout (name :: localsCtx.layout))
+          (Functions.Block.toLocals returns { stmts := rest }) =
+          some (tailStmts, tailFinalCtx) →
+        Locals.SourceLowering.StackPrefixRel (name :: layout) compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource
+            { sourceCtx with scope := name :: sourceCtx.scope }
+            sourceFuel { stmts := rest } compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult)
+    {trace : OpenExternal.OpenTrace}
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx (sourceFuel + 1)
+          { stmts := .let_ name valueExpr :: rest } compiler)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    ∃ targetFuel targetResult,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program targetFuel state)
+        trace (.ok targetResult) ∧
+      Functions.Source.WholeProgramOutcomeRel sourceOutcome
+        targetResult := by
+  rcases
+      functionsBlock_toLocals_compileOpen_let_cons_inv hCompileBlock with
+    ⟨code, restStmts, hCode, hRestCompile, hCompiledStmts⟩
+  have hSegmentCode :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt code ++ restStmts) }
+          structuredCtx supply).code := by
+    simp [hCompiledStmts]
+  let segment' :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt code ++ restStmts) }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+  rcases codeSegment_expressions_codeStmt_cons_split segment' with
+    ⟨headSegment, tailSegment, hHeadStart, hTailStart, _hTailFall⟩
+  have hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment' =
+        Structured.Preservation.CodeSegment.startPc segment := by
+    simp [segment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hHeadPc :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc headSegment := by
+    rw [hPc, ← hSegmentStart, ← hHeadStart]
+  have hTailForHead :
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        Locals.SourceLowering.StackPrefixRel (name :: layout) compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc headSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource
+            { sourceCtx with scope := name :: sourceCtx.scope }
+            sourceFuel { stmts := rest } compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult := by
+    intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
+      hRel hAfterPc hRest
+    have hTailPc :
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment := by
+      rw [hAfterPc]
+      exact hTailStart.symm
+    exact hTail tailSegment hRestCompile hRel hTailPc hRest
+  exact
+    compilerOpenFunctionsBlock_let_cons_openRunNResult_of_tail_pc
+      hPrim hOwned hSupported hAccess hCode hCtxLayout hNoDup hFresh
+      program tailFuel headSegment hHeadPc hPrefixRel hTailForHead hResolve
+
+theorem compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_compileOpen_tail_pc
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {programSource : Functions.Program}
+    {sourceCtx ctxFinal : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {returns : List Name}
+    {name : Name} {valueExpr : Functions.Expr 1}
+    {rest : List Functions.Stmt}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {idx : Nat}
+    (hOwned : Locals.Source.Expr.SourceOwned valueExpr)
+    (hSupported : LocalsExprOpenSupported valueExpr)
+    (hAccess : Locals.SourceLowering.Expr.Accessible layout 0 valueExpr)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := .assign name valueExpr :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (hName : layout[idx]? = some name)
+    (hBound : idx + 1 ≤ 16)
+    (program : Assembly.Program)
+    (tailFuel : Nat)
+    (segment :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel layout compiler [] state)
+    (hTail :
+      ∀ {tailStmts : List Expressions.Stmt}
+        {tailFinalCtx : Locals.Ctx}
+        {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        (tailSegment :
+          Structured.Preservation.CodeSegment program
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured tailStmts }
+              structuredCtx supply).code) →
+        Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns { stmts := rest }) =
+          some (tailStmts, tailFinalCtx) →
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource sourceCtx sourceFuel { stmts := rest }
+            compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult)
+    {trace : OpenExternal.OpenTrace}
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx (sourceFuel + 1)
+          { stmts := .assign name valueExpr :: rest } compiler)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    ∃ targetFuel targetResult,
+      OpenExternal.OpenResultResolves
+        (OpenAssembly.Source.openRunNResult program targetFuel state)
+        trace (.ok targetResult) ∧
+      Functions.Source.WholeProgramOutcomeRel sourceOutcome
+        targetResult := by
+  rcases
+      functionsBlock_toLocals_compileOpen_assign_cons_inv hCompileBlock with
+    ⟨depth, valueCode, swapOp, restStmts, hDepth, hValue, hSwap,
+      hRestCompile, hCompiledStmts⟩
+  have hDepthExpected :
+      Locals.Layout.lookupDepth? name localsCtx.layout =
+        some (idx + 1) := by
+    simpa [hCtxLayout] using
+      (Locals.Layout.lookupDepth?_of_get?_nodup hName hNoDup)
+  have hDepthEq : depth = idx + 1 := by
+    rw [hDepthExpected] at hDepth
+    cases hDepth
+    rfl
+  subst depth
+  have hSegmentCode :
+      (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code =
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt
+                  (valueCode ++
+                    [Structured.BasicInstr.op swapOp,
+                      Structured.BasicInstr.op Structured.BasicOp.pop]) ++
+                  restStmts) }
+          structuredCtx supply).code := by
+    simp [hCompiledStmts]
+  let segment' :
+      Structured.Preservation.CodeSegment program
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (Locals.codeStmt
+                  (valueCode ++
+                    [Structured.BasicInstr.op swapOp,
+                      Structured.BasicInstr.op Structured.BasicOp.pop]) ++
+                  restStmts) }
+          structuredCtx supply).code :=
+    Structured.Preservation.CodeSegment.cast_code hSegmentCode segment
+  rcases codeSegment_expressions_codeStmt_cons_split segment' with
+    ⟨headSegment, tailSegment, hHeadStart, hTailStart, _hTailFall⟩
+  have hSegmentStart :
+      Structured.Preservation.CodeSegment.startPc segment' =
+        Structured.Preservation.CodeSegment.startPc segment := by
+    simp [segment', Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc]
+  have hHeadPc :
+      state.pc =
+        Structured.Preservation.CodeSegment.startPc headSegment := by
+    rw [hPc, ← hSegmentStart, ← hHeadStart]
+  have hTailForHead :
+      ∀ {tailTrace : OpenExternal.OpenTrace}
+        {sourceOutcome : Functions.Source.Outcome}
+        {tailCtxAfter : Functions.Source.Ctx}
+        {compilerAfter : Objects.Source.State}
+        {evmAfter : EvmYul.EVM.State},
+        Locals.SourceLowering.StackPrefixRel layout compilerAfter []
+          evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc headSegment →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource sourceCtx sourceFuel { stmts := rest }
+            compilerAfter)
+          tailTrace (.ok (sourceOutcome, tailCtxAfter)) →
+        ∃ targetResult,
+          OpenExternal.OpenResultResolves
+            (OpenAssembly.Source.openRunNResult program tailFuel evmAfter)
+            tailTrace (.ok targetResult) ∧
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult := by
+    intro tailTrace sourceOutcome tailCtxAfter compilerAfter evmAfter
+      hRel hAfterPc hRest
+    have hTailPc :
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.startPc tailSegment := by
+      rw [hAfterPc]
+      exact hTailStart.symm
+    exact hTail tailSegment hRestCompile hRel hTailPc hRest
+  exact
+    compilerOpenFunctionsBlock_assign_cons_openRunNResult_of_tail_pc
+      hPrim hOwned hSupported hAccess hValue hCtxLayout hNoDup hName
+      hBound hSwap program tailFuel headSegment hHeadPc hPrefixRel
+      hTailForHead hResolve
+
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
     (program : Functions.Program) (asm : Assembly.Program)
