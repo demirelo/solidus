@@ -438,6 +438,24 @@ theorem openRunListResult_single_prim_call
   simpa [openRunListResult_nil] using
     OpenExternal.OpenResultResolves.bind_ok hStep hRest
 
+theorem openRunListResult_emitInstr_prim_call
+    {program : Assembly.Program} {pc : Nat} {op : Assembly.PrimOp}
+    {emitted : List Assembly.LocatedTarget} {state : EVMState}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    (hEmit : Assembly.emitInstr? program pc (.prim op) = some emitted)
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse) :
+    OpenExternal.OpenResultResolves
+      (openRunListResult (emitted.map Assembly.LocatedTarget.instr) state)
+      [{ site := call.site, response := response }]
+      (.ok
+        (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+  simp [Assembly.emitInstr?] at hEmit
+  subst emitted
+  simpa using openRunListResult_single_prim_call hKind hCall response
+
 def openStep (target : Assembly.TargetProgram) (state : EVMState) :
     OpenExternal.OpenResult EVMException EVMState :=
   match target.fetch state.pc.toNat with
@@ -479,6 +497,149 @@ def openRunNResult (program : Assembly.Program) :
           match result with
           | .running state' => openRunNResult program fuel state'
           | .halted halt => .done (.ok (.halted halt)))
+
+theorem openRunNResult_zero (program : Assembly.Program) (state : EVMState) :
+    openRunNResult program 0 state =
+      .done (.ok (.running state)) := by
+  rfl
+
+theorem openRunNResult_succ
+    (program : Assembly.Program) (fuel : Nat) (state : EVMState) :
+    openRunNResult program (fuel + 1) state =
+      OpenExternal.OpenResult.bind (openStepResult program state)
+        (fun result =>
+          match result with
+          | .running state' => openRunNResult program fuel state'
+          | .halted halt => .done (.ok (.halted halt))) := by
+  rfl
+
+theorem openRunNResult_resolves_step_running
+    {program : Assembly.Program} {fuel : Nat} {state mid : EVMState}
+    {headTrace tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hStep :
+      OpenExternal.OpenResultResolves (openStepResult program state)
+        headTrace (.ok (.running mid)))
+    (hRest :
+      OpenExternal.OpenResultResolves (openRunNResult program fuel mid)
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      (headTrace ++ tailTrace) result := by
+  rw [openRunNResult_succ]
+  exact OpenExternal.OpenResultResolves.bind_ok hStep hRest
+
+theorem openRunNResult_resolves_step_halted
+    {program : Assembly.Program} {fuel : Nat} {state : EVMState}
+    {headTrace : OpenExternal.OpenTrace} {halt : Assembly.Halt}
+    (hStep :
+      OpenExternal.OpenResultResolves (openStepResult program state)
+        headTrace (.ok (.halted halt))) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      headTrace (.ok (.halted halt)) := by
+  rw [openRunNResult_succ]
+  have hDone :
+      OpenExternal.OpenResultResolves
+        ((match Assembly.StepResult.halted halt with
+          | .running state' => openRunNResult program fuel state'
+          | .halted halt => .done (.ok (.halted halt))) :
+          OpenExternal.OpenResult EVMException Assembly.StepResult)
+        [] (.ok (.halted halt)) :=
+    OpenExternal.OpenResultResolves.done
+  simpa using
+    (OpenExternal.OpenResultResolves.bind_ok
+      (source := openStepResult program state)
+      (next := fun stepResult =>
+        match stepResult with
+        | .running state' => openRunNResult program fuel state'
+        | .halted halt => .done (.ok (.halted halt)))
+      (left := headTrace) (right := [])
+      (value := Assembly.StepResult.halted halt)
+      (result := (.ok (.halted halt) :
+        Except EVMException Assembly.StepResult))
+      hStep hDone)
+
+theorem openStepResult_resolves_closed_of_emitCurrent_no_callCreate
+    {program : Assembly.Program} {state : EVMState}
+    {code : List Assembly.TargetInstr} {result : Assembly.StepResult}
+    (hEmit : Assembly.emitCurrent? program state = some code)
+    (hCode : Target.codeUsesCallCreate code = false)
+    (hStep : Assembly.Compiled.stepResult program state = .ok result) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      [] (.ok result) := by
+  unfold openStepResult
+  rw [hEmit]
+  unfold Assembly.Compiled.stepResult at hStep
+  rw [hEmit] at hStep
+  exact Target.openRunListResult_resolves_closed_of_no_callCreate hCode hStep
+
+theorem openStepResult_emitCurrent_single_prim_call
+    {program : Assembly.Program} {state : EVMState} {op : Assembly.PrimOp}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    (hEmit : Assembly.emitCurrent? program state =
+      some [Assembly.TargetInstr.prim op])
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      [{ site := call.site, response := response }]
+      (.ok
+        (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+  unfold openStepResult
+  rw [hEmit]
+  exact Target.openRunListResult_single_prim_call hKind hCall response
+
+theorem openStepResult_current_prim_call
+    {program : Assembly.Program} {state : EVMState}
+    {pc : Nat} {op : Assembly.PrimOp}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse) :
+    OpenExternal.OpenResultResolves (openStepResult program state)
+      [{ site := call.site, response := response }]
+      (.ok
+        (.running (EvmYul.EVM.State.incrPC (call.resume response)))) := by
+  have hEmit :
+      Assembly.emitCurrent? program state =
+        some [Assembly.TargetInstr.prim op] := by
+    simp [Assembly.emitCurrent?, hAt, Assembly.emitInstr?]
+  exact
+    openStepResult_emitCurrent_single_prim_call
+      (op := op) hEmit hKind hCall response
+
+theorem openRunNResult_current_prim_call_continue
+    {program : Assembly.Program} {state : EVMState}
+    {fuel : Nat} {pc : Nat} {op : Assembly.PrimOp}
+    {kind : OpenExternal.CallKind}
+    {call : OpenExternal.OpenCall EVMState}
+    {tailTrace : OpenExternal.OpenTrace}
+    {result : Except EVMException Assembly.StepResult}
+    (hAt :
+      Assembly.Program.instrAtPc program state.pc.toNat =
+        some (pc, Assembly.Instr.prim op))
+    (hKind : OpenExternal.CallKind.ofEVMOperation? op.toEVM = some kind)
+    (hCall : OpenExternal.CallKind.evmOpenCall? state kind = some call)
+    (response : OpenExternal.CallResponse)
+    (hRest :
+      OpenExternal.OpenResultResolves
+        (openRunNResult program fuel
+          (EvmYul.EVM.State.incrPC (call.resume response)))
+        tailTrace result) :
+    OpenExternal.OpenResultResolves
+      (openRunNResult program (fuel + 1) state)
+      ({ site := call.site, response := response } :: tailTrace) result := by
+  have hStep :=
+    openStepResult_current_prim_call hAt hKind hCall response
+  simpa using
+    openRunNResult_resolves_step_running
+      (fuel := fuel) hStep hRest
 
 end Compiled
 
