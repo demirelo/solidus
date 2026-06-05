@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-05 07:44 CEST.
+Last updated: 2026-06-05 08:40 CEST.
 
 ### Current Assessment
 
@@ -127,10 +127,14 @@ no-readiness theorem:
 `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout`.
 It runs the ordinary heads, procedure-call/callee-body branch, and caller tails
 with actual `SourceStateRel`, `SourceStateTargetGasRel`, and response evidence.
-The old `...sourceGasSeed...supportedFor_programLayout` name is now only a
-legacy wrapper over this stronger theorem. Remaining work is the top
-initial-scoped/source-open route, followed by removing the legacy wrapper and
-the remaining public readiness premises.
+The old `...sourceGasSeed...supportedFor_programLayout` legacy wrapper has now
+been deleted. The source/gas-seeded initial-scoped, block-scoped, and
+checked-compile source-open wrappers now also call the no-readiness route
+directly; the checked-compile theorem is pinned as
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses`.
+Remaining work is to either migrate the runtime-facing no-seed route to this
+actual-trace source/gas carrier or derive its readiness premises from checked
+compiler/source contracts, then remove the remaining public readiness premises.
 
 2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
 also has a checked no-seed/readiness-driven path through statement level:

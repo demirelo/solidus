@@ -92006,108 +92006,6 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
               | terminalArgs kind args =>
                   simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
 
-theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout
-    {prim : Objects.Source.PrimitiveSemantics}
-    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
-    {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
-    {source : Reference.State}
-    {programSource : Functions.Program} {lower : Expressions.Program}
-    (hProgramSupported :
-      FunctionsProgramRegularOpenSupported programSource)
-    (_hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
-    (hNonCallSourceGas :
-      ∀ {sourceLayout' layout' : List Name}
-        {sourceRef' : Reference.State}
-        {compiler' : Objects.Source.State}
-        {state' : EvmYul.EVM.State}
-        {suffix : List Word},
-        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
-          sourceRef' compiler' →
-        SourceStateTargetGasRel cfg sourceRef' state' →
-        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
-        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
-          prim suffix)
-    {sourceCtx ctxFinal : Functions.Source.Ctx}
-    {sourceFuel : Nat}
-    {retc : Nat} {returns : List Name}
-    {stmts : List Functions.Stmt}
-    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
-    {compiledStmts : List Expressions.Stmt}
-    {compiler : Objects.Source.State}
-    {direct : Locals.RunState}
-    {state : EvmYul.EVM.State}
-    {hiddenReturns : List Structured.ReturnDest}
-    {tokens : List Word}
-    {structuredCtx : Structured.CompileContext}
-    {supply : Structured.LabelSupply}
-    (hSupported :
-      FunctionsStmtListRegularOpenSupportedFor programSource returns layout
-        stmts)
-    (_hReady :
-      FunctionsStmtListSourceStateRelReadyFor cfg sourceLayout prim stmts
-        compiler)
-    (hSourceLayout : sourceLayout = sourceCtx.scope)
-    (hLower : Functions.Program.toExpressions? programSource = some lower)
-    (layoutProgram :
-      Structured.Preservation.ProcedurePreservation.ProgramLayout
-        lower.toStructured)
-    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
-    (hCalls :
-      Structured.Preservation.ProcedurePreservation.CallsIncluded
-        (Structured.Block.compileFromCtx
-          { stmts := Expressions.StmtList.toStructured compiledStmts }
-          structuredCtx supply).calls
-        layoutProgram.sites)
-    (hCtxRel :
-      Functions.SourceDirect.CtxRel retc sourceCtx localsCtx)
-    (hCompileBlock :
-      Locals.Block.compileOpen localsCtx
-          (Functions.Block.toLocals returns { stmts := stmts }) =
-        some (compiledStmts, finalLocalsCtx))
-    (hCtxLayout : localsCtx.layout = layout)
-    (hNoDup : layout.Nodup)
-    (segment :
-      Structured.Preservation.CodeSegment layoutProgram.asm
-        (Structured.Block.compileFromCtx
-          { stmts := Expressions.StmtList.toStructured compiledStmts }
-          structuredCtx supply).code)
-    (hPc :
-      state.pc = Structured.Preservation.CodeSegment.startPc segment)
-    (hSourceRel :
-      Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout source
-        compiler)
-    (hGasRel : SourceStateTargetGasRel cfg source state)
-    (hStateRel :
-      Functions.SourceDirect.StateRel layout hiddenReturns compiler direct)
-    (hFrameRel :
-      Structured.Preservation.Frame.StateRel direct state tokens)
-    {trace : OpenExternal.OpenTrace}
-    (hResponses :
-      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
-    {sourceOutcome : Functions.Source.Outcome}
-    (hResolve :
-      OpenExternal.OpenResultResolves
-        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
-          prim programSource sourceCtx sourceFuel { stmts := stmts }
-          compiler)
-        trace (.ok (sourceOutcome, ctxFinal))) :
-    ∃ targetFuel : Nat,
-      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
-        targetFuel state trace
-        (fun targetResult =>
-          FunctionsBlockCompiledOpenResultRelSourceGas cfg sourceLayout
-            layoutProgram.asm structuredCtx
-            (Structured.Preservation.CodeSegment.fallthroughPc segment)
-            retc returns hiddenReturns tokens (sourceOutcome, ctxFinal)
-            finalLocalsCtx targetResult) := by
-  exact
-    compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout
-      hPrim hProgramSupported hNonCallSourceGas hSupported hSourceLayout
-      hLower layoutProgram hCtxProcs hCalls hCtxRel hCompileBlock hCtxLayout
-      hNoDup segment hPc hSourceRel hGasRel hStateRel hFrameRel hResponses
-      hResolve
-
 theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -95017,8 +94915,6 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     {programSource : Functions.Program} {lower : Expressions.Program}
     (hProgramSupported :
       FunctionsProgramRegularOpenSupported programSource)
-    (hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
     (hNonCallSourceGas :
       ∀ {sourceLayout' layout' : List Name}
         {sourceRef' : Reference.State}
@@ -95043,8 +94939,6 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     {cleanup : Structured.Code}
     (hSupported :
       FunctionsStmtListRegularOpenSupportedFor programSource [] [] stmts)
-    (hReady :
-      FunctionsStmtListSourceStateRelReadyFor cfg [] prim stmts compiler)
     (hLower : Functions.Program.toExpressions? programSource = some lower)
     (layoutProgram :
       Structured.Preservation.ProcedurePreservation.ProgramLayout
@@ -95116,9 +95010,9 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     simpa [direct] using
       (Structured.Preservation.Frame.stateRel_initial state)
   rcases
-      compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout
-        hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
-        hReady rfl hLower layoutProgram hCtxProcs hCalls
+      compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hNonCallSourceGas hSupported rfl hLower
+        layoutProgram hCtxProcs hCalls
         Functions.SourceDirect.CtxRel.initial hCompileBlock rfl (by simp)
         bodySegment hPc hSourceRel hGasRel hStateRel hFrameRel hResponses
         hRawResolve with
@@ -95521,8 +95415,6 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     {programSource : Functions.Program} {lower : Expressions.Program}
     (hProgramSupported :
       FunctionsProgramRegularOpenSupported programSource)
-    (hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
     (hNonCallSourceGas :
       ∀ {sourceLayout' layout' : List Name}
         {sourceRef' : Reference.State}
@@ -95547,8 +95439,6 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     {cleanup : Structured.Code}
     (hSupported :
       FunctionsStmtListRegularOpenSupportedFor programSource [] [] stmts)
-    (hReady :
-      FunctionsStmtListSourceStateRelReadyFor cfg [] prim stmts compiler)
     (hLower : Functions.Program.toExpressions? programSource = some lower)
     (layoutProgram :
       Structured.Preservation.ProcedurePreservation.ProgramLayout
@@ -95615,10 +95505,10 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
   subst sourceOutcome
   rcases
       compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
-        hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
-        hReady hLower layoutProgram hCtxProcs hCalls hCompileBlock
-        bodySegment cleanupSegment hCleanupStart hCleanup hPc hPrefixRel
-        hSourceRel hGasRel hResponses hResolve with
+        hPrim hProgramSupported hNonCallSourceGas hSupported hLower
+        layoutProgram hCtxProcs hCalls hCompileBlock bodySegment
+        cleanupSegment hCleanupStart hCleanup hPc hPrefixRel hSourceRel
+        hGasRel hResponses hResolve with
     ⟨cleanupFuel, hCleanupPkg⟩
   rcases hCleanupPkg with
     ⟨cleanupResult, hCleanupTrace, hCleanupReady, hCleanupRel⟩
@@ -95871,8 +95761,6 @@ theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentShare
     {programSource : Functions.Program} {lower : Expressions.Program}
     (hProgramSupported :
       FunctionsProgramRegularOpenSupported programSource)
-    (hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
     (hNonCallSourceGas :
       ∀ {sourceLayout' layout' : List Name}
         {sourceRef' : Reference.State}
@@ -95898,9 +95786,6 @@ theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentShare
     (hSupported :
       FunctionsStmtListRegularOpenSupportedFor programSource [] []
         block.stmts)
-    (hReady :
-      FunctionsStmtListSourceStateRelReadyFor cfg [] prim block.stmts
-        compiler)
     (hLower : Functions.Program.toExpressions? programSource = some lower)
     (layoutProgram :
       Structured.Preservation.ProcedurePreservation.ProgramLayout
@@ -95964,10 +95849,10 @@ theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentShare
   | mk stmts =>
       exact
         compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
-          hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
-          hReady hLower layoutProgram bounds hCtxProcs hCalls hCompileBlock
-          bodySegment cleanupSegment hAsm hCleanupStart hCleanupFallthrough
-          hCleanup hPc hPrefixRel hSourceRel hGasRel hResponses hResolve
+          hPrim hProgramSupported hNonCallSourceGas hSupported hLower
+          layoutProgram bounds hCtxProcs hCalls hCompileBlock bodySegment
+          cleanupSegment hAsm hCleanupStart hCleanupFallthrough hCleanup hPc
+          hPrefixRel hSourceRel hGasRel hResponses hResolve
 
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
@@ -96447,7 +96332,7 @@ theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked
     ⟨targetFuel, hTargetRel⟩
   exact ⟨targetFuel, by simpa [layoutProgram] using hTargetRel⟩
 
-theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses
+theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_sourceGasSeed_responses
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
     {cfg : Reference.StateRelConfig}
@@ -96457,11 +96342,6 @@ theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked
     {sourceStore : EvmYul.Yul.VarStore}
     (hProgramSupported :
       FunctionsProgramRegularOpenSupported program)
-    (hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim program)
-    (hMainReady :
-      FunctionsStmtListSourceStateRelReadyFor cfg [] prim program.body.stmts
-        (Functions.Source.Program.initialState initial.toSharedState))
     (hInitialShared :
       Reference.SharedStateRel cfg sourceShared initial.toSharedState)
     (hNonCallSourceGas :
@@ -96666,11 +96546,11 @@ theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked
       using hSource
   rcases
       compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
-        hPrim hProgramSupported hProgramReady hNonCallSourceGas
-        hProgramSupported.1 hMainReady hLower layoutProgram hBounds
-        hCtxProcs hCallsBody hCompileOpen bodySegment cleanupCodeSegment
-        (by rfl) hCleanupCodeStart' hCleanupCodeFallthrough hCleanup hBodyPc
-        hPrefixRel hInitialSourceRel hInitialGasRel hResponses hSourceBlock with
+        hPrim hProgramSupported hNonCallSourceGas hProgramSupported.1 hLower
+        layoutProgram hBounds hCtxProcs hCallsBody hCompileOpen bodySegment
+        cleanupCodeSegment (by rfl) hCleanupCodeStart'
+        hCleanupCodeFallthrough hCleanup hBodyPc hPrefixRel hInitialSourceRel
+        hInitialGasRel hResponses hSourceBlock with
     ⟨targetFuel, hTargetRel⟩
   exact ⟨targetFuel, by simpa [layoutProgram] using hTargetRel⟩
 
