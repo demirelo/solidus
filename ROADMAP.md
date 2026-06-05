@@ -112,6 +112,19 @@ and its no-`RETURNDATACOPY` sibling. The remaining public CALL gap is no longer
 target-side bridge callbacks; it is deriving or classifying the explicit
 source-readiness and gas/runtime readiness premises.
 
+2026-06-05 CEST boundary update: the remaining source-readiness premise is not
+just missing compiler-generated evidence. Its current statement quantifies over
+arbitrary erased target states/gas, so the sound route is to rebuild the
+recursive source-open theorem as genuinely seed/trace driven: actual
+`SourceStateRel`, `SourceStateTargetGasRel`, and response evidence flow through
+heads and tails. The ordinary block-head replacement trio is now checked:
+`compilerOpenFunctionsBlock_expr_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_tail`,
+`...let...sourceGasSeed_noReady_of_compileOpen_tail`, and
+`...assign...sourceGasSeed_noReady_of_compileOpen_tail` remove
+`FunctionsStmtListSourceStateRelReadyFor` from ordinary tail boundaries.
+Remaining work is the recursive block theorem itself, including the
+procedure-call/callee-body branch, and then the top public source-open route.
+
 2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
 also has a checked no-seed/readiness-driven path through statement level:
 `SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen`,
