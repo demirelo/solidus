@@ -71602,6 +71602,234 @@ theorem compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_ta
       hMem hNoDup hToken hExact hReturnLabel hAssignCtxLayout hLayoutNoDup
       hTargetsNoDup hTargets hAssign' hCompileAssign hBaseRel rfl hTail
 
+theorem compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
+    {args : List (Functions.Expr 1)}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {argStmts assignStmts : List Expressions.Stmt}
+    {sourceBeforeArgs sourceAfterArgs : Objects.Source.State}
+    {direct : Locals.RunState}
+    {state : EvmYul.EVM.State}
+    {hiddenReturns : List Structured.ReturnDest}
+    {tokens : List Word}
+    {structuredProgram : Structured.Program}
+    {proc : Structured.Proc}
+    {bodySupply dispatchSupply : Structured.LabelSupply}
+    {sites : List Structured.CallSite} {site : Structured.CallSite}
+    {returnDest : Nat} {bodyCtx : Structured.CompileContext}
+    {token : Word}
+    {asm : Assembly.Program}
+    {targets : List Name} {argValues returnValues : List Word}
+    {store' : Functions.Source.Store}
+    {assignFinalCtx : Locals.Ctx} {assignCtx : Locals.Ctx}
+    {structuredCtx assignStructuredCtx : Structured.CompileContext}
+    {supply assignSupply : Structured.LabelSupply}
+    {argTrace bodyTrace tailTrace : OpenExternal.OpenTrace}
+    {ResultRel : Assembly.StepResult → Prop}
+    (sharedAfterCall : EvmYul.SharedState .EVM)
+    (hArgOwned :
+      Locals.Source.ExprSeq.SourceOwned (Functions.Lower.argExprs args))
+    (hArgSupported :
+      LocalsExprSeqOpenSupported (Functions.Lower.argExprs args))
+    (hArgAccess :
+      Locals.SourceLowering.ExprSeq.Accessible layout 0
+        (Functions.Lower.argExprs args))
+    (hCompileArgs :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.evalArgs args } =
+        some (argStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hLayoutNoDup : layout.Nodup)
+    (argSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured argStmts }
+          structuredCtx supply).code)
+    (callSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc argValues.reverse token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Preservation.ProcedurePreservation.procSegment
+          structuredProgram proc bodySupply dispatchSupply sites))
+    (assignSegment :
+      Structured.Preservation.CodeSegment asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured assignStmts }
+          assignStructuredCtx assignSupply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc argSegment)
+    (hCallStart :
+      Structured.Preservation.CodeSegment.startPc callSeg =
+        Structured.Preservation.CodeSegment.fallthroughPc argSegment)
+    (hAssignStart :
+      Structured.Preservation.CodeSegment.startPc assignSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc callSeg)
+    (hStateRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeArgs
+        direct)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel direct state tokens)
+    (hArgReady :
+      ∀ {suffix : List Word},
+        StackPrefixSuffixErasedRel layout sourceBeforeArgs [] suffix state →
+        LocalsExprSeqSourceStateTargetGasRelReadyFor cfg sourceLayout layout
+          prim (Functions.Lower.argExprs args) sourceBeforeArgs [] suffix)
+    (hArgResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+          prim args sourceBeforeArgs)
+        argTrace (.ok (sourceAfterArgs, argValues)))
+    (hArgc : proc.argc = argValues.length)
+    (hArgBound : argValues.length ≤ 16)
+    (hBody :
+      ∀ {sourceAfterRef evmAfter callSource callerBase},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterRef sourceAfterArgs →
+        SourceStateTargetGasRel cfg sourceAfterRef evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc argSegment →
+        Structured.Preservation.Frame.StateRel callSource evmAfter tokens →
+        Structured.StackFrame.splitArgs? proc.argc callSource.evm.stack =
+          some (argValues.reverse, callerBase.evm.stack) →
+        Functions.SourceDirect.PrefixedStateRel layout hiddenReturns
+          sourceAfterArgs argValues.reverse callSource →
+        Functions.SourceDirect.StateRel layout hiddenReturns
+          (sourceAfterArgs.withShared sharedAfterCall) callerBase →
+        callSource.evm.stack =
+          argValues.reverse ++ callerBase.evm.stack →
+        callSource.returns = hiddenReturns →
+        ∀ entryTarget : EvmYul.EVM.State,
+          Structured.Preservation.Frame.StateRel
+            ((callSource.withEVM
+              { callSource.evm with stack := argValues.reverse }).pushReturn
+              callerBase.evm.stack proc.retc)
+            entryTarget (token :: tokens) →
+          entryTarget.pc =
+            Structured.Preservation.CodeSegment.startPc
+              (codeSegment_procSegment_bodyCode procSeg) →
+          SourceStateTargetGasRel cfg sourceAfterRef entryTarget →
+          ∃ sourceAfterBody : Reference.State,
+          ∃ afterBody : EvmYul.EVM.State,
+          ∃ bodyState returned : Locals.RunState,
+          ∃ stack : EvmYul.Stack Word,
+          ∃ frame : Structured.ReturnDest,
+            Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+              sourceAfterBody (sourceAfterArgs.withShared sharedAfterCall) ∧
+            (∃ bodyFuel : Nat,
+              ∃ hBodyTrace :
+                OpenAssembly.Source.OpenTraceResult asm bodyFuel entryTarget
+                  bodyTrace (.running afterBody),
+                SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
+                  hBodyTrace) ∧
+            Structured.Preservation.CompiledOutcomeRel asm bodyCtx
+              (Structured.Preservation.CodeSegment.fallthroughPc
+                (codeSegment_procSegment_bodyCode procSeg))
+              (Structured.Outcome.regular bodyState) (.running afterBody)
+              (token :: tokens) ∧
+            SourceStateTargetGasRel cfg sourceAfterBody afterBody ∧
+            Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+              some stack ∧
+            bodyState.returns = frame :: returned.returns ∧
+            bodyState.evm.stack.length = proc.retc ∧
+            proc.retc < 16 ∧
+            Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+              (sourceAfterArgs.withShared sharedAfterCall) returnValues
+              bodyState ∧
+            frame.callerStack = callerBase.evm.stack)
+    (hMem :
+      site ∈ sites.filter (Structured.CallSite.forProc proc.name))
+    (hNoDup :
+      ((sites.filter (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hExact : Structured.Preservation.ExactLabels asm)
+    (hReturnLabel :
+      Assembly.Program.labelPc asm site.returnLabel = some returnDest)
+    (hAssignCtxLayout : assignCtx.layout = layout)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets returnValues
+          sourceAfterArgs.vars =
+        some store')
+    (hCompileAssign :
+      Locals.Block.compileOpen assignCtx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (assignStmts, assignFinalCtx))
+    (hTail :
+      ∀ sourceAfterAssign evmAfter directAfter,
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterAssign
+          ((sourceAfterArgs.withShared sharedAfterCall).withVars store') →
+        SourceStateTargetGasRel cfg sourceAfterAssign evmAfter →
+        Functions.SourceDirect.StateRel layout hiddenReturns
+          ((sourceAfterArgs.withShared sharedAfterCall).withVars store')
+          directAfter →
+        Structured.Preservation.Frame.StateRel directAfter evmAfter tokens →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc assignSegment →
+        ∃ tailFuel : Nat,
+          SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg asm tailFuel
+            evmAfter tailTrace ResultRel) :
+    finalLocalsCtx = localsCtx ∧
+      ∃ fuel : Nat,
+        SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg asm fuel state
+          (argTrace ++ (bodyTrace ++ tailTrace)) ResultRel := by
+  refine
+    compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_exists_frameStateRel_withShared_of_compileOpen_sourceGasRelReady
+      hPrim sharedAfterCall hArgOwned hArgSupported hArgAccess hCompileArgs
+      hCtxLayout hLayoutNoDup asm argSegment hPc hStateRel hFrameRel
+      hArgReady hArgResolve (argc := proc.argc) hArgc ?_
+  intro sourceAfterRef evmAfter callSource callerBase hSourceAfterRef
+    hGasAfter hAfterPc hFrame hSplit hPrefix hBaseRel hStack
+    hCallSourceReturns
+  have hCallPc :
+      evmAfter.pc = Structured.Preservation.CodeSegment.startPc callSeg := by
+    rw [hAfterPc]
+    exact hCallStart.symm
+  have hArgBound' : argValues.reverse.length ≤ 16 := by
+    simpa using hArgBound
+  have hAssign' :
+      Functions.Source.Store.assignMany targets returnValues
+          (sourceAfterArgs.withShared sharedAfterCall).vars =
+        some store' := by
+    simpa [Locals.Source.State.withShared] using hAssign
+  exact
+    callSite_body_regular_then_return_assign_continue_exists_sourceStateRelTailGas
+      (cfg := cfg) (sourceLayout := sourceLayout)
+      (sourceEntryState := sourceAfterRef)
+      (layout := layout) (hiddenReturns := hiddenReturns)
+      (sourceBeforeCall := sourceAfterArgs.withShared sharedAfterCall)
+      (sourceAfterCall := sourceAfterArgs.withShared sharedAfterCall)
+      (callSource := callSource) (callerBase := callerBase)
+      (program := structuredProgram) (proc := proc)
+      (bodySupply := bodySupply) (dispatchSupply := dispatchSupply)
+      (sites := sites) (site := site) (returnDest := returnDest)
+      (bodyCtx := bodyCtx) (target := evmAfter)
+      (args := argValues.reverse) (callerStack := callerBase.evm.stack)
+      (tokens := tokens) (token := token) (asm := asm)
+      (targets := targets) (values := returnValues) (store' := store')
+      (assignStmts := assignStmts) (assignFinalCtx := assignFinalCtx)
+      (assignCtx := assignCtx) (assignStructuredCtx := assignStructuredCtx)
+      (assignSupply := assignSupply) (bodyTrace := bodyTrace)
+      (tailTrace := tailTrace) (ResultRel := ResultRel)
+      callSeg procSeg assignSegment hAssignStart hSplit hArgBound'
+      hCallPc hFrame hGasAfter
+      (by
+        intro entryTarget hEntryRel hEntryPc hEntryGas
+        exact
+          hBody hSourceAfterRef hGasAfter hAfterPc hFrame hSplit
+            hPrefix hBaseRel hStack hCallSourceReturns entryTarget
+            hEntryRel hEntryPc hEntryGas)
+      hMem hNoDup hToken hExact hReturnLabel hAssignCtxLayout hLayoutNoDup
+      hTargetsNoDup hTargets hAssign' hCompileAssign hBaseRel rfl hTail
+
 theorem compilerOpenFunctionsArgList_then_callSite_body_leave_return_assign_tail_exists_sourceGasRel_stateRelTail_of_entry_of_compileOpen
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -86912,6 +87140,245 @@ theorem compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_re
       hMem hNoDup hToken hExact hReturnLabel hAssignCtxLayout hTargetsNoDup
       hTargets hAssign hCompileAssign hTail
 
+theorem compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    {fn : Functions.FunDef} {proc : Structured.Proc}
+    {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {argStmts assignStmts : List Expressions.Stmt}
+    {sourceBeforeArgs sourceAfterArgs bodySource : Objects.Source.State}
+    {direct : Locals.RunState}
+    {state : EvmYul.EVM.State}
+    {hiddenReturns : List Structured.ReturnDest}
+    {tokens : List Word}
+    {site : Structured.CallSite}
+    {returnDest : Nat}
+    {token : Word}
+    {targets : List Name} {argValues returnValues : List Word}
+    {paramStore store' : Functions.Source.Store}
+    {assignFinalCtx : Locals.Ctx} {assignCtx : Locals.Ctx}
+    {structuredCtx assignStructuredCtx : Structured.CompileContext}
+    {supply assignSupply : Structured.LabelSupply}
+    {argTrace bodyTrace tailTrace : OpenExternal.OpenTrace}
+    {ResultRel : Assembly.StepResult → Prop}
+    (_hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (_hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (_hFind :
+      Functions.Source.FunList.find? functionName programSource.functions =
+        some fn)
+    (hProcLookup :
+      Structured.ProcList.lookup? functionName lower.toStructured.procs =
+        some proc)
+    (hArgOwned :
+      Locals.Source.ExprSeq.SourceOwned (Functions.Lower.argExprs args))
+    (hArgSupported :
+      LocalsExprSeqOpenSupported (Functions.Lower.argExprs args))
+    (hArgAccess :
+      Locals.SourceLowering.ExprSeq.Accessible layout 0
+        (Functions.Lower.argExprs args))
+    (hCompileArgs :
+      Locals.Block.compileOpen localsCtx
+          { stmts := Functions.Lower.evalArgs args } =
+        some (argStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hLayoutNoDup : layout.Nodup)
+    (argSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured argStmts }
+          structuredCtx supply).code)
+    (callSeg :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Preservation.ProcedurePreservation.callSiteCode
+          proc argValues.reverse token site.returnLabel))
+    (procSeg :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Preservation.ProcedurePreservation.procSegment
+          lower.toStructured proc
+          (layoutProgram.procLayout hProcLookup).bodySupply
+          (layoutProgram.procLayout hProcLookup).dispatchSupply
+          layoutProgram.sites))
+    (assignSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured assignStmts }
+          assignStructuredCtx assignSupply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc argSegment)
+    (hCallStart :
+      Structured.Preservation.CodeSegment.startPc callSeg =
+        Structured.Preservation.CodeSegment.fallthroughPc argSegment)
+    (hAssignStart :
+      Structured.Preservation.CodeSegment.startPc assignSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc callSeg)
+    (hStateRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBeforeArgs
+        direct)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel direct state tokens)
+    (hArgReady :
+      ∀ {suffix : List Word},
+        StackPrefixSuffixErasedRel layout sourceBeforeArgs [] suffix state →
+        LocalsExprSeqSourceStateTargetGasRelReadyFor cfg sourceLayout layout
+          prim (Functions.Lower.argExprs args) sourceBeforeArgs [] suffix)
+    (hArgResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+          prim args sourceBeforeArgs)
+        argTrace (.ok (sourceAfterArgs, argValues)))
+    (hParams :
+      Functions.Source.Store.insertMany fn.params argValues
+          Locals.Source.Store.empty =
+        some paramStore)
+    (hProcArgc : proc.argc = fn.params.length)
+    (hArgBound : argValues.length ≤ 16)
+    (hBody :
+      ∀ {sourceAfterRef evmAfter callSource callerBase},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterRef sourceAfterArgs →
+        SourceStateTargetGasRel cfg sourceAfterRef evmAfter →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc argSegment →
+        Structured.Preservation.Frame.StateRel callSource evmAfter tokens →
+        Structured.StackFrame.splitArgs? proc.argc callSource.evm.stack =
+          some (argValues.reverse, callerBase.evm.stack) →
+        Functions.SourceDirect.PrefixedStateRel layout hiddenReturns
+          sourceAfterArgs argValues.reverse callSource →
+        Functions.SourceDirect.StateRel layout hiddenReturns
+          (sourceAfterArgs.withShared bodySource.shared) callerBase →
+        callSource.evm.stack =
+          argValues.reverse ++ callerBase.evm.stack →
+        callSource.returns = hiddenReturns →
+        ∀ entryTarget : EvmYul.EVM.State,
+          Structured.Preservation.Frame.StateRel
+            ((callSource.withEVM
+              { callSource.evm with stack := argValues.reverse }).pushReturn
+              callerBase.evm.stack proc.retc)
+            entryTarget (token :: tokens) →
+          entryTarget.pc =
+            Structured.Preservation.CodeSegment.startPc
+              (codeSegment_procSegment_bodyCode procSeg) →
+          SourceStateTargetGasRel cfg sourceAfterRef entryTarget →
+          ∃ sourceAfterBody : Reference.State,
+          ∃ afterBody : EvmYul.EVM.State,
+          ∃ bodyState returned : Locals.RunState,
+          ∃ stack : EvmYul.Stack Word,
+          ∃ frame : Structured.ReturnDest,
+            Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+              sourceAfterBody (sourceAfterArgs.withShared bodySource.shared) ∧
+            (∃ bodyFuel : Nat,
+              ∃ hBodyTrace :
+                OpenAssembly.Source.OpenTraceResult layoutProgram.asm
+                  bodyFuel entryTarget bodyTrace (.running afterBody),
+                SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
+                  hBodyTrace) ∧
+            Structured.Preservation.CompiledOutcomeRel layoutProgram.asm
+              (Structured.Preservation.ProcedurePreservation.bodyCtx
+                lower.toStructured proc)
+              (Structured.Preservation.CodeSegment.fallthroughPc
+                (codeSegment_procSegment_bodyCode procSeg))
+              (Structured.Outcome.regular bodyState) (.running afterBody)
+              (token :: tokens) ∧
+            SourceStateTargetGasRel cfg sourceAfterBody afterBody ∧
+            Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+              some stack ∧
+            bodyState.returns = frame :: returned.returns ∧
+            bodyState.evm.stack.length = proc.retc ∧
+            proc.retc < 16 ∧
+            Functions.SourceDirect.ReturnedStackRel (frame :: hiddenReturns)
+              (sourceAfterArgs.withShared bodySource.shared) returnValues
+              bodyState ∧
+            frame.callerStack = callerBase.evm.stack)
+    (hMem :
+      site ∈ layoutProgram.sites.filter
+        (Structured.CallSite.forProc proc.name))
+    (hNoDup :
+      ((layoutProgram.sites.filter
+          (Structured.CallSite.forProc proc.name)).map
+        Structured.CallSite.token).Nodup)
+    (hToken : site.token = token)
+    (hExact : Structured.Preservation.ExactLabels layoutProgram.asm)
+    (hReturnLabel :
+      Assembly.Program.labelPc layoutProgram.asm site.returnLabel =
+        some returnDest)
+    (hAssignCtxLayout : assignCtx.layout = layout)
+    (hTargetsNoDup : targets.Nodup)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hAssign :
+      Functions.Source.Store.assignMany targets returnValues
+          sourceAfterArgs.vars =
+        some store')
+    (hCompileAssign :
+      Locals.Block.compileOpen assignCtx
+          { stmts := Functions.Lower.assignReturnedTops targets } =
+        some (assignStmts, assignFinalCtx))
+    (hTail :
+      ∀ sourceAfterAssign evmAfter directAfter,
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterAssign
+          ((sourceAfterArgs.withShared bodySource.shared).withVars store') →
+        SourceStateTargetGasRel cfg sourceAfterAssign evmAfter →
+        Functions.SourceDirect.StateRel layout hiddenReturns
+          ((sourceAfterArgs.withShared bodySource.shared).withVars store')
+          directAfter →
+        Structured.Preservation.Frame.StateRel directAfter evmAfter tokens →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc assignSegment →
+        ∃ tailFuel : Nat,
+          SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg
+            layoutProgram.asm tailFuel evmAfter tailTrace ResultRel) :
+    finalLocalsCtx = localsCtx ∧
+      ∃ fuel : Nat,
+        SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+          fuel state (argTrace ++ (bodyTrace ++ tailTrace)) ResultRel := by
+  have hArgsLen : argValues.length = fn.params.length :=
+    Functions.Source.Store.insertMany_length hParams
+  have hArgc : proc.argc = argValues.length :=
+    hProcArgc.trans hArgsLen.symm
+  exact
+    SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen
+      (prim := prim) hPrim (cfg := cfg) (sourceLayout := sourceLayout)
+      (args := args) (localsCtx := localsCtx)
+      (finalLocalsCtx := finalLocalsCtx) (layout := layout)
+      (argStmts := argStmts) (assignStmts := assignStmts)
+      (sourceBeforeArgs := sourceBeforeArgs)
+      (sourceAfterArgs := sourceAfterArgs) (direct := direct)
+      (state := state) (hiddenReturns := hiddenReturns)
+      (tokens := tokens) (structuredProgram := lower.toStructured)
+      (proc := proc)
+      (bodySupply := (layoutProgram.procLayout hProcLookup).bodySupply)
+      (dispatchSupply :=
+        (layoutProgram.procLayout hProcLookup).dispatchSupply)
+      (sites := layoutProgram.sites) (site := site)
+      (returnDest := returnDest)
+      (bodyCtx :=
+        Structured.Preservation.ProcedurePreservation.bodyCtx
+          lower.toStructured proc)
+      (token := token) (asm := layoutProgram.asm)
+      (targets := targets) (argValues := argValues)
+      (returnValues := returnValues) (store' := store')
+      (assignFinalCtx := assignFinalCtx) (assignCtx := assignCtx)
+      (structuredCtx := structuredCtx)
+      (assignStructuredCtx := assignStructuredCtx)
+      (supply := supply) (assignSupply := assignSupply)
+      (argTrace := argTrace) (bodyTrace := bodyTrace)
+      (tailTrace := tailTrace) (ResultRel := ResultRel)
+      bodySource.shared hArgOwned hArgSupported hArgAccess hCompileArgs
+      hCtxLayout hLayoutNoDup argSegment callSeg procSeg assignSegment hPc
+      hCallStart hAssignStart hStateRel hFrameRel hArgReady hArgResolve
+      hArgc hArgBound hBody hMem hNoDup hToken hExact hReturnLabel
+      hAssignCtxLayout hTargetsNoDup hTargets hAssign hCompileAssign hTail
+
 theorem compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_stateRelTail_of_compileOpen
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -87821,6 +88288,464 @@ theorem compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sour
               hCompileAssign hCompileRest hGasAfter hAfterPc hFrame hSplit
               hPrefix hBaseRel hStack hCallSourceReturns entryTarget
               hEntryRel hEntryPc hEntryGas)
+        hSiteMem hTokenNoDup (by simp [site]) hExact
+        (by simpa [site] using hReturnLabel) hAssignCtxLayout
+        hTargetsNoDup hTargets hAssign hCompileAssign hTailForCall with
+      ⟨_hArgFinalCtx, fuel, hFull⟩
+    exact ⟨fuel, by simpa [hTrace, List.append_assoc] using hFull⟩
+  · rcases
+      FunctionsProgramRegularOpenSupported.funDef hProgramSupported hFind with
+    ⟨_hScoped, _hFrameBound, _hParamsLe, _hReturnsLt, hBodySupported⟩
+    have hBodyModeRegular : bodyOutcome.mode = .regular := by
+      rcases hBodyEq : fn.body with ⟨bodySourceStmts⟩
+      have hBodySupportedStmts :
+          FunctionsStmtListRegularOpenSupportedFor programSource fn.returns
+            (Functions.SourceDirect.FunDef.targetBodyCtx fn).layout
+            bodySourceStmts := by
+        simpa [hBodyEq] using hBodySupported
+      have hBodyOpenStmts :
+          OpenExternal.OpenResultResolves
+            (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+              prim programSource (Functions.Source.FunDef.bodyCtx fn)
+              bodyFuel { stmts := bodySourceStmts }
+              { shared := sourceAfterArgs.shared,
+                vars :=
+                  Functions.Source.Store.initReturns fn.returns paramStore })
+            bodyTrace (.ok (bodyOutcome, bodyCtx')) := by
+        simpa [hBodyEq] using hBodyOpen
+      exact
+        compilerOpenFunctionsBlock_regular_mode_of_supportedFor
+          hProgramSupported hBodySupportedStmts hBodyOpenStmts
+    rw [hBodyModeRegular] at hLeaveMode
+    cases hLeaveMode
+
+theorem compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_compileOpen
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    {returns : List Name} {localsCtx finalLocalsCtx : Locals.Ctx}
+    {layout : List Name} {compiledStmts : List Expressions.Stmt}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {sourceCtx ctxAfter : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {targets : List Name} {functionName : Name}
+    {args : List (Functions.Expr 1)}
+    {rest : List Functions.Stmt}
+    {sourceBefore sourceAfter : Objects.Source.State}
+    {direct : Locals.RunState}
+    {state : EvmYul.EVM.State}
+    {hiddenReturns : List Structured.ReturnDest}
+    {tokens : List Word}
+    {trace tailTrace : OpenExternal.OpenTrace}
+    {ResultRel : Assembly.StepResult → Prop}
+    (hArgOwned :
+      Locals.Source.ExprSeq.SourceOwned (Functions.Lower.argExprs args))
+    (hArgSupported :
+      LocalsExprSeqOpenSupported (Functions.Lower.argExprs args))
+    (hArgAccess :
+      Locals.SourceLowering.ExprSeq.Accessible layout 0
+        (Functions.Lower.argExprs args))
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns
+            { stmts := Functions.Stmt.call targets functionName args :: rest }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCtxLayout : localsCtx.layout = layout)
+    (hLayoutNoDup : layout.Nodup)
+    (segment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hStateRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns sourceBefore
+        direct)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel direct state tokens)
+    (hArgReady :
+      ∀ {suffix : List Word},
+        StackPrefixSuffixErasedRel layout sourceBefore [] suffix state →
+        LocalsExprSeqSourceStateTargetGasRelReadyFor cfg sourceLayout layout
+          prim (Functions.Lower.argExprs args) sourceBefore [] suffix)
+    (hParamBound :
+      ∀ {fn : Functions.FunDef},
+        Functions.Source.FunList.find? functionName
+            programSource.functions =
+          some fn →
+        fn.params.length ≤ 16)
+    (hTargets :
+      ∀ {name : Name}, name ∈ targets →
+        ∃ idx, layout[idx]? = some name ∧ targets.length + idx ≤ 16)
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run
+          prim programSource sourceCtx (sourceFuel + 1)
+          (.call targets functionName args) sourceBefore)
+        trace (.ok (Functions.Source.Outcome.regular sourceAfter,
+          ctxAfter)))
+    (hBody :
+      ∀ {argTrace bodyTrace argValues sourceAfterArgs sourceAfterRef fn paramStore}
+        {returnValues returnStore bodyFuel bodyOutcome bodyCtx'}
+        {proc : Structured.Proc}
+        {argStmts : List Expressions.Stmt} {argCtx : Locals.Ctx}
+        {assignStmts : List Expressions.Stmt}
+        {afterAssignCtx : Locals.Ctx} {restStmts : List Expressions.Stmt}
+        {returnDest : Nat},
+        targets.Nodup →
+        trace = argTrace ++ bodyTrace →
+        ctxAfter = sourceCtx →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+            prim args sourceBefore)
+          argTrace (.ok (sourceAfterArgs, argValues)) →
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterRef sourceAfterArgs →
+        (hFind :
+          Functions.Source.FunList.find? functionName
+              programSource.functions =
+            some fn) →
+        (hProcLookup :
+          Structured.ProcList.lookup? functionName lower.toStructured.procs =
+            some proc) →
+        (argSegment :
+          Structured.Preservation.CodeSegment layoutProgram.asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured argStmts }
+              structuredCtx supply).code) →
+        (calleeSegment :
+          Structured.Preservation.CodeSegment layoutProgram.asm
+            (Structured.Preservation.ProcedurePreservation.procSegment
+              lower.toStructured proc
+              (layoutProgram.procLayout hProcLookup).bodySupply
+              (layoutProgram.procLayout hProcLookup).dispatchSupply
+              layoutProgram.sites)) →
+        Functions.Source.Store.insertMany fn.params argValues
+            Locals.Source.Store.empty =
+          some paramStore →
+        sourceFuel = bodyFuel + 1 →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource (Functions.Source.FunDef.bodyCtx fn)
+            bodyFuel fn.body
+            { shared := sourceAfterArgs.shared,
+              vars :=
+                Functions.Source.Store.initReturns fn.returns paramStore })
+          bodyTrace (.ok (bodyOutcome, bodyCtx')) →
+        bodyOutcome.mode = .regular →
+        Functions.Source.Store.lookupMany fn.returns
+            bodyOutcome.state.vars =
+          some returnValues →
+        Functions.Source.Store.assignMany targets returnValues
+            sourceAfterArgs.vars =
+          some returnStore →
+        sourceAfter =
+          { shared := bodyOutcome.state.shared, vars := returnStore } →
+        proc.name = fn.name →
+        proc.argc = fn.params.length →
+        proc.retc = fn.returns.length →
+        ({ procName := functionName
+           token := Structured.Stmt.callToken supply
+           returnLabel := Structured.LabelSupply.label supply 0 } :
+            Structured.CallSite) ∈
+          layoutProgram.sites.filter (Structured.CallSite.forProc proc.name) →
+        ((layoutProgram.sites.filter
+            (Structured.CallSite.forProc proc.name)).map
+          Structured.CallSite.token).Nodup →
+        Structured.Preservation.ExactLabels layoutProgram.asm →
+        Assembly.Program.labelPc layoutProgram.asm
+            (Structured.LabelSupply.label supply 0) =
+          some returnDest →
+        Locals.Block.compileOpen localsCtx
+            { stmts := Functions.Lower.evalArgs args } =
+          some (argStmts, argCtx) →
+        Locals.Block.compileOpen argCtx
+            { stmts := Functions.Lower.assignReturnedTops targets } =
+          some (assignStmts, afterAssignCtx) →
+        Locals.Block.compileOpen afterAssignCtx
+            (Functions.Block.toLocals returns { stmts := rest }) =
+          some (restStmts, finalLocalsCtx) →
+        ∀ {evmAfter callSource callerBase},
+          SourceStateTargetGasRel cfg sourceAfterRef evmAfter →
+          evmAfter.pc =
+            Structured.Preservation.CodeSegment.fallthroughPc argSegment →
+          Structured.Preservation.Frame.StateRel callSource evmAfter tokens →
+          Structured.StackFrame.splitArgs? proc.argc callSource.evm.stack =
+            some (argValues.reverse, callerBase.evm.stack) →
+          Functions.SourceDirect.PrefixedStateRel layout hiddenReturns
+            sourceAfterArgs argValues.reverse callSource →
+          Functions.SourceDirect.StateRel layout hiddenReturns
+            (sourceAfterArgs.withShared bodyOutcome.state.shared) callerBase →
+          callSource.evm.stack =
+            argValues.reverse ++ callerBase.evm.stack →
+          callSource.returns = hiddenReturns →
+          ∀ entryTarget : EvmYul.EVM.State,
+            Structured.Preservation.Frame.StateRel
+              ((callSource.withEVM
+                { callSource.evm with stack := argValues.reverse }).pushReturn
+                callerBase.evm.stack proc.retc)
+              entryTarget (Structured.Stmt.callToken supply :: tokens) →
+            entryTarget.pc =
+              Structured.Preservation.CodeSegment.startPc
+                (codeSegment_procSegment_bodyCode calleeSegment) →
+            SourceStateTargetGasRel cfg sourceAfterRef entryTarget →
+            ∃ sourceAfterBody : Reference.State,
+            ∃ afterBody : EvmYul.EVM.State,
+            ∃ bodyState returned : Locals.RunState,
+            ∃ stack : EvmYul.Stack Word,
+            ∃ frame : Structured.ReturnDest,
+              Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+                sourceAfterBody
+                (sourceAfterArgs.withShared bodyOutcome.state.shared) ∧
+              (∃ bodyTargetFuel : Nat,
+                ∃ hBodyTrace :
+                  OpenAssembly.Source.OpenTraceResult layoutProgram.asm
+                    bodyTargetFuel entryTarget bodyTrace (.running afterBody),
+                  SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
+                    hBodyTrace) ∧
+              Structured.Preservation.CompiledOutcomeRel layoutProgram.asm
+                (Structured.Preservation.ProcedurePreservation.bodyCtx
+                  lower.toStructured proc)
+                (Structured.Preservation.CodeSegment.fallthroughPc
+                  (codeSegment_procSegment_bodyCode calleeSegment))
+                (Structured.Outcome.regular bodyState) (.running afterBody)
+                (Structured.Stmt.callToken supply :: tokens) ∧
+              SourceStateTargetGasRel cfg sourceAfterBody afterBody ∧
+              Structured.StackFrame.attachReturns? frame bodyState.evm.stack =
+                some stack ∧
+              bodyState.returns = frame :: returned.returns ∧
+              bodyState.evm.stack.length = proc.retc ∧
+              proc.retc < 16 ∧
+              Functions.SourceDirect.ReturnedStackRel
+                (frame :: hiddenReturns)
+                (sourceAfterArgs.withShared bodyOutcome.state.shared)
+                returnValues bodyState ∧
+              frame.callerStack = callerBase.evm.stack)
+    (hTail :
+      ∀ {argTrace bodyTrace argValues sourceAfterArgs fn paramStore}
+        {returnValues returnStore bodyFuel bodyOutcome bodyCtx'}
+        {proc : Structured.Proc}
+        {argStmts : List Expressions.Stmt} {argCtx : Locals.Ctx}
+        {assignStmts : List Expressions.Stmt}
+        {afterAssignCtx : Locals.Ctx} {restStmts : List Expressions.Stmt}
+        {returnDest : Nat},
+        (assignSegment :
+          Structured.Preservation.CodeSegment layoutProgram.asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured assignStmts }
+              structuredCtx
+              (Structured.Stmt.compileFromCtxCore
+                (.call functionName) structuredCtx supply).next).code) →
+        (tailSegment :
+          Structured.Preservation.CodeSegment layoutProgram.asm
+            (Structured.Block.compileFromCtx
+              { stmts := Expressions.StmtList.toStructured restStmts }
+              structuredCtx
+              (Structured.Stmt.compileFromCtxCore
+                (.call functionName) structuredCtx supply).next).code) →
+        targets.Nodup →
+        trace = argTrace ++ bodyTrace →
+        ctxAfter = sourceCtx →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.ArgList.eval
+            prim args sourceBefore)
+          argTrace (.ok (sourceAfterArgs, argValues)) →
+        Functions.Source.FunList.find? functionName programSource.functions =
+          some fn →
+        Functions.Source.Store.insertMany fn.params argValues
+            Locals.Source.Store.empty =
+          some paramStore →
+        sourceFuel = bodyFuel + 1 →
+        OpenExternal.OpenResultResolves
+          (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+            prim programSource (Functions.Source.FunDef.bodyCtx fn)
+            bodyFuel fn.body
+            { shared := sourceAfterArgs.shared,
+              vars :=
+                Functions.Source.Store.initReturns fn.returns paramStore })
+          bodyTrace (.ok (bodyOutcome, bodyCtx')) →
+        Functions.Source.Store.lookupMany fn.returns
+            bodyOutcome.state.vars =
+          some returnValues →
+        Functions.Source.Store.assignMany targets returnValues
+            sourceAfterArgs.vars =
+          some returnStore →
+        sourceAfter =
+          { shared := bodyOutcome.state.shared, vars := returnStore } →
+        (hProcLookup :
+          Structured.ProcList.lookup? functionName lower.toStructured.procs =
+            some proc) →
+        proc.name = fn.name →
+        proc.argc = fn.params.length →
+        proc.retc = fn.returns.length →
+        ({ procName := functionName
+           token := Structured.Stmt.callToken supply
+           returnLabel := Structured.LabelSupply.label supply 0 } :
+            Structured.CallSite) ∈
+          layoutProgram.sites.filter (Structured.CallSite.forProc proc.name) →
+        ((layoutProgram.sites.filter
+            (Structured.CallSite.forProc proc.name)).map
+          Structured.CallSite.token).Nodup →
+        Structured.Preservation.ExactLabels layoutProgram.asm →
+        Assembly.Program.labelPc layoutProgram.asm
+            (Structured.LabelSupply.label supply 0) =
+          some returnDest →
+        Locals.Block.compileOpen localsCtx
+            { stmts := Functions.Lower.evalArgs args } =
+          some (argStmts, argCtx) →
+        Locals.Block.compileOpen argCtx
+            { stmts := Functions.Lower.assignReturnedTops targets } =
+          some (assignStmts, afterAssignCtx) →
+        Locals.Block.compileOpen afterAssignCtx
+            (Functions.Block.toLocals returns { stmts := rest }) =
+          some (restStmts, finalLocalsCtx) →
+        Structured.Preservation.CodeSegment.startPc tailSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc assignSegment →
+        Structured.Preservation.CodeSegment.fallthroughPc tailSegment =
+          Structured.Preservation.CodeSegment.fallthroughPc segment →
+        ∀ sourceAfterAssign evmAfter directAfter,
+          Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+            sourceAfterAssign
+            ((sourceAfterArgs.withShared bodyOutcome.state.shared).withVars
+              returnStore) →
+          SourceStateTargetGasRel cfg sourceAfterAssign evmAfter →
+          Functions.SourceDirect.StateRel layout hiddenReturns
+            ((sourceAfterArgs.withShared bodyOutcome.state.shared).withVars
+              returnStore)
+            directAfter →
+          Structured.Preservation.Frame.StateRel directAfter evmAfter
+            tokens →
+          evmAfter.pc =
+            Structured.Preservation.CodeSegment.fallthroughPc assignSegment →
+          ∃ tailFuel : Nat,
+            SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg
+              layoutProgram.asm tailFuel evmAfter tailTrace ResultRel) :
+    ∃ fuel : Nat,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        fuel state (trace ++ tailTrace) ResultRel := by
+  rcases
+      compilerOpenFunctionsStmt_call_resolves_ok_regular_programLayout_parts_of_compileOpen
+        hLower layoutProgram hCtxProcs hCompileBlock hCalls segment
+        hResolve with
+    ⟨argTrace, bodyTrace, argValues, sourceAfterArgs, fn, paramStore,
+      returnValues, returnStore, bodyFuel, bodyOutcome, bodyCtx', proc,
+      bodySupply, dispatchSupply, calleeSegment, argStmts, argCtx,
+      assignStmts, afterAssignCtx, restStmts, argSegment, callSiteSegment,
+      assignSegment, tailSegment, returnDest, hTargetsNoDup, hTrace,
+      hCtxAfter, hArgResolve, hFind, hParams, hSourceFuel, hBodyOpen, hMode,
+      hLookup, hAssign, hSourceAfter, hProcLookup, hProcName, hProcArgc,
+      hProcRetc, hSiteMem, hTokenNoDup, hExact, hReturnLabel, hCompileArgs,
+      hCompileAssign, hCompileRest, hArgStart, hCallStart, hAssignStart,
+      hTailStart, hTailFall⟩
+  have hArgCtx : argCtx = localsCtx :=
+    compilerOpenFunctionsArgList_compileOpen_finalCtx hCompileArgs
+  have hAssignCtxLayout : argCtx.layout = layout := by
+    rw [hArgCtx, hCtxLayout]
+  have hArgLen : argValues.length = fn.params.length :=
+    Functions.Source.Store.insertMany_length hParams
+  have hArgBound : argValues.length ≤ 16 := by
+    rw [hArgLen]
+    exact hParamBound hFind
+  let site : Structured.CallSite :=
+    { procName := functionName
+      token := Structured.Stmt.callToken supply
+      returnLabel := Structured.LabelSupply.label supply 0 }
+  let calleeSegmentExact :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Preservation.ProcedurePreservation.procSegment
+          lower.toStructured proc
+          (layoutProgram.procLayout hProcLookup).bodySupply
+          (layoutProgram.procLayout hProcLookup).dispatchSupply
+          layoutProgram.sites) :=
+    (layoutProgram.procLayout hProcLookup).segment
+  have hTailForCall :
+      ∀ sourceAfterAssign evmAfter directAfter,
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout
+          sourceAfterAssign
+          ((sourceAfterArgs.withShared bodyOutcome.state.shared).withVars
+            returnStore) →
+        SourceStateTargetGasRel cfg sourceAfterAssign evmAfter →
+        Functions.SourceDirect.StateRel layout hiddenReturns
+          ((sourceAfterArgs.withShared bodyOutcome.state.shared).withVars
+            returnStore)
+          directAfter →
+        Structured.Preservation.Frame.StateRel directAfter evmAfter tokens →
+        evmAfter.pc =
+          Structured.Preservation.CodeSegment.fallthroughPc assignSegment →
+        ∃ tailFuel : Nat,
+          SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg
+            layoutProgram.asm tailFuel evmAfter tailTrace ResultRel := by
+    intro sourceAfterAssign evmAfter directAfter hSourceAssign hGasAssign
+      hStateRelAfter hFrameRelAfter hAfterPc
+    exact
+      hTail assignSegment tailSegment hTargetsNoDup hTrace hCtxAfter
+        hArgResolve hFind hParams hSourceFuel hBodyOpen hLookup hAssign
+        hSourceAfter hProcLookup hProcName hProcArgc hProcRetc hSiteMem
+        hTokenNoDup hExact hReturnLabel hCompileArgs hCompileAssign
+        hCompileRest hTailStart hTailFall sourceAfterAssign evmAfter
+        directAfter hSourceAssign hGasAssign hStateRelAfter hFrameRelAfter
+        hAfterPc
+  rcases hMode with hRegularMode | hLeaveMode
+  · rcases
+        compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen
+        hPrim (cfg := cfg) (sourceLayout := sourceLayout)
+        (programSource := programSource) (lower := lower) (fn := fn)
+        (proc := proc) (functionName := functionName) (args := args)
+        (localsCtx := localsCtx) (finalLocalsCtx := argCtx)
+        (layout := layout) (argStmts := argStmts)
+        (assignStmts := assignStmts)
+        (sourceBeforeArgs := sourceBefore)
+        (sourceAfterArgs := sourceAfterArgs)
+        (bodySource := bodyOutcome.state) (direct := direct)
+        (state := state) (hiddenReturns := hiddenReturns)
+        (tokens := tokens) (site := site) (returnDest := returnDest)
+        (token := Structured.Stmt.callToken supply)
+        (targets := targets) (argValues := argValues)
+        (returnValues := returnValues) (paramStore := paramStore)
+        (store' := returnStore) (assignFinalCtx := afterAssignCtx)
+        (assignCtx := argCtx) (structuredCtx := structuredCtx)
+        (assignStructuredCtx := structuredCtx) (supply := supply)
+        (assignSupply :=
+          (Structured.Stmt.compileFromCtxCore (.call functionName)
+            structuredCtx supply).next)
+        (argTrace := argTrace) (bodyTrace := bodyTrace)
+        (tailTrace := tailTrace) (ResultRel := ResultRel)
+        hProgramSupported hLower layoutProgram hFind hProcLookup
+        hArgOwned hArgSupported hArgAccess hCompileArgs hCtxLayout
+        hLayoutNoDup argSegment callSiteSegment calleeSegmentExact
+        assignSegment (by simpa [hArgStart] using hPc) hCallStart
+        hAssignStart hStateRel hFrameRel hArgReady hArgResolve hParams
+        hProcArgc hArgBound
+        (by
+          intro sourceAfterRef' evmAfter callSource callerBase
+          intro hSourceAfterRef hGasAfter hAfterPc hFrame hSplit hPrefix
+          intro hBaseRel hStack hCallSourceReturns entryTarget hEntryRel
+          intro hEntryPc hEntryGas
+          exact
+            hBody hTargetsNoDup hTrace hCtxAfter hArgResolve
+              hSourceAfterRef hFind hProcLookup argSegment calleeSegmentExact
+              hParams hSourceFuel hBodyOpen hRegularMode hLookup hAssign
+              hSourceAfter hProcName hProcArgc hProcRetc hSiteMem
+              hTokenNoDup hExact hReturnLabel hCompileArgs hCompileAssign
+              hCompileRest hGasAfter hAfterPc hFrame hSplit hPrefix
+              hBaseRel hStack hCallSourceReturns entryTarget hEntryRel
+              hEntryPc hEntryGas)
         hSiteMem hTokenNoDup (by simp [site]) hExact
         (by simpa [site] using hReturnLabel) hAssignCtxLayout
         hTargetsNoDup hTargets hAssign hCompileAssign hTailForCall with

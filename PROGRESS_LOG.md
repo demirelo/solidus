@@ -8009,3 +8009,12 @@ Resumed the active adaptive-spill cleanup goal; target is deriving byte-encoding
 - Focus: distinguish real remaining derivation targets from compatibility-only old APIs and fundamental source/runtime premises.
 
 2026-06-05 04:39 CEST - compaction-resume/call-dynamic-source-tail: Resumed under the active CALL goal after compaction. Latest checked local brick is the dynamic regular call-site body/return-assignment wrapper that can hand caller tails actual post-call `SourceStateRel` plus `SourceStateTargetGasRel`; next frontier is lifting it through seed-aware argument/program-layout/recursive block wrappers and then pinning/auditing/docs.
+## 2026-06-05 Compaction resume
+
+- Resumed from compaction on the CALL frontier. Latest committed checkpoints have recursive CALL source-gas theorem and source/gas-seeded top wrappers pinned; remaining work is to remove the public non-CALL seed/readiness leakage and wire the checked public CALL path through OpenRuntime, then audit assumptions.
+
+2026-06-05 07:29 CEST - proof/call-no-seed-source-gas-statement-corridor: Added and checked a no-seed/readiness-driven regular CALL source/gas corridor through statement level:
+`SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen`,
+`compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen`, and
+`compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_compileOpen`.
+These reuse argument expression-sequence source/gas readiness instead of the broad actual-run non-CALL source/gas seed while still returning actual post-call `SourceStateRel` and `SourceStateTargetGasRel` to caller tails. Verification: focused `lake env lean --json EvmCompiler/Yul/OpenLowering.lean -DmaxErrors=20` passed after each lift with only existing warnings, `lake build EvmCompiler.Yul.OpenLowering` passed, direct `LayerAudit` Lean check passed after refreshing the import artifact, `lake build EvmCompiler.LayerAudit` passed, scoped Lean-file no-hole scan found no `sorry`/`admit`/new `axiom`/`unsafe`, scoped `git diff --check` passed, and axiom audits for the three new pins reported only `[propext, Classical.choice, Quot.sound]`. Remaining frontier: migrate ordinary enriched block-head wrappers and the recursive block/top wrappers off the sourceGasSeed route.

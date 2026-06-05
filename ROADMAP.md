@@ -109,6 +109,19 @@ The checked compile wrapper is response-indexed and carries the source/gas seed
 premise explicitly, so it is not yet the final public CALL theorem; it is the
 right internal top-of-source-open carrier for the public-runtime step.
 
+2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
+also has a checked no-seed/readiness-driven path through statement level:
+`SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen`,
+`compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_entry_of_compileOpen`,
+and
+`compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sourceGasRel_sourceStateRelTailGas_of_compileOpen`.
+These consume argument expression-sequence source/gas readiness instead of the
+broad actual-run non-CALL source/gas seed while still returning actual
+post-call `SourceStateRel` and `SourceStateTargetGasRel` for caller tails.
+The remaining seed premise is now above this local corridor: ordinary enriched
+block-head wrappers and the recursive block/top wrappers still use the
+sourceGasSeed route and must be migrated next.
+
 The generated return-dispatch
 condition prefix, `JUMPI` step, full `DUP`/`PUSH`/`EQ`/`JUMPI` test,
 mismatched-token dispatch-table branch, selected-token return branch, selected
@@ -766,11 +779,12 @@ into the exact argument and primitive traces; the new seed-aware mutual
 recursion threads that response predicate through arbitrary expression syntax;
 `expr`/`let`/`assign` statement heads now have seed-aware checked wrappers; and
 the matching block/result wrappers pass actual post-head source/gas witnesses
-to recursive tails. The next proof brick is consumer migration: move the
-recursive block/list theorem, argument-list, and procedure-call consumers off
-`LocalsExprSourceStateTargetGasRelReadyFor` /
-`LocalsExprSeqSourceStateTargetGasRelReadyFor`, then delete those old readiness
-predicates from the public/import-visible spine.
+to recursive tails. The regular call statement now also has a no-seed
+source/gas consumer through the generated call-site/body/return/tail corridor.
+The next proof brick is consumer migration above that point: move the ordinary
+enriched block-head wrappers and recursive block/list theorem off the
+sourceGasSeed route, then either derive or privatize the remaining readiness
+predicates before deleting them from the public/import-visible spine.
 
 Distance estimate, after the 2026-06-05 02:04 CEST audit:
 
