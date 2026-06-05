@@ -98,17 +98,19 @@ The recursive call branch still drives the callee body with actual body-entry
 `SourceStateRel`/`SourceStateTargetGasRel`, weakens `let`-extended final source
 layouts back to the caller layout, and hands recursive caller tails actual
 post-call `SourceStateRel` and `SourceStateTargetGasRel`. The old
-`...sourceGasSeed...supportedFor_programLayout` name is now only a thin
-temporary adapter for lower top-wrapper callers; its proof delegates to the new
-no-seed theorem and ignores the old seed/response arguments.
+`...sourceGasSeed...supportedFor_programLayout` name is now only an unpinned
+legacy adapter; its proof delegates to the new no-seed theorem and ignores the
+old seed/response arguments.
 
-That recursive theorem has now also been lifted through the initial scoped
+The source-open carrier is lifted through the initial scoped
 block-plus-cleanup wrapper, whole-program/postamble wrapper, block-level shim,
-and a checked compile wrapper:
-`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses`.
-The checked compile wrapper is response-indexed and carries the source/gas seed
-premise explicitly, so it is not yet the final public CALL theorem; it is the
-right internal top-of-source-open carrier for the public-runtime step.
+and the no-seed checked compile wrapper
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`.
+The public runtime route now consumes this no-seed source-open carrier in
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`
+and its no-`RETURNDATACOPY` sibling. The remaining public CALL gap is no longer
+target-side bridge callbacks; it is deriving or classifying the explicit
+source-readiness and gas/runtime readiness premises.
 
 2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
 also has a checked no-seed/readiness-driven path through statement level:
@@ -777,25 +779,20 @@ inputs.
 The immediate source-readiness blocker is no longer list recursion, argument
 evaluation, the resolved CALL branch, response splitting across
 argument/primitive traces, seed-aware expression mutual recursion, ordinary
-statement-head seed wrappers, or ordinary block-head frame/result seed
-wrappers. The seed-aware lit/var/nil/cons expression bricks are checked; the
-primitive expression split is checked with an actual-run non-CALL source/gas
-premise; the response-aware wrapper splits whole expression trace admissibility
-into the exact argument and primitive traces; the new seed-aware mutual
-recursion threads that response predicate through arbitrary expression syntax;
-`expr`/`let`/`assign` statement heads now have seed-aware checked wrappers; and
-the matching block/result wrappers pass actual post-head source/gas witnesses
-to recursive tails. The regular call statement now also has a no-seed
-source/gas consumer through the generated call-site/body/return/tail corridor.
-The next proof brick is consumer migration above that point: move the ordinary
-enriched block-head wrappers and recursive block/list theorem off the
-sourceGasSeed route, then either derive or privatize the remaining readiness
-predicates before deleting them from the public/import-visible spine.
+statement-head seed wrappers, ordinary block-head frame/result seed wrappers,
+or the recursive block/list theorem. The no-seed source/gas recursive theorem
+now consumes no-seed `expr`/`let`/`assign` heads and the no-seed regular
+`Stmt.call` source/gas consumer through the generated
+call-site/body/return/tail corridor. The next proof brick is therefore no longer
+consumer migration inside the block recursion; it is deriving or privatizing the
+remaining readiness predicates before deleting them from the public/import-visible
+spine.
 
 Distance estimate, after the 2026-06-05 02:04 CEST audit:
 
-- Immediate checklist progress is **4 / 9 fully checked** at the top level,
-  with item 5 mostly checked and item 6 partially checked. Item 4, the hard internal procedure-call
+- Immediate checklist progress is **6 / 9 mostly checked** at the top level,
+  with item 5 and item 6 checked on the public no-seed route but still carrying
+  readiness/runtime premises that need generation or classification. Item 4, the hard internal procedure-call
   splice, is checked as a recursive regular block theorem. The proof now runs
   ordinary heads, nested CALL-bearing expressions, argument lists, generated
   call-site/proc-entry code, recursive callee bodies, return dispatch,
@@ -803,14 +800,12 @@ Distance estimate, after the 2026-06-05 02:04 CEST audit:
   semantic result relation and the current shared-state CALL bridge carrier.
   For item 5, the initial scoped block-plus-cleanup carrier, generated
   program-end postamble carrier, scoped/block whole-program carrier, and
-  checked-compile `FunctionsOpen.Program.runState` carrier are checked. Item 5
-  remains open because the checked-compile carrier still takes explicit
-  main/function-body source-readiness premises. The function-entry premise is
+  checked-compile `FunctionsOpen.Program.runState` carrier are checked on the
+  no-seed bridge-ready route. Item 5 remains open because the checked-compile
+  carrier still takes explicit main/function-body source-readiness premises. The function-entry premise is
   now seed-aware down to the actual post-argument relation, expression
   recursion, response splitting, ordinary statement heads, and parameter-store
-  construction proof, but the next step is still to migrate the old
-  block/argument/procedure readiness consumers and then derive those readiness
-  premises from checked
+  construction proof; the next step is to derive those readiness premises from checked
   source/compiler contracts or make them part of a checked compiler contract,
   rather than exposing them as public proof callbacks. Item 6 now has a
   checked ordinary-path source-bridge/gas-ready
@@ -1219,12 +1214,11 @@ Immediate proof tasks:
    source-open dispatcher/top block wrapper so the actual
    `OpenAssembly.Source.OpenTraceResult` emitted by
    `FunctionsProgramToAssemblySourceOpenSoundAt` also has
-   `SourceOpenTraceCurrentSharedBridgeReadyFor` and the final
-   `FunctionsBlockCompiledOpenResultRelSourceGas` evidence needed by the CALL
-   public spine. Status: the recursive source/gas theorem itself is now
-   no-seed/readiness-driven; the remaining work is migrating the initial
-   scoped/top/checked-compile wrappers off the temporary seed adapter and then
-   deriving or privatizing readiness premises from checked compiler contracts.
+   `SourceOpenTraceCurrentSharedBridgeReadyFor` evidence needed by the CALL
+   public spine. Status: the public source-open route is now no-seed and checked
+   through `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`;
+   the remaining work is deleting unpinned legacy seed adapters and deriving or
+   privatizing readiness premises from checked compiler contracts.
    - [x] Add the generated program-end postamble carrier:
      `sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough`
      replays the main fallthrough jump to `programEnd` and final label inside
@@ -1239,9 +1233,9 @@ Immediate proof tasks:
      `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`
      and
      `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`.
-   - [x] Add the source/gas-seeded variants of the initial scoped
-     block-plus-cleanup carrier, whole-program/postamble carrier, and
-     block-level shim:
+   - [x] Historical/internal only: the source/gas-seeded variants of the initial
+     scoped block-plus-cleanup carrier, whole-program/postamble carrier, and
+     block-level shim were checked:
      `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout`,
      `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout`,
      and
@@ -1252,17 +1246,18 @@ Immediate proof tasks:
      `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`
      proves the checked-compile carrier route, with explicit source-readiness
      premises.
-   - [x] Add the response-indexed checked compile wrapper for the source/gas
-     route:
+   - [x] Historical/internal only: the response-indexed checked compile wrapper
+     for the source/gas route was checked:
      `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses`.
      It derives the initial `SourceStateRel`/`SourceStateTargetGasRel` from the
      initial shared-state relation and threads response admissibility into the
      source-open carrier.
-   - [ ] Replace those source/gas-seeded top wrappers with no-seed variants
-     that call
-     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_supportedFor_programLayout`
-     directly, then delete the temporary `...sourceGasSeed...supportedFor`
-     adapter.
+   - [x] Stop advertising the source/gas-seeded top wrappers as public/audit
+     surfaces. `LayerAudit` now pins the no-seed source-open checked-compile
+     wrapper and public runtime wrappers, not the seed top route.
+   - [ ] Delete the unpinned legacy source/gas-seeded top wrappers and the
+     temporary `...sourceGasSeed...supportedFor` adapter once no in-flight proof
+     branch needs those names.
    - [x] Replace the over-strong arbitrary shared-state program readiness
      premise with the seeded
      `FunctionsProgramCallEntrySourceStateRelReadyFor` predicate and thread the
@@ -1273,9 +1268,9 @@ Immediate proof tasks:
      `FunctionsStmtListSourceStateRelReadyFor` premises from checked
      source/compiler contracts, or add them to a checked compiler contract so
      they are not public callbacks.
-   - [ ] Remove any remaining public/top-wrapper non-CALL primitive
-     source/gas seed premise by migrating callers to the no-seed source/gas
-     route or keeping old adapters private until they can be deleted.
+   - [x] Remove the remaining public/top-wrapper non-CALL primitive source/gas
+     seed premise from the checked public route. Remaining seed names are
+     unpinned legacy internals, not public/import-visible CALL surfaces.
 6. [ ] Feed the public replay wrapper from the checked source-open carrier and
    remove public target-side CALL bridge callbacks from the ordinary CALL path
    and its family wrappers.
