@@ -91647,6 +91647,202 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
     SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
       (hPrefix := hBodyTrace) hBodyReady hCleanupRel
 
+theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (hProgramReady :
+      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceFuel : Nat}
+    {stmts : List Functions.Stmt}
+    {finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {sourceRef : Reference.State}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {cleanup : Structured.Code}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource [] [] stmts)
+    (hReady :
+      FunctionsStmtListSourceStateRelReadyFor cfg [] prim stmts compiler)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCompileBlock :
+      Locals.Block.compileOpen Locals.Ctx.initial
+          (Functions.Block.toLocals [] { stmts := stmts }) =
+        some (compiledStmts, finalLocalsCtx))
+    (bodySegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (cleanupSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        cleanup.toAssembly)
+    (hCleanupStart :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment)
+    (hCleanup : finalLocalsCtx.cleanupTo? 0 = some cleanup)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc bodySegment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel [] compiler [] state)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg [] sourceRef compiler)
+    (hGasRel : SourceStateTargetGasRel cfg sourceRef state)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim programSource Functions.Source.Ctx.initial
+          { stmts := stmts } sourceFuel compiler)
+        trace (.ok sourceOutcome)) :
+    ∃ targetFuel,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          FunctionsBlockCompiledOutcomeRel layoutProgram.asm structuredCtx
+            (Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment)
+            [] [] [] [] sourceOutcome targetResult) := by
+  rcases
+      compilerOpenFunctionsBlock_runScoped_regular_inv_of_supportedFor
+        hProgramSupported hSupported hResolve with
+    ⟨sourceInner, ctxFinal, hRawResolve, hSourceOutcome⟩
+  subst sourceOutcome
+  let direct : Locals.RunState := Structured.RunState.initial state
+  have hLocal :
+      Locals.SourceLowering.StateRel [] compiler direct := by
+    exact
+      Locals.SourceLowering.StackPrefixRel.to_stateRel_nil
+        (target := direct)
+        (by simpa [direct, Structured.RunState.initial] using hPrefixRel)
+  have hStateRel :
+      Functions.SourceDirect.StateRel [] [] compiler direct := by
+    exact ⟨hLocal, rfl⟩
+  have hFrameRel :
+      Structured.Preservation.Frame.StateRel direct state [] := by
+    simpa [direct] using
+      (Structured.Preservation.Frame.stateRel_initial state)
+  rcases
+      compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
+        hReady rfl hLower layoutProgram hCtxProcs hCalls
+        Functions.SourceDirect.CtxRel.initial hCompileBlock rfl (by simp)
+        bodySegment hPc hSourceRel hGasRel hStateRel hFrameRel hResponses
+        hRawResolve with
+    ⟨bodyFuel, hBodyRelPkg⟩
+  rcases hBodyRelPkg with
+    ⟨bodyResult, hBodyTrace, hBodyReady, hBodyRel⟩
+  rcases
+      FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_compiledOutcomeRel
+        (FunctionsBlockCompiledOpenResultRelSourceGas.to_resultRel hBodyRel) with
+    ⟨bodyState, afterBody, hBodyResult, hStateRelAfter, hCompiled⟩
+  subst bodyResult
+  rcases hCompiled with ⟨hFrame, hBodyPc⟩
+  rcases hStateRelAfter with ⟨hLocalRel, hReturns⟩
+  rcases hLocalRel with ⟨hSharedRel, hStackRel⟩
+  rcases
+      Functions.SourceDirect.Cleanup.runCleanupTo_exists
+        (ctx := finalLocalsCtx) (targetDepth := 0) (state := bodyState)
+        (Nat.zero_le finalLocalsCtx.layout.length) hStackRel.1 with
+    ⟨cleaned, hCleanupRun⟩
+  have hStateRelFull :
+      Functions.SourceDirect.StateRel finalLocalsCtx.layout [] sourceInner
+        bodyState := by
+    exact ⟨⟨hSharedRel, hStackRel⟩, hReturns⟩
+  have hCleanupScope :
+      Functions.SourceDirect.CleanupScopeRel finalLocalsCtx.layout [] := by
+    simp [Functions.SourceDirect.CleanupScopeRel,
+      Functions.SourceDirect.SameScope]
+  have hScopedRel :
+      Functions.SourceDirect.StateRel [] []
+        (Locals.Source.State.restrictTo [] sourceInner) cleaned := by
+    have hClean :=
+      Functions.SourceDirect.StateRel.cleanupTo_scope
+        (ctx := finalLocalsCtx) (scope := [])
+        (hiddenReturns := []) (source := sourceInner) (target := bodyState)
+        (cleaned := cleaned) hStateRelFull hCleanupScope hCleanupRun
+    simpa using hClean
+  have hCleanupPc :
+      afterBody.pc =
+        Structured.Preservation.CodeSegment.startPc cleanupSegment := by
+    exact hBodyPc.trans hCleanupStart.symm
+  have hCleanupRunState :
+      Structured.Code.runState cleanup bodyState = .ok cleaned :=
+    locals_runCleanupTo_runState_of_cleanupTo hCleanup hCleanupRun
+  rcases
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel.codeSegment_no_call_frameStateRel_running_continue_exists
+        (cfg := cfg) cleanupSegment
+        (structuredCode_runnerSafe_cleanupTo? hCleanup)
+        (structuredCode_frameSafe_cleanupTo? hCleanup)
+        (Locals.CompilerFacts.Ctx.cleanupTo?_noCallCreate hCleanup)
+        hCleanupPc hFrame hCleanupRunState
+        (by
+          intro targetFinal hFrameFinal hPcFinal
+          let hDone :
+              OpenAssembly.Source.OpenTraceResult layoutProgram.asm 0
+                targetFinal [] (.running targetFinal) :=
+            OpenAssembly.Source.OpenTraceResult.done
+              (program := layoutProgram.asm) targetFinal
+          have hDoneReady :
+              SourceOpenTraceCurrentSharedBridgeReadyFor (cfg := cfg)
+                hDone :=
+            SourceOpenTraceCurrentSharedBridgeReadyFor.done targetFinal
+          have hResultRel :
+              FunctionsBlockCompiledOutcomeRel layoutProgram.asm structuredCtx
+                (Structured.Preservation.CodeSegment.fallthroughPc
+                  cleanupSegment)
+                [] [] [] []
+                (Functions.Source.Outcome.regular
+                  (Locals.Source.State.restrictTo [] sourceInner))
+                (.running targetFinal) := by
+            refine
+              ⟨Structured.Outcome.regular cleaned,
+                Functions.SourceDirect.BlockScopedOutcomeRel.regular
+                  hScopedRel,
+                ?_⟩
+            exact
+              Structured.Preservation.CompiledOutcomeRel.regular
+                hFrameFinal hPcFinal
+          exact
+            ⟨0,
+              SourceOpenTraceCurrentSharedBridgeReadyResultRel.of_trace
+                hDone hDoneReady hResultRel⟩) with
+    ⟨cleanupFuel, hCleanupRel⟩
+  refine ⟨bodyFuel + cleanupFuel, ?_⟩
+  simpa [Functions.Source.Ctx.initial, List.append_nil] using
+    SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
+      (hPrefix := hBodyTrace) hBodyReady hCleanupRel
+
 theorem compilerOpenFunctionsBlock_initial_scoped_openRunNResult_wholeRel_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -91955,6 +92151,190 @@ theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridg
           SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
             (hPrefix := hCleanupTrace) hCleanupReady hPostRel
 
+theorem compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (hProgramReady :
+      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceFuel : Nat}
+    {stmts : List Functions.Stmt}
+    {finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {sourceRef : Reference.State}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {cleanup : Structured.Code}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource [] [] stmts)
+    (hReady :
+      FunctionsStmtListSourceStateRelReadyFor cfg [] prim stmts compiler)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (bounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCompileBlock :
+      Locals.Block.compileOpen Locals.Ctx.initial
+          (Functions.Block.toLocals [] { stmts := stmts }) =
+        some (compiledStmts, finalLocalsCtx))
+    (bodySegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (cleanupSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        cleanup.toAssembly)
+    (hAsm : layoutProgram.asm = lower.toStructured.compile)
+    (hCleanupStart :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment)
+    (hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code)
+    (hCleanup : finalLocalsCtx.cleanupTo? 0 = some cleanup)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc bodySegment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel [] compiler [] state)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg [] sourceRef compiler)
+    (hGasRel : SourceStateTargetGasRel cfg sourceRef state)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim programSource Functions.Source.Ctx.initial
+          { stmts := stmts } sourceFuel compiler)
+        trace (.ok sourceOutcome)) :
+    ∃ targetFuel,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult) := by
+  rcases
+      compilerOpenFunctionsBlock_runScoped_regular_inv_of_supportedFor
+        hProgramSupported hSupported hResolve with
+    ⟨sourceInner, _ctxFinal, _hRawResolve, hSourceOutcome⟩
+  subst sourceOutcome
+  rcases
+      compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
+        hReady hLower layoutProgram hCtxProcs hCalls hCompileBlock
+        bodySegment cleanupSegment hCleanupStart hCleanup hPc hPrefixRel
+        hSourceRel hGasRel hResponses hResolve with
+    ⟨cleanupFuel, hCleanupPkg⟩
+  rcases hCleanupPkg with
+    ⟨cleanupResult, hCleanupTrace, hCleanupReady, hCleanupRel⟩
+  rcases hCleanupRel with ⟨directOutcome, hScopedRel, hCompiledRel⟩
+  cases directOutcome with
+  | mk directState directMode =>
+      cases directMode <;> cases cleanupResult
+      all_goals
+        simp [Functions.Source.WholeProgramOutcomeRel,
+          Functions.SourceDirect.BlockScopedOutcomeRel,
+          Functions.SourceDirect.StmtOutcomeRel,
+          Structured.Preservation.CompiledOutcomeRel,
+          Structured.Preservation.WholeProgramOutcomeRel,
+          Functions.Source.Outcome.regular,
+          Locals.Source.Outcome.regular,
+          Structured.Outcome.regular] at hScopedRel hCompiledRel ⊢
+      · rcases hCompiledRel with ⟨hFrame, hPcClean⟩
+        rename_i targetClean
+        have hPcMain :
+            targetClean.pc =
+              Assembly.Program.pcAfter
+                (Structured.Preservation.CompiledProgram.main
+                  lower.toStructured).code := by
+          exact hPcClean.trans hCleanupFallthrough
+        have hPostResultRel :
+            ∀ final,
+              Structured.Preservation.eraseControl final =
+                  Structured.Preservation.eraseControl targetClean →
+              final.pc = Assembly.Program.pcAfter lower.toStructured.compile →
+              Functions.Source.WholeProgramOutcomeRel
+                (Functions.Source.Outcome.regular
+                  (Locals.Source.State.restrictTo [] sourceInner))
+                (.running final) := by
+          intro final hErase _hFinalPc
+          have hWholeClean :
+              Structured.Preservation.WholeProgramOutcomeRel
+                (Structured.Outcome.regular directState)
+                (.running targetClean) :=
+            Structured.Preservation.WholeProgramOutcomeRel.running_of_stateRel
+              hFrame
+          have hEraseDirect :
+              Structured.Preservation.eraseControl directState.evm =
+                Structured.Preservation.eraseControl targetClean := by
+            simpa [Structured.Preservation.WholeProgramOutcomeRel,
+              Structured.Outcome.regular] using hWholeClean
+          have hWholeStructured :
+              Structured.Preservation.WholeProgramOutcomeRel
+                (Structured.Outcome.regular directState)
+                (.running final) := by
+            simp [Structured.Preservation.WholeProgramOutcomeRel,
+              Structured.Outcome.regular]
+            exact hEraseDirect.trans hErase.symm
+          exact
+            ⟨Structured.Outcome.regular directState,
+              by
+                simpa [Functions.SourceDirect.BlockScopedOutcomeRel,
+                  Functions.SourceDirect.StmtOutcomeRel,
+                  Functions.Source.Outcome.regular,
+                  Locals.Source.Outcome.regular,
+                  Structured.Outcome.regular] using hScopedRel,
+              hWholeStructured⟩
+        rcases
+            sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough
+              (cfg := cfg) bounds hPcMain hPostResultRel with
+          ⟨postFuel, hPostRelStructured⟩
+        have hPostRel :
+            SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg
+              layoutProgram.asm postFuel targetClean []
+              (fun targetResult =>
+                Functions.Source.WholeProgramOutcomeRel
+                  (Functions.Source.Outcome.regular
+                    (Locals.Source.State.restrictTo [] sourceInner))
+                  targetResult) := by
+          simpa [hAsm] using hPostRelStructured
+        refine ⟨cleanupFuel + postFuel, ?_⟩
+        simpa [List.append_nil] using
+          SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running
+            (hPrefix := hCleanupTrace) hCleanupReady hPostRel
+
 theorem compilerOpenFunctionsBlock_initial_block_scoped_openRunNResult_wholeRel_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
@@ -92120,6 +92500,111 @@ theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentShare
           layoutProgram bounds hCtxProcs hCalls hCompileBlock bodySegment
           cleanupSegment hAsm hCleanupStart hCleanupFallthrough hCleanup
           hPc hPrefixRel hResolve
+
+theorem compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (hProgramReady :
+      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceFuel : Nat}
+    {block : Functions.Block}
+    {finalLocalsCtx : Locals.Ctx}
+    {compiledStmts : List Expressions.Stmt}
+    {sourceRef : Reference.State}
+    {compiler : Objects.Source.State}
+    {state : EvmYul.EVM.State}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    {cleanup : Structured.Code}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource [] []
+        block.stmts)
+    (hReady :
+      FunctionsStmtListSourceStateRelReadyFor cfg [] prim block.stmts
+        compiler)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (bounds :
+      Structured.Preservation.ProcedurePreservation.CompilationBounds
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCompileBlock :
+      Locals.Block.compileOpen Locals.Ctx.initial
+          (Functions.Block.toLocals [] block) =
+        some (compiledStmts, finalLocalsCtx))
+    (bodySegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (cleanupSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        cleanup.toAssembly)
+    (hAsm : layoutProgram.asm = lower.toStructured.compile)
+    (hCleanupStart :
+      Structured.Preservation.CodeSegment.startPc cleanupSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment)
+    (hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code)
+    (hCleanup : finalLocalsCtx.cleanupTo? 0 = some cleanup)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc bodySegment)
+    (hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel [] compiler [] state)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg [] sourceRef compiler)
+    (hGasRel : SourceStateTargetGasRel cfg sourceRef state)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim programSource Functions.Source.Ctx.initial block sourceFuel
+          compiler)
+        trace (.ok sourceOutcome)) :
+    ∃ targetFuel,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          Functions.Source.WholeProgramOutcomeRel sourceOutcome
+            targetResult) := by
+  cases block with
+  | mk stmts =>
+      exact
+        compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+          hPrim hProgramSupported hProgramReady hNonCallSourceGas hSupported
+          hReady hLower layoutProgram bounds hCtxProcs hCalls hCompileBlock
+          bodySegment cleanupSegment hAsm hCleanupStart hCleanupFallthrough
+          hCleanup hPc hPrefixRel hSourceRel hGasRel hResponses hResolve
 
 def FunctionsBlockToAssemblySourceOpenSoundAt
     (prim : Objects.Source.PrimitiveSemantics)
@@ -92596,6 +93081,233 @@ theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked
         hCompileOpen bodySegment cleanupCodeSegment
         (by rfl) hCleanupCodeStart' hCleanupCodeFallthrough hCleanup hBodyPc
         hPrefixRel hSourceBlock with
+    ⟨targetFuel, hTargetRel⟩
+  exact ⟨targetFuel, by simpa [layoutProgram] using hTargetRel⟩
+
+theorem FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig}
+    {program : Functions.Program} {asm : Assembly.Program}
+    {sourceFuel : Nat} {initial : EvmYul.EVM.State}
+    {sourceShared : EvmYul.SharedState .Yul}
+    {sourceStore : EvmYul.Yul.VarStore}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported program)
+    (hProgramReady :
+      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim program)
+    (hMainReady :
+      FunctionsStmtListSourceStateRelReadyFor cfg [] prim program.body.stmts
+        (Functions.Source.Program.initialState initial.toSharedState))
+    (hInitialShared :
+      Reference.SharedStateRel cfg sourceShared initial.toSharedState)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    (hCompile : Functions.Source.Program.compileChecked? program = some asm)
+    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
+    (hInitialStack : initial.stack = []) :
+    ∀ {trace : OpenExternal.OpenTrace}
+      {sourceOutcome : Functions.Source.Outcome},
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace →
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Program.runState
+          prim sourceFuel program
+          (Functions.Source.Program.initialState initial.toSharedState))
+        trace (.ok sourceOutcome) →
+      ∃ targetFuel,
+        SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg asm targetFuel
+          initial trace
+          (fun targetResult =>
+            Functions.Source.WholeProgramOutcomeRel sourceOutcome
+              targetResult) := by
+  rcases Functions.Source.Program.compileChecked?_eq_some hCompile with
+    ⟨lower, hLower, hStructuredCompile⟩
+  rcases
+      Structured.Preservation.ProcedurePreservation.compileChecked?_eq_some
+        hStructuredCompile with
+    ⟨hAsm, _hAccepted, hBounds⟩
+  subst asm
+  let layoutProgram :=
+    Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds
+      hBounds
+  let mainEvidence :=
+    Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds
+      hBounds
+  have hLowerBodyStructured :
+      lower.body.toStructured =
+        { stmts := Expressions.StmtList.toStructured lower.body.stmts } := by
+    cases lower.body
+    rfl
+  have hMainCodeEq :
+      (Structured.Preservation.CompiledProgram.main lower.toStructured).code =
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.body.stmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).code := by
+    simp [Structured.Preservation.CompiledProgram.main,
+      Expressions.Block.toStructured, Expressions.Program.toStructured,
+      hLowerBodyStructured]
+  let mainSegment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured lower.body.stmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).code :=
+    Structured.Preservation.CodeSegment.cast_code hMainCodeEq
+      mainEvidence.mainSegment
+  have hLowerLocals :
+      (Functions.Program.toLocals program).toExpressions? = some lower := by
+    simpa [Functions.Program.toExpressions?] using hLower
+  have hBodyCompile :
+      Locals.Block.compile Locals.Ctx.initial
+          (Functions.Block.toLocals [] program.body) =
+        some lower.body := by
+    simpa [Functions.Program.toLocals] using
+      (Locals.Program.body_toExpressions_of_toExpressions? hLowerLocals)
+  rcases
+      codeSegment_localsBlock_compile_split
+        (ctx := Locals.Ctx.initial)
+        (block := Functions.Block.toLocals [] program.body)
+        (lower := lower.body)
+        (asm := layoutProgram.asm)
+        (structuredCtx :=
+          Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+        (supply := 0)
+        hBodyCompile mainSegment with
+    ⟨bodyStmts, finalLocalsCtx, cleanup, hCompileOpen, hCleanup,
+      hLowerStmts, bodySegment, cleanupSegment, hBodyStart,
+      hCleanupStart, hCleanupFall⟩
+  have hCallsFull :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts :=
+              Expressions.StmtList.toStructured
+                (bodyStmts ++ Locals.codeStmt cleanup) }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).calls
+        layoutProgram.sites := by
+    simpa [layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.main,
+      Structured.Preservation.CompiledProgram.mainCtx,
+      Expressions.Block.toStructured,
+      Expressions.Program.toStructured, hLowerBodyStructured, hLowerStmts] using
+      mainEvidence.mainCalls
+  have hCallsBody :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured bodyStmts }
+          (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+          0).calls
+        layoutProgram.sites :=
+    expressionsStmtList_toStructured_append_callsIncluded_left
+      (ctx := Structured.Preservation.CompiledProgram.mainCtx lower.toStructured)
+      (supply := 0) (left := bodyStmts)
+      (right := Locals.codeStmt cleanup) hCallsFull
+  have hCtxProcs :
+      (Structured.Preservation.CompiledProgram.mainCtx lower.toStructured).procs =
+        lower.toStructured.procs := by
+    simp [Structured.Preservation.CompiledProgram.mainCtx]
+  have hMainStart :
+      Structured.Preservation.CodeSegment.startPc mainSegment =
+        Assembly.Program.pcAfter [] := by
+    simp [mainSegment, layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.mainSegmentFromWholeFits,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.startPc,
+      Assembly.Program.pcAfter]
+  have hBodyPc :
+      initial.pc =
+        Structured.Preservation.CodeSegment.startPc bodySegment := by
+    calc
+      initial.pc = Assembly.Program.pcAfter [] := hInitialPc
+      _ = Structured.Preservation.CodeSegment.startPc mainSegment :=
+        hMainStart.symm
+      _ = Structured.Preservation.CodeSegment.startPc bodySegment :=
+        hBodyStart.symm
+  have hMainFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc mainSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code := by
+    simp [mainSegment, layoutProgram, mainEvidence,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.ofCompilationBounds,
+      Structured.Preservation.ProcedurePreservation.ProgramLayout.mainEvidenceOfCompilationBounds,
+      Structured.Preservation.CompiledProgram.mainSegmentFromWholeFits,
+      Structured.Preservation.CodeSegment.cast_code,
+      Structured.Preservation.CodeSegment.fallthroughPc, hMainCodeEq,
+      Assembly.Program.pcAfter]
+  have hCleanupFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code :=
+    hCleanupFall.trans hMainFallthrough
+  rcases codeSegment_expressions_codeStmt_single_split cleanupSegment with
+    ⟨cleanupCodeSegment, hCleanupCodeStart, hCleanupCodeFall⟩
+  have hCleanupCodeStart' :
+      Structured.Preservation.CodeSegment.startPc cleanupCodeSegment =
+        Structured.Preservation.CodeSegment.fallthroughPc bodySegment :=
+    hCleanupCodeStart.trans hCleanupStart
+  have hCleanupCodeFallthrough :
+      Structured.Preservation.CodeSegment.fallthroughPc cleanupCodeSegment =
+        Assembly.Program.pcAfter
+          (Structured.Preservation.CompiledProgram.main
+            lower.toStructured).code :=
+    hCleanupCodeFall.trans hCleanupFallthrough
+  have hPrefixRel :
+      Locals.SourceLowering.StackPrefixRel []
+        (Functions.Source.Program.initialState initial.toSharedState) []
+        initial := by
+    have hInitialRel :=
+      (Functions.SourceDirect.StateRel.initial
+        (evm := initial) hInitialStack).1
+    simpa [Structured.RunState.initial] using
+      Locals.SourceLowering.StackPrefixRel.of_stateRel hInitialRel
+  have hInitialSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg []
+        (.Ok sourceShared sourceStore)
+        (Functions.Source.Program.initialState initial.toSharedState) := by
+    simpa [Functions.Source.Program.initialState] using
+      Reference.SourceBridgeFacts.sourceStateRel_nil
+        (cfg := cfg) (shared := sourceShared) (store := sourceStore)
+        (source := Functions.Source.Program.initialState
+          initial.toSharedState)
+        hInitialShared
+  have hInitialGasRel :
+      SourceStateTargetGasRel cfg (.Ok sourceShared sourceStore)
+        initial := by
+    simpa [SourceStateTargetGasRel] using
+      hInitialShared.machine.gasAvailable
+  intro trace sourceOutcome hResponses hSource
+  have hSourceBlock :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runScoped
+          prim program Functions.Source.Ctx.initial program.body sourceFuel
+          (Functions.Source.Program.initialState initial.toSharedState))
+        trace (.ok sourceOutcome) := by
+    simpa [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Program.runState]
+      using hSource
+  rcases
+      compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+        hPrim hProgramSupported hProgramReady hNonCallSourceGas
+        hProgramSupported.1 hMainReady hLower layoutProgram hBounds
+        hCtxProcs hCallsBody hCompileOpen bodySegment cleanupCodeSegment
+        (by rfl) hCleanupCodeStart' hCleanupCodeFallthrough hCleanup hBodyPc
+        hPrefixRel hInitialSourceRel hInitialGasRel hResponses hSourceBlock with
     ⟨targetFuel, hTargetRel⟩
   exact ⟨targetFuel, by simpa [layoutProgram] using hTargetRel⟩
 

@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-05 06:54 CEST.
+Last updated: 2026-06-05 07:12 CEST.
 
 ### Current Assessment
 
@@ -99,7 +99,17 @@ source layouts back to the caller layout, and hands recursive caller tails the
 actual post-call source/gas witnesses instead of the older callback scaffold.
 The theorem still has an explicit actual-run non-CALL primitive source/gas seed
 premise; this is now the next premise to discharge or keep private during
-public wiring, not a missing CALL branch. The generated return-dispatch
+public wiring, not a missing CALL branch.
+
+That recursive theorem has now also been lifted through the initial scoped
+block-plus-cleanup wrapper, whole-program/postamble wrapper, block-level shim,
+and a checked compile wrapper:
+`FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses`.
+The checked compile wrapper is response-indexed and carries the source/gas seed
+premise explicitly, so it is not yet the final public CALL theorem; it is the
+right internal top-of-source-open carrier for the public-runtime step.
+
+The generated return-dispatch
 condition prefix, `JUMPI` step, full `DUP`/`PUSH`/`EQ`/`JUMPI` test,
 mismatched-token dispatch-table branch, selected-token return branch, selected
 dispatch-table recursion, procedure-selected dispatch, exit-label dispatch,
@@ -1191,7 +1201,9 @@ Immediate proof tasks:
    `FunctionsProgramToAssemblySourceOpenSoundAt` also has
    `SourceOpenTraceCurrentSharedBridgeReadyFor` and the final
    `FunctionsBlockCompiledOpenResultRelSourceGas` evidence needed by the CALL
-   public spine.
+   public spine. Status: mostly checked internally via source/gas wrappers; not
+   complete until the remaining source/gas seed and readiness premises are
+   discharged or kept private from the public theorem.
    - [x] Add the generated program-end postamble carrier:
      `sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough`
      replays the main fallthrough jump to `programEnd` and final label inside
@@ -1206,12 +1218,25 @@ Immediate proof tasks:
      `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`
      and
      `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`.
+   - [x] Add the source/gas-seeded variants of the initial scoped
+     block-plus-cleanup carrier, whole-program/postamble carrier, and
+     block-level shim:
+     `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout`,
+     `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout`,
+     and
+     `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_sourceGasSeed_of_compileOpen_supportedFor_programLayout`.
    - [x] Wire that whole-program carrier through
      `FunctionsProgramToAssemblySourceOpenSoundAt` / checked compile target
      wrappers without leaving a public source-trace bridge premise:
      `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`
      proves the checked-compile carrier route, with explicit source-readiness
      premises.
+   - [x] Add the response-indexed checked compile wrapper for the source/gas
+     route:
+     `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready_sourceGasSeed_responses`.
+     It derives the initial `SourceStateRel`/`SourceStateTargetGasRel` from the
+     initial shared-state relation and threads response admissibility into the
+     source-open carrier.
    - [x] Replace the over-strong arbitrary shared-state program readiness
      premise with the seeded
      `FunctionsProgramCallEntrySourceStateRelReadyFor` predicate and thread the
@@ -1222,6 +1247,9 @@ Immediate proof tasks:
      `FunctionsStmtListSourceStateRelReadyFor` premises from checked
      source/compiler contracts, or add them to a checked compiler contract so
      they are not public callbacks.
+   - [ ] Discharge or privatize the explicit actual-run non-CALL primitive
+     source/gas seed premise needed by the source/gas route before replacing
+     the public runtime wrapper.
 6. [ ] Feed the public replay wrapper from the checked source-open carrier and
    remove public target-side CALL bridge callbacks from the ordinary CALL path
    and its family wrappers.
