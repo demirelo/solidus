@@ -91145,7 +91145,7 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
               | terminalArgs kind args =>
                   simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
 
-theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}
     (hPrim : Locals.SourceLowering.PrimitiveSound prim)
     {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
@@ -91153,9 +91153,7 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
     {programSource : Functions.Program} {lower : Expressions.Program}
     (hProgramSupported :
       FunctionsProgramRegularOpenSupported programSource)
-    (hProgramReady :
-      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
-    (_hNonCallSourceGas :
+    (hNonCallSourceGas :
       ∀ {sourceLayout' layout' : List Name}
         {sourceRef' : Reference.State}
         {compiler' : Objects.Source.State}
@@ -91183,7 +91181,870 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
     (hSupported :
       FunctionsStmtListRegularOpenSupportedFor programSource returns layout
         stmts)
-    (hReady :
+    (hSourceLayout : sourceLayout = sourceCtx.scope)
+    (hLower : Functions.Program.toExpressions? programSource = some lower)
+    (layoutProgram :
+      Structured.Preservation.ProcedurePreservation.ProgramLayout
+        lower.toStructured)
+    (hCtxProcs : structuredCtx.procs = lower.toStructured.procs)
+    (hCalls :
+      Structured.Preservation.ProcedurePreservation.CallsIncluded
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).calls
+        layoutProgram.sites)
+    (hCtxRel :
+      Functions.SourceDirect.CtxRel retc sourceCtx localsCtx)
+    (hCompileBlock :
+      Locals.Block.compileOpen localsCtx
+          (Functions.Block.toLocals returns { stmts := stmts }) =
+        some (compiledStmts, finalLocalsCtx))
+    (hCtxLayout : localsCtx.layout = layout)
+    (hNoDup : layout.Nodup)
+    (segment :
+      Structured.Preservation.CodeSegment layoutProgram.asm
+        (Structured.Block.compileFromCtx
+          { stmts := Expressions.StmtList.toStructured compiledStmts }
+          structuredCtx supply).code)
+    (hPc :
+      state.pc = Structured.Preservation.CodeSegment.startPc segment)
+    (hSourceRel :
+      Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout source
+        compiler)
+    (hGasRel : SourceStateTargetGasRel cfg source state)
+    (hStateRel :
+      Functions.SourceDirect.StateRel layout hiddenReturns compiler direct)
+    (hFrameRel :
+      Structured.Preservation.Frame.StateRel direct state tokens)
+    {trace : OpenExternal.OpenTrace}
+    (hResponses :
+      SourceOpenTraceResponsesSharedBridgeRel cfg trace)
+    {sourceOutcome : Functions.Source.Outcome}
+    (hResolve :
+      OpenExternal.OpenResultResolves
+        (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+          prim programSource sourceCtx sourceFuel { stmts := stmts }
+          compiler)
+        trace (.ok (sourceOutcome, ctxFinal))) :
+    ∃ targetFuel : Nat,
+      SourceOpenTraceCurrentSharedBridgeReadyResultRel cfg layoutProgram.asm
+        targetFuel state trace
+        (fun targetResult =>
+          FunctionsBlockCompiledOpenResultRelSourceGas cfg sourceLayout
+            layoutProgram.asm structuredCtx
+            (Structured.Preservation.CodeSegment.fallthroughPc segment)
+            retc returns hiddenReturns tokens (sourceOutcome, ctxFinal)
+            finalLocalsCtx targetResult) := by
+  induction sourceFuel using Nat.strong_induction_on generalizing
+      sourceLayout source sourceCtx ctxFinal retc returns stmts localsCtx
+      finalLocalsCtx layout compiledStmts compiler direct state hiddenReturns
+      tokens structuredCtx supply trace sourceOutcome with
+  | h sourceFuel ih =>
+      cases sourceFuel with
+      | zero =>
+          rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+            at hResolve
+          cases hResolve
+      | succ sourceFuel' =>
+          cases stmts with
+          | nil =>
+              exact
+                compilerOpenFunctionsBlock_nil_sourceTrace_currentSharedBridgeReadyResultRel_sourceGasSeed_of_compileOpen
+                  (cfg := cfg) (sourceLayout := sourceLayout)
+                  (source := source) (retc := retc) (returns := returns)
+                  hCtxRel hCompileBlock hCtxLayout layoutProgram.asm segment
+                  hPc hSourceRel hGasRel hStateRel hFrameRel hResolve
+          | cons stmt rest =>
+              cases stmt with
+              | expr expr =>
+                  rcases hSupported with
+                    ⟨hOwned, hOpenSupported, hAccess, hRestSupported⟩
+                  exact
+                    compilerOpenFunctionsBlock_expr_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_tail
+                      hPrim hOwned hOpenSupported hAccess hCompileBlock
+                      hCtxLayout hNoDup layoutProgram.asm segment hPc
+                      hSourceRel hGasRel hStateRel hFrameRel
+                      (by
+                        intro suffix hErased
+                        exact hNonCallSourceGas hSourceRel hGasRel hErased)
+                      (hTail := by
+                        intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                          tailCtxAfter sourceAfter compilerAfter directAfter
+                          evmAfter tailSegment hRestCompile hSourceAfter
+                          hGasAfter hStateRelTail hFrameRelTail hTailPc
+                          hResponsesTail hRestResolve
+                        have hTailFinalCtx : tailFinalCtx = finalLocalsCtx := by
+                          rcases
+                              functionsBlock_toLocals_compileOpen_expr_cons_inv
+                                hCompileBlock with
+                            ⟨_code, _restStmts, _hCode, hRestCompile',
+                              _hCompiledStmts⟩
+                          rw [hRestCompile] at hRestCompile'
+                          cases hRestCompile'
+                          rfl
+                        have hCompileBlockTail :
+                            Locals.Block.compileOpen localsCtx
+                                (Functions.Block.toLocals returns
+                                  { stmts := .expr expr :: rest }) =
+                              some (compiledStmts, tailFinalCtx) := by
+                          simpa [hTailFinalCtx] using hCompileBlock
+                        have hTailCalls :
+                            Structured.Preservation.ProcedurePreservation.CallsIncluded
+                              (Structured.Block.compileFromCtx
+                                { stmts :=
+                                    Expressions.StmtList.toStructured
+                                      tailStmts }
+                                structuredCtx supply).calls
+                              layoutProgram.sites :=
+                          functionsBlock_expr_cons_callsIncluded_tail_of_compileOpen
+                            hCompileBlockTail hRestCompile hCalls
+                        exact
+                          ih sourceFuel' (Nat.lt_succ_self sourceFuel')
+                            (sourceLayout := sourceLayout)
+                            (source := sourceAfter)
+                            (sourceCtx := sourceCtx)
+                            (ctxFinal := tailCtxAfter)
+                            (retc := retc) (returns := returns)
+                            (stmts := rest) (localsCtx := localsCtx)
+                            (finalLocalsCtx := tailFinalCtx)
+                            (layout := layout)
+                            (compiledStmts := tailStmts)
+                            (compiler := compilerAfter)
+                            (direct := directAfter) (state := evmAfter)
+                            (hiddenReturns := hiddenReturns)
+                            (tokens := tokens)
+                            (structuredCtx := structuredCtx)
+                            (supply := supply) (trace := tailTrace)
+                            (sourceOutcome := sourceOutcome)
+                            hRestSupported hSourceLayout hCtxProcs
+                            hTailCalls hCtxRel
+                            hRestCompile hCtxLayout hNoDup tailSegment hTailPc
+                            hSourceAfter hGasAfter hStateRelTail
+                            hFrameRelTail hResponsesTail hRestResolve)
+                      hResponses hResolve
+              | let_ name valueExpr =>
+                  rcases hSupported with
+                    ⟨hOwned, hOpenSupported, hAccess, hFresh,
+                      hRestSupported⟩
+                  have hCtxLayoutTail :
+                      (localsCtx.withLayout (name :: localsCtx.layout)).layout =
+                        name :: layout := by
+                    simp [Locals.Ctx.withLayout, hCtxLayout]
+                  have hNoDupTail : (name :: layout).Nodup := by
+                    simp [hFresh, hNoDup]
+                  have hFreshSource : name ∉ sourceLayout := by
+                    rw [hSourceLayout]
+                    intro hMem
+                    have hTargetMem : name ∈ localsCtx.layout :=
+                      (hCtxRel.1.2 name).mpr hMem
+                    exact hFresh (by simpa [hCtxLayout] using hTargetMem)
+                  rcases
+                    compilerOpenFunctionsBlock_let_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_tail
+                      hPrim hOwned hOpenSupported hAccess hCompileBlock
+                      hCtxLayout hNoDup hFresh hFreshSource
+                      layoutProgram.asm segment hPc hSourceRel hGasRel hStateRel
+                      hFrameRel
+                      (by
+                        intro suffix hErased
+                        exact hNonCallSourceGas hSourceRel hGasRel hErased)
+                      (hTail := by
+                        intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                          tailCtxAfter sourceAfter compilerAfter directAfter
+                          evmAfter tailSegment hRestCompile hSourceAfter
+                          hGasAfter hStateRelTail hFrameRelTail hTailPc
+                          hResponsesTail hRestResolve
+                        have hTailFinalCtx : tailFinalCtx = finalLocalsCtx := by
+                          rcases
+                              functionsBlock_toLocals_compileOpen_let_cons_inv
+                                hCompileBlock with
+                            ⟨_code, _restStmts, _hCode, hRestCompile',
+                              _hCompiledStmts⟩
+                          rw [hRestCompile] at hRestCompile'
+                          cases hRestCompile'
+                          rfl
+                        have hCompileBlockTail :
+                            Locals.Block.compileOpen localsCtx
+                                (Functions.Block.toLocals returns
+                                  { stmts := .let_ name valueExpr :: rest }) =
+                              some (compiledStmts, tailFinalCtx) := by
+                          simpa [hTailFinalCtx] using hCompileBlock
+                        have hTailCalls :
+                            Structured.Preservation.ProcedurePreservation.CallsIncluded
+                              (Structured.Block.compileFromCtx
+                                { stmts :=
+                                    Expressions.StmtList.toStructured
+                                      tailStmts }
+                                structuredCtx supply).calls
+                              layoutProgram.sites :=
+                          functionsBlock_let_cons_callsIncluded_tail_of_compileOpen
+                            hCompileBlockTail hRestCompile hCalls
+                        exact
+                          ih sourceFuel' (Nat.lt_succ_self sourceFuel')
+                            (sourceLayout := name :: sourceLayout)
+                            (source := sourceAfter)
+                            (sourceCtx :=
+                              { sourceCtx with
+                                scope := name :: sourceCtx.scope })
+                            (ctxFinal := tailCtxAfter)
+                            (retc := retc) (returns := returns)
+                            (stmts := rest)
+                            (localsCtx :=
+                              localsCtx.withLayout
+                                (name :: localsCtx.layout))
+                            (finalLocalsCtx := tailFinalCtx)
+                            (layout := name :: layout)
+                            (compiledStmts := tailStmts)
+                            (compiler := compilerAfter)
+                            (direct := directAfter) (state := evmAfter)
+                            (hiddenReturns := hiddenReturns)
+                            (tokens := tokens)
+                            (structuredCtx := structuredCtx)
+                            (supply := supply) (trace := tailTrace)
+                            (sourceOutcome := sourceOutcome)
+                            hRestSupported (by simp [hSourceLayout])
+                            hCtxProcs hTailCalls
+                            (Functions.SourceDirect.CtxRel.withScopeCons
+                              hCtxRel)
+                            hRestCompile hCtxLayoutTail hNoDupTail
+                            tailSegment hTailPc hSourceAfter hGasAfter
+                            hStateRelTail hFrameRelTail hResponsesTail hRestResolve)
+                      hResponses hResolve with
+                    ⟨targetFuel, hLetRel⟩
+                  exact
+                    ⟨targetFuel,
+                      SourceOpenTraceCurrentSharedBridgeReadyResultRel.mono
+                        hLetRel
+                        (by
+                          intro targetResult hResultRel
+                          exact
+                            FunctionsBlockCompiledOpenResultRelSourceGas.of_sourceLayout_subset
+                              (layoutSmall := sourceLayout)
+                              (layoutBig := name :: sourceLayout)
+                              (by
+                                intro n hn
+                                simp [hn])
+                              hResultRel)⟩
+              | assign name valueExpr =>
+                  rcases hSupported with
+                    ⟨hOwned, hOpenSupported, hAccess, hLookup,
+                      hRestSupported⟩
+                  rcases hLookup with ⟨idx, hName, hBound⟩
+                  exact
+                    compilerOpenFunctionsBlock_assign_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_tail
+                      hPrim hOwned hOpenSupported hAccess hCompileBlock
+                      hCtxLayout hNoDup hName hBound layoutProgram.asm segment
+                      hPc hSourceRel hGasRel hStateRel hFrameRel
+                      (by
+                        intro suffix hErased
+                        exact hNonCallSourceGas hSourceRel hGasRel hErased)
+                      (hTail := by
+                        intro tailStmts tailFinalCtx tailTrace sourceOutcome
+                          tailCtxAfter sourceAfter compilerAfter directAfter
+                          evmAfter tailSegment hRestCompile hSourceAfter
+                          hGasAfter hStateRelTail hFrameRelTail hTailPc
+                          hResponsesTail hRestResolve
+                        have hTailFinalCtx : tailFinalCtx = finalLocalsCtx := by
+                          rcases
+                              functionsBlock_toLocals_compileOpen_assign_cons_inv
+                                hCompileBlock with
+                            ⟨_depth, _valueCode, _swapOp, _restStmts, _hDepth,
+                              _hValue, _hSwap, hRestCompile',
+                              _hCompiledStmts⟩
+                          rw [hRestCompile] at hRestCompile'
+                          cases hRestCompile'
+                          rfl
+                        have hCompileBlockTail :
+                            Locals.Block.compileOpen localsCtx
+                                (Functions.Block.toLocals returns
+                                  { stmts := .assign name valueExpr :: rest }) =
+                              some (compiledStmts, tailFinalCtx) := by
+                          simpa [hTailFinalCtx] using hCompileBlock
+                        have hTailCalls :
+                            Structured.Preservation.ProcedurePreservation.CallsIncluded
+                              (Structured.Block.compileFromCtx
+                                { stmts :=
+                                    Expressions.StmtList.toStructured
+                                      tailStmts }
+                                structuredCtx supply).calls
+                              layoutProgram.sites :=
+                          functionsBlock_assign_cons_callsIncluded_tail_of_compileOpen
+                            hCompileBlockTail hRestCompile hCalls
+                        exact
+                          ih sourceFuel' (Nat.lt_succ_self sourceFuel')
+                            (sourceLayout := sourceLayout)
+                            (source := sourceAfter)
+                            (sourceCtx := sourceCtx)
+                            (ctxFinal := tailCtxAfter)
+                            (retc := retc) (returns := returns)
+                            (stmts := rest) (localsCtx := localsCtx)
+                            (finalLocalsCtx := tailFinalCtx)
+                            (layout := layout)
+                            (compiledStmts := tailStmts)
+                            (compiler := compilerAfter)
+                            (direct := directAfter) (state := evmAfter)
+                            (hiddenReturns := hiddenReturns)
+                            (tokens := tokens)
+                            (structuredCtx := structuredCtx)
+                            (supply := supply) (trace := tailTrace)
+                            (sourceOutcome := sourceOutcome)
+                            hRestSupported hSourceLayout hCtxProcs
+                            hTailCalls hCtxRel
+                            hRestCompile hCtxLayout hNoDup tailSegment hTailPc
+                            hSourceAfter hGasAfter hStateRelTail
+                            hFrameRelTail hResponsesTail hRestResolve)
+                      hResponses hResolve
+              | call targets functionName args =>
+                  have hFinalRegular :
+                      sourceOutcome.mode = .regular :=
+                    compilerOpenFunctionsBlock_regular_mode_of_supportedFor
+                      hProgramSupported hSupported hResolve
+                  rcases hSupported with
+                    ⟨hCallSupported, hRestSupported⟩
+                  cases sourceFuel' with
+                  | zero =>
+                      rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+                        at hResolve
+                      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+                        hHeadError | hHeadOk
+                      · rcases hHeadError with ⟨err, _hHead, hResult⟩
+                        cases hResult
+                      · rcases hHeadOk with
+                          ⟨headTrace, tailTrace, stmtResult, hTrace, hHead,
+                            hRest⟩
+                        rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Stmt.run]
+                          at hHead
+                        cases hHead
+                  | succ callFuel =>
+                      rw [Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen]
+                        at hResolve
+                      rcases OpenExternal.OpenResultResolves.bind_inv hResolve with
+                        hHeadError | hHeadOk
+                      · rcases hHeadError with ⟨err, _hHead, hResult⟩
+                        cases hResult
+                      · rcases hHeadOk with
+                          ⟨headTrace, tailTrace, stmtResult, hTrace, hHead,
+                            hRest⟩
+                        rcases stmtResult with ⟨headOutcome, ctxAfterHead⟩
+                        cases headOutcome with
+                        | mk headState headMode =>
+                            cases headMode with
+                            | regular =>
+                                subst trace
+                                simp [Functions.Source.Outcome.regular,
+                                  Locals.Source.Outcome.regular] at hRest
+                                exact
+                                  compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sourceGasSeed_responses_sourceStateRelTailGas_of_compileOpen
+                                    (prim := prim) hPrim (cfg := cfg)
+                                    (sourceLayout := sourceLayout)
+                                    (programSource := programSource)
+                                    (lower := lower) hProgramSupported
+                                    (returns := returns)
+                                    (localsCtx := localsCtx)
+                                    (finalLocalsCtx := finalLocalsCtx)
+                                    (layout := layout)
+                                    (compiledStmts := compiledStmts)
+                                    (structuredCtx := structuredCtx)
+                                    (supply := supply)
+                                    (sourceCtx := sourceCtx)
+                                    (ctxAfter := ctxAfterHead)
+                                    (sourceFuel := callFuel)
+                                    (targets := targets)
+                                    (functionName := functionName)
+                                    (args := args) (rest := rest)
+                                    (sourceBefore := compiler)
+                                    (sourceAfter := headState)
+                                    (direct := direct) (state := state)
+                                    (hiddenReturns := hiddenReturns)
+                                    (tokens := tokens)
+                                    (trace := headTrace)
+                                    (tailTrace := tailTrace)
+                                    (ResultRel :=
+                                      fun targetResult =>
+                                        FunctionsBlockCompiledOpenResultRelSourceGas
+                                          cfg sourceLayout layoutProgram.asm
+                                          structuredCtx
+                                          (Structured.Preservation.CodeSegment.fallthroughPc
+                                            segment)
+                                          retc returns hiddenReturns tokens
+                                          (sourceOutcome, ctxFinal)
+                                          finalLocalsCtx targetResult)
+                                    (FunctionsCallRegularOpenSupported.arg_owned
+                                      hCallSupported)
+                                    (FunctionsCallRegularOpenSupported.arg_openSupported
+                                      hCallSupported)
+                                    (FunctionsCallRegularOpenSupported.arg_access
+                                      hCallSupported)
+                                    hLower layoutProgram hCtxProcs hCompileBlock
+                                    hCalls hCtxLayout hNoDup segment hPc
+                                    hSourceRel hGasRel hStateRel hFrameRel
+                                    (by
+                                      intro suffix hErased
+                                      exact hNonCallSourceGas hSourceRel hGasRel
+                                        hErased)
+                                    (by
+                                      intro fn hFind
+                                      exact
+                                        FunctionsCallRegularOpenSupported.param_bound
+                                          hCallSupported hFind)
+                                    (by
+                                      intro name hMem
+                                      exact
+                                        FunctionsCallRegularOpenSupported.targets_access
+                                          hCallSupported hMem)
+                                    hResponses hHead
+                                    (hBody := by
+                                      intro argTrace bodyTrace argValues
+                                      intro sourceAfterArgs sourceAfterRef
+                                      intro fn paramStore
+                                      intro returnValues returnStore bodyFuel
+                                      intro bodyOutcome bodyCtx' proc argStmts
+                                      intro argCtx assignStmts afterAssignCtx
+                                      intro restStmts returnDest hTargetsNoDup
+                                      intro hTraceCall hCtxAfter hArgResolve
+                                      intro hSourceAfterRef hResponsesBody
+                                      intro hFind hProcLookup argSegment
+                                      intro calleeSegment hParams hSourceFuel
+                                      intro hBodyOpen hRegularMode hLookup hAssign
+                                      intro hSourceAfter hProcName hProcArgc
+                                      intro hProcRetc hSiteMem hTokenNoDup
+                                      intro hExact hReturnLabel hCompileArgs
+                                      intro hCompileAssign hCompileRest evmAfter
+                                      intro callSource callerBase hGasAfter
+                                      intro hAfterPc hFrame hSplit hPrefix
+                                      intro hBaseRel hStack hCallSourceReturns
+                                      intro entryTarget hEntryRel hEntryPc
+                                      intro hEntryGas
+                                      have hBodyOpenRegular :
+                                          OpenExternal.OpenResultResolves
+                                            (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+                                              prim programSource
+                                              (Functions.Source.FunDef.bodyCtx
+                                                fn)
+                                              bodyFuel fn.body
+                                              { shared :=
+                                                  sourceAfterArgs.shared,
+                                                vars :=
+                                                  Functions.Source.Store.initReturns
+                                                    fn.returns paramStore })
+                                            bodyTrace
+                                              (.ok
+                                                (Functions.Source.Outcome.regular
+                                                  bodyOutcome.state,
+                                                  bodyCtx')) := by
+                                        cases bodyOutcome with
+                                        | mk bodyState bodyMode =>
+                                            cases bodyMode <;>
+                                              simp at hRegularMode
+                                            simpa [Functions.Source.Outcome.regular]
+                                              using hBodyOpen
+                                      exact
+                                        compilerOpenFunctionsCall_regular_body_exists_of_programLayout_body_sourceTrace_sourceGasRel
+                                          (prim := prim) (cfg := cfg)
+                                          (sourceLayout := sourceLayout)
+                                          (sourceAfterRef := sourceAfterRef)
+                                          (programSource := programSource)
+                                          (lower := lower) (fn := fn)
+                                          (proc := proc)
+                                          (functionName := functionName)
+                                          (layout := layout)
+                                          (sourceAfterArgs := sourceAfterArgs)
+                                          (bodySource := bodyOutcome.state)
+                                          (callSource := callSource)
+                                          (callerBase := callerBase)
+                                          (entryTarget := entryTarget)
+                                          (token :=
+                                            Structured.Stmt.callToken supply)
+                                          (hiddenReturns := hiddenReturns)
+                                          (tokens := tokens)
+                                          (argValues := argValues)
+                                          (returnValues := returnValues)
+                                          (paramStore := paramStore)
+                                          (bodyCtx' := bodyCtx')
+                                          (bodyTrace := bodyTrace)
+                                          hProgramSupported hLower layoutProgram
+                                          hFind hProcLookup calleeSegment
+                                          hSourceAfterRef hEntryGas hParams
+                                          hProcArgc hProcRetc hSplit hPrefix
+                                          hEntryRel hEntryPc hLookup
+                                          (by
+                                            intro sourceBodyRef hSourceBodyRef
+                                            intro initStmts bodyStmts pushCtx
+                                            intro directAfterInit
+                                            intro targetAfterInit bodySegment
+                                            intro hInitCompile hBodyCompile
+                                            intro hBodyCalls hDirectAfterInitRel
+                                            intro hBodyPc hRelAfterInit
+                                            intro hGasAfterInit
+                                            rcases
+                                                FunctionsProgramRegularOpenSupported.funDef
+                                                  hProgramSupported hFind with
+                                              ⟨hScoped, _hFrameBound,
+                                                _hParamsLe, _hReturnsLt,
+                                                hBodySupported⟩
+                                            have hBodyCtxRel :
+                                                Functions.SourceDirect.CtxRel
+                                                  fn.returns.length
+                                                  (Functions.Source.FunDef.bodyCtx
+                                                    fn)
+                                                  (Functions.SourceDirect.FunDef.targetBodyCtx
+                                                    fn) := by
+                                              simpa
+                                                [Functions.SourceDirect.FunDef.sourceBodyCtx]
+                                                using
+                                                  Functions.SourceDirect.FunDef.bodyCtxRel
+                                                    fn
+                                            have hBodyNoDup :
+                                                (Functions.SourceDirect.FunDef.targetBodyCtx
+                                                  fn).layout.Nodup :=
+                                              Functions.SourceDirect.FunDef.targetBodyCtx_layout_nodup
+                                                hScoped
+                                            have hBodyCtxProcs :
+                                                (Structured.Preservation.ProcedurePreservation.bodyCtx
+                                                  lower.toStructured proc).procs =
+                                                  lower.toStructured.procs := by
+                                              simp
+                                                [Structured.Preservation.ProcedurePreservation.bodyCtx]
+                                            rcases hBodyEq : fn.body with
+                                              ⟨bodySourceStmts⟩
+                                            have hBodySupportedStmts :
+                                                FunctionsStmtListRegularOpenSupportedFor
+                                                  programSource fn.returns
+                                                  (Functions.SourceDirect.FunDef.targetBodyCtx
+                                                    fn).layout bodySourceStmts := by
+                                              simpa [hBodyEq] using
+                                                hBodySupported
+                                            have hBodyCompileStmts :
+                                                Locals.Block.compileOpen
+                                                  (Functions.SourceDirect.FunDef.targetBodyCtx
+                                                    fn)
+                                                  { stmts :=
+                                                      Functions.StmtList.toLocals
+                                                        fn.returns
+                                                        bodySourceStmts } =
+                                                  some (bodyStmts, pushCtx) := by
+                                              simpa [hBodyEq] using
+                                                hBodyCompile
+                                            have hBodyOpenRegularStmts :
+                                                OpenExternal.OpenResultResolves
+                                                  (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+                                                    prim programSource
+                                                    (Functions.Source.FunDef.bodyCtx
+                                                      fn)
+                                                    bodyFuel
+                                                    { stmts := bodySourceStmts }
+                                                    { shared :=
+                                                        sourceAfterArgs.shared,
+                                                      vars :=
+                                                        Functions.Source.Store.initReturns
+                                                          fn.returns
+                                                          paramStore })
+                                                  bodyTrace
+                                                  (.ok
+                                                    (Functions.Source.Outcome.regular
+                                                      bodyOutcome.state,
+                                                      bodyCtx')) := by
+                                              simpa [hBodyEq] using
+                                                hBodyOpenRegular
+                                            rcases
+                                                ih bodyFuel (by omega)
+                                                  (sourceLayout :=
+                                                    (Functions.SourceDirect.FunDef.sourceBodyCtx
+                                                      fn).scope)
+                                                  (source := sourceBodyRef)
+                                                  (sourceCtx :=
+                                                    Functions.Source.FunDef.bodyCtx
+                                                      fn)
+                                                  (ctxFinal := bodyCtx')
+                                                  (retc := fn.returns.length)
+                                                  (returns := fn.returns)
+                                                  (stmts := bodySourceStmts)
+                                                  (localsCtx :=
+                                                    Functions.SourceDirect.FunDef.targetBodyCtx
+                                                      fn)
+                                                  (finalLocalsCtx := pushCtx)
+                                                  (layout :=
+                                                    (Functions.SourceDirect.FunDef.targetBodyCtx
+                                                      fn).layout)
+                                                  (compiledStmts := bodyStmts)
+                                                  (compiler :=
+                                                    { shared :=
+                                                        sourceAfterArgs.shared,
+                                                      vars :=
+                                                        Functions.Source.Store.initReturns
+                                                          fn.returns
+                                                          paramStore })
+                                                  (direct := directAfterInit)
+                                                  (state := targetAfterInit)
+                                                  (hiddenReturns :=
+                                                    { callerStack :=
+                                                        callerBase.evm.stack,
+                                                      retc :=
+                                                        fn.returns.length } ::
+                                                      hiddenReturns)
+                                                  (tokens :=
+                                                    Structured.Stmt.callToken
+                                                      supply :: tokens)
+                                                  (structuredCtx :=
+                                                    Structured.Preservation.ProcedurePreservation.bodyCtx
+                                                      lower.toStructured proc)
+                                                  (supply :=
+                                                    (Structured.Block.compileFromCtx
+                                                      { stmts :=
+                                                          Expressions.StmtList.toStructured
+                                                            initStmts }
+                                                      (Structured.Preservation.ProcedurePreservation.bodyCtx
+                                                        lower.toStructured proc)
+                                                      (layoutProgram.procLayout
+                                                        hProcLookup).bodySupply).next)
+                                                  (trace := bodyTrace)
+                                                  (sourceOutcome :=
+                                                    Functions.Source.Outcome.regular
+                                                      bodyOutcome.state)
+                                                  hBodySupportedStmts
+                                                  (by
+                                                    simp
+                                                      [Functions.SourceDirect.FunDef.sourceBodyCtx])
+                                                  hBodyCtxProcs hBodyCalls
+                                                  hBodyCtxRel hBodyCompileStmts
+                                                  rfl hBodyNoDup bodySegment
+                                                  hBodyPc hSourceBodyRef
+                                                  hGasAfterInit
+                                                  hDirectAfterInitRel
+                                                  hRelAfterInit
+                                                  hResponsesBody
+                                                  hBodyOpenRegularStmts with
+                                              ⟨bodyTargetFuel, hBodyRelSrc⟩
+                                            rcases hBodyRelSrc with
+                                              ⟨targetResult, hBodyTrace,
+                                                hBodyReadyTrace,
+                                                hBodyResultRel⟩
+                                            rcases
+                                                FunctionsBlockCompiledOpenResultRel.source_regular_running_compiledOutcomeRel
+                                                  (FunctionsBlockCompiledOpenResultRelSourceGas.to_resultRel
+                                                    hBodyResultRel) with
+                                              ⟨_bodyState, afterBody,
+                                                hTargetResult, _hCompiledBody⟩
+                                            subst targetResult
+                                            rcases
+                                                compilerOpenFunctionsCall_regular_return_layout_parts_of_supported
+                                                  hProgramSupported hFind
+                                                  hBodyOpenRegular
+                                                  (FunctionsBlockCompiledOpenResultRelSourceGas.to_resultRel
+                                                    hBodyResultRel) with
+                                              ⟨hAccessible, hLayoutNoDup,
+                                                hReturnsLen, hRetcBound⟩
+                                            exact
+                                              ⟨bodyTargetFuel, afterBody,
+                                                ⟨.running afterBody,
+                                                  hBodyTrace, hBodyReadyTrace,
+                                                  rfl, hBodyResultRel⟩,
+                                                hAccessible, hLookup,
+                                                hLayoutNoDup, hReturnsLen,
+                                                hRetcBound⟩))
+                                    (hTail := by
+                                      intro argTrace bodyTrace argValues
+                                      intro sourceAfterArgs fn paramStore
+                                      intro returnValues returnStore bodyFuel
+                                      intro bodyOutcome bodyCtx' proc argStmts
+                                      intro argCtx assignStmts afterAssignCtx
+                                      intro restStmts returnDest assignSegment
+                                      intro tailSegment hTargetsNoDup hTraceCall
+                                      intro hCtxAfter hArgResolve hFind hParams
+                                      intro hSourceFuel hBodyOpen hLookup
+                                      intro hAssign hSourceAfter hProcLookup
+                                      intro hProcName hProcArgc hProcRetc
+                                      intro hSiteMem hTokenNoDup hExact
+                                      intro hReturnLabel hCompileArgs
+                                      intro hCompileAssign hCompileRest
+                                      intro hTailStart hTailFall
+                                      intro sourceAfterAssign evmAfter
+                                      intro directAfter hSourceAssign
+                                      intro hGasAssign hStateRelAfter
+                                      intro hFrameRelAfter hAfterPc hResponsesTail
+                                      have hTailCalls :
+                                          Structured.Preservation.ProcedurePreservation.CallsIncluded
+                                            (Structured.Block.compileFromCtx
+                                              { stmts :=
+                                                  Expressions.StmtList.toStructured
+                                                    restStmts }
+                                              structuredCtx
+                                              (Structured.Stmt.compileFromCtxCore
+                                                (.call functionName)
+                                                structuredCtx supply).next).calls
+                                            layoutProgram.sites :=
+                                        functionsBlock_call_cons_callsIncluded_tail_of_compileOpen
+                                          hCompileBlock hCompileArgs
+                                          hCompileAssign hCompileRest hCalls
+                                      have hRestSourceCtx :
+                                          OpenExternal.OpenResultResolves
+                                            (Reference.SourceBridgeFacts.CompilerOpen.FunctionsOpen.Block.runOpen
+                                              prim programSource sourceCtx
+                                              (callFuel + 1)
+                                              { stmts := rest } headState)
+                                            tailTrace
+                                              (.ok (sourceOutcome, ctxFinal)) := by
+                                        simpa [hCtxAfter] using hRest
+                                      have hTailCtxRel :
+                                          Functions.SourceDirect.CtxRel retc
+                                            sourceCtx afterAssignCtx := by
+                                        have hArgCtx : argCtx = localsCtx :=
+                                          compilerOpenFunctionsArgList_compileOpen_finalCtx
+                                            hCompileArgs
+                                        have hAfterAssignCtx :
+                                            afterAssignCtx = argCtx :=
+                                          compilerOpenFunctionsAssignReturnedTops_compileOpen_finalCtx
+                                            hCompileAssign
+                                        rw [hAfterAssignCtx, hArgCtx]
+                                        exact hCtxRel
+                                      have hSourceAssignHead :
+                                          Reference.SourceBridgeFacts.SourceStateRel
+                                            cfg sourceLayout sourceAfterAssign
+                                            headState := by
+                                        simpa [hSourceAfter,
+                                          Locals.Source.State.withShared,
+                                          Locals.Source.State.withVars] using
+                                          hSourceAssign
+                                      have hStateRelHead :
+                                          Functions.SourceDirect.StateRel layout
+                                            hiddenReturns headState
+                                            directAfter := by
+                                        simpa [hSourceAfter,
+                                          Locals.Source.State.withShared,
+                                          Locals.Source.State.withVars] using
+                                          hStateRelAfter
+                                      rcases
+                                          ih (callFuel + 1) (by omega)
+                                            (sourceLayout := sourceLayout)
+                                            (source := sourceAfterAssign)
+                                            (sourceCtx := sourceCtx)
+                                            (ctxFinal := ctxFinal)
+                                            (retc := retc)
+                                            (returns := returns)
+                                            (stmts := rest)
+                                            (localsCtx := afterAssignCtx)
+                                            (finalLocalsCtx := finalLocalsCtx)
+                                            (layout := layout)
+                                            (compiledStmts := restStmts)
+                                            (compiler := headState)
+                                            (direct := directAfter)
+                                            (state := evmAfter)
+                                            (hiddenReturns := hiddenReturns)
+                                            (tokens := tokens)
+                                            (structuredCtx := structuredCtx)
+                                            (supply :=
+                                              (Structured.Stmt.compileFromCtxCore
+                                                (.call functionName)
+                                                structuredCtx supply).next)
+                                            (trace := tailTrace)
+                                            (sourceOutcome := sourceOutcome)
+                                            hRestSupported hSourceLayout hCtxProcs hTailCalls
+                                            hTailCtxRel
+                                            hCompileRest
+                                            (by
+                                              have hArgCtx : argCtx = localsCtx :=
+                                                compilerOpenFunctionsArgList_compileOpen_finalCtx
+                                                  hCompileArgs
+                                              have hAfterAssignCtx :
+                                                  afterAssignCtx = argCtx :=
+                                                compilerOpenFunctionsAssignReturnedTops_compileOpen_finalCtx
+                                                  hCompileAssign
+                                              rw [hAfterAssignCtx, hArgCtx,
+                                                hCtxLayout])
+                                            hNoDup tailSegment
+                                            (by
+                                              rw [hAfterPc]
+                                              exact hTailStart.symm)
+                                            hSourceAssignHead hGasAssign
+                                            hStateRelHead hFrameRelAfter
+                                            hResponsesTail hRestSourceCtx with
+                                        ⟨tailFuel, hTailRel⟩
+                                      refine ⟨tailFuel, ?_⟩
+                                      exact
+                                        SourceOpenTraceCurrentSharedBridgeReadyResultRel.mono
+                                          hTailRel
+                                          (by
+                                            intro targetResult hTailResultRel
+                                            exact
+                                              FunctionsBlockCompiledOpenResultRelSourceGas.cast_fallthrough
+                                                hTailFall hTailResultRel))
+                            | brk =>
+                                subst trace
+                                simp [Functions.Source.Outcome.brk] at hRest
+                                cases hRest
+                                simp [Functions.Source.Outcome.brk] at hFinalRegular
+                            | cont =>
+                                subst trace
+                                simp [Functions.Source.Outcome.cont] at hRest
+                                cases hRest
+                                simp [Functions.Source.Outcome.cont] at hFinalRegular
+                            | leave =>
+                                subst trace
+                                simp [Functions.Source.Outcome.leave] at hRest
+                                cases hRest
+                                simp [Functions.Source.Outcome.leave] at hFinalRegular
+                            | halt kind =>
+                                subst trace
+                                simp [Functions.Source.Outcome.halt] at hRest
+                                cases hRest
+                                simp [Functions.Source.Outcome.halt] at hFinalRegular
+              | block body =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | if_ cond body =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | switch scrutinee cases defaultBody =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | for_ init cond post body =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | brk =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | cont =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | leave =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | terminal kind =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+              | terminalArgs kind args =>
+                  simp [FunctionsStmtListRegularOpenSupportedFor] at hSupported
+
+theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout
+    {prim : Objects.Source.PrimitiveSemantics}
+    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
+    {cfg : Reference.StateRelConfig} {sourceLayout : List Name}
+    {source : Reference.State}
+    {programSource : Functions.Program} {lower : Expressions.Program}
+    (hProgramSupported :
+      FunctionsProgramRegularOpenSupported programSource)
+    (_hProgramReady :
+      FunctionsProgramCallEntrySourceStateRelReadyFor cfg prim programSource)
+    (hNonCallSourceGas :
+      ∀ {sourceLayout' layout' : List Name}
+        {sourceRef' : Reference.State}
+        {compiler' : Objects.Source.State}
+        {state' : EvmYul.EVM.State}
+        {suffix : List Word},
+        Reference.SourceBridgeFacts.SourceStateRel cfg sourceLayout'
+          sourceRef' compiler' →
+        SourceStateTargetGasRel cfg sourceRef' state' →
+        StackPrefixSuffixErasedRel layout' compiler' [] suffix state' →
+        LocalsExprNonCallSourceGasSeedReadyFor cfg sourceLayout' layout'
+          prim suffix)
+    {sourceCtx ctxFinal : Functions.Source.Ctx}
+    {sourceFuel : Nat}
+    {retc : Nat} {returns : List Name}
+    {stmts : List Functions.Stmt}
+    {localsCtx finalLocalsCtx : Locals.Ctx} {layout : List Name}
+    {compiledStmts : List Expressions.Stmt}
+    {compiler : Objects.Source.State}
+    {direct : Locals.RunState}
+    {state : EvmYul.EVM.State}
+    {hiddenReturns : List Structured.ReturnDest}
+    {tokens : List Word}
+    {structuredCtx : Structured.CompileContext}
+    {supply : Structured.LabelSupply}
+    (hSupported :
+      FunctionsStmtListRegularOpenSupportedFor programSource returns layout
+        stmts)
+    (_hReady :
       FunctionsStmtListSourceStateRelReadyFor cfg sourceLayout prim stmts
         compiler)
     (hSourceLayout : sourceLayout = sourceCtx.scope)
@@ -91222,7 +92083,7 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
     (hFrameRel :
       Structured.Preservation.Frame.StateRel direct state tokens)
     {trace : OpenExternal.OpenTrace}
-    (_hResponses :
+    (hResponses :
       SourceOpenTraceResponsesSharedBridgeRel cfg trace)
     {sourceOutcome : Functions.Source.Outcome}
     (hResolve :
@@ -91241,10 +92102,11 @@ theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_cu
             retc returns hiddenReturns tokens (sourceOutcome, ctxFinal)
             finalLocalsCtx targetResult) := by
   exact
-    compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_supportedFor_programLayout
-      hPrim hProgramSupported hProgramReady hSupported hReady hSourceLayout
+    compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout
+      hPrim hProgramSupported hNonCallSourceGas hSupported hSourceLayout
       hLower layoutProgram hCtxProcs hCalls hCtxRel hCompileBlock hCtxLayout
-      hNoDup segment hPc hSourceRel hGasRel hStateRel hFrameRel hResolve
+      hNoDup segment hPc hSourceRel hGasRel hStateRel hFrameRel hResponses
+      hResolve
 
 theorem compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_of_compileOpen_supportedFor_programLayout
     {prim : Objects.Source.PrimitiveSemantics}

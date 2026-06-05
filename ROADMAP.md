@@ -122,8 +122,15 @@ heads and tails. The ordinary block-head replacement trio is now checked:
 `...let...sourceGasSeed_noReady_of_compileOpen_tail`, and
 `...assign...sourceGasSeed_noReady_of_compileOpen_tail` remove
 `FunctionsStmtListSourceStateRelReadyFor` from ordinary tail boundaries.
-Remaining work is the recursive block theorem itself, including the
-procedure-call/callee-body branch, and then the top public source-open route.
+The recursive block theorem itself is now also exposed as a checked
+no-readiness theorem:
+`compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_noReady_of_compileOpen_supportedFor_programLayout`.
+It runs the ordinary heads, procedure-call/callee-body branch, and caller tails
+with actual `SourceStateRel`, `SourceStateTargetGasRel`, and response evidence.
+The old `...sourceGasSeed...supportedFor_programLayout` name is now only a
+legacy wrapper over this stronger theorem. Remaining work is the top
+initial-scoped/source-open route, followed by removing the legacy wrapper and
+the remaining public readiness premises.
 
 2026-06-05 07:29 CEST update: the regular call-site source/gas corridor now
 also has a checked no-seed/readiness-driven path through statement level:
