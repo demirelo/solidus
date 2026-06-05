@@ -2,7 +2,1960 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-03 12:35 CEST.
+Last updated: 2026-06-05 06:54 CEST.
+
+### Current Assessment
+
+This is the authoritative current CALL status. Older detailed chronology is
+kept below for theorem-history context; where wording below sounds broader or
+staler, this section wins.
+
+We did **not** restart the CALL proof. The old recursive/open finite-path CALL
+corridor is still checked and remains useful: argument evaluation, internal
+procedure-call entry/body replay, returned-value assignment, caller tails,
+productive loop frontier work, typed continuations, and the imported-Yul
+source-open dispatcher are not being redone. The refactor since the nested-CALL
+audit changed the **current CALL evidence invariant**, not the whole proof
+spine.
+
+The old invariant,
+`FunctionsBlockCompiledOpenResultRel` at the current PC, is too strong for
+nested external CALLs inside expressions because the target can be suspended
+mid-expression with already-evaluated operands still on the stack. The current
+runtime CALL invariant is therefore
+`FunctionsOpenCurrentSharedStateBridgeRel`: it carries exactly the shared-state
+relation needed for response admissibility at the suspended CALL instruction.
+
+The old whole-program source-readiness predicate that quantified over arbitrary
+callee shared states was also too strong. The checked CALL spine now uses
+`FunctionsProgramCallEntrySourceStateRelReadyFor`, which only asks for callee
+body readiness at entries reached with an actual post-argument
+`SourceStateRel` witness and an actual `Store.insertMany` parameter-store
+provenance proof from the source call. The arbitrary-world
+`FunctionsProgramSourceStateRelReadyFor` scaffold has been removed from the
+Lean API.
+
+Current frontier: the seed-aware procedure-call corridor is checked through the
+program-layout wrapper with the dynamic post-body/post-assignment source/gas
+package. The regular call-site body wrapper now takes the callee body's actual
+post-body `SourceStateRel` and `SourceStateTargetGasRel`, uses the checked
+store/shared recombination helper after returned-value assignment, and hands the
+caller tail the actual post-call `SourceStateRel`, `SourceStateTargetGasRel`,
+source-direct relation, and structured frame relation. This dynamic wrapper is
+lifted through seed-aware argument evaluation and then through the generated
+program-layout call-site/return-assignment wrapper. The regular source
+`Stmt.call` head now also has a checked source/gas statement-level wrapper,
+`compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_sourceGasSeed_responses_sourceStateRelTailGas_of_compileOpen`,
+which performs the source call/program-layout split, gives argument/body/tail
+response evidence to the right continuations, and hands the caller tail actual
+post-call `SourceStateRel` and `SourceStateTargetGasRel`. These surfaces are
+pinned in `LayerAudit`.
+
+The callee body-entry source/gas seed is now checked as
+`sourceStateRel_funDef_body_entry_exists`: from actual post-argument
+`SourceStateRel`, actual `Store.insertMany` parameter provenance, and
+`fn.Scoped`, it constructs a `SourceStateRel` for the callee body source scope
+at `{ shared := sourceAfterArgs.shared, vars := Store.initReturns ... }` and
+transfers `SourceStateTargetGasRel` across the store change. This removes the
+next hidden body-entry callback that the strengthened recursive CALL branch
+would otherwise need.
+
+The recursive-block source/gas result carrier is now checked as
+`FunctionsBlockCompiledOpenResultRelSourceGas`, with projections/casts for the
+old compiled-open result relation and the regular/running source/gas witness.
+The empty-block base case
+`compilerOpenFunctionsBlock_nil_sourceTrace_currentSharedBridgeReadyResultRel_sourceGasSeed_of_compileOpen`
+is also checked and pinned: an empty block preserves the incoming
+`SourceStateRel` and `SourceStateTargetGasRel` as the final regular/running
+source/gas evidence. `SourceOpenTraceCurrentSharedBridgeReadyResultRel.mono`
+is checked as the small result-predicate transport needed by future
+fallthrough casts.
+
+The ordinary block-head compiled-result/source/gas wrappers are now checked and
+pinned for `expr :: rest`, initialized `let :: rest`, and assignment heads:
+`...compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_tail`. These
+consume the response-aware seed statement-head proofs, split concrete head/tail
+response admissibility, pass actual post-head `SourceStateRel` and
+`SourceStateTargetGasRel` plus the exact tail readiness predicate to recursive
+tails, and cast the enriched carrier across the whole-block fallthrough. The
+`let` wrapper exposes the naturally extended `name :: sourceLayout` relation to
+its tail/final result; `expr` and `assign` preserve the incoming layout. A new checked recombination brick,
+`sourceStateRel_with_shared_exists`, combines shared-state evidence from one
+source relation with caller-variable/store evidence from another, which is the
+missing small adapter needed when a callee body updates shared state but the
+caller tail keeps caller variables. The layout-weakening helpers
+`sourceStoreRel_of_layout_subset`, `sourceStateRel_of_layout_subset`, and
+`FunctionsBlockCompiledOpenResultRelSourceGas.of_sourceLayout_subset` are also
+checked and pinned; these let the recursive theorem forget `let`-introduced
+variables when a caller-side head only needs the original source layout.
+
+The full response-aware recursive block theorem is now checked and pinned as
+`compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout`.
+It consumes the dynamic statement-level `Stmt.call` source/gas tail package in
+the call-statement branch, drives the recursive callee body with the actual
+body-entry `SourceStateRel`/`SourceStateTargetGasRel`, threads response
+admissibility through argument/body/tail traces, weakens `let`-extended final
+source layouts back to the caller layout, and hands recursive caller tails the
+actual post-call source/gas witnesses instead of the older callback scaffold.
+The theorem still has an explicit actual-run non-CALL primitive source/gas seed
+premise; this is now the next premise to discharge or keep private during
+public wiring, not a missing CALL branch. The generated return-dispatch
+condition prefix, `JUMPI` step, full `DUP`/`PUSH`/`EQ`/`JUMPI` test,
+mismatched-token dispatch-table branch, selected-token return branch, selected
+dispatch-table recursion, procedure-selected dispatch, exit-label dispatch,
+regular/leave callee-body exit dispatch, returned-assignment result
+continuation, and regular/leave call-site body/exit-dispatch/return-assignment
+composition now have checked result-level source/gas wrappers. The callee
+setup/body sub-brick is checked:
+`openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRelSourceGas_of_initReturns_body_values_sourceTrace`
+and
+`compilerOpenFunctionsCall_regular_body_exists_of_initReturns_body_sourceTrace_sourceGasRel`
+lift the recursive body IH through generated `initReturns` and the proc segment,
+returning post-body `SourceStateRel` and `SourceStateTargetGasRel` alongside the
+compiled-outcome/returned-stack facts. The checked program-layout wrapper
+`compilerOpenFunctionsCall_regular_body_exists_of_programLayout_body_sourceTrace_sourceGasRel`
+packages that same source/gas body evidence at the generated program-layout
+layer consumed by the recursive call branch. Next comes wiring this recursive
+theorem into the public source-open/CALL-family spine, eliminating or
+privatizing the remaining non-CALL seed/callback premises, and auditing the
+public CALL boundary.
+
+At the gas-aware runtime boundary, CALL readiness is now being split into two
+orthogonal facts: generic current-instruction gas/step readiness and the
+compiler/source shared-state bridge at CALL sites. The new checked bridge
+bricks (`OpenXCurrentRunningInstrGasReadyCase`,
+`OpenXCurrentRunningInstrCompiledOpenEvidenceCase.of_gas_ready_case_call_bridge_rel`,
+`OpenXCompiledOpenCurrentEmittedEvidenceFor.of_source_trace_current_shared_bridge_ready_gas_cases`,
+and
+`currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_cases`)
+show that a source-open trace carrier plus gas-only current-instruction cases
+is enough to build the emitted runtime evidence consumed by `OpenXReplayAbove`.
+This avoids reintroducing a concrete external-world/code-stability premise for
+CALL responses; response preservation remains trace-admissible via
+`SourceOpenTraceResponsesAdmissible`.
+
+Checked source/local carrier progress:
+
+- [x] Weak current shared-state bridge:
+  `FunctionsOpenCurrentSharedStateBridgeRel`, with constructors from raw
+  shared-state relation, source-state plus stack-prefix relation,
+  source-state plus frame relation and explicit gas relation, current relation,
+  and result-relation-at-current-PC.
+- [x] Source-open trace carrier:
+  `SourceOpenTraceCurrentSharedBridgeReadyFor`, where running steps only need a
+  bridge when the current instruction is a CALL-family primitive.
+- [x] Runtime conversion:
+  `OpenXCompiledOpenCurrentCallBridgeReadyFor.of_source_trace_current_shared_bridge_ready`
+  converts the source carrier through `Assembly.assemble?` into the gas-aware
+  runtime call-bridge-ready object.
+- [x] Runtime gas/evidence split:
+  `OpenXCurrentRunningInstrGasReadyCase` separates ordinary gas/step readiness
+  from CALL shared-state preservation, and
+  `currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_cases`
+  combines gas-only current-instruction cases with the source-open shared
+  bridge carrier to produce the emitted runtime evidence needed for
+  `OpenXReplayAbove`.
+- [x] Primitive CALL base case:
+  `compilerOpenPrimitive_callKind_stackPrefix_sourceTrace_currentSharedBridgeReady`
+  extends the trace across a primitive CALL, emits the matching source call
+  event, preserves the response stack-prefix relation, and records the weak
+  bridge at the suspended opcode.
+- [x] Expression recursion:
+  `compilerOpenLocalsExpr_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+  and
+  `compilerOpenLocalsExprSeq_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+  thread the carrier through supported expression trees and expression
+  sequences.
+- [x] Statement heads already lifted through the carrier:
+  expression statements, initialized `let`, and single assignment, including
+  imported/source store updates and generated no-CALL assignment-tail replay.
+- [x] Function-call argument evaluation:
+  `compilerOpenFunctionsArgList_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen_sourceRelReady`
+  threads the carrier through compiled argument evaluation and returns the final
+  source-state relation.
+- [x] Hidden-frame bridge adapter:
+  `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_frameStateRel`
+  derives the weak bridge from source-state relation, source-direct state
+  relation, structured frame relation, and an explicit gas-availability
+  relation. This is the safe route for hidden return frames; it intentionally
+  does **not** infer gas from frame erasure.
+- [x] Source-state/target-gas hidden-frame bridge wrapper:
+  `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_frameStateRel_source`
+  exposes the same hidden-frame bridge from a general `Reference.State` plus
+  `SourceStateTargetGasRel`, matching the state/gas package returned by the
+  argument-list and expression carrier recursion.
+- [x] Hidden-frame/suffix bridge adapter:
+  `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_stackPrefixSuffixErasedRel`
+  derives the weak bridge from source-state relation, stack-prefix/suffix
+  erased relation, and an explicit gas-availability relation. This is the
+  checked bridge needed before lifting CALL-family primitive expression steps
+  through hidden-frame suffix execution.
+- [x] Hidden-frame/suffix primitive frontier:
+  `StackPrefixSuffixErasedRel.compilerPrimitiveOpenCall?_site_eq_evmOpenCall?`
+  and
+  `compilerOpenPrimitive_callKind_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady`
+  reconcile compiler/EVM CALL sites under erased shared-state equality and
+  extend the source-trace carrier across a primitive CALL while preserving the
+  suffix/hidden-frame relation for every external response. The companion
+  `compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady`
+  and
+  `compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_of_resolves_ok`
+  close the non-CALL branch and package the full primitive split needed by
+  suffix expression recursion. These are pinned in `LayerAudit` and
+  axiom-audited with only the expected Lean kernel/library dependencies.
+- [x] Source-state/target-gas suffix primitive wrapper:
+  `SourceStateTargetGasRel`,
+  `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_stackPrefixSuffixErasedRel_source`,
+  and
+  `compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_of_resolves_ok_source_state_gas_rel`
+  package the explicit gas bridge at the source-state boundary, so suffix
+  expression recursion can carry CALL readiness recursively instead of trying
+  to recover gas from erased stack/frame relations. These are pinned in
+  `LayerAudit`, build-checked through `EvmCompiler.LayerAudit`, and
+  axiom-audited with only the expected Lean kernel/library dependencies.
+- [x] Hidden-frame/suffix expression carrier skeleton:
+  `compilerOpenLocalsExpr_lit_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+  `compilerOpenLocalsExpr_var_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+  `compilerOpenLocalsExprSeq_nil_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+  `compilerOpenLocalsExprSeq_cons_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_head_tail`,
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_args`,
+  and
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_args`
+  replay literal/variable/nil expression code, compose head/tail expression
+  sequences, and splice argument evaluation into the suffix primitive frontier
+  under an explicit target-dependent post-gas readiness package while
+  preserving `StackPrefixSuffixErasedRel`. These are pinned in `LayerAudit`,
+  build-checked through `EvmCompiler.LayerAudit`, and axiom-audited with only
+  the expected Lean kernel/library dependencies.
+- [x] Seed-aware suffix expression base/sequence refactor:
+  `compilerOpenLocalsExpr_lit_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode`,
+  `compilerOpenLocalsExpr_var_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode`,
+  `compilerOpenLocalsExprSeq_nil_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode`,
+  and
+  `compilerOpenLocalsExprSeq_cons_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_head_tail`
+  carry the actual input `SourceStateRel` and `SourceStateTargetGasRel` seed
+  through literal, variable, nil, and head/tail expression-sequence
+  composition. This is the replacement direction for the old target-dependent
+  expression-readiness predicate: the sequence proof now feeds the tail with
+  the actual post-head source/gas witnesses instead of requiring readiness for
+  every erased target state.
+- [x] CALL primitive response source/gas extraction:
+  `SourceStateTargetGasRel.of_openPrimitiveEVMResultRel`,
+  `...of_openPrimitiveEVMResultRel_incrPC`, and
+  `...of_openCallRelAt_response_incrPC` extract the actual post-source
+  `SourceStateTargetGasRel` from an `OpenPrimitiveEVMResultRel`, including the
+  external-CALL response branch when the response is admissible for the
+  suspended source/compiler shared states. These are pinned in `LayerAudit`,
+  build-checked through `EvmCompiler.LayerAudit`, and axiom-audited with only
+  the expected Lean kernel/library dependencies. This closes the local
+  response/gas extraction sub-obligation for the seed-aware primitive
+  expression theorem; it does not by itself replace the old expression
+  readiness predicate yet.
+- [x] Suffix CALL response source/gas bridge:
+  `yulOpenCall?_resume_state_eq_finishShared`,
+  `evmOpenCall?_resume_toSharedState_eq_finishShared`,
+  `StackPrefixSuffixErasedRel.sharedStateRel_of_source_state_rel_gas`,
+  `StackPrefixSuffixErasedRel.sourceStateTargetGasRel_of_callKind_response`,
+  and
+  `compilerOpenPrimitive_callKind_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_sourceGasResponse`
+  bridge hidden-frame/suffix CALL sites from an admissible external response
+  at the actual suspended source/target shared states to both the actual
+  resumed source `SourceStateRel` and the resumed target
+  `SourceStateTargetGasRel`. This avoids requiring exact compiler/EVM
+  shared-state equality in the suffix setting; it is the checked CALL-branch
+  input for the seed-aware primitive expression theorem, not yet the full
+  replacement for the old expression-readiness predicate.
+- [x] Resolved CALL primitive source/gas trace bridge:
+  `compilerOpenPrimitive_callKind_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_sourceGasRel_of_resolves_ok`
+  turns an actual resolved primitive CALL trace, plus local response
+  admissibility for every event in that trace, into the actual resumed source
+  `SourceStateRel`, `SourceStateTargetGasRel`, suffix-erased target relation,
+  incremented PC fact, and source-trace carrier continuation. This keeps the
+  local theorem in `OpenLowering` phrased over
+  `Reference.SharedStateRel.OpenExternalResponseRel`; higher layers can later
+  derive that local predicate from `SourceOpenTraceResponsesAdmissible` after
+  splitting the concrete trace.
+- [x] Seed-aware primitive expression source/gas split:
+  `compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_sourceGasSeed_of_resolves_ok`
+  and
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_args`
+  plus the compiled-code wrapper
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_args`
+  splice the resolved CALL branch into primitive expression execution using the
+  actual post-argument `SourceStateRel` and `SourceStateTargetGasRel` seed. The
+  non-CALL branch now asks only for an actual-run post-primitive source/gas
+  premise, while the CALL branch is discharged by local response admissibility
+  at the concrete suspended source/target shared states. These are pinned in
+  `LayerAudit`, build-checked through `EvmCompiler.LayerAudit`, and
+  axiom-audited with only the expected Lean kernel/library dependencies. This
+  is the first checked primitive-expression replacement for the old arbitrary
+  target-state expression-readiness scaffold; the remaining work is to lift it
+  through the mutual recursion, then delete the old
+  `LocalsExprSourceStateTargetGasRelReadyFor`/sequence package.
+- [x] Response-aware seed primitive expression wrapper:
+  `SourceOpenTraceResponsesSharedBridgeRel`,
+  `SourceOpenTraceResponsesSharedBridgeRel.left_of_append`,
+  `SourceOpenTraceResponsesSharedBridgeRel.right_of_append`,
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_args_responses`,
+  and
+  `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_args_responses`
+  consume response admissibility for the whole concrete expression trace and
+  split it internally into argument-trace and primitive-trace obligations. This
+  closes the broad-callback hole in the primitive-expression wrapper: the CALL
+  response branch now gets admissibility only for the actual primitive suffix
+  trace produced after argument evaluation. This wrapper is now lifted through
+  the checked seed-aware mutual recursion below; the remaining expression
+  cleanup is downstream consumer migration and deletion of the old
+  `LocalsExprSourceStateTargetGasRelReadyFor`/sequence package.
+- [x] Response-aware seed expression mutual recursion:
+  `LocalsExprNonCallSourceGasSeedReadyFor`,
+  `compilerOpenLocalsExpr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`,
+  and
+  `compilerOpenLocalsExprSeq_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`
+  carry the actual input `SourceStateRel`, `SourceStateTargetGasRel`,
+  suffix-erased target relation, and whole-expression response admissibility
+  through literal, variable, primitive, nil, and cons expression syntax. The
+  cons branch splits concrete `headTrace ++ tailTrace` admissibility for
+  recursive head/tail calls, so nested CALLs in arguments and later expression
+  tails are handled by the same recursion. The remaining non-CALL primitive
+  side is an actual-run source/gas contract, not an arbitrary target-state
+  readiness callback. These are pinned in `LayerAudit`, build-checked through
+  `EvmCompiler.LayerAudit`, and axiom-audited with only the expected Lean
+  kernel/library dependencies. Downstream statement/block consumers still use
+  the old readiness predicates and must be migrated before those predicates can
+  be deleted.
+- [x] Response-aware seed ordinary statement-head wrappers:
+  `compilerOpenFunctionsStmt_expr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`,
+  `compilerOpenFunctionsStmt_let_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`,
+  and
+  `compilerOpenFunctionsStmt_assign_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`
+  lift expression statements, initialized `let`, and assignment heads through
+  the new seed-aware expression recursion. They consume the actual incoming
+  `SourceStateRel`, `SourceStateTargetGasRel`, suffix-erased target relation,
+  whole statement trace response admissibility, and actual-run non-CALL
+  primitive source/gas contract; they no longer need the old arbitrary
+  target-state expression readiness predicate. These are pinned in
+  `LayerAudit`, build-checked through `EvmCompiler.LayerAudit`, and
+  axiom-audited with only the expected Lean kernel/library dependencies.
+  Downstream block/procedure-call consumers still need migration to these
+  wrappers.
+- [x] Response-aware seed ordinary block-head result wrappers:
+  `compilerOpenFunctionsBlock_expr_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_sourceGasSeed_of_compileOpen_tail`,
+  `compilerOpenFunctionsBlock_let_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_sourceGasSeed_of_compileOpen_tail`,
+  and
+  `compilerOpenFunctionsBlock_assign_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_sourceGasSeed_of_compileOpen_tail`
+  move `expr :: rest`, initialized `let :: rest`, and assignment heads at the
+  frame/result block boundary onto the seed-aware statement wrappers. These
+  theorems no longer manufacture
+  `LocalsExprSourceStateTargetGasRelReadyFor` from a materialized suffix for
+  the head. Instead, they consume the actual incoming source-state/gas seed,
+  split whole block-trace response admissibility into head and tail traces, and
+  pass the actual post-head `SourceStateRel` and `SourceStateTargetGasRel` to
+  the tail callback. These are pinned in `LayerAudit`, build-checked through
+  `EvmCompiler.LayerAudit`, and axiom-audited with only the expected Lean
+  kernel/library dependencies. The remaining consumer migration is to route
+  the recursive block/list theorem and procedure-call/argument consumers onto
+  these seed-aware callbacks, then delete the old expression-readiness
+  predicates.
+- [x] Response-aware seed ordinary block-head compiled-result wrappers:
+  `compilerOpenFunctionsBlock_expr_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRel_sourceGasSeed_of_compileOpen_tail`,
+  `compilerOpenFunctionsBlock_let_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRel_sourceGasSeed_of_compileOpen_tail`,
+  and
+  `compilerOpenFunctionsBlock_assign_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRel_sourceGasSeed_of_compileOpen_tail`
+  are the seed-aware versions of the exact wrapper shapes currently consumed
+  by the recursive block theorem's ordinary `expr :: rest`, initialized
+  `let :: rest`, and assignment cases. They preserve the compiled-open result
+  relation at the whole-block fallthrough while passing actual post-head
+  `SourceStateRel` and `SourceStateTargetGasRel` to the tail callback and
+  splitting whole-trace response admissibility. These are the checked bridges
+  from the seed-aware ordinary block-head wrappers into the live recursive
+  compiled-result spine. Focused `OpenLowering` and `LayerAudit` Lean checks
+  passed and axiom audits report the expected
+  `[propext, Classical.choice, Quot.sound]`; a prior
+  `lake build EvmCompiler.LayerAudit` attempt was blocked by an unrelated
+  concurrent private-scratch edit in `Locals.SourceLowering` referencing
+  missing `ScratchRange.preallocState` / `preallocMachine`.
+- [x] Response-aware seed hidden-frame argument-list bridge:
+  `compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_continue_frameStateRel_withShared_of_compileOpen_sourceGasSeed_responses`
+  and
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_exists_frameStateRel_withShared_of_compileOpen_sourceGasSeed_responses`
+  are the seed-aware replacements for the argument-evaluation bridge consumed
+  by procedure-call heads. They run compiled function-call arguments using the
+  response-aware expression-sequence recursion, consume actual incoming
+  `SourceStateRel`/`SourceStateTargetGasRel`, split CALL response
+  admissibility at the concrete argument trace, and return the same
+  `SourceStateRel`, `SourceStateTargetGasRel`, hidden-frame `Frame.StateRel`,
+  `PrefixedStateRel`, and caller-base facts expected by the call-site/body
+  wrappers. These are pinned in `LayerAudit`, `lake build
+  EvmCompiler.Yul.OpenLowering` passed, the focused `LayerAudit` Lean check
+  passed, and axiom audits report the expected
+  `[propext, Classical.choice, Quot.sound]`. The next migration step is to
+  route the call-statement/procedure branch through these wrappers and then
+  remove the old `LocalsExprSeqSourceStateTargetGasRelReadyFor` call-argument
+  dependency.
+- [x] Response-aware seed call-site/body/tail bridge:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_sourceGasSeed_responses_stateRelTail_of_entry_of_compileOpen`
+  and
+  `compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_sourceGasSeed_responses_stateRelTail_of_entry_of_compileOpen`
+  lift the seed-aware argument-list bridge through the generated procedure
+  call-site sequence: argument evaluation, call prologue/callee entry, callee
+  body replay, return dispatch, returned-value assignment, and caller tail.
+  They preserve the same `stateRelTail` call-site/body contract as the old
+  wrapper while replacing the old call-argument
+  `LocalsExprSeqSourceStateTargetGasRelReadyFor` premise with actual incoming
+  source/gas seed evidence, argument-trace response admissibility, and the
+  actual-run non-CALL primitive source/gas contract. These are pinned in
+  `LayerAudit`, `lake build EvmCompiler.Yul.OpenLowering` passed, the focused
+  `LayerAudit` Lean check passed, and axiom audits report the expected
+  `[propext, Classical.choice, Quot.sound]`. The next migration step is the
+  full call-statement wrapper, which must split the whole call-head/tail trace
+  responses into argument, body, and caller-tail obligations before calling the
+  seed-aware recursive body/tail callbacks.
+- [x] Post-return source/gas recombination bridge:
+  `sourceStoreRel_assignMany_visible_exists`,
+  `sourceStateRel_assignMany_visible_exists`, and
+  `sourceStateRel_assignMany_visible_with_shared_exists` show that returned
+  value assignment can rebuild the imported/source `SourceStateRel` after
+  `Store.assignMany`, while preserving the target gas relation from the callee
+  body's post-shared state. These are pinned in `LayerAudit`, `lake build
+  EvmCompiler.LayerAudit` passed, and axiom audits report the expected
+  `[propext, Classical.choice, Quot.sound]`. This is the missing store/shared
+  brick for strengthening the current `stateRelTail` call-site wrapper into a
+  source/gas-tail wrapper.
+- [x] Generated returned-assignment source/gas corridor:
+  `compilerOpenAssignTopWithOffset_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel`,
+  `compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileOpen`,
+  `compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileOpen`,
+  `compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileOpen`,
+  and
+  `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileOpen`
+  preserve `SourceStateTargetGasRel` through generated return-label and
+  returned-value assignment code while keeping the source-trace CALL bridge
+  carrier. These are pinned in `LayerAudit`, `lake build
+  EvmCompiler.Yul.OpenLowering` and `lake build EvmCompiler.LayerAudit` passed,
+  scoped no-hole and `git diff --check` checks passed, and axiom audits report
+  the expected `[propext, Classical.choice, Quot.sound]`. A small 4.28
+  migration wrapper in `Functions.Preservation` was also fixed so these builds
+  can refresh.
+- [x] Generated return-dispatch condition/JUMPI/selected-branch source/gas path:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.dispatchCondition_source_running_continue_exists_sourceGasRel`,
+  `...source_jump_no_call_running_continue_exists_sourceGasRel`,
+  `...source_jumpi_no_call_running_continue_exists_sourceGasRel`,
+  `...dispatchCondition_jumpi_source_running_continue_exists_sourceGasRel`,
+  `...dispatch_mismatched_test_source_running_continue_exists_sourceGasRel`,
+  `...liftBuriedToTop_source_running_continue_exists_sourceGasRel`,
+  `...removeBuriedUnder_source_running_continue_exists_sourceGasRel`,
+  `...source_returnAttach_after_remove_continue_exists_sourceGasRel`,
+  `...dispatch_case_source_running_continue_exists_sourceGasRel`, and
+  `...dispatch_selected_site_source_running_continue_exists_sourceGasRel`
+  preserve `SourceStateTargetGasRel` through the generated `DUP`/`PUSH`/`EQ`
+  return-token test, the concrete assembly `JUMPI`, the combined dispatch
+  condition row, the mismatched-token table branch, return-token removal, the
+  selected return-label `JUMP`, and the selected-site wrapper while keeping the
+  result-plus source-trace CALL bridge carrier. Verification: focused
+  `OpenLowering` Lean checks passed, `lake build EvmCompiler.Yul.OpenLowering`
+  passed, scoped no-hole and `git diff --check` checks passed, and axiom audits
+  report only `[propext, Classical.choice, Quot.sound]`. `LayerAudit` now has
+  pins for these CALL surfaces, but its direct module check is currently
+  blocked later by unrelated stale public stack/adaptive-spill names. The next
+  dispatch gas brick is the full selected dispatch-table recursion.
+- [x] Hidden-frame/suffix expression mutual recursion:
+  `LocalsExprSourceStateTargetGasRelReadyFor`,
+  `LocalsExprSeqSourceStateTargetGasRelReadyFor`,
+  `compilerOpenLocalsExpr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+  and
+  `compilerOpenLocalsExprSeq_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`
+  close nested CALL-bearing expression and expression-sequence recursion under
+  suffix/hidden frames. They return both source-state relation and
+  `SourceStateTargetGasRel` for post-expression target states, so later CALL
+  sites can derive the weak current shared-state bridge. These are pinned in
+  `LayerAudit`, build-checked through `EvmCompiler.LayerAudit`, and
+  axiom-audited with only the expected Lean kernel/library dependencies. This
+  is now explicitly interim scaffolding: it is checked, but over-strong because
+  it still asks for a post-expression gas/source package for arbitrary erased
+  target states. It should be removed once the seed-aware primitive theorem and
+  seed-aware expression mutual recursion replace its downstream uses.
+- [x] Hidden-frame argument-list carrier:
+  `compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_continue_frameStateRel_withShared_of_compileOpen_sourceGasRelReady`
+  lifts compiled function-call argument evaluation under hidden frames from
+  `Frame.StateRel` through the suffix expression recursion. It recovers
+  `PrefixedStateRel`, `Frame.StateRel`, `SourceStateRel`, and
+  `SourceStateTargetGasRel`, so procedure-call heads can enter the callee/tail
+  wrappers with the source-trace CALL bridge carrier already established.
+- [x] Silent call-entry gas carrier:
+  `SourceOpenTraceCurrentSharedBridgeReadyFor.source_label_no_call_running_continue_exists_sourceGasRel`,
+  `...proc_entry_label_continue_exists_sourceGasRel`,
+  `...sinkTopUnder_source_running_continue_exists_sourceGasRel`,
+  `...callPrologue_source_running_continue_exists_sourceGasRel`,
+  `...source_callEntry_after_prologue_and_jump_continue_exists_sourceGasRel`,
+  `...structured_callSite_callEntry_continue_exists_sourceGasRel`, and
+  `...structured_callSite_body_continue_exists_sourceGasRel` thread
+  `SourceStateTargetGasRel` through generated silent label/PUSH/SWAP/JUMP
+  call-entry plumbing, so recursive callee-body continuations can receive both
+  the hidden-frame `Frame.StateRel` and the explicit gas bridge.
+- [x] Gas-aware regular/leave call-site body wrappers:
+  `SourceOpenTraceCurrentSharedBridgeReadyFor.callSite_body_regular_then_return_assign_continue_exists_sourceGasRel`
+  and
+  `...callSite_body_leave_then_return_assign_continue_exists_sourceGasRel`
+  compose generated call-entry, callee body, exit dispatch, returned-value
+  assignment, and caller-tail continuation while passing `SourceStateTargetGasRel`
+  to the callee-body callback. This closes the last generated-code gas transport
+  gap before the recursive callee-body/tail call-head theorem.
+- [x] Silent source-open run helper:
+  `SourceOpenTraceCurrentSharedBridgeReadyFor.of_program_no_callCreate` and
+  `...of_resolves_program_no_callCreate` show no-CALL assembly runs
+  automatically carry the source-trace bridge. These are source-file checked,
+  import-visible, and pinned in `LayerAudit`.
+- [x] Statement/list source-state readiness package:
+  `FunctionsStmtSourceStateRelReadyFor` and
+  `FunctionsStmtListSourceStateRelReadyFor` now package the source-state
+  readiness facts needed by statement/block recursion. The package has checked
+  head/tail projections for expression statements, initialized `let`, single
+  assignment, and internal procedure-call heads; the call head exposes argument
+  hidden-frame/source-target-gas expression-sequence readiness and the
+  post-call tail callback without pretending the procedure-call carrier splice
+  is finished.
+- [x] CALL argument readiness projection:
+  `FunctionsStmtListSourceStateRelReadyFor.call_args` now exposes the
+  hidden-frame/suffix `LocalsExprSeqSourceStateTargetGasRelReadyFor` package
+  required by the checked argument-to-call-site theorem. This avoids the false
+  route of trying to recover target gas from erased stack/frame relations.
+- [x] Seeded program call-entry readiness boundary:
+  `FunctionsProgramCallEntrySourceStateRelReadyFor` and
+  `FunctionsProgramCallEntrySourceStateRelReadyFor.funDef` package callee-body
+  readiness only for function entries justified by the actual source
+  post-argument `SourceStateRel` and the actual `Store.insertMany` proof that
+  built the callee parameter store. The argument-to-call-site and
+  statement-level CALL wrappers now thread these witnesses upward, and the
+  recursive block theorem plus checked-compile source-open wrappers consume
+  this narrower predicate instead of the removed arbitrary shared-state/program
+  readiness predicate.
+- [x] Hidden-frame ordinary statement carriers:
+  `FunctionsStmtListSourceStateRelReadyFor.expr_head_targetGas`,
+  `...let_head_targetGas`, and `...assign_head_targetGas` expose the
+  hidden-frame/suffix expression readiness for ordinary statement heads, and
+  `compilerOpenFunctionsStmt_expr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+  `...let_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+  and
+  `...assign_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`
+  lift `expr`, initialized `let`, and single assignment through the same
+  source-trace carrier shape as CALL arguments. They return `SourceStateRel`,
+  `SourceStateTargetGasRel`, and the post-statement
+  `StackPrefixSuffixErasedRel`; the assignment wrapper uses the exact
+  generated `SWAP`/`POP` replay internally to preserve the gas bridge before
+  erasing back to the hidden-frame relation.
+- [x] Ordinary statement-list/block carrier consumers:
+  `compilerOpenFunctionsBlock_{expr,let,assign}_cons_sourceTrace_currentSharedBridgeReady_of_tail_pc`
+  and their `..._of_compileOpen_tail_pc` wrappers consume the readiness package
+  through syntactic tails and produce the actual
+  `OpenAssembly.Source.OpenTraceResult` plus
+  `SourceOpenTraceCurrentSharedBridgeReadyFor` for generated block layouts.
+- [x] Result-plus-carrier package:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel`, with `.of_trace` and
+  `.resolves`, packages an actual source-open trace, the CALL-readiness carrier,
+  and an arbitrary old semantic `ResultRel` over the same target result. This
+  is the intended output shape for the remaining call-head splice, avoiding a
+  carrier-only theorem that would lose the semantic result needed by return
+  dispatch and caller-tail composition.
+- [x] Result-plus-carrier silent call-entry/proc-entry wrappers:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.source_label_no_call_running_continue_exists_sourceGasRel`,
+  `...sinkTopUnder_source_running_continue_exists_sourceGasRel`,
+  `...callPrologue_source_running_continue_exists_sourceGasRel`,
+  `...source_callEntry_after_prologue_and_jump_continue_exists_sourceGasRel`,
+  `...proc_entry_label_continue_exists_sourceGasRel`,
+  `...structured_callSite_callEntry_continue_exists_sourceGasRel`, and
+  `...structured_callSite_body_continue_exists_sourceGasRel` carry the old
+  semantic/result relation plus the current CALL carrier through generated
+  silent label/PUSH/SWAP/JUMP call-entry plumbing while preserving
+  `SourceStateTargetGasRel`.
+- [x] Result-plus-carrier suffix composition and returned-value assignment:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running` appends a
+  carrier-ready running prefix to a result-plus-carrier suffix, and
+  `...assignReturnedTops_callSiteReturn_attachedFrameStateRel_of_compileOpen`
+  turns the generated return-label/returned-values assignment suffix plus a
+  result-plus-carrier caller-tail callback into one result-plus-carrier package.
+- [x] Result-plus-carrier returned-value assignment with state/frame tails:
+  `compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_stateRel_of_compileOpen`,
+  `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_stateRel_of_compileOpen`,
+  and
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.assignReturnedTops_callSiteReturn_attachedFrameStateRel_stateRelTail_of_compileOpen`
+  lift the generated return-label/returned-values assignment bridge from a
+  suffix-erased callback to the natural post-call
+  `Functions.SourceDirect.StateRel` plus `Frame.StateRel` caller-tail callback.
+  These are pinned in `LayerAudit`, build-checked through
+  `EvmCompiler.LayerAudit`, and axiom-audited with only the expected Lean
+  kernel/library dependencies.
+- [x] Result-plus-carrier returned-value assignment and call-site body wrappers
+  with state/frame tails plus gas:
+  `compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_stateRel_sourceGasRel_of_compileOpen`,
+  `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_stateRel_sourceGasRel_of_compileOpen`,
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.assignReturnedTops_callSiteReturn_attachedFrameStateRel_stateRelTail_sourceGasRel_of_compileOpen`,
+  `...callSite_body_regular_then_return_assign_continue_exists_sourceGasRel_stateRelTailGas`,
+  and
+  `...callSite_body_leave_then_return_assign_continue_exists_sourceGasRel_stateRelTailGas`
+  carry the post-return gas witness together with the natural post-call
+  source-direct/frame relation into the caller-tail continuation. These are
+  pinned in `LayerAudit`, build-checked through `EvmCompiler.LayerAudit`, and
+  axiom-audited with only the expected Lean kernel/library dependencies.
+- [x] Result-plus-carrier exit-dispatch/body corridor:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.dispatchCondition_source_running_continue_exists`,
+  `...dispatchCondition_jumpi_source_running_continue_exists`,
+  `...dispatch_case_source_running_continue_exists`,
+  `...selected_table_source_running_continue_exists`,
+  `...forProc_selected_source_running_continue_exists`,
+  `...exit_label_then_dispatch_continue_exists`,
+  `...body_regular_then_exit_dispatch_continue_exists`, and
+  `...body_leave_then_exit_dispatch_continue_exists` lift the generated
+  condition rows, selected/mismatched return-dispatch table, procedure exit
+  label, and regular/leave body-prefix composition into the result-plus-carrier
+  package. This removes the fixed-target-result bottleneck in the
+  callee-body-to-return-dispatch corridor.
+- [x] Result-plus-carrier regular/leave call-site body wrappers with
+  state/frame tails:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.callSite_body_regular_then_return_assign_continue_exists_sourceGasRel_stateRelTail`
+  and
+  `...callSite_body_leave_then_return_assign_continue_exists_sourceGasRel_stateRelTail`
+  compose generated call-entry, callee body, exit dispatch, returned-value
+  assignment, and caller-tail continuation while giving the caller tail the
+  post-call source-direct relation and structured frame relation. These are the
+  checked wrapper shape needed by the final call-head splice theorem, where the
+  recursive tail proof is naturally stated over source state/frame relations
+  rather than hidden suffixes.
+- [x] Result-plus-carrier segment-local no-CALL/init-return bridge:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.current_no_call_running_continue_of_current_instr`,
+  `...source_code_no_call_relAt_running_continue_exists`,
+  `...source_code_no_call_frameStateRel_running_continue_exists`,
+  `...codeSegment_no_call_frameStateRel_running_continue_exists`, and
+  `...initReturns_frameStateRel_running_of_compileOpen` lift generated
+  no-CALL structured-code segments and generated procedure `initReturns` setup
+  into the result-plus-carrier package without requiring the whole surrounding
+  assembly program to be no-CALL. This answers the per-segment setup-code gap
+  identified by Aristotle and gives the callee-body splice a checked
+  carrier-ready prefix for return-slot initialization.
+- [x] Raw `initReturns ++ body` result-plus-carrier composition:
+  `openRunNResult_functionsFunDef_raw_initReturns_then_body_compiledOpenResultRel_sourceTrace_of_compileOpen`
+  composes generated return-slot initialization with a recursive callee-body
+  result-plus-carrier suffix. This is still the raw procedure-body segment, not
+  the full regular procedure wrapper with `pushReturns`/cleanup and caller-tail
+  packaging.
+- [x] Regular body `pushReturns`/cleanup result-plus-carrier suffix:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.pushReturns_frameStateRel_running_of_compileOpen`,
+  `...pushReturns_cleanup_frameStateRel_running_of_compileOpen`, and
+  `...body_regular_openResultRel_then_pushReturns_cleanup_running` lift
+  generated return-value pushes and cleanup into the result-plus-carrier
+  package, then append that no-CALL return suffix to a CALL-capable regular
+  callee body prefix.
+- [x] Regular callee-body/procSegment source-trace wrapper:
+  `SourceOpenTraceCurrentSharedBridgeReadyResultRel.compileToPreserving_append_pushReturns_regular_openResultRel_running`,
+  `...compileToPreserving_append_pushReturns_regular_compiledOutcomeRel`,
+  `...compileToPreserving_append_pushReturns_regular_compiledOutcomeRel_values`,
+  `openRunNResult_functionsFunDef_raw_initReturns_then_body_regular_static_values_sourceTrace_of_compileOpen`,
+  `openRunNResult_functionsFunDef_body_regular_compiledOutcomeRel_values_sourceTrace`,
+  `openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRel_values_sourceTrace`,
+  `openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRel_of_initReturns_body_values_sourceTrace`,
+  and
+  `compilerOpenFunctionsCall_regular_body_exists_of_initReturns_body_sourceTrace`
+  lift the recursive regular callee-body run through `compileToPreserving`,
+  raw `initReturns ++ body`, full `procSegment`, and the generated
+  `pushReturns`/cleanup suffix while preserving both old semantic
+  `CompiledOutcomeRel` evidence and the source-trace CALL carrier. This is the
+  checked body callback shape needed by the full argument-to-call-site wrapper.
+- [x] Program-layout regular callee-body source-trace wrapper:
+  `compilerOpenFunctionsCall_regular_body_exists_of_programLayout_body_sourceTrace`
+  lifts the checked regular callee-body callback through
+  `ProgramLayout`, source-function lookup, structured-procedure lookup, and
+  checked body-call inclusion. This puts the source-trace body callback at the
+  same layer as the existing full statement-call corridor.
+- [x] Program-layout argument-to-call-site regular body/tail composition:
+  `compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_stateRelTail_of_entry_of_compileOpen`
+  composes hidden-frame argument evaluation, structured call-site/proc-entry
+  plumbing, the checked program-layout regular callee-body source-trace
+  wrapper, returned-value assignment, and the result-plus caller-tail callback.
+  This is pinned in `LayerAudit`, build-checked through
+  `EvmCompiler.Yul.OpenLowering`, and axiom-audited with only the expected
+  Lean kernel/library dependencies.
+- [x] Statement-level regular CALL source-trace wrapper:
+  `compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_stateRelTail_of_compileOpen`
+  consumes the source `Stmt.call` split, the checked hidden-frame CALL-argument
+  readiness, the program-layout regular argument-to-call-site wrapper, and
+  result-plus body/tail callbacks. It also rules out source `leave` from the
+  called body using `FunctionsProgramRegularOpenSupported`.
+- [x] Recursive regular block source-trace/result theorem:
+  `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_of_compileOpen_supportedFor_programLayout`
+  consumes the hidden-frame ordinary `expr`/`let`/`assign` wrappers plus the
+  checked statement-level `Stmt.call` wrapper in one strong-induction block
+  theorem. The CALL branch supplies recursive callee-body and caller-tail
+  result-plus-carrier callbacks from the smaller-fuel IH, and the ordinary
+  branches append their generated no-CALL heads to the recursive tail result.
+  The theorem returns `SourceOpenTraceCurrentSharedBridgeReadyResultRel`
+  ending in `FunctionsBlockCompiledOpenResultRel`, so the old semantic result
+  relation and the new current-CALL bridge carrier stay coupled.
+- [x] Initial scoped block cleanup, whole-program, and checked-compile
+  source-open carrier bricks:
+  `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_of_compileOpen_supportedFor_programLayout`
+  threads the recursive block carrier through the generated top-block cleanup
+  suffix, returning `FunctionsBlockCompiledOutcomeRel` in the
+  result-plus-carrier package. Separately,
+  `sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough`
+  carries the source-trace bridge through the generated jump to
+  `programEnd` and final label. The scoped and block-level whole-program
+  wrappers,
+  `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`
+  and
+  `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`,
+  compose those two bricks into `Functions.Source.WholeProgramOutcomeRel`.
+  Finally,
+  `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`
+  lifts the carrier through `FunctionsOpen.Program.runState` and checked
+  compile, currently with explicit main-body and call-entry source-readiness
+  premises. These are pinned in `LayerAudit`, build-checked, and
+  axiom-audited with only the expected Lean kernel/library dependencies.
+
+Checked lower/public replay progress:
+
+- [x] `OpenGasAware.openX` and the emitted-block replay tower are checked for
+  primitive CALL, ordinary silent running continuations, success, revert, and
+  final running-state done continuations.
+- [x] `OpenAssembly.OpenBlockTraceResult` is exposed at the imported-Yul CALL
+  boundary, preserving emitted-block evidence needed by gas-aware replay.
+- [x] Public imported-Yul wrappers have moved from broad replay-readiness
+  callbacks to trace-local readiness objects and then to current shared-bridge
+  facts. The newest ordinary-path wrapper is
+  `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`:
+  it feeds the public `OpenXReplayAbove` replay theorem from the checked
+  source-open carrier plus gas-only current-instruction readiness, without a
+  public `hRunningCallSharedBridgeRel` / `hCallBridgeReady` callback. The
+  no-`RETURNDATACOPY` sibling
+  `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`
+  now follows the same route. The older target-side bridge public wrappers
+  have been removed from the import-visible API and from `LayerAudit` pins.
+- [x] The older `RecursiveBridgeCALLTopAssumptions` package is hidden behind
+  checked source/open dispatcher premises on this path; it is not the current
+  public blocker.
+
+Live remaining gap:
+
+The newest ordinary-path public wrapper no longer takes the old target-side
+CALL bridge callbacks. It still exposes source-readiness premises
+(`FunctionsProgramCallEntrySourceStateRelReadyFor` and main-body
+`FunctionsStmtListSourceStateRelReadyFor`) plus trace-local runtime premises:
+gas-only current-instruction readiness, halted no-CALL checks,
+`CurrentNoCallPathChecksReady`, and final fallthrough/clean-return-buffer
+readiness. These remaining premises must either be derived from checked
+source/compiler contracts or explicitly classified as fundamental resource
+inputs.
+
+The immediate source-readiness blocker is no longer list recursion, argument
+evaluation, the resolved CALL branch, response splitting across
+argument/primitive traces, seed-aware expression mutual recursion, ordinary
+statement-head seed wrappers, or ordinary block-head frame/result seed
+wrappers. The seed-aware lit/var/nil/cons expression bricks are checked; the
+primitive expression split is checked with an actual-run non-CALL source/gas
+premise; the response-aware wrapper splits whole expression trace admissibility
+into the exact argument and primitive traces; the new seed-aware mutual
+recursion threads that response predicate through arbitrary expression syntax;
+`expr`/`let`/`assign` statement heads now have seed-aware checked wrappers; and
+the matching block/result wrappers pass actual post-head source/gas witnesses
+to recursive tails. The next proof brick is consumer migration: move the
+recursive block/list theorem, argument-list, and procedure-call consumers off
+`LocalsExprSourceStateTargetGasRelReadyFor` /
+`LocalsExprSeqSourceStateTargetGasRelReadyFor`, then delete those old readiness
+predicates from the public/import-visible spine.
+
+Distance estimate, after the 2026-06-05 02:04 CEST audit:
+
+- Immediate checklist progress is **4 / 9 fully checked** at the top level,
+  with item 5 mostly checked and item 6 partially checked. Item 4, the hard internal procedure-call
+  splice, is checked as a recursive regular block theorem. The proof now runs
+  ordinary heads, nested CALL-bearing expressions, argument lists, generated
+  call-site/proc-entry code, recursive callee bodies, return dispatch,
+  returned-value assignment, and caller tails while preserving both the old
+  semantic result relation and the current shared-state CALL bridge carrier.
+  For item 5, the initial scoped block-plus-cleanup carrier, generated
+  program-end postamble carrier, scoped/block whole-program carrier, and
+  checked-compile `FunctionsOpen.Program.runState` carrier are checked. Item 5
+  remains open because the checked-compile carrier still takes explicit
+  main/function-body source-readiness premises. The function-entry premise is
+  now seed-aware down to the actual post-argument relation, expression
+  recursion, response splitting, ordinary statement heads, and parameter-store
+  construction proof, but the next step is still to migrate the old
+  block/argument/procedure readiness consumers and then derive those readiness
+  premises from checked
+  source/compiler contracts or make them part of a checked compiler contract,
+  rather than exposing them as public proof callbacks. Item 6 now has a
+  checked ordinary-path source-bridge/gas-ready
+  public replay wrapper and a checked no-`RETURNDATACOPY` sibling; the old
+  target-side bridge wrappers are no longer import-visible. Item 6 remains
+  open until any remaining CALL-family wrappers are moved to that route and the
+  remaining gas-only/runtime premises are generated or classified.
+- The important refinement discovered during the block theorem is the
+  source-layout invariant: `sourceLayout = sourceCtx.scope` must be explicit at
+  this layer, because `let` freshness is derived from `CtxRel`/same-scope
+  evidence plus target layout freshness rather than from the readiness package
+  alone.
+- The CALL-specific source/local carrier work is now checked through regular
+  statement-list/block recursion: primitive CALL, recursive expressions,
+  argument lists, ordinary statement heads, internal procedure-call heads,
+  recursive callee bodies, and caller tails are all composed by the checked
+  block theorem and pinned in `LayerAudit`.
+- Item 5 is underway, and item 6 has checked ordinary/no-`RETURNDATACOPY`
+  splices:
+  the carrier now moves from the checked source-open block result into the
+  public imported-Yul replay theorem without the public current-CALL bridge
+  callback. The remaining item-6 work is CALL-family wrapper propagation plus
+  discharge or classification of the gas-only trace-local runtime premises.
+- Items 7 through 9 are the cleanup/audit tail: non-CALL trace-local premises,
+  CALL-family coverage/classification, and final public-assumption/proof-hole
+  audit.
+
+Seed-aware expression status: lit, var, nil, cons sequence composition, the
+CALL primitive admissible-response source/gas extraction helper, the
+hidden-frame/suffix CALL response source/gas bridge, the primitive source/gas
+split, the response-aware primitive compiled-code wrapper, and the
+response-aware seed expression mutual recursion are now checked and pinned.
+Seed-aware `expr`/`let`/`assign` statement-head wrappers are also checked and
+pinned. The old expression-readiness predicates are still used by downstream
+block/argument/procedure consumers for now, so consumer migration plus deletion
+of the old predicates is the current non-circular refactor frontier.
+
+In short: we are **past the hard source-local CALL recursion** and close to the
+ordinary external-CALL proof, but not at the last line yet. The remaining risk
+is public/source-open integration and callback removal, not uncertainty about
+nested expression CALLs, procedure-call bodies, hidden frames, or caller tails.
+
+Immediate proof tasks:
+
+1. [x] Refresh focused artifacts for the new silent-run helper and re-check
+   `LayerAudit` pins.
+2. [x] Add a statement/list-level source-state readiness package so block
+   recursion can compose the checked expression/let/assign/arg-list carriers
+   without ad hoc premises.
+3. [x] Consume the statement/list readiness package in the ordinary
+   block-recursion theorem for `expr`/`let`/`assign` heads and syntactic tails,
+   producing the actual source-trace carrier for the generated
+   `OpenAssembly.Source.OpenTraceResult`.
+4. [x] Lift the carrier through the internal procedure-call statement head.
+   The checked route splits the generated call into arguments, silent call-site
+   plumbing, callee body, return dispatch, returned-value assignment, and
+   caller tail, while returning `SourceOpenTraceCurrentSharedBridgeReadyFor`
+   inside `SourceOpenTraceCurrentSharedBridgeReadyResultRel` and threading the
+   explicit gas relation alongside hidden-frame `Frame.StateRel`.
+   - [x] Add the generic segment-local no-CALL one-step carrier extender:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.current_no_call_running_continue_of_current_instr_exists`.
+     This is the reusable source-open brick for generated internal-call
+     prologue/jump/label code when the surrounding program can still contain
+     real external CALLs elsewhere.
+   - [x] Specialize that extender to generated local stack-shuffle instructions
+     and jumps:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.source_local_instr_no_call_running_continue_exists`
+     and
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.source_jump_no_call_running_continue_exists`.
+   - [x] Reuse/generated-prove the call-site prologue/jump/return-label plumbing
+     is silent for the carrier, through:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.sinkTopUnder_source_running_continue_exists`,
+     `...callPrologue_source_running_continue_exists`,
+     `...source_callEntry_after_prologue_and_jump_continue_exists`, and
+     `...structured_callSite_callEntry_continue_exists`.
+   - [x] Lift the proc-entry label and call-site-to-callee-body entry splice
+     through the carrier, via
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.source_label_no_call_running_continue_exists`,
+     `...proc_entry_label_continue_exists`, and
+     `...structured_callSite_body_continue_exists`.
+   - [x] Compose/package the already-checked argument-list carrier into the
+     procedure-call head frontier, producing post-argument `callSource`,
+     `callerBase`, split-argument/frame facts, a carrier continuation, and an
+     argument-then-downstream wrapper via
+     `compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_continue_withShared_of_compileOpen_sourceRelReady`
+     and
+     `compilerOpenFunctionsArgList_then_sourceTrace_currentSharedBridgeReady_of_compileOpen_sourceRelReady`.
+   - [x] Add the generic body-prefix/suffix composition brick:
+     `openTraceResult_append_running` and
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.append_running` compose a
+     carrier-ready trace that ends in a running callee/return state with the
+     carrier-ready generated suffix trace. This is the reusable join point for
+     callee body recursion followed by return dispatch, returned-value
+     assignment, and caller tail.
+   - [x] Add the returned-value single-slot assignment carrier bricks:
+     `compilerOpenAssignTopWithOffset_stackPrefixSuffix_sourceTrace_currentSharedBridgeReady_fallthrough`
+     and its erased-shared-state variant replay the generated swap/pop
+     assignment suffix without external events while preserving the source-trace
+     CALL bridge carrier.
+   - [x] Lift returned-value assignment from one slot to the generated
+     returned-values list:
+     `compilerOpenFunctionsAssignReturnedTopsRev_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen`
+     and
+     `compilerOpenFunctionsAssignReturnedTops_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen`
+     induct over the actual `assignReturnedTops` generated code and preserve
+     the carrier through every swap/pop assignment.
+   - [x] Reattach the generated return label plus returned-value assignment
+     under the attached hidden return frame:
+     `compilerOpenFunctionsAssignReturnedTops_returnLabel_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen`
+     steps over the return label, converts the attached returned frame back to
+     the erased stack-prefix/suffix relation, and then invokes the checked full
+     returned-values-list carrier.
+   - [x] Reattach that checked return-label/assignment carrier to the actual
+     generated call-site return segment:
+     `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen`
+     expands the concrete `callSiteCode`, identifies the exact return label PC,
+     casts the assignment segment to the expanded program, and preserves the
+     source-trace CALL bridge carrier through the assembly recast.
+   - [x] Thread the carrier through return-frame token removal and the selected
+     return-dispatch case branch:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.liftBuriedToTop_source_running_continue_exists`,
+     `...removeBuriedUnder_source_running_continue_exists`,
+     `...source_returnAttach_after_remove_continue_exists`, and
+     `...dispatch_case_source_running_continue_exists` replay the generated
+     swap/pop/label/jump code locally without assuming the whole surrounding
+     program is no-CALL.
+   - [x] Thread the carrier through a single dispatch probe and conditional
+     jump:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.source_jumpi_no_call_running_continue_exists`,
+     `...dispatchCondition_source_running_continue_exists`, and
+     `...dispatchCondition_jumpi_source_running_continue_exists` replay the
+     generated `dup`/`push`/`eq`/`jumpi` test without assuming the surrounding
+     program is no-CALL.
+   - [x] Lift the remaining dispatch-table recursion through the carrier:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.dispatch_mismatched_test_source_running_continue_exists`,
+     `...dispatch_selected_site_source_running_continue_exists`,
+     `...selected_table_source_running_continue_exists`, and
+     `...forProc_selected_source_running_continue_exists` replay the selected
+     and mismatched return-dispatch table branches while preserving the
+     source-trace CALL bridge carrier.
+   - [x] Compose the exit-label-plus-dispatch wrapper:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.exit_label_then_dispatch_continue_exists`
+     steps over the generated procedure exit label and then invokes the checked
+     selected dispatch-table carrier.
+   - [x] Compose carrier-ready callee body exits into that checked exit-dispatch
+     wrapper:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.body_regular_then_exit_dispatch_continue_exists`
+     and
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.body_leave_then_exit_dispatch_continue_exists`
+     append a checked body trace to the generated exit-label/dispatch/return
+     continuation for regular and `leave` callee-body outcomes.
+   - [x] Compose the regular callee-body carrier through generated call-site
+     entry, exit dispatch, returned-value assignment, and caller-tail
+     continuation:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.callSite_body_regular_then_return_assign_continue_exists`.
+     This packages the regular call-site continuation once the recursive callee
+     body callback and caller-tail callback are available.
+   - [x] Compose the `leave` callee-body carrier through generated call-site
+     entry, exit dispatch, returned-value assignment, and caller-tail
+     continuation:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.callSite_body_leave_then_return_assign_continue_exists`.
+     This gives the procedure-call head the same source-trace carrier wrapper
+     for callee bodies that exit by `leave` as for regular bodies.
+   - [x] Add the explicit-gas hidden-frame/suffix current-CALL bridge:
+     `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_stackPrefixSuffixErasedRel`
+     derives the weak bridge from source-state relation plus
+     `StackPrefixSuffixErasedRel` when an explicit gas-availability relation is
+     available. This closes the shared-state side of the suffix/hidden-frame
+     primitive CALL frontier; the source-trace suffix expression recursion is
+     still the next proof brick.
+   - [x] Add the suffix/hidden-frame primitive source-trace frontier:
+     `StackPrefixSuffixErasedRel.compilerPrimitiveOpenCall?_site_eq_evmOpenCall?`
+     proves the compiler and EVM CALL trace sites coincide under the erased
+     suffix relation, and
+     `compilerOpenPrimitive_callKind_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady`
+     attaches the source-trace carrier to the existing suffix primitive CALL
+     open-run theorem. The non-CALL branch
+     `compilerOpenPrimitive_no_callCreate_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady`
+     and combined
+     `compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_of_resolves_ok`
+     now give expression recursion one primitive frontier for all supported
+     primitive outcomes.
+   - [x] Add the source-state/target-gas suffix primitive wrapper:
+     `SourceStateTargetGasRel`,
+     `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_stackPrefixSuffixErasedRel_source`,
+     and
+     `compilerOpenPrimitive_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_of_resolves_ok_source_state_gas_rel`
+     expose the same suffix primitive frontier from a source-state relation plus
+     an explicit source/target gas relation. This is the checked carrier shape
+     needed before the suffix expression recursion can run recursively through
+     nested CALL-bearing expressions.
+   - [x] Add suffix expression base/sequence source-trace carrier bricks:
+     `compilerOpenLocalsExpr_lit_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+     `compilerOpenLocalsExpr_var_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+     `compilerOpenLocalsExprSeq_nil_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode`,
+     and
+     `compilerOpenLocalsExprSeq_cons_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_of_head_tail`
+     cover literal, variable, empty expression-sequence, and generic head/tail
+     sequence composition under `StackPrefixSuffixErasedRel` and the
+     source-trace CALL bridge carrier.
+   - [x] Refactor the suffix expression base/sequence carrier to a seed-aware
+     shape for literal, variable, nil, and cons sequence composition, carrying
+     actual `SourceStateRel`/`SourceStateTargetGasRel` evidence through the
+     head and into the tail.
+   - [x] Prove the seed-aware primitive expression theorem: for an actual
+     primitive evaluation result, derive the actual post-source
+     `SourceStateRel` and `SourceStateTargetGasRel` while preserving the
+     source-trace current-CALL bridge carrier, including the external-CALL
+     response branch. This is checked with an actual-run non-CALL source/gas
+     premise and a response-aware compiled-code wrapper that splits whole-trace
+     admissibility into argument and primitive suffix traces.
+   - [x] Replace the expression theorem itself with seed-aware,
+     response-aware mutual recursion:
+     `compilerOpenLocalsExpr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`
+     and
+     `compilerOpenLocalsExprSeq_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasSeed_of_compileCode_responses`.
+   - [x] Add seed-aware ordinary statement-head wrappers for
+     `expr`/`let`/`assign`, replacing the old expression-readiness dependency
+     at the statement-head theorem boundary.
+   - [ ] Migrate block, argument-list, and procedure-call readiness consumers off
+     `LocalsExprSourceStateTargetGasRelReadyFor` and
+     `LocalsExprSeqSourceStateTargetGasRelReadyFor`, then delete the old
+     over-strong predicates instead of keeping them for compatibility.
+   - [x] Compose the suffix primitive/args expression theorem with explicit
+     target-dependent post-gas readiness:
+     `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_args`
+     and
+     `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_args`
+     split generated argument code from the primitive opcode, run the checked
+     suffix primitive frontier, and return both source-state relation and
+     `SourceStateTargetGasRel` for the final target state.
+   - [x] Close the mutual suffix expression/expression-sequence recursion for
+     nested CALL-bearing expressions under hidden frames using the
+     target-dependent post-gas readiness package:
+     `LocalsExprSourceStateTargetGasRelReadyFor`,
+     `LocalsExprSeqSourceStateTargetGasRelReadyFor`,
+     `compilerOpenLocalsExpr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+     and
+     `compilerOpenLocalsExprSeq_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`.
+     These are checked, pinned in `LayerAudit`, and axiom-audited with only
+     expected Lean kernel/library dependencies.
+   - [x] Add the hidden-frame/frameStateRel argument-list source-trace carrier:
+     `compilerOpenFunctionsArgList_callSource_sourceTrace_currentSharedBridgeReady_continue_frameStateRel_withShared_of_compileOpen_sourceGasRelReady`.
+     This consumes the mutual suffix expression-sequence recursion for actual
+     generated procedure-call arguments and returns the post-argument
+     `Frame.StateRel`, split-argument facts, `SourceStateRel`,
+     `SourceStateTargetGasRel`, and carrier continuation needed by the
+     callee/tail splice.
+   - [x] Expose hidden-frame target-gas readiness for ordinary statement heads:
+     `FunctionsStmtListSourceStateRelReadyFor.expr_head_targetGas`,
+     `...let_head_targetGas`, and `...assign_head_targetGas` preserve the old
+     exact source-state readiness while adding the hidden suffix
+     `LocalsExprSourceStateTargetGasRelReadyFor` projection needed under
+     procedure return frames.
+   - [x] Add hidden-frame ordinary statement source-trace wrappers:
+     `compilerOpenFunctionsStmt_expr_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+     `...let_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`,
+     and
+     `...assign_stackPrefixSuffixErased_sourceTrace_currentSharedBridgeReady_fallthrough_sourceGasRel_of_compileCode_ready`.
+     These lift non-call `expr`/`let`/`assign` heads through
+     `StackPrefixSuffixErasedRel`, returning `SourceStateRel`,
+     `SourceStateTargetGasRel`, the post-statement erased suffix relation, and
+     the source-trace CALL carrier continuation.
+   - [x] Add source/target gas transport helpers:
+     `SourceStateTargetGasRel.of_target_gasAvailable_eq` and
+     `SourceStateTargetGasRel.ok_store` move the explicit gas relation across
+     target states with unchanged `gasAvailable` and across source states that
+     differ only in store. These are the small reusable facts needed by the
+     upcoming silent call-entry/proc-entry gas-carrying splice.
+   - [x] Add the general source-state hidden-frame bridge wrapper:
+     `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_frameStateRel_source`
+     derives the current shared-state bridge from `SourceStateRel`,
+     `Frame.StateRel`, and `SourceStateTargetGasRel` without exposing the
+     `.Ok` source-state fields at the call-head splice.
+   - [x] Lift generated call-entry/proc-entry silent plumbing through the
+     explicit gas relation:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.source_label_no_call_running_continue_exists_sourceGasRel`,
+     `...proc_entry_label_continue_exists_sourceGasRel`,
+     `...sinkTopUnder_source_running_continue_exists_sourceGasRel`,
+     `...callPrologue_source_running_continue_exists_sourceGasRel`,
+     `...source_callEntry_after_prologue_and_jump_continue_exists_sourceGasRel`,
+     `...structured_callSite_callEntry_continue_exists_sourceGasRel`, and
+     `...structured_callSite_body_continue_exists_sourceGasRel` preserve
+     `SourceStateTargetGasRel` while replaying the generated label/PUSH/SWAP/JUMP
+     call-entry path into the callee body segment.
+   - [x] Lift regular/leave generated call-site body wrappers through the
+     explicit gas relation:
+     `SourceOpenTraceCurrentSharedBridgeReadyFor.callSite_body_regular_then_return_assign_continue_exists_sourceGasRel`
+     and
+     `...callSite_body_leave_then_return_assign_continue_exists_sourceGasRel`
+     now pass `SourceStateTargetGasRel` from the generated call-entry path into
+     the recursive callee-body callback before composing exit dispatch,
+     returned-value assignment, and caller tail.
+   - [x] Lift the silent call-entry/proc-entry wrappers to the
+     result-plus-carrier package:
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel.source_label_no_call_running_continue_exists_sourceGasRel`,
+     `...sinkTopUnder_source_running_continue_exists_sourceGasRel`,
+     `...callPrologue_source_running_continue_exists_sourceGasRel`,
+     `...source_callEntry_after_prologue_and_jump_continue_exists_sourceGasRel`,
+     `...proc_entry_label_continue_exists_sourceGasRel`,
+     `...structured_callSite_callEntry_continue_exists_sourceGasRel`, and
+     `...structured_callSite_body_continue_exists_sourceGasRel` preserve the
+     old semantic/result relation and the CALL carrier through generated
+     silent call-entry plumbing.
+   - [x] Add result-plus-carrier body/tail composition bricks:
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel.append_running`
+     appends carrier-ready body prefixes to result-plus-carrier suffixes, and
+     `...assignReturnedTops_callSiteReturn_attachedFrameStateRel_of_compileOpen`
+     preserves the old semantic/result relation and the CALL carrier through
+     generated return-label and returned-value assignment before the caller
+     tail.
+   - [x] Lift generated return-dispatch and body-exit replay to the
+     result-plus-carrier package:
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel.source_local_instr_no_call_running_continue_exists`,
+     `...source_jump_no_call_running_continue_exists`,
+     `...source_jumpi_no_call_running_continue_exists`,
+     `...dispatchCondition_source_running_continue_exists`,
+     `...dispatchCondition_jumpi_source_running_continue_exists`,
+     `...source_label_no_call_running_continue_exists`,
+     `...liftBuriedToTop_source_running_continue_exists`,
+     `...removeBuriedUnder_source_running_continue_exists`,
+     `...source_returnAttach_after_remove_continue_exists`,
+     `...dispatch_case_source_running_continue_exists`,
+     `...dispatch_mismatched_test_source_running_continue_exists`,
+     `...dispatch_selected_site_source_running_continue_exists`,
+     `...selected_table_source_running_continue_exists`,
+     `...forProc_selected_source_running_continue_exists`,
+     `...exit_label_then_dispatch_continue_exists`,
+     `...body_regular_then_exit_dispatch_continue_exists`, and
+     `...body_leave_then_exit_dispatch_continue_exists` preserve the old
+     semantic/result relation and the CALL carrier through generated
+     return-token removal, return-dispatch scanning, procedure exit labels, and
+     regular/leave callee-body exit composition.
+   - [x] Lift generated no-CALL structured-code segments and procedure
+     `initReturns` setup to the result-plus-carrier package:
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel.current_no_call_running_continue_of_current_instr`,
+     `...source_code_no_call_relAt_running_continue_exists`,
+     `...source_code_no_call_frameStateRel_running_continue_exists`,
+     `...codeSegment_no_call_frameStateRel_running_continue_exists`, and
+     `...initReturns_frameStateRel_running_of_compileOpen`. These are checked,
+     pinned in `LayerAudit`, and axiom-audited with only expected Lean
+     kernel/library dependencies.
+   - [x] Compose raw `initReturns ++ body` procedure segments into the
+     result-plus-carrier package:
+     `openRunNResult_functionsFunDef_raw_initReturns_then_body_compiledOpenResultRel_sourceTrace_of_compileOpen`.
+     This consumes a recursive body result-plus-carrier suffix and appends the
+     checked generated `initReturns` prefix; it is checked, pinned in
+     `LayerAudit`, and axiom-audited with only expected Lean kernel/library
+     dependencies.
+   - [x] Lift the generated regular return suffix into the
+     result-plus-carrier package:
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel.pushReturns_frameStateRel_running_of_compileOpen`,
+     `...pushReturns_cleanup_frameStateRel_running_of_compileOpen`, and
+     `...body_regular_openResultRel_then_pushReturns_cleanup_running`.
+     These compose CALL-capable regular body traces with no-CALL
+     `pushReturns`/cleanup while preserving returned-stack, final frame, final
+     PC, and old semantic evidence.
+   - [x] Recurse through the regular callee body wrapper with the hidden return
+     frame, `compileToPreserving`/`procSegment`, and the
+     explicit gas relation needed by
+     `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_frameStateRel`
+     and
+     `FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_stackPrefixSuffixErasedRel`.
+     The checked wrappers
+     `openRunNResult_functionsFunDef_body_regular_compiledOutcomeRel_values_sourceTrace`,
+     `openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRel_values_sourceTrace`,
+     `openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRel_of_initReturns_body_values_sourceTrace`,
+     and
+     `compilerOpenFunctionsCall_regular_body_exists_of_initReturns_body_sourceTrace`
+     return old semantic/result evidence together with
+     `SourceOpenTraceCurrentSharedBridgeReadyFor`.
+   - [x] Lift the regular body callback through program layout:
+     `compilerOpenFunctionsCall_regular_body_exists_of_programLayout_body_sourceTrace`
+     packages source-function lookup, structured-procedure lookup, procedure
+     layout supplies, and body-call inclusion around the checked procSegment
+     source-trace theorem.
+   - [x] Plug the regular body callback into the full argument-to-call-site
+     theorem with result-plus caller-tail composition:
+     `compilerOpenFunctionsArgList_then_callSite_programLayout_body_regular_return_assign_tail_exists_sourceTrace_stateRelTail_of_entry_of_compileOpen`
+     consumes the checked program-layout callee-body callback, hidden-frame
+     argument replay, generated call-site/proc-entry plumbing, returned-value
+     assignment, and the caller-tail result callback.
+   - [x] Lift the checked argument-to-call-site theorem through source
+     `Stmt.call`, consuming
+     `FunctionsStmtListSourceStateRelReadyFor.call_args` for hidden-frame
+     argument readiness and exposing the recursive body/tail callbacks:
+     `compilerOpenFunctionsStmt_call_regular_then_tail_exists_sourceTrace_stateRelTail_of_compileOpen`.
+   - [x] Consume the checked hidden-frame ordinary statement wrappers and the
+     checked statement-level CALL wrapper in statement-list/block recursion,
+     supplying the recursive callee-body and caller-tail result-plus callbacks
+     from the smaller-fuel IH:
+     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_of_compileOpen_supportedFor_programLayout`.
+   - [x] Consume the source/gas-enriched ordinary heads, dynamic statement-level
+     `Stmt.call` wrapper, program-layout callee-body source/gas wrapper, and
+     layout weakening in the full recursive block theorem:
+     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout`.
+     This is the recursive CALL branch we were trying to close; remaining
+     recursive-frontier work is wiring this theorem upward and discharging its
+     explicit actual-run non-CALL primitive seed premise.
+   - [x] Confirm the leave-body analogue is not a blocker for the current
+     regular CALL theorem. The leave body-to-dispatch/result-plus corridors are
+     checked for reuse, while the regular statement-level CALL theorem rules
+     out source `leave` in called bodies via
+     `FunctionsProgramRegularOpenSupported`.
+5. [ ] Thread the checked source/gas recursive block theorem through the
+   source-open dispatcher/top block wrapper so the actual
+   `OpenAssembly.Source.OpenTraceResult` emitted by
+   `FunctionsProgramToAssemblySourceOpenSoundAt` also has
+   `SourceOpenTraceCurrentSharedBridgeReadyFor` and the final
+   `FunctionsBlockCompiledOpenResultRelSourceGas` evidence needed by the CALL
+   public spine.
+   - [x] Add the generated program-end postamble carrier:
+     `sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough`
+     replays the main fallthrough jump to `programEnd` and final label inside
+     `SourceOpenTraceCurrentSharedBridgeReadyResultRel`.
+   - [x] Add the initial scoped block-plus-cleanup carrier:
+     `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_compiledOutcomeRel_of_compileOpen_supportedFor_programLayout`
+     composes the recursive regular block theorem with the generated cleanup
+     suffix and returns `FunctionsBlockCompiledOutcomeRel`.
+   - [x] Compose block-plus-cleanup with the program-end postamble into a
+     whole-program `Functions.Source.WholeProgramOutcomeRel` source-trace
+     carrier:
+     `compilerOpenFunctionsBlock_initial_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`
+     and
+     `compilerOpenFunctionsBlock_initial_block_scoped_sourceTrace_currentSharedBridgeReadyResultRel_wholeRel_of_compileOpen_supportedFor_programLayout`.
+   - [x] Wire that whole-program carrier through
+     `FunctionsProgramToAssemblySourceOpenSoundAt` / checked compile target
+     wrappers without leaving a public source-trace bridge premise:
+     `FunctionsProgramToAssemblySourceOpenBridgeReadySoundAt.of_compileChecked_supported_ready`
+     proves the checked-compile carrier route, with explicit source-readiness
+     premises.
+   - [x] Replace the over-strong arbitrary shared-state program readiness
+     premise with the seeded
+     `FunctionsProgramCallEntrySourceStateRelReadyFor` predicate and thread the
+     actual post-argument `SourceStateRel` witness through the call-site/body
+     callbacks.
+   - [ ] Derive the remaining
+     `FunctionsProgramCallEntrySourceStateRelReadyFor` and main-body
+     `FunctionsStmtListSourceStateRelReadyFor` premises from checked
+     source/compiler contracts, or add them to a checked compiler contract so
+     they are not public callbacks.
+6. [ ] Feed the public replay wrapper from the checked source-open carrier and
+   remove public target-side CALL bridge callbacks from the ordinary CALL path
+   and its family wrappers.
+   - [x] Add the gas/evidence split
+     `currentEmittedTraceReadyFor_of_source_trace_current_shared_bridge_ready_gas_cases`,
+     which combines the checked source-open shared bridge carrier with
+     gas-only current-instruction cases.
+   - [x] Add the ordinary-path public replay wrapper
+     `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady`,
+     removing public `hRunningCallSharedBridgeRel` / `hCallBridgeReady`
+     callbacks from that route.
+   - [x] Move the no-`RETURNDATACOPY` sibling to the same route via
+     `compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_sourceBridgeGasReady_noReturnDataCopy`.
+   - [x] Retire the old target-side bridge public wrappers from the
+     import-visible API and `LayerAudit` pins.
+   - [ ] Move any remaining public CALL-family wrappers to the
+     source-bridge/gas-ready route, then remove any internal-only target-side
+     bridge scaffolding that no later proof uses.
+7. [ ] Derive or classify the remaining non-CALL trace-local premises:
+   `hRunningReady`, `hHaltedNoCall`, `CurrentNoCallPathChecksReady`, and final
+   fallthrough/clean-return-buffer readiness, from checked emitted-code and
+   resource facts rather than public callbacks.
+8. [ ] Extend/audit the same abstract-response architecture across the CALL
+   family: `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `CREATE`, and `CREATE2`,
+   with unsupported members explicitly rejected or proven.
+9. [ ] Run the final assumption audit: public theorem grep for replay/call
+   callbacks, compiler artifacts, generated layout/evidence inputs, stale
+   direct let/assign CALL scaffolding, and proof holes/axioms.
+
+Bottom line: the remaining work is a public integration splice, not a wholesale
+redo. We are close in the sense that the source finite-path proof, expression
+carrier, internal procedure corridor, recursive regular block theorem, and
+gas-aware replay tower all exist; we are not done because the current public
+CALL wrapper still exposes trace-local callback premises that must be generated
+by the checked compiler/open-lowering proof itself.
+
+Architecture correction: the public CALL evidence no longer treats a
+block-level compiled-open result relation as the final current-step invariant.
+That relation is too strong for nested external CALLs inside expressions, where
+the target is mid-expression and evaluated operands are still on the stack.
+`Yul.OpenLowering.FunctionsOpenCurrentSharedStateBridgeRel` is now the runtime
+CALL invariant: it stores exactly the shared-state relation needed for
+external-call response admissibility. It has checked constructors from a raw
+shared-state relation, from imported/source `SourceStateRel` plus a
+`StackPrefixRel` (the expression-recursive case), from the existing
+`FunctionsBlockCompiledOpenCurrentRel`, and from the older result-style
+current-PC fact. `Yul.OpenRuntime.OpenXCurrentRunningInstrCompiledOpenEvidenceCase`
+now consumes this weak shared bridge in the CALL branch; existing result-style
+wrappers remain producers of the weak bridge, not the final architecture.
+`compilerOpenPrimitive_callKind_stackPrefix_openRunNResult_continue_currentSharedBridgeRel`
+packages the existing primitive CALL open-run continuation with the weak bridge
+at the exact mid-expression primitive step, so the next expression induction has
+a checked local source for the CALL evidence.
+`SourceOpenTraceCurrentSharedBridgeReadyFor` now carries the same weak bridge
+along actual source-open trace proofs: every running step records a
+current-instruction callback that only has to produce the bridge when the
+instruction is a CALL-family primitive. Its constructors include a direct
+`stepRunning_of_shared_bridge` and a `current_stepAt_running_continue` wrapper,
+so expression proofs can attach bridge evidence at the exact generated CALL
+opcode while composing with the ordinary source `OpenTraceResult` recursion.
+`OpenXCompiledOpenCurrentCallBridgeReadyFor.of_source_trace_current_shared_bridge_ready`
+converts that source-side carrier through `Assembly.assemble?` into the runtime
+call-bridge-ready object, using the existing target-side running-readiness and
+halted-no-CALL checks. This is the missing source-aware bridge between
+`openRunNResult` preservation and the public `OpenBlockTraceResult` replay gate.
+`compilerOpenPrimitive_callKind_stackPrefix_sourceTrace_currentSharedBridgeReady`
+now supplies the primitive expression base case: from imported/source
+`SourceStateRel`, the mid-expression `StackPrefixRel`, the generated CALL
+opcode, and a tail source trace/carrier after an arbitrary response, it extends
+the trace across the CALL step, proves the compiler primitive emits the same
+source call event, preserves the response stack-prefix relation, and carries
+the weak shared bridge at the current opcode.
+Expression-frontier checkpoint: `Yul.OpenLowering` now also has the no-CALL
+trace-extension constructor, the no-CALL primitive source-trace branch, the
+primitive CALL/no-CALL split over actual compiler-open primitive resolutions,
+literal and variable leaf source-trace lemmas, nil/cons expression-sequence
+composition, and source-relation-aware primitive/sequence wrappers. The
+source-relation-aware wrappers deliberately do not invent imported/source
+state preservation from lower EVM stack-prefix facts; they take the
+source-state relation produced by the imported/source expression soundness and
+use it exactly where later nested CALL sites need it.
+Expression recursion checkpoint: `LocalsExprSourceStateRelReadyFor` and
+`LocalsExprSeqSourceStateRelReadyFor` package the source-state facts needed by
+the recursive compiler-open expression proof. The mutual theorems
+`compilerOpenLocalsExpr_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+and
+`compilerOpenLocalsExprSeq_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+now lift the CALL carrier through every supported locals expression and
+expression sequence produced by `compileCode`, preserving fallthrough PC,
+stack-prefix relation, source-trace CALL readiness, and the final
+imported/source `SourceStateRel`. The zero-result adapter
+`compilerOpenLocalsExpr_zero_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+specializes that recursion to statement expressions, and
+`compilerOpenFunctionsStmt_expr_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+has now lifted the carrier through the `FunctionsOpen.Stmt.run (.expr expr)`
+frontier. The same carrier now also crosses the `let` and `assign` statement
+heads: `sourceStateRel_cons_insert_exists` and
+`sourceStateRel_insert_visible_exists` provide the imported/source store
+updates, `compilerOpenFunctionsStmt_let_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+threads declaration/insertion, `compilerOpenAssignTail_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough`
+replays the generated swap/pop assignment tail without consuming external
+events, and
+`compilerOpenFunctionsStmt_assign_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileCode_sourceRelReady`
+composes expression evaluation, visible assignment, and the assign tail. The
+function-call argument frontier now has the exact-stack-prefix adapter
+`compilerOpenFunctionsArgList_stackPrefix_sourceTrace_currentSharedBridgeReady_fallthrough_of_compileOpen_sourceRelReady`,
+which converts `FunctionsOpen.ArgList.eval` through the checked
+`Functions.Lower.argExprs` expression-sequence carrier while preserving final
+imported/source `SourceStateRel`, argument stack-prefix relation, fallthrough
+PC, and source-trace CALL readiness for the chosen continuation fuel.
+Hidden-frame bridge checkpoint:
+`FunctionsOpenCurrentSharedStateBridgeRel.of_source_state_rel_frameStateRel`
+now derives the weak current shared-state CALL bridge from imported/source
+`SourceStateRel`, source-direct state relation, structured frame relation, and
+an explicit gas-availability relation. The existing current-relation bridge is
+factored through this frame-native theorem, and
+`FunctionsBlockCompiledOpenCurrentBridgeRel.to_currentSharedStateBridgeRel`
+projects the stronger current bridge package to the weak runtime bridge. This
+does not infer gas from `Frame.StateRel`; it makes the gas requirement explicit
+at exactly the boundary where hidden frames otherwise erase it.
+Verification for the current statement-frontier checkpoint: direct
+`OpenLowering` Lean check, direct `OpenLowering.olean` refresh, narrow
+CALL-pin import/name checks, direct `LayerAudit` check, focused
+`lake build EvmCompiler.LayerAudit`, proof-hole scan, scoped
+`git diff --check`, and axiom checks pass with only `[propext,
+Classical.choice, Quot.sound]` for the new low-level carrier lemmas. Earlier
+checked public wrappers retain the existing executable-checker
+`[Lean.ofReduceBool, Lean.trustCompiler]` footprint.
+
+Verified checkpoint: `Yul.OpenLowering` now exposes the generic
+`FunctionsBlockCompiledOpenCurrentRel`, a current-state invariant over the
+source state, source-direct context/state relation, structured frame relation,
+and target EVM state. It is deliberately expression/statement/block generic,
+not a CALL-specific lemma. The theorem
+`FunctionsBlockCompiledOpenCurrentRel.to_resultRel_current_pc` converts this
+prefix-local relation into the existing running compiled-open result relation at
+the current PC, and
+`FunctionsBlockCompiledOpenCurrentRel.of_resultRel_current_pc` converts an
+existing running result relation at the current PC back into the prefix-local
+current relation. `Yul.OpenRuntime.OpenXCurrentRunningInstrCompiledOpenEvidenceCase`
+now stores this current relation directly in its CALL branch, and its `call`
+constructor consumes the current relation instead of the older
+`FunctionsBlockCompiledOpenResultRel`. This gives the next generated-evidence
+proof a bridge in both directions: it can reuse existing result-style lowering
+facts where they already exist, while exposing the expression/statement/block
+generic current invariant at emitted running prefixes.
+The source/runtime half of the same prefix has now been packaged as
+`FunctionsBlockCompiledOpenCurrentBridgeRel`: one invariant carrying the
+imported/source `SourceStateRel`, the compiled-open current relation, and the
+gas-availability relation for the exact current EVM state.  The runtime CALL
+evidence branch stores this bridge relation instead of separate source/current/gas
+witnesses and unpacks it only when constructing response-admissibility.
+`LayerAudit` pins the new Functions and imported-Yul CALL boundary names.
+Verification: `lake env lean EvmCompiler/LayerAudit.lean -DmaxErrors=30`,
+`lake build EvmCompiler.LayerAudit`, focused hole scan, scoped
+`git diff --check`, and axiom audit all pass; the axiom audit reports only
+`[propext, Classical.choice, Quot.sound]`.
+The runtime proof now also has the trace-local carrier
+`OpenXCompiledOpenCurrentEmittedEvidenceFor`: each actual running step of an
+`OpenBlockTraceResult` stores the compiled-open current-step evidence, each
+halted step stores no-CALL evidence, and
+`currentEmittedTraceReadyFor_of_compiled_open_current_emitted_evidence` converts
+that carrier into the existing gas-aware trace-readiness object by splitting the
+actual trace responses. The replay wrapper
+`OpenXReplayTraceReadinessForCheckedTrace.of_compiled_open_current_emitted_evidence`
+therefore reduces the remaining CALL replay assumption from a global
+current-running callback to a proof object for each generated open block trace.
+The next split was tightened after a boundary audit:
+`OpenXCompiledOpenCurrentCallBridgeReadyFor` stores target-side current
+readiness at each actual running emitted step, but asks for
+`FunctionsBlockCompiledOpenCurrentBridgeRel` only when that current instruction
+is proved to be an open CALL-family primitive. No-CALL running steps no longer
+carry an unused source/compiler bridge relation. The conversion
+`openXCompiledOpenCurrentEmittedEvidenceFor_of_current_call_bridge_ready` turns
+this call-only bridge-ready trace into compiled-open evidence, and
+`OpenXReplayTraceReadinessForCheckedTrace.of_compiled_open_current_call_bridge_ready`
+routes it into replay readiness. The public imported-Yul replay family now has
+call-bridge-ready wrappers:
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_callBridgeReady`
+and
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_callBridgeReady_noReturnDataCopy`.
+`OpenLowering.FunctionsBlockCompiledOpenCurrentBridgeRel.initial` proves the
+entry-state bridge relation from the checked initial shared-state relation and
+initial empty stack, and
+`functionsBlockCompiledOpenCurrentBridgeRel_initial_of_recursiveBridgeInitialCodeImageRel`
+lifts that constructor to the imported-Yul public initial-code-image premise.
+The generic constructor
+`openXCompiledOpenCurrentCallBridgeReadyFor_of_openBlockTrace_current_call_bridge_cases`
+now builds the call-only trace carrier by induction over an actual
+`OpenBlockTraceResult` from per-step target-readiness, call-site bridge, and
+halted no-CALL cases.
+The result-style constructor
+`OpenLowering.FunctionsBlockCompiledOpenCurrentBridgeRel.of_source_state_rel_result_rel_current_pc`
+now packages an imported/source `SourceStateRel`, an existing running
+`FunctionsBlockCompiledOpenResultRel` at the current target PC, and gas relation
+into the bridge relation; the runtime helper
+`openXCompiledOpenCurrentCallBridgeReadyFor_of_openBlockTrace_current_result_rel_cases`
+uses it to build the call-only trace carrier from per-CALL-site result-style
+facts.
+The public replay surface has been moved to the weaker shared bridge:
+`OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_shared_bridge_cases`
+and
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_callSharedBridgeReady`
+route replay through current shared-state bridge facts rather than block-level
+result-style call-site facts.
+Remaining gap: connect the new source-trace/shared-state carrier to the
+already-checked recursive CALL corridor and public replay wrapper. The older
+compiled-open proof already checks the regular internal procedure-call
+corridor through argument evaluation, procedure entry/body, returned-value
+assignment, and caller tails; this work is not being redone. The exact
+stack-prefix argument adapter above covers top-level argument evaluation, but
+the frame-native procedure-call statement carrier still needs a matching
+source-trace path for hidden return frames/tokens. That path cannot simply
+coerce `StackPrefixSuffixErasedRel` into the current full shared-state bridge,
+because the suffix-erased relation intentionally erases gas/control; the next
+proof boundary must carry the needed gas relation alongside the frame relation,
+or else deliberately weaken the response-admissibility bridge. The checked
+frame-native adapter above supports the first route. What remains is to lift
+the new carrier through the internal procedure-call statement head using
+imported/source statement-level source-state facts and explicit gas relation,
+compose the checked `expr`/`let`/`assign`/argument/call adapters with the
+existing block/procedure recursion, then route the public
+replay wrapper through
+`OpenXCompiledOpenCurrentCallBridgeReadyFor.of_source_trace_current_shared_bridge_ready`
+and retire the public call-site callback. Focused
+`lake build EvmCompiler.LayerAudit` currently passes for the CALL carrier
+surface despite the broader dirty 4.28 migration. The low-level CALL surface
+depends only on
+`[propext, Classical.choice, Quot.sound]`; the checked public wrappers
+additionally inherit the existing executable-checker
+`[Lean.ofReduceBool, Lean.trustCompiler]` stack.
+
+Verified checkpoint: `Yul.OpenRuntime` now exposes
+`OpenXCurrentRunningInstrCompiledOpenEvidenceCase`, a checked current-step
+evidence object that turns compiler-open result relation, source state/frame
+relation, gas relation, target step checks, and post-budget evidence into the
+existing response-admissible and trace-ready current CALL cases. It also adds
+the trace/replay wrappers
+`currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_compiled_open_evidence_cases_of_initial_code`
+and
+`OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_compiled_open_evidence_cases`.
+`LayerAudit.ImportedYulOpenCALLBoundary` pins these names. Verification:
+`lake build EvmCompiler.LayerAudit`, focused hole scan, scoped
+`git diff --check`, and axiom audit all pass; the axiom audit reports only
+`[propext, Classical.choice, Quot.sound]`. Remaining gap: derive this
+compiled-open evidence from the lowering/open-trace proof itself instead of
+passing it as a current-step callback.
+
+Latest checked checkpoint: `Yul.OpenLowering` now exposes
+`FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_frameStateRel`,
+which opens a regular running compiled-open result back into the
+`Functions.SourceDirect.StateRel`, `Structured.Preservation.Frame.StateRel`, and
+fallthrough-PC evidence it packaged. `Yul.OpenRuntime` composes that with the
+source-facing gas relation via
+`OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_functions_block_compiled_open_result_rel`,
+so a current primitive CALL can be made response-admissible from the checked
+compiled-open result object rather than from separately re-supplied direct/frame
+evidence. `LayerAudit` pins both surfaces. Earlier checkpoint:
+`Yul.OpenLowering` now has the CALL-capable
+`compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_openRunNResult_compiledOpenResultRel_of_compileOpen_supportedFor_programLayout`
+theorem. This closes the recursive source-fuel/program-layout proof shape for
+ordinary supported function blocks: CALL argument replay, callee-body recursion,
+regular-return assignment, and caller-tail recursion all check under arbitrary
+hidden return frames/tokens. Its no-hidden entry wrapper
+`compilerOpenFunctionsBlock_regular_openRunNResult_compiledOpenResultRel_of_compileOpen_supportedFor_programLayout`
+also checks, so ordinary top-level block execution can enter the CALL-capable
+program-layout proof without exposing hidden return frames/tokens. The open
+program-end postamble and the top-level scoped-cleanup bridge now check too:
+`openRunNResult_program_end_postamble_of_main_fallthrough`,
+`localsBlock_compile_parts`, `codeSegment_localsBlock_compile_split`,
+`openRunNResult_cleanupTo_runState_continue`, and
+`openRunNResult_cleanupTo_frameStateRel_continue` split generated
+`Locals.Block.compile` output into raw body plus cleanup and replay that cleanup
+without consuming external events. Public source-open and compiled-open wiring
+also checks through
+`FunctionsProgramToAssemblySourceOpenSoundAt.of_compileChecked_supported`,
+`FunctionsProgramToCompiledOpenSoundAt.of_compileChecked_supported`, and
+`FunctionsProgramToCompiledOpenSoundAt.of_compileCheckedAssemblyTarget_supported`.
+`LayerAudit.FunctionsOpenCALLBoundary` now pins this Functions-to-compiled-open
+CALL theorem and the checked compiler-target extractor. The Functions regular
+CALL support predicate now has an executable checker,
+`FunctionsProgramRegularOpenSupported?`, plus the checked public target
+`FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?`; the corresponding
+compiled-open wrapper consumes that checked target instead of a hand-supplied
+support proposition. `Yul.OpenRuntime` now adds the first checked
+imported-Yul lift:
+`compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?`
+validates the CALL-admitting imported-Yul/static/resource checked target,
+extracts the lowered `Functions.Program`, runs the executable regular-open
+support check on that lowered program, and projects to
+`FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?`.
+`LayerAudit.ImportedYulOpenCALLBoundary` pins that projection and the resulting
+Functions-to-compiled-open soundness wrapper. It now also pins the checked
+composition theorem
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen`:
+an imported-Yul source-open dispatcher execution over a selected finite external
+trace is converted through the top recursive source-open dispatcher theorem,
+lifted from Functions block execution to whole-program Functions execution, and
+then replayed by the compiled-open assembly runner with the same trace and a
+`WholeProgramOutcomeRel` result. The newer wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked`
+also checks and is pinned: it removes `RecursiveBridgeCALLTopAssumptions` from
+this public open boundary by constructing that package from checked
+compiler/runtime/source premises. The latest supported wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked_supported`
+also checks and is pinned: it removes the top-level
+`SourceResultOutcomeLayoutSupported` premise by deriving it from the selected
+open dispatcher trace, dispatcher `CallSafe`/control-scoped facts, checkpoint
+admissibility, and the resolved open result. The source-facing selected-trace
+package `SourceOpenDispatcherTraceAccepted` and wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpen_of_checked_traceAccepted`
+also check and are pinned: they bundle the remaining selected open dispatcher
+trace resolution, result relatability, and external-response admissibility
+premises into one trace contract. The compiled-open trace wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_compiledOpenTrace_of_checked_traceAccepted`
+also checks and is pinned: it converts the compiled-open resolver at the
+imported-Yul CALL boundary into an explicit `OpenAssembly.Compiled.OpenTraceResult`
+proof object. The richer emitted-block wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openBlockTrace_of_checked_traceAccepted`
+also checks and is pinned now: it exposes
+`OpenAssembly.OpenBlockTraceResult asm target ...`, preserving the exact
+instruction/emitted-target-block/target-code evidence needed by the final
+gas-aware lift. `Yul.OpenGasAware` now adds and pins the CALL-capable open
+`EVM.X`-style target runner: `openX` mirrors the closed gas-aware
+exception/gas/check structure but turns CALL-family opcodes into
+`OpenExternal.CallSite` events, resumes with returned gas, and exposes
+`openX_current_call_continue` plus `OpenXReplayAbove` as the target-side replay
+contract for the next bridge. The target-side theorem-truth check for CALL event
+identity under gas charging is now checked too:
+`evmCallSite?_gasChargedState_of_gasExecRel`,
+`evmOpenCall?_gasChargedState_of_gasExecRel`, and
+`openX_current_gasless_call_continue` prove that a gasless emitted-block CALL
+event can be consumed by the gas-aware `openX` runner with the same
+`CallSite`, while the gas-aware post-response state remains in `GasExecRel` with
+the gasless emitted-block post state. The open runner's copied `EVM.X`
+exception ladder is now connected to the existing closed gas-aware check
+surface too: `xStepException?_none_of_raw_checks` and
+`xStepException?_none_of_step_checks` prove that `XStepRawChecksPass`/
+`XStepChecksPass` discharge the per-step `xStepException? = none` premise used
+by the CALL continuation bridge; the path-readiness-facing wrapper
+`openX_current_gasless_call_continue_of_step_checks` now consumes
+`XStepChecksPass` directly. The emitted-primitive CALL wrapper
+`openX_current_emitted_prim_call_continue_of_step_checks` now composes that
+bridge with `instrAtPc`/`emitInstr?`/target-code decoding evidence, so the
+upcoming emitted-block induction can consume the same block-shape facts exposed
+by `OpenAssembly.OpenBlockTraceResult` instead of asking callers for a raw
+`EVM.decode` premise. The silent ordinary-step counterpart is checked too:
+`openStepAfterChecks_of_not_callKind`, `openStepAfterChecks_of_callKind_no_call`,
+and the `openX_current_running_continue`/`success`/`revert` families cover
+non-CALL and malformed/no-open-call CALL-family steps without consuming an
+external trace event. The first replay-above current-step wrapper also checks:
+`openXReplayAbove_current_emitted_prim_call_continue_of_step_checks` lifts the
+emitted primitive CALL bridge into the same `OpenXReplayAbove` gas-bound
+contract used by the public target theorem. It still takes the future block
+induction's tail replay/check/gas premises explicitly, so it is a real current
+CALL case, not yet the whole block-trace induction. The silent current-step
+replay-above wrappers now check and are pinned too:
+`openXReplayAbove_current_running_continue_of_openStepAfterChecks_done`,
+`openXReplayAbove_current_success_of_openStepAfterChecks_done`, and
+`openXReplayAbove_current_revert_of_openStepAfterChecks_done` package ordinary
+closed steps into the same public gas-bound replay contract. Together with the
+current primitive CALL wrapper, these give the future open block-trace induction
+checked replay-above cases for CALL events, empty-trace running continuations,
+success, and revert. The open replay base case is checked and pinned too:
+`OpenXTracePathDoneContinuation` and `openXReplayAbove_done_of_path_done` turn a
+final running-state continuation into the `OpenXReplayAbove` empty-trace
+contract, giving the upcoming `OpenAssembly.OpenBlockTraceResult` induction its
+done branch without inventing an external-world model. The replay surface has
+now been strengthened to the recursive prefix shape as well:
+`OpenXTraceRelAbove`, `openXReplayAbove_of_traceRelAbove`,
+`openXTraceRelAbove_done_of_path_done`,
+`openXTraceRelAbove_current_emitted_prim_call_continue_exists_of_step_checks`,
+and the relation-level running/success/revert wrappers prove current-step
+replay from any gas-aware state related by `GasExecRel`, not only from a
+freshly installed gas state. This is the intended handoff shape for composing
+emitted-block prefixes with later CALLs in the tail. The emitted-block bridge
+surface is now started as a checked proof object:
+`OpenXRunListRunningRelReady`, `OpenXRunListHaltedRelReady`, and
+`OpenXBlockTraceRelReady` mirror `OpenAssembly.OpenBlockTraceResult` while
+adding the gas-aware replay and post-budget handoff facts needed for recursion.
+The projections `OpenXBlockTraceRelReady.to_openBlockTrace`,
+`OpenXBlockTraceRelReady.to_traceRelAbove`, and
+`OpenXBlockTraceRelReady.to_replayAbove` check and are pinned, as are the first
+current-block constructors for primitive CALL, ordinary running continuation,
+success, and revert. The checked bridge from open emitted-block traces to the
+gas-aware replay contract is now result-specific as well:
+`OpenXBlockTraceRelReady.of_openBlockTrace_with_done_continuation` and
+`OpenXBlockTraceRelReady.openBlockTrace_replayAbove_with_done_continuation`
+consume only a done-continuation for the actual `OpenBlockTraceResult` result,
+rather than the broader all-running-states `DoneRelReady` scaffold. The bridge
+now constructs that result-specific done-continuation internally in the
+imported-Yul replay wrapper from smaller final fallthrough facts for running
+states: final PC at the encoded code end, stack bound, and clean return
+buffers. The wrapper derives final code equality trace-locally via
+`openBlockTrace_running_preserves_code_of_current_emitted_ready_cases_of_initial_code`
+and then uses the checked OpenX fallthrough-`STOP` constructors.
+The bridge
+now has a trace-local readiness surface as well:
+`OpenXBlockTraceRelReady.TraceReadyFor`,
+`of_traceReadyFor_with_done_continuation`, and
+`traceReadyFor_replayAbove_with_done_continuation` replace global
+`RunningPathRelReady`/`HaltedPathRelReady` callbacks with a proof object for
+the exact emitted-block trace being replayed. The trace-local surface is now
+constructible from block-local emitted-step obligations:
+`RunningBlockReadyFor`, `HaltedBlockReadyFor`,
+`traceReadyFor_of_openBlockTrace`, and
+`traceReadyFor_of_openBlockTrace_pathRelReady` check and are pinned. This
+narrows the next derivation to proving readiness for each emitted block from
+decoder/check/gas facts, instead of exposing whole-trace callbacks. The exact
+current-step cases now feed this trace-local interface too:
+`runListRunningReadyFor_current_emitted_prim_call_of_step_checks`,
+`runListRunningReadyFor_current_running_of_openStepAfterChecks_done`,
+`runListHaltedReadyFor_current_success_of_openStepAfterChecks_done`, and
+`runListHaltedReadyFor_current_revert_of_openStepAfterChecks_done` wrap the
+checked CALL, silent-running, success, and revert constructors behind
+`RunListRunningReadyFor`/`RunListHaltedReadyFor`. The CALL case now also
+consumes the actual open run-list evidence carried by an emitted block:
+`openRunListResult_emitInstr_prim_call_running_inv` inverts a singleton
+emitted primitive CALL run into its selected response, trace, and resumed
+mid-state, and
+`runListRunningReadyFor_current_emitted_prim_call_of_run_step_checks` feeds
+that concrete `hRun` directly into `RunListRunningReadyFor`. The checked
+ordinary emitted-block companion is now in place too:
+`OpenAssembly.Target.openRunListResult_resolves_closed_inv_of_no_callCreate`
+inverts an open no-CALL target run into an empty trace and matching closed
+`Target.runListResult`, while
+`OpenXBlockTraceRelReady.openRunListResult_emitInstr_no_call_inv` specializes
+that fact to emitted source instructions. This is the adapter needed to reuse
+closed gas-aware path checks for ordinary emitted blocks while keeping actual
+CALL-family instructions on the open event path. The no-CALL adapter now
+reaches the trace-local readiness surface as well:
+`openX_runListResult_with_positive_path_continuation_agrees_of_path_ready` and
+`openX_runListResult_running_with_positive_path_continuation_agrees_of_path_ready`
+turn closed no-CALL `XRunListPathReady` proofs into open `openX` executions
+with fixed positive prefix fuel, while
+`RunListRunningReadyFor`/`RunListHaltedReadyFor` no-CALL path-ready adapters
+and their emitted-instruction specializations consume the actual open run-list
+evidence, recover the empty current trace, and thread arbitrary later tail
+traces without creating external events. The useful checked-fact route is now
+in place too:
+`openX_runListResult_running_with_positive_path_continuation_agrees_of_path_ready_and_budget`
+threads computed `XRunListGasBudget` through the no-CALL prefix and hands the
+particular gas-aware midpoint, with enough remaining gas, to the tail
+continuation. The emitted no-CALL running/halted path-check wrappers then
+derive `RunListRunningReadyFor`/`RunListHaltedReadyFor` from
+`CurrentNoCallPathChecksReady`, compiler-provided bytecode encoding/decode
+safety, the actual open run-list evidence, and the computed run-list gas budget.
+`CurrentNoCallPathChecksReady` is deliberately local to emitted blocks whose
+source instruction is no-CALL, so the CALL replay boundary no longer asks for
+the impossible global `XBlockPathChecksReady` predicate on CALL-capable
+programs. The checked
+block-local dispatcher is now in place as well:
+`CurrentRunningInstrReadyCase`,
+`runListRunningReadyFor_current_emitted_of_ready_case`,
+`runListHaltedReadyFor_current_emitted_of_no_call_case`,
+`runningBlockReadyFor_of_current_emitted_ready_cases`, and
+`haltedBlockReadyFor_of_current_emitted_no_call_cases` compose the ordinary
+no-CALL path-check branch with the primitive CALL `hRun`-consuming branch behind
+the `RunningBlockReadyFor`/`HaltedBlockReadyFor` interface consumed by
+`traceReadyFor_of_openBlockTrace`. `CurrentRunningInstrReadyCase.not_create_like`
+also checks, making the still-unsupported `CREATE`/`CREATE2` branch explicit
+rather than classifying it as either no-CALL or CALL. This dispatcher now
+composes all the way to the gas-aware replay handoff:
+`traceReadyFor_of_openBlockTrace_current_emitted_ready_cases` builds the
+trace-local readiness proof from the block-local dispatcher, and
+`openBlockTrace_replayAbove_with_done_continuation_of_current_emitted_ready_cases`
+turns the exact `OpenAssembly.OpenBlockTraceResult` plus result-specific done
+continuation into `OpenXReplayAbove`. The code-image route has now replaced the
+old global state-code replay premise: `CurrentRunningInstrReadyCase` carries
+the primitive-CALL response code-stability clause, while
+`openRunListResult_current_emitted_running_preserves_code_of_ready_case`,
+`traceReadyFor_of_openBlockTrace_current_emitted_ready_cases_of_initial_code`,
+and
+`openBlockTrace_replayAbove_with_done_continuation_of_current_emitted_ready_cases_of_initial_code`
+thread target-code equality through the exact emitted-block trace from the
+initial code image. The imported-Yul code-image wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_codeImage`
+now composes the checked trace-accepted open block result with that gas-aware
+handoff and returns an explicit `OpenGasAware.OpenXReplayAbove` witness while
+exposing only `OpenXReplayTraceReadinessForCheckedTrace`: clean final
+fallthrough for actual final running states plus `TraceReadyFor` indexed by the
+exact `OpenAssembly.OpenBlockTraceResult`. This boundary has now been pushed one
+step closer to checked generation: `OpenXBlockTraceRelReady` also exposes
+`CurrentEmittedTraceReadyFor`, indexed by the exact open trace, and local
+current-block no-CALL path-check wrappers replace the older global
+`CurrentNoCallPathChecksReady` callback for this route. The constructor
+`OpenXReplayTraceReadinessForCheckedTrace.of_current_emitted_trace_ready`
+derives both `TraceReadyFor` and clean fallthrough from exact-trace current-step
+readiness plus final fallthrough PC/stack/return-buffer facts. The exact-trace
+current-step readiness now has an exact observed-block shape: the fundamental
+constructor
+`currentEmittedTraceReadyFor_of_openBlockTrace_running_halted_ready` builds it
+from exact running-block replay, exact running-block code preservation, and
+halted-block replay. The compatibility constructor
+`currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_ready_cases_of_initial_code`
+still derives that exact object from the older block-local classifier while
+threading initial code by induction, and
+`OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_ready_cases`
+threads that generated exact-trace object through the imported-Yul readiness
+bundle. The running-CALL branch now has a trace-indexed exact-response route as
+well: `CurrentRunningInstrTraceReadyCase`,
+`openRunListResult_emitInstr_prim_call_running_preserves_code_of_trace_response_stable`,
+and
+`runListRunningReadyFor_current_emitted_of_trace_ready_case_current_path_checks`
+derive exact current-block replay plus code preservation from the concrete
+response event in the current block trace. The corresponding constructor
+`currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_trace_ready_cases_of_initial_code`
+and imported-Yul readiness wrapper
+`OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_trace_ready_cases`
+are now pinned; this is the shape intended for wiring
+`SourceOpenTraceResponsesAdmissible` into emitted CALL suspensions. That
+source-facing response handoff is now checked too:
+`OpenXCurrentRunningInstrResponseAdmissibleCase` replaces the direct
+per-response target-code-stability field with a source/target
+`SharedStateRel` at the suspended target state, its
+`no_call`, `call_of_shared_state_rel`, and `call_of_source_state_rel`
+constructors expose the intended source-proof entry points, its
+`shared_state_rel_of_source_direct_frame` bridge derives that suspended
+`SharedStateRel` from checked `SourceStateRel`, `Functions.SourceDirect.StateRel`,
+and `Structured.Preservation.Frame.StateRel` evidence plus the explicit
+source-facing `gasAvailableRel` for the current gasful target state, and
+`call_of_source_state_rel_frame` packages that bridge into current CALL
+readiness. The next adapter is checked too:
+`FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_frameStateRel`
+recovers the direct/frame witnesses from a regular running compiled-open result,
+and
+`OpenXCurrentRunningInstrResponseAdmissibleCase.call_of_functions_block_compiled_open_result_rel`
+feeds that packaged compiler-open result directly into current primitive-CALL
+readiness when the source-facing gas relation is supplied. This is intentionally
+weaker than full shared-state equality:
+structured frame preservation erases gas, so the gas relation must come from the
+gas-aware/source-facing boundary rather than from the frame proof alone. Its
+`to_trace_ready_case` projection uses
+`SourceOpenTraceResponsesAdmissible` for the exact current emitted-block trace,
+and
+`currentEmittedTraceReadyFor_of_openBlockTrace_current_emitted_response_admissible_cases_of_initial_code`
+splits whole-trace response admissibility across each
+`OpenBlockTraceResult.stepRunning` prefix/tail. The imported-Yul wrapper
+`OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_emitted_response_admissible_cases`
+now exposes this generated route at the checked-trace boundary, and
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_responseAdmissible`
+uses the checked compiler target's encoding/decode-safety facts plus the
+selected trace contract to construct the replay-readiness bundle internally.
+The stale full
+`OpenXReplayReadinessForCheckedTrace`, the old core/semantic replay bundles, and
+the non-code-image replay wrapper have been deleted from the audit surface. A
+theorem-boundary check still shows that
+primitive-CALL code preservation is not purely compiler-generated under the
+unconstrained open response model: `CallResponse.internalMutation` may update
+the shared state broadly enough to rewrite the caller code image. The
+source-facing response contract has therefore been tightened:
+`RelationallyAdmissibleOpenResponse` now carries target caller-code stability,
+and the checked projection lemmas
+`RelationallyAdmissibleOpenResponse.target_code_stable`,
+`RelationallyAdmissibleOpenResponse.evmOpenCall_resume_code_stable`, and
+`SourceOpenTraceResponsesAdmissible.event_target_code_stable` expose that fact
+from selected finite traces. The remaining proof task is to thread each
+emitted CALL suspension in the target trace through the corresponding
+source/direct/frame/gas evidence, now using the compiled-open result projection
+when a regular running prefix has been related, so the new response-admissible
+current-instruction case can be generated rather than supplied. The current public
+`FunctionsProgramToCompiledOpenSoundAt` route only returns same-trace
+resolutions plus final `WholeProgramOutcomeRel`; the next architectural proof
+step is therefore to expose a synchronized source/target path or emitted-block
+readiness theorem that preserves the `SourceStateRel` proof at each selected
+primitive-CALL suspension. OpenX finalization now mirrors the
+closed gas-aware finalization route:
+`openX_fallthrough_stop_success_of_checks`,
+`OpenXTracePathDoneContinuation.running_of_fallthrough_stop`, and
+`OpenXBlockTraceRelReady.DoneContinuationReady.running_of_fallthrough_stop`
+construct result-specific done readiness from the usual clean fallthrough
+`STOP` package; the remaining wrapper work is to derive that clean
+fallthrough package at the actual final running states of the checked open
+trace. The checked imported-Yul regular-open
+CALL target now
+also exposes compiler-generated bytecode facts:
+`compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_decodeWindow`,
+`_jumpdestCorrect`, `_decodeSafety`, and `_encodingCorrect`, so the final
+gas-aware CALL wrapper can source decoder correctness from the checked compiler
+target rather than caller-supplied evidence. The imported-Yul gas-aware roots in
+`LayerAudit.ImportedYulBoundary` intentionally remain on the no-internal-CALL
+theorem until a higher imported-Yul/gas-aware CALL wrapper is proved. The local
+no-CALL path-check field has now been reduced as well: `Yul.OpenGasAware` proves
+`CurrentNoCallPathChecksReady.of_core_noReturnDataCopy_current_no_call`, deriving
+path checks for ordinary emitted blocks from core non-gas replay checks,
+target no-`RETURNDATACOPY`, and the current instruction's local no-CALL fact.
+`Yul.OpenRuntime` adds the explicit
+`compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?`
+gate and the no-RDC OpenX wrapper
+`compileCheckedCALLRegularOpen_sourceOpenDispatcherBlockResult_openXReplayAbove_of_checked_traceAccepted_codeImage_noReturnDataCopy`,
+which now also consumes only the actual-trace readiness bundle and no longer
+asks for global `XBlockReplayCoreNonGasReady`. The remaining CALL work is
+lifting this checked imported-Yul open bridge to the final public open/gas-aware
+target theorem, deriving exact running-block replay/code preservation plus final
+fallthrough facts from checked compiler facts and the selected source trace
+contract, and
+extending/generalizing it to the CALL family. `RETURNDATACOPY` remains an
+explicit gas-aware boundary on this route, matching the existing no-CALL EVM
+root, not a completed CALL-family feature.
+
+Current closeout status:
+
+- [x] Recursive CALL propagation through expressions, procedure call bodies,
+  loops, typed continuations, returned-value assignment, and caller tails.
+- [x] Checked regular-open support gate at the Functions layer.
+- [x] Checked imported-Yul regular-open target and compiled-open bridge.
+- [x] Public open wrapper hides `RecursiveBridgeCALLTopAssumptions` behind
+  checked compiler/runtime/source premises.
+- [x] Public open wrapper derives the top-level source layout-support premise
+  from the selected open dispatcher result.
+- [x] Package the remaining source-result relatability and selected
+  trace admissibility premises so the theorem boundary is source-facing rather
+  than bridge-facing.
+- [x] Expose the checked compiled-open target trace as
+  `OpenAssembly.Compiled.OpenTraceResult` at the imported-Yul CALL boundary.
+- [x] Introduce and pin the open gas-aware EVM target runner and CALL-step
+  resolver.
+- [x] Expose the richer emitted-block open target trace
+  `OpenAssembly.OpenBlockTraceResult` at the imported-Yul CALL boundary.
+- [x] Prove and pin the current-CALL gasless-to-gas-aware event bridge:
+  gas charging preserves the observed `CallSite`, and same-response CALL
+  continuations preserve `GasExecRel`.
+- [x] Prove and pin the open runner check bridge from closed gas-aware raw/step
+  checks to `xStepException? = none`, including a current-CALL wrapper that
+  consumes `XStepChecksPass` directly.
+- [x] Prove and pin the emitted primitive CALL wrapper that derives the
+  gas-aware decode premise from `instrAtPc`/`emitInstr?`/target-code evidence.
+- [x] Prove and pin the silent current-step `openX` bridge for ordinary closed
+  EVM steps, covering running continuation, success, and revert without
+  consuming external trace events.
+- [x] Prove and pin the current primitive CALL `OpenXReplayAbove` wrapper that
+  packages the emitted-block CALL step into the public gas-bound replay
+  contract, with tail replay/check evidence still explicit.
+- [x] Prove and pin the silent current-step `OpenXReplayAbove` wrappers for
+  ordinary running continuation, success, and revert cases.
+- [x] Prove and pin the open done-continuation/base `OpenXReplayAbove` bridge
+  for final running states.
+- [x] Prove and pin the open fallthrough-`STOP` finalization constructors that
+  turn checked clean finalization into
+  `OpenXTracePathDoneContinuation`/`DoneContinuationReady`.
+- [x] Prove and pin the relation-level `OpenXTraceRelAbove` base and
+  current-step wrappers for primitive CALL, ordinary running continuation,
+  success, and revert.
+- [x] Define and pin the `OpenXBlockTraceRelReady` induction surface that
+  projects both to `OpenAssembly.OpenBlockTraceResult` and to
+  `OpenXTraceRelAbove`/`OpenXReplayAbove`, with first current-block readiness
+  constructors for CALL, running continuation, success, and revert.
+- [x] Prove and pin the result-specific
+  `OpenXBlockTraceRelReady.openBlockTrace_replayAbove_with_done_continuation`
+  bridge, so the emitted-block-to-gas-aware handoff no longer needs the broad
+  all-running-states done-readiness premise.
+- [x] Define and pin the trace-local `OpenXBlockTraceRelReady.TraceReadyFor`
+  surface plus replay theorem, replacing global run-path readiness callbacks
+  with a proof object indexed by the exact `OpenBlockTraceResult`.
+- [x] Prove and pin `TraceReadyFor` construction from block-local emitted-step
+  readiness obligations, including adapters from the older path-readiness
+  callbacks for compatibility while the checked per-block facts are derived.
+- [x] Prove and pin current-step wrappers from emitted primitive CALL,
+  ordinary running continuation, success, and revert facts into
+  `RunListRunningReadyFor`/`RunListHaltedReadyFor`.
+- [x] Prove and pin the emitted primitive CALL run-list inversion and the
+  `hRun`-consuming readiness wrapper, so the trace-local CALL case uses the
+  actual `OpenBlockTraceResult` current-block run evidence.
+- [x] Prove and pin the no-CALL open run-list inverse and emitted-instruction
+  specialization, so ordinary emitted blocks can recover the empty open trace
+  and closed `Target.runListResult` expected by existing gas-aware checks.
+- [x] Prove and pin the no-CALL path-ready-to-open-readiness bridge, including
+  fixed positive prefix-fuel run-list replay, zero-tail-fuel contradiction, and
+  emitted-instruction `RunListRunningReadyFor`/`RunListHaltedReadyFor`
+  specializations.
+- [x] Prove and pin the budget-aware no-CALL path-check wrappers, so ordinary
+  emitted running/halted blocks derive readiness from local
+  `CurrentNoCallPathChecksReady`, checked bytecode facts, and computed
+  `XRunListGasBudget`.
+- [x] Prove and pin the block-local readiness dispatcher that combines the
+  no-CALL path-check branch with the primitive CALL open-event branch, while
+  leaving `CREATE`/`CREATE2` as an explicit unsupported boundary.
+- [x] Compose the dispatcher into `TraceReadyFor` and the result-specific
+  `OpenXReplayAbove` emitted-block replay bridge.
+- [x] Expose and pin compiler-generated bytecode decode/encoding facts for the
+  checked imported-Yul regular-open CALL target.
+- [x] Bridge open emitted-block traces to `OpenGasAware.OpenXReplayAbove` at
+  the imported-Yul code-image/trace-accepted boundary.
+- [x] Delete the stale full replay-readiness scaffold and derive target-code
+  equality trace-locally from `RecursiveBridgeInitialCodeImageRel`, removing
+  the old global `stateCode` premise.
+- [x] Strengthen the source-facing open response admissibility contract so each
+  admitted opaque response preserves the suspended target caller code image,
+  and pin trace/event projection lemmas for that code-stability fact.
+- [x] Narrow the OpenX checked-trace replay bundle from a prebuilt
+  result-specific done-continuation callback to final running-state
+  fallthrough PC, stack-bound, and return-buffer-clean facts; the wrapper now
+  derives final code equality from the trace-local readiness relation,
+  constructs `DoneContinuationReady` internally, and handles halted target
+  results via the vacuous constructor.
+- [x] Replace the impossible global `XBlockPathChecksReady` callback with the
+  CALL-compatible local `CurrentNoCallPathChecksReady` field for actual no-CALL
+  emitted blocks.
+- [x] Prove the no-RDC/current-no-CALL constructor for that local path-check
+  callback as an intermediate bridge, then supersede the no-RDC wrapper's global
+  core premise with actual-trace readiness.
+- [x] Replace the remaining core/semantic checked-trace bundles with
+  `OpenXReplayTraceReadinessForCheckedTrace`, indexed by the exact open block
+  trace; update the no-RDC wrapper so it no longer takes global
+  `XBlockReplayCoreNonGasReady`.
+- [x] Add exact-trace `CurrentEmittedTraceReadyFor` plus local current-block
+  no-CALL path-check wrappers, and derive `TraceReadyFor`/clean final
+  fallthrough from that exact-trace evidence.
+- [x] Refactor `CurrentEmittedTraceReadyFor` so running steps carry exact replay
+  plus exact observed-block code preservation, then generate it from the actual
+  `OpenAssembly.OpenBlockTraceResult` and expose the corresponding imported-Yul
+  replay readiness constructor.
+- [x] Add trace-indexed current-CALL readiness: exact primitive CALL
+  replay/code preservation now depends on the concrete response event in the
+  current trace, not on a universal all-responses code-stability premise.
+- [x] Add source-facing response-admissibility route for current emitted CALLs:
+  whole selected-trace admissibility is split across the emitted-block
+  induction, and each current CALL code-stability proof is derived from
+  `SourceOpenTraceResponsesAdmissible` plus a `SharedStateRel` at the suspended
+  target state.
+- [x] Add constructors for the source-facing current-instruction case from
+  direct `SharedStateRel` and from `SourceStateRel` plus the current EVM
+  shared-state equality.
+- [x] Add the response-admissible imported-Yul OpenX wrapper, so this route no
+  longer asks callers to provide the whole
+  `OpenXReplayTraceReadinessForCheckedTrace` bundle.
+- [ ] Lift the checked open CALL bridge into the final imported-Yul gas-aware
+  public theorem and the EVM-facing public spine, deriving actual
+  block-local current-CALL/no-CALL readiness and final fallthrough facts from
+  checked compiler facts, target resource/resource-bound facts, the selected
+  trace response contract, and the source/target shared-state relation at each
+  emitted CALL suspension.
+- [ ] Generalize/audit the whole CALL family and remove the stale no-CALL root
+  from the CALL path.
 
 ### Architecture Lock: CALL Frontiers
 
@@ -46,7 +1999,15 @@ Execution order:
    boundaries.
 3. [x] Replace the remaining closed `CALLSeqLoweringFrontierAt`/`CALLSeqKontFrontierAt`
    all-bounds route with the open finite-path sequence/kont/loop package.
-4. [ ] Wire the CALL-capable frontier into the preferred public compiler theorem.
+4. [x] Wire the CALL-capable frontier into the preferred public compiler theorem.
+   The CALL-capable recursive block theorem and no-hidden program-layout wrapper
+   now check in `Yul.OpenLowering`. The open no-CALL program-end postamble and
+   top-level `Locals.Block.compile` cleanup split/replay are checked as well.
+   The main-program boundary now checks: the public statement uses
+   scoped/program execution, derives generated main evidence from checked
+   compilation bounds, composes raw body -> cleanup -> postamble, converts the
+   checked block relation to `Functions.Source.WholeProgramOutcomeRel`, and
+   exposes source-open and compiled-open public theorem wrappers.
    The top CALL assumption package now exposes
    `RecursiveBridgeCALLTopAssumptions.callOpenSeqPathKontPathLoweringFrontiersUpTo_canonical`;
    the source-to-compiler-open dispatcher boundary is now exposed by
@@ -77,11 +2038,11 @@ Execution order:
    `compile_openRunN_result_openBlockTrace_sound`, and
    `compile_openRunN_result_compiled_sound` now give the direct open analogue
    of the closed assembly compile theorem from the real `Assembly.compile?`
-   success fact. `Yul.OpenLowering` now pins the next adjacent proof boundary:
-   `FunctionsBlockToAssemblySourceOpenSoundAt` is the compiler-open
-   function-block to assembly source-open theorem we still have to prove, while
-   its checked `.to_compiled` wrapper shows that theorem immediately composes
-   through the existing assembly compile proof. Closed no-CALL assembly source
+   success fact. `Yul.OpenLowering` now has the checked public program boundary:
+   `FunctionsProgramToAssemblySourceOpenSoundAt.of_compileChecked_supported`
+   composes the CALL-capable function-block theorem through scoped cleanup and
+   program postamble, while the checked `FunctionsProgramToCompiledOpenSoundAt`
+   wrappers compose that result through assembly compilation. Closed no-CALL assembly source
    runs now also embed into this open target tower with the empty trace through
    `Source.openRunNResult_resolves_closed_of_no_callCreate` and the direct
    no-CALL compile wrappers; current-instruction no-CALL source-open steps now
@@ -115,7 +2076,37 @@ Execution order:
    The combined
    `openRunNResult_structured_callSite_body_continue` now consumes the actual
    emitted call-site segment plus procedure segment and reaches that generated
-   body segment in one open replay.
+   body segment in one open replay. The existential-fuel call-site entry
+   bridge is now present too:
+   `openRunNResult_sinkTopUnder_source_running_continue_exists`,
+   `openRunNResult_callPrologue_source_running_continue_exists`,
+   `openRunNResult_source_callEntry_after_prologue_and_jump_continue_exists`,
+   `openRunNResult_structured_callSite_callEntry_continue_exists`, and
+   `openRunNResult_structured_callSite_body_continue_exists` allow the
+   generated call prologue, jump-to-entry, procedure entry label, and body-entry
+   handoff to consume a downstream continuation that chooses the actual fuel
+   for the reached target. The entry-label sub-lemmas
+   `openRunNResult_source_label_running_continue_exists` and
+   `openRunNResult_proc_entry_label_continue_exists` remain the smallest
+   generated-label atoms inside that bridge. This removes the false fixed-body-
+   subfuel pressure before the call-site target is known; the next return-side
+   atom is to compose the recursive body result with return dispatch, returned
+   assignment, and the caller tail at the generated `ProgramLayout` boundary.
+   The single-step prerequisites for the return-dispatch existential lift are
+   also present:
+   `openRunNResult_source_local_instr_no_call_running_continue_exists` and
+   `openRunNResult_source_jump_no_call_running_continue_exists` let generated
+   local instructions and jumps consume continuations whose fuel is chosen by
+   the reached target. The selected return-dispatch case now has its stack
+   shuffle and frame-return lift as well:
+   `openRunNResult_liftBuriedToTop_source_running_continue_exists`,
+   `openRunNResult_removeBuriedUnder_source_running_continue_exists`,
+   `openRunNResult_source_returnAttach_after_remove_continue_exists`, and
+   `openRunNResult_dispatch_case_source_running_continue_exists` cover the
+   matching-token branch through return-token removal and the jump to the
+   caller return label. The next missing dispatch atom is the mismatched-token
+   test branch, which needs an existential companion for the generated
+   `dup`/`push`/`eq`/`jumpi` condition helper.
    The high-level function-call block splitter now also packages the exact
    generated call-site segment:
    `codeSegment_functions_call_cons_callSite_parts_split_of_compileOpen`
@@ -147,6 +2138,58 @@ Execution order:
    consumes actual emitted argument-evaluation code to produce the no-hidden
    call-source `Frame.StateRel`, split arguments, caller base, and fallthrough
    PC facts for the next call-head composition.
+   That boundary now has checked frame-native variants as well:
+   `StackPrefixSuffixErasedRel.to_sourceDirect_prefixedStateRel_frameStateRel`,
+   `compilerOpenFunctionsArgList_callSource_parts_frameStateRel_withShared_of_compileOpen`,
+   `compilerOpenFunctionsArgList_then_openRunNResult_exists_rel_frameStateRel_of_compileOpen`,
+   `compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_rel_frameStateRelTail_of_entry_of_compileOpen`,
+   and
+   `compilerOpenFunctionsArgList_then_callSite_body_leave_return_assign_tail_exists_rel_frameStateRelTail_of_entry_of_compileOpen`
+   run argument evaluation, split the visible direct call-source stack, enter
+   regular or leave callee bodies, assign returned values, and continue the tail
+   under arbitrary hidden return frames and return tokens. The large
+   statement-level CALL wrapper has now crossed the same boundary too:
+   `compilerOpenFunctionsStmt_call_regular_then_tail_exists_rel_frameStateRelTail_of_compileOpen`
+   consumes `SourceDirect.StateRel` plus `Frame.StateRel`, dispatches through
+   the frame-native regular/leave CALL corridor, and gives the tail callback
+   `StateRel` plus `Frame.StateRel` under the original hidden returns/tokens.
+   The callee-body adapters are frame-native now too:
+   `compilerOpenFunctionsCall_regular_body_exists_of_initReturns_body` and
+   `compilerOpenFunctionsCall_leave_body_exists_of_initReturns_body` thread
+   arbitrary hidden return frames and return-token tails through `initReturns`,
+   recursive body replay, returned-stack extraction, and the caller-frame
+   reattachment facts; they now also expose the checked source/direct
+   `StateRel` produced after generated `initReturns` to the recursive body
+   callback. The generated program-layout siblings
+   `compilerOpenFunctionsCall_regular_body_exists_of_programLayout_body` and
+   `compilerOpenFunctionsCall_leave_body_exists_of_programLayout_body` instantiate
+   those adapters with the exact `ProgramLayout.procLayout` body/dispatch
+   supplies and proc-body `CallsIncluded` evidence. Two small extractors are
+   checked for the next recursion step:
+   `FunctionsBlockCompiledOpenResultRel.source_regular_ctxRel` pulls the
+   source/direct context relation out of a regular recursive body result, and
+   `sourceDirect_returnValuesAccessible_of_mem_bound` packages return-value
+   accessibility from target-layout containment plus the 16-word stack bound.
+   The regular-return static layout facts are now checked too:
+   `compilerOpenFunctionsBlock_regular_ctx_scope_of_supportedFor`,
+   `compilerOpenFunctionsBlock_regular_ctx_scope_of_supportedFor_block`, and
+   `compilerOpenFunctionsCall_regular_return_layout_parts_of_supported`
+   derive callee return accessibility, layout nodup, leave-retc equality, and
+   retc bound from `FunctionsProgramRegularOpenSupported` plus the recursive
+   regular body result. Recursive tails now also have checked call-list
+   projection:
+   `expressionsStmtList_toStructured_append_callsIncluded_right`,
+   `expressionsStmtList_toStructured_codeStmt_append_callsIncluded_right`,
+   `functionsBlock_expr_cons_callsIncluded_tail_of_compileOpen`,
+   `functionsBlock_let_cons_callsIncluded_tail_of_compileOpen`,
+   `functionsBlock_assign_cons_callsIncluded_tail_of_compileOpen`, and
+   `functionsBlock_call_cons_callsIncluded_tail_of_compileOpen` preserve the
+   global `ProgramLayout` call-site inclusion through ordinary heads and the
+   generated CALL corridor. The next open boundary is the CALL-capable
+   source-fuel block/program recursion that invokes callee body proofs from
+   `FunctionsStmtListRegularOpenSupportedFor`/`FunctionsProgramRegularOpenSupported`
+   and uses those checked return-layout and tail-inclusion facts to close the
+   body-return cleanup corridor without a public call oracle.
    The regular callee-body return side now has its first package too:
    `FunctionsBlockCompiledOpenResultRel.source_regular_running_return_cleanup_parts`
    extracts the recursive body `StateRel`, builds the source/direct
@@ -235,9 +2278,36 @@ Execution order:
    `openRunNResult_functionsFunDef_body_regular_compiledOutcomeRel` consumes
    the real `Functions.FunDef.toLocalsProc` preserving-compiled body segment,
    so the call case no longer has to restate the body lowering as
-   `initReturns ++ source-body ++ pushReturns`. The next missing atom is a
-   returned-call cons theorem that composes argument evaluation, the specialized
-   body wrapper, call-site replay, returned assignment, and the source tail.
+   `initReturns ++ source-body ++ pushReturns`. The leave sibling is checked as
+   well via `openRunNResult_functionsFunDef_body_leave_compiledOutcomeRel`, so
+   returned calls can consume callee bodies that exit through either ordinary
+   fallthrough or `leave`. The actual procedure-segment wrappers are now
+   checked too:
+   `openRunNResult_functionsFunDef_procSegment_body_regular_compiledOutcomeRel`
+   and
+   `openRunNResult_functionsFunDef_procSegment_body_leave_compiledOutcomeRel`
+   extract the exact emitted `FunDef.toLocalsProc` body segment from the
+   generated procedure segment and cast the body result back to the procedure
+   body fallthrough. Architecture correction: the next CALL theorem must not be
+   grafted onto the current local block theorem without a whole-program layout
+   boundary. A bare block `CodeSegment` can split the emitted argument,
+   call-site, returned-assignment, and syntactic-tail code, but it cannot know
+   where the callee procedure segment lives in the surrounding assembly. The
+   returned-call cons theorem therefore needs to be stated against the same
+   generated-procedure layout spine used by structured preservation: source
+   function lookup plus deterministic lowering gives the structured proc,
+   while a `ProgramLayout`/proc-layout fact supplies the emitted proc segment,
+   exact labels, global call-site table, and per-proc token nodup facts. Once
+   that layout boundary is present, the missing atom composes argument
+   evaluation, the proc-segment body wrapper, call-site replay, returned
+   assignment, and the source tail. The first layout-facing packages are now in
+   place:
+   `functionsProgram_toExpressions?_programLayout_call_parts_of_source_lookup`
+   exposes the callee proc segment/site/nodup/exact-label facts, and
+   `codeSegment_functions_call_cons_programLayout_parts_split_of_source_lookup`
+   adds the emitted argument, call-site, returned-assignment, and tail segments.
+   Do not reintroduce a public all-callees oracle or force this through the
+   local no-CALL block theorem.
    On the
    return side, the proof must stay instruction-/segment-local rather than use a
    whole-program no-CALL adapter, because the surrounding assembly can contain
@@ -282,6 +2352,19 @@ Execution order:
    actual emitted call-site segment, the generated procedure segment, a
    recursive body-run continuation at the generated body segment, and continue
    through return dispatch in one open replay.
+   The same return-dispatch corridor now has existential-fuel companions:
+   `openRunNResult_dispatch_selected_site_source_running_continue_exists`,
+   `openRunNResult_selected_table_source_running_continue_exists`,
+   `openRunNResult_forProc_selected_source_running_continue_exists`,
+   `openRunNResult_exit_label_then_dispatch_continue_exists`,
+   `openRunNResult_body_regular_then_exit_dispatch_continue_exists`,
+   `openRunNResult_body_leave_then_exit_dispatch_continue_exists`,
+   `openRunNResult_callSite_body_regular_then_exit_dispatch_continue_exists`,
+   and
+   `openRunNResult_callSite_body_leave_then_exit_dispatch_continue_exists`.
+   These remove the remaining fixed-fuel pressure through return dispatch and
+   procedure entry/body replay; the next wrapper is the returned-assignment
+   plus caller-tail existential handoff.
    `FunctionsBlockCompiledOpenResultRel.source_regular_running_compiledOutcomeRel`
    and `.source_leave_running_compiledOutcomeRel` now extract the required
    concrete running target body outcome from the recursive function-block open
@@ -332,7 +2415,12 @@ Execution order:
    `callSiteCode` segment plus generated assignment segment, and exposes the
    deterministic label-plus-assignment fuel `2 * targets.length + 1`. This
    avoids forcing exact `toSharedState` equality and instead uses the gas-erased
-   frame relation plus `ReturnedStackRel`/`attachReturns?`.
+   frame relation plus `ReturnedStackRel`/`attachReturns?`. Its existential
+   tail-fuel companion
+   `compilerOpenFunctionsAssignReturnedTops_callSiteReturn_attachedFrameStateRel_openRunNResult_exists_of_compileOpen`
+   now lets the syntactic caller tail choose fuel after returned assignment has
+   produced the actual post-assignment target and hidden suffix, which is the
+   shape needed by the recursive sequence frontier.
    The first consuming call-site/body wrappers are now checked:
    `openRunNResult_callSite_body_regular_then_return_assign_continue` and
    `openRunNResult_callSite_body_leave_then_return_assign_continue` compose
@@ -340,10 +2428,22 @@ Execution order:
    open syntactic tail while preserving that pre-call/post-callee state split
    and now also distinguish the argument-bearing `callSource` used for
    `splitArgs?`/prologue from the `callerBase` stack used by returned-value
-   assignment. The next procedure-call step is feeding those wrappers from
-   source call-head inversion, using the body-result facts to supply the
-   returned values, argument split, caller base, caller vars-equality, and frame
-   attachment premises. The first small source-head input helper is now checked:
+   assignment. Their existential-fuel companions
+   `openRunNResult_callSite_body_regular_then_return_assign_continue_exists`
+   and
+   `openRunNResult_callSite_body_leave_then_return_assign_continue_exists`
+   now let the recursive callee body and syntactic caller tail choose fuel
+   independently after the generated call-site, dispatch, and returned-
+   assignment path has produced the actual target state. The next
+   procedure-call step is feeding those wrappers from source call-head
+   inversion, using the body-result facts to supply the returned values,
+   argument split, caller base, caller vars-equality, and frame attachment
+   premises. The first source-open call inversion helper is now packaged too:
+   `compilerOpenFunctionsStmt_call_resolves_ok_regular_inv` exposes a
+   successful returned source `Stmt.call` as argument evaluation, source
+   function lookup, callee body `Block.runOpen`, returned-value lookup,
+   caller-side assignment, and exact post-call source state. The first small
+   source-head input helper is now checked:
    `sourceDirect_prefixedStateRel_splitArgs_callerBase` extracts the
    `splitArgs?` fact, caller-base `StateRel`, and exact caller stack equation
    from a prefixed argument-stack relation. The helper
@@ -369,6 +2469,152 @@ Execution order:
    caller-vars equality, assignment over the post-call `withShared` source, and
    tail run over `(sourceAfterArgs.withShared sharedAfterCall).withVars
    returnStore` from the source call inversion's raw assignment/tail state.
+   The source-open/generated-layout lookup mismatch is now isolated locally:
+   `functionsSourceFunList_find?_eq_direct`,
+   `functionsFunList_find?_of_source_find?`,
+   `functionsProgram_toExpressions?_structured_proc_lookup_of_source_lookup`,
+   `functionsProgram_toExpressions?_programLayout_call_parts_of_sourceOpen_lookup`,
+   and
+   `codeSegment_functions_call_cons_programLayout_parts_split_of_sourceOpen_lookup`
+   let the source `Stmt.call` inversion feed generated proc/call-site layout
+   splitters from the source-open `FunList.find?` fact. These helpers remove
+   the need to import `RecursiveBridgeSupport` into `OpenLowering` just to cross
+   the source/direct lookup spelling boundary.
+   The caller-tail relation after generated CALL return assignment is now named
+   explicitly: `StackSuffixErasedRel` packages an existential hidden suffix
+   below the locals, `StackPrefixSuffixErasedRel.of_stackPrefixRel` embeds the
+   old exact stack-prefix route as the empty-suffix case, and
+   `StackSuffixErasedRel.explicitSuffixTail_of_tail` feeds this readable
+   tail-input relation into the existing explicit-suffix return-assignment
+   wrappers. The single-assignment frontier is erased too:
+   `compilerOpenAssignTopWithOffset_stackPrefixSuffixErased_openRunNResult_continue_fallthrough`
+   turns the exact `swap; pop` assignment replay into the erased hidden-suffix
+   relation needed after a CALL result is written back into a caller local. The
+   call-site/body/return-assignment wrappers now expose the same tail shape:
+   `openRunNResult_callSite_body_regular_then_return_assign_continue_exists_stackSuffixTail`
+   and
+   `openRunNResult_callSite_body_leave_then_return_assign_continue_exists_stackSuffixTail`
+   take the caller tail over `StackSuffixErasedRel` and unpack the explicit
+   suffix only for the lower return-assignment theorem. The first low-level
+   expression-tail relation atom is present:
+   `StackPrefixSuffixErasedRel.consPrefix_replaceStackAndIncrPC` preserves the
+   hidden suffix when emitted code pushes a value above the current expression
+   prefix. Local reads and atom replay have started moving to the same
+   relation:
+   `StackPrefixSuffixErasedRel.local_stack_lookup_value` and
+   `StackPrefixSuffixErasedRel.local_stack_get?_of_store_lookup` prove a DUP
+   for a local reads from the locals segment before the hidden suffix, while
+   `compilerOpenLocalsExpr_lit_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`
+   and
+   `compilerOpenLocalsExpr_var_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`
+   replay literal and variable expressions under the hidden-suffix relation.
+   Expression-sequence bind/splitting also has suffix-aware wrappers now:
+   `compilerOpenLocalsExprSeq_nil_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   `compilerOpenLocalsExprSeq_cons_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_head_tail`,
+   and
+   `compilerOpenLocalsExprSeq_cons_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode_head_tail`.
+   The hidden-suffix primitive and recursive expression route is now honest and
+   discharged in `Yul.OpenLowering`: primitive replay under the erased
+   hidden-suffix relation is exposed as
+   `PrimitiveStackPrefixSuffixErasedSound`, and the theorem
+   `primitiveStackPrefixSuffixErasedSound_of_primitiveSound` proves that
+   frontier from ordinary `Locals.SourceLowering.PrimitiveSound`. The proof
+   uses `StackPrefixSuffixErasedRel.gasExecRel_targetShared` and
+   `primOp_step_exists_gasExecRel` for non-CALL primitives, plus
+   `StackPrefixSuffixErasedRel.callSite_eq_targetShared` and
+   `StackPrefixSuffixErasedRel.eraseControl_incrPC_finishShared_targetShared`
+   for CALL-family primitives. The checked wrappers consuming this proved
+   frontier are:
+   `StackPrefixSuffixErasedRel.of_stackPrefixSuffixRel`,
+   `StackPrefixSuffixErasedRel.to_stackPrefixSuffixRel`,
+   `compilerOpenPrimitive_stackPrefixSuffixErased_openRunNResult_continue_pc_of_resolves_ok`,
+   `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_args`,
+   `compilerOpenLocalsExpr_prim_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode_args`,
+   `compilerOpenLocalsExpr_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   and
+   `compilerOpenLocalsExprSeq_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`.
+   The important theorem-boundary point is that the hidden suffix is not
+   swallowed into the locals store, and erased gas/control equality is not
+   treated as exact `state.toSharedState = compiler.shared`. This layer no
+   longer requires a separate erased primitive oracle; the next missing proof is
+   to compose the checked hidden-suffix expression/statement/block-head
+   frontier through the generated internal procedure-call return path and then
+   replace the corresponding public-spine assumptions.
+   The expression/statement tail adapters under this relation are now written:
+   `stackPrefixSuffixErased_singleton_to_cons_insert`,
+   `compilerOpenLocalsExpr_zero_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   `compilerOpenLocalsExpr_evalOne_insert_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   `compilerOpenLocalsExpr_evalOne_assign_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   `compilerOpenFunctionsStmt_expr_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   `compilerOpenFunctionsStmt_let_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`,
+   and
+   `compilerOpenFunctionsStmt_assign_stackPrefixSuffixErased_openRunNResult_continue_fallthrough_of_compileCode`.
+   The corresponding block-head composition wrappers are now drafted too:
+   `compilerOpenFunctionsBlock_expr_cons_stackPrefixSuffixErased_openRunNResult_of_tail_pc`,
+   `compilerOpenFunctionsBlock_let_cons_stackPrefixSuffixErased_openRunNResult_of_tail_pc`,
+   `compilerOpenFunctionsBlock_assign_cons_stackPrefixSuffixErased_openRunNResult_of_tail_pc`,
+   `compilerOpenFunctionsBlock_expr_cons_stackPrefixSuffixErased_openRunNResult_of_compileOpen_tail_pc`,
+   `compilerOpenFunctionsBlock_let_cons_stackPrefixSuffixErased_openRunNResult_of_compileOpen_tail_pc`,
+   and
+   `compilerOpenFunctionsBlock_assign_cons_stackPrefixSuffixErased_openRunNResult_of_compileOpen_tail_pc`.
+   These let ordinary generated caller-tail heads consume actual
+   `compileOpen` block splits while preserving the same hidden caller-frame
+   suffix and passing the tail its generated segment start PC.
+   Current focused verification is clean: `lake env lean
+   EvmCompiler/Yul/OpenLowering.lean -DmaxErrors=40`, proof-escape scan, and
+   diff hygiene all pass for this file. The primitive erased-suffix frontier is
+   now proved from ordinary primitive soundness. The first generated-layout
+   `Stmt.call` branch bridges after argument replay are now checked:
+   `compilerOpenFunctionsArgList_callSource_continue_withShared_of_compileOpen`
+   packages the generated argument run, derived `callSource`/`callerBase`, and
+   a continuation principle; `compilerOpenFunctionsArgList_then_openRunNResult_exists_of_compileOpen`
+   runs an arbitrary call-site continuation after the arguments; and
+   `compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_of_compileOpen`
+   plus
+   `compilerOpenFunctionsArgList_then_callSite_body_leave_return_assign_tail_exists_of_compileOpen`
+   consume the generated call-site return/assignment corridor for both
+   successful callee body modes, handing the caller tail a suffix-erased state.
+   These bridges now keep source actual argument values distinct from callee
+   return values, so the real `Stmt.call` inversion can supply `argValues` from
+   argument evaluation and `returnValues` from the callee return lookup without
+   an accidental equality between the two lists.
+   The source/layout bookkeeping bridge is now checked:
+   `codeSegment_callSite_returnLabelPc_exists_of_exactLabels` derives the
+   caller return-label PC from the actual generated call-site segment and exact
+   labels; `compilerOpenFunctionsArgList_compileOpen_finalCtx` records that
+   argument replay leaves the locals context unchanged; and
+   `compilerOpenFunctionsStmt_call_resolves_ok_regular_programLayout_parts_of_compileOpen`
+   packages successful source `Stmt.call` inversion together with the generated
+   program-layout split for the emitted `call :: rest` block, including the
+   callee proc segment, argument segment, call-site segment, returned-assignment
+   segment, tail segment, token/site facts, and return-label PC.
+   The callback-parametric semantic branch is now checked:
+   `compilerOpenFunctionsStmt_call_regular_then_tail_exists_of_compileOpen`
+   consumes those packaged facts, branches on the successful source callee mode,
+   and composes argument replay, generated call-site execution, return
+   dispatch, returned assignment, and the suffix-erased caller tail for both
+   regular and leave callee outcomes. The generated CALL branch now consumes
+   whole-block call inclusion instead of requiring callers to pre-project the
+   head `Structured.Stmt.call`: `functionsBlock_call_cons_callsIncluded_call_of_compileOpen`
+   derives the head `CallsIncluded` fact from the actual `call :: rest`
+   `compileOpen` split, and
+   `compilerOpenFunctionsBlock_regular_openRunNResult_compiledOpenResultRel_of_compileOpen_programLayout`
+   names the layout-aware ordinary block boundary that the final CALL case must
+   extend. The call-site/body/return-assignment corridor now has per-entry
+   callback wrappers:
+   `openRunNResult_callSite_body_regular_then_return_assign_continue_exists_of_entry_stackSuffixTail`,
+   `openRunNResult_callSite_body_leave_then_return_assign_continue_exists_of_entry_stackSuffixTail`,
+   `compilerOpenFunctionsArgList_then_callSite_body_regular_return_assign_tail_exists_of_entry_of_compileOpen`,
+   and
+   `compilerOpenFunctionsArgList_then_callSite_body_leave_return_assign_tail_exists_of_entry_of_compileOpen`.
+   `compilerOpenFunctionsStmt_call_regular_then_tail_exists_of_compileOpen`
+   has been refactored onto that per-entry shape, so it no longer asks callers
+   to choose a fixed `afterBody` before the actual generated procedure-entry
+   target exists. The public block theorem still excludes `call` in
+   `FunctionsStmtListRegularOpenSupported`; the next real proof step is to
+   construct the regular/leave callback data from the recursive callee body
+   proof, then use this branch to replace that unsupported case in the public
+   induction.
    The body-result extractors now preserve the direct-source facts needed for
    that bridge:
    `FunctionsBlockCompiledOpenResultRel.source_regular_running_stateRel_compiledOutcomeRel`
@@ -642,8 +2888,11 @@ Execution order:
    `FunctionsBlockCompiledOpenResultRel`, then extending the same shape to
    loops, switch/conditionals, and the
    whole-program imported-Yul-to-open-EVM theorem.
-5. [ ] Delete private direct-CALL or compatibility scaffolding that is no longer
-   reached from that spine.
+5. [ ] Delete or classify private direct-CALL or compatibility scaffolding that
+   is no longer reached from that spine. Current audit found no live
+   direct let-CALL or assign-CALL-named scaffolds; the remaining let/assign
+   wrappers are generic expression/statement-head helpers used by the checked
+   recursive spine.
 
 Definition of done: the preferred checked compiler theorem admits accepted Yul
 programs containing ordinary `CALL`, proves that imported-Yul execution and
@@ -698,8 +2947,9 @@ let/assign CALL scaffolding, or a concrete external-world model.
   exhaustive CALL-capable frontier. The top CALL package now derives the checked
   `ProgramCALLBridgeContext` from compilation and exposes ordinary/typed
   canonical open frontiers without a public callee oracle.
-- [ ] Wire the preferred public Yul preservation theorem to the CALL-capable
-  frontier, while leaving the no-CALL theorem only as a fallback/special case.
+- [x] Wire the preferred Functions-level public preservation theorem to the
+  CALL-capable frontier, while leaving the no-CALL theorem only as a
+  fallback/special case at higher imported-Yul/gas-aware boundaries for now.
   The source-to-compiler-open dispatcher-block result is now wired. The
   target-side primitive/instruction/list/program CALL adapter is Lean-checked
   in `OpenAssembly`, including empty-trace compatibility for no-CALL target
@@ -738,13 +2988,29 @@ let/assign CALL scaffolding, or a concrete external-world model.
   `OpenLowering.compilerOpenPrimitive_stackPrefix_openRunNResult_continue_of_resolves_ok`.
   The first expression-level `.prim` composition theorem is also checked:
   `OpenLowering.compilerOpenLocalsExpr_prim_stackPrefix_openRunNResult_continue_of_args`.
-  The remaining public gap is proving the CALL-capable
-  compiler-open/function-block theorem, then composing the public imported-Yul
-  dispatcher result through it.
+  `OpenLowering` now also has the checked frame-native ordinary block spine:
+  the empty-block base, expression/let/assign heads, block-head tail bridges,
+  ordinary supported-list induction, the recursive program-layout CALL theorem,
+  scoped cleanup/postamble composition, and the Functions-to-compiled-open
+  public wrappers. `LayerAudit.FunctionsOpenCALLBoundary` pins the checked
+  compiler-target route. `Yul.OpenRuntime` now adds the checked imported-Yul
+  regular-open CALL target
+  `compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?`,
+  proves that it projects to the lowered Functions
+  `FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?`, and exposes the
+  corresponding Functions compiled-open soundness wrapper through
+  `LayerAudit.ImportedYulOpenCALLBoundary`.
 - [ ] Audit the public theorem boundary: no concrete world/precompile/callee
   model, no direct CALL scaffolding, no generated compiler evidence assumed
   without a checked constructor, no public call oracle, and no hidden no-CALL
-  premise on the preferred route.
+  premise on the preferred route. Current Functions-level audit is clean for
+  generated replay/certificate/call-oracle premises. The regular Functions
+  support predicate is now checkable by `FunctionsProgramRegularOpenSupported?`
+  and bundled into
+  `FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?`; the imported-Yul
+  checker now also bundles that support check for the lowered Functions
+  program. Remaining audit work is to generalize the higher imported-Yul/
+  gas-aware surface.
 - [ ] Extend the same architecture from ordinary `CALL` to the CALL family when
   ordinary `CALL` is finished: `CALLCODE`, `DELEGATECALL`, `STATICCALL`,
   `CREATE`, and `CREATE2`, with a request-boundary audit for each.
@@ -2039,8 +4305,11 @@ Remaining work:
      nonrelatable frontend/resource errors before a productive callee body.
    - [x] Relate or rule out expression error and out-of-fuel branches using
      existing acceptedness/resource premises.
-   - [ ] Delete direct let-CALL and assign-CALL scaffolding as soon as the
-     expression theorem subsumes it; do not leave compatibility aliases.
+   - [x] Delete or classify direct let-CALL and assign-CALL scaffolding as soon
+     as the expression theorem subsumes it; do not leave compatibility aliases.
+     Current grep finds no live direct let-CALL or assign-CALL-named scaffolds;
+     remaining let/assign wrappers are generic expression/statement-head
+     theorem pieces used by the checked recursive spine.
    - [ ] Run the focused Lean check and log the exact removed theorem names.
 
 3. [ ] Thread expression preservation through open sequence frontiers.
@@ -2131,13 +4400,21 @@ Remaining work:
      CALL theorem has passed the same audit gates.
    - [ ] Rename public no-CALL runtime/spine names where they become
      misleading once CALL is admitted; remove old compatibility aliases.
-   - [ ] Route `LayerAudit` to the CALL-capable public theorem once the bridge
-     is fully checked.
+   - [x] Route `LayerAudit` to the CALL-capable Functions public theorem once
+     the bridge is fully checked. `LayerAudit.FunctionsOpenCALLBoundary` now
+     pins the Functions-to-compiled-open theorem and checked compiler-target
+     extractor; `LayerAudit.ImportedYulBoundary` intentionally stays on the
+     no-internal-CALL gas-aware root until the higher wrapper is generalized.
    - [ ] Confirm the public theorem proves storage equality and result equality
      through the strengthened storage/result relation in the main spine.
-   - [ ] Confirm the public theorem has no stale compiler-generated evidence,
+   - [x] Confirm the Functions-level public theorem has no stale
+     compiler-generated evidence,
      replay certificate, all-callees-preserve premise, direct CALL statement
      scaffold, concrete external-world assumption, or hidden checker shortcut.
+     Current Functions-level scan is clean for replay/certificate/call-oracle
+     terms; `FunctionsProgramRegularOpenSupported?` now checks the regular
+     support predicate and the checked regular-open target bundles support
+     success with compile/assembly success.
 
 7. [ ] Remove stale proof internals after CALL wiring.
    - [ ] Delete direct let-CALL and assign-CALL lemmas no longer used by the
@@ -5632,9 +7909,10 @@ or transitional theorem variants, not compiler-acceptance evidence.
 Non-goals:
 
 - Keep the EVM top-16 `DUP`/`SWAP` addressability problem separate from the
-  recursive call-depth proof.  It is now tracked below as a liveness/layout
-  allocation task; until that pass is checked, actual `StackOp.dup?`/
-  `StackOp.swap?` failures remain a sound conservative rejection.
+  recursive call-depth proof.  The locals-source spill route now has checked
+  conservative and adaptive public wrappers around deep-local failures; the
+  preferred imported-Yul path still tracks top-16 allocation/spilling separately
+  from call-depth/resource recurrence.
 - Do not accept general unbounded recursion. If an internal-call cycle can run
   for an unbounded number of active frames for some accepted input/state, the
   stack-safe checked compiler must reject it.
@@ -5644,6 +7922,97 @@ Non-goals:
 - Do not hide compiler-generated call-depth or ranking evidence inside source
   acceptedness unless that evidence is produced and checked by an executable
   analyzer theorem.
+
+### Top-16 Spill Status
+
+- [x] Conservative locals-source spill route: `compileCheckedWithConservativeSpill?`
+  hides generated spill plans/expressions programs, proves assembly replay for
+  source runs, and exposes visible-state observation equality outside scratch.
+- [x] Adaptive locals-source spill route: `compileCheckedWithAdaptiveSpill?`
+  now exposes the same public assembly-only shape for the less-conservative
+  fallback that spills one stack local at a time until the atom compiles.  The
+  audit pins compile decomposition, no-CALL/CREATE, open-block/program
+  preservation, end-PC preservation, and observation equality.
+- [x] Adaptive observable-state projection:
+  `AdaptiveSpillObservableOutcomeRel.regular_observations` and
+  `AdaptiveSpillObservableOutcomeRel.halt_observations` expose the visible
+  consequences of the private-scratch relation directly: account map/storage,
+  substate, created accounts, return data, and `H_return` agree, while only
+  private scratch memory and gas/control fields may differ.
+- [x] Functions source-owned adaptive spill route:
+  `Functions.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?`
+  hides generated spill plans/expressions programs behind executable source-owned
+  checking, derives the lowered locals run internally, and exposes preservation
+  plus visible-state observation equality at the Functions source boundary.
+- [x] Objects/Yul source-lowered adaptive spill adapter:
+  `Objects.Source.Program.compileCheckedWithAdaptiveSpillSourceOwned?` and
+  `Yul.Program.compileCheckedWithAdaptiveSpillSourceOwned?` lift the checked
+  source-owned root route through transparent adapters.  The theorem starts from
+  `SourceLowered.run` under the structured primitive semantics, consumes only
+  executable compile success plus the private scratch boundary, and exposes
+  assembly execution with visible-state observation equality outside scratch.
+- [x] Adaptive source-owned Yul target/bytecode adapter:
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?`
+  resolves the adaptive spill assembly to a concrete target program and checks
+  the same bytecode bridge, feature/source-static, no-CALL/CREATE, and
+  no-RETURNDATACOPY runtime facts used by the no-CALL path.  The composed
+  theorem
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticNoReturnDataCopy?_source_observations_targetFacts`
+  packages source-lowered adaptive spill observation preservation together with
+  target decode-window, jumpdest, and block-replay facts.
+- [x] Adaptive emitted-code assembly stack-bound gate:
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?`
+  runs the executable `AssemblyBounds.inferProgramBoundCheckResult?` pass on the
+  adaptive spill assembly and derives
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_actualEVMStackHeadroomBound`,
+  so later gas-aware wrappers can consume the same actual EVM stack-headroom
+  fact as the existing no-CALL route.  The wrapper
+  `adaptiveSpillStackSafe_actualEVMHeadroomPoints` now also exposes the
+  source-run-indexed EVM headroom points directly from the executable assembly
+  checker and the preservation-produced gasless run equality.  The adaptive
+  and conservative stack-safe spill gates also have direct
+  `_of_noReturnDataCopy` constructors from the no-RETURNDATACOPY target gate
+  plus executable `AssemblyBounds.inferProgramBoundCheckResult?` success, so
+  callers do not need to unfold the private stack-safe wrappers to supply that
+  checked bound.
+- [x] Adaptive source-lowered gas-aware EVM replay:
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_sourceLowered_sufficientGas_X`
+  composes the source-lowered adaptive observation theorem, bytecode bridge,
+  executable assembly stack-bound check, path checks, no-CALL/CREATE, and
+  no-RETURNDATACOPY facts into the gas-aware EVM boundary.  For any successful
+  `SourceLowered.run` and matching encoded target code, it derives a gasless
+  block trace and proves that every sufficiently large UInt256 gas value has an
+  `EVM.X` execution whose result agrees with the target outcome.
+- [x] Adaptive imported-reference gas-aware EVM replay:
+  `Yul.Program.sourceLowered_run_of_dispatcher_source_result_block_bridge`
+  factors the source-only half of the recursive dispatcher bridge, deriving
+  `SourceLowered.run` from an imported/reference Yul run without invoking the
+  old target compiler path.  The composed theorem
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_referenceRun_sufficientGas_X`
+  now connects the imported reference run to the adaptive source-lowered
+  gas-aware theorem under the private scratch boundary, encoded target-code
+  relation, and canonical entry-state premises.  The public-facing wrapper
+  `compileCheckedWithAdaptiveSpillSourceOwnedAssemblyTargetBytecodeFeaturesSourceStaticAssemblyInferredBoundStackSafeNoReturnDataCopy?_runResult_sufficientGas_X`
+  spells the source premise as `∃ sourceFuel, Reference.runResult ... = .ok
+  referenceResult ∧ referenceResult ≠ .regular .OutOfFuel`, avoiding exposure
+  of the internal `RecursiveBridgeSourceRun` package.
+- [x] Exact-or-conservative-spill fallback theorem:
+  `compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?` first tries the
+  ordinary exact stack-safe no-RETURNDATACOPY compiler gate, then falls back to
+  the conservative source-owned private-scratch spill route.  Its gas-aware
+  run-result theorem proves either the exact
+  `SourceLowered.WholeProgramOutcomeRel` or the conservative
+  outside-private-scratch observable relation, while keeping the private scratch
+  boundary explicit.  This is an honest alternate public surface for
+  stack-too-deep avoidance, not yet a silent replacement for the exact
+  live-layout public spine.
+- [ ] Lift spilling into the preferred imported-Yul/live-layout path, or
+  deliberately keep that path on the exact live-layout/hidden-frame checker until
+  a full higher-level spilling allocator exists there.
+  The checked adaptive source-owned adapter is now connected to imported
+  reference execution, but it remains a distinct private-scratch spill route
+  rather than the older live-layout public spine; a future live-layout allocator
+  could perform equivalent spilling before structured procedure compilation.
 
 ### Current Boundary To Replace
 
@@ -6281,19 +8650,27 @@ Core recurrence model:
   also has a checked resource wrapper,
   `SourceFrameWordSumResourceBound`, plus a Yul bridge wrapper
   `RecursiveBridgeSourceFrameWordSumResourceBound` and executable check
-  `recursiveBridgeExecutableFrameWordSumStackCheck?`.  The Yul bridge now also
+  `recursiveBridgeExecutableFrameWordSumStackCheck?`.  The weighted context now
+  exports the exact split facts directly:
+  hidden-return weight is bounded by the checked path sum, and full source-stack
+  weight is bounded by `layout.length + frameWords` before the final
+  `layout.length <= 16` headroom projection.  The Yul bridge now also
   has `RecursiveBridgeSourceDirectFrameWordSumPoint`, with main/call/return
   constructors and a point-to-source-headroom projection, plus
   `RecursiveBridgeActualSourceRunFrameWordSumPoints` to lift those checked
   weighted points across actual assembly-source runs and project them into the
   existing source-frame and EVM stack-headroom interfaces.  The no-CALL runtime
-  now also has source-checked exact-sum compile gates,
+  now also has source-checked exact-sum compile gates, including the live
+  no-internal-CALL gate
+  `compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumStackSafeNoReturnDataCopy?`,
+  which requires the live no-CALL compile result, the executable
+  `recursiveBridgeExecutableFrameWordSumStackCheck?`, and an inferred assembly
+  stack-bound check.  The older checked-compile gates,
   `compileCheckedAssemblyTargetBytecodeResourcesFeaturesSourceStaticExecutableFrameWordSumStackSafeNoReturnDataCopy?`
-  and its assembly-inferred sibling, plus public sound/no-out-of-gas theorem
-  roots over the exact accumulated hidden-frame check.  Import-level
-  `LayerAudit` still points at the older frame-words-depth root until the
-  parallel CALL-side `RecursiveBridgeSupport` rebuild lets the new
-  `NoCallRuntime` olean be produced.
+  and its assembly-inferred sibling, remain as compatibility surfaces.  Public
+  sound/no-out-of-gas theorem roots over the exact accumulated hidden-frame
+  check are now import-visible, and `LayerAudit` pins the preferred live public
+  roots plus the source frame-word-sum and assembly-bound projections.
 - [x] Lift the refined frame-word resource route through the Yul bridge:
   `RecursiveBridgeSourceFrameWordsResourceBound` and
   `recursiveBridgeSourceFrameWordsResourceDepth?` now expose the checked
@@ -7308,10 +9685,72 @@ storage scratch assumption.
 	  and the scoped public-root wrapper names.
 	  Exact frame-word note: the path-summed hidden-return headroom surface is
 	  already checked in `Functions.CallDepth.SourceFrameWordSumResourceBound` and
-	  still pinned in compatibility tripwires; the preferred public no-CALL Yul
-	  gas-aware roots now use the executable live no-internal-CALL compile gate
-	  plus inferred assembly stack-bound check, rather than the stale
-	  checked-compile `FrameWordSum` route.
+	  still pinned in compatibility tripwires.  The preferred public no-CALL Yul
+	  gas-aware roots now use the executable live no-internal-CALL live-layout
+	  frame-word-sum compile gate plus inferred assembly stack-bound check,
+	  rather than the older `16 + frameWords + 17 <= 1024` frame-word-sum gate,
+	  coarse live stack-safe alias, or stale checked-compile route.  The
+	  compatibility frame-word-sum projections still expose the concrete
+	  lowered function program, `Program.maxActiveFrameWords?` result, and exact
+	  `16 + frameWords + 17 <= 1024` capacity proof directly via
+	  `_sourceFrameWordSumExactBound`, so readers do not need to infer exactness
+	  from the abstract resource-bound wrapper alone.  These exact-bound pins now
+	  also live in `EvmCompiler.StackGuardAudit`, a CALL-independent audit module
+	  kept checkable while the shared `LayerAudit` imports the in-flight CALL
+	  boundary first.  The audit now pins both the Yul-facing compile-success
+	  projections and the underlying function-level exact checker surface:
+	  `Program.maxActiveFrameWords?`, `StackFrameWordSumCheckResult.path_words_bound`,
+	  the hidden-return/source-stack weighted-context projections, and the
+	  checked `SourceFrameWordSumResourceBound` projections.
+	  The function-level headroom API now also has layout-sensitive projection
+	  wrappers: `SourceDirectWeightedFrameContext.sourceStackHeadroom_of_layout_budget`
+	  and
+	  `SourceFrameWordSumResourceBound.sourceStackHeadroom_of_weightedContext_layout_budget`
+	  derive `SourceStackHeadroom` from the exact live-layout budget
+	  `layout.length + frameWords + 17 <= 1024`.  That sharper budget is now also
+	  executable-checker-produced: `Program.stackFrameWordSumVisibleCheck?`
+	  checks `visibleWords + frameWords + 17 <= 1024`, the packaged
+	  `Program.sourceFrameWordSumVisibleResourceBound?` exposes the checked
+	  resource bound, and the layout-exact wrappers consume it at
+	  `visibleWords = layout.length`.  The visible checker is now lifted through
+	  the Yul recursive bridge as
+	  `Yul.Program.recursiveBridgeExecutableFrameWordSumVisibleStackCheck?`,
+	  with checked source/resource projections pinned in `StackGuardAudit`.
+	  The function live-layout checker now exposes a single executable
+	  max-live-layout-width surface too:
+		  `Functions.LiveLayout.Checked.Program.maxLiveLayoutWidth?` mirrors
+		  `Checked.check?`, and `Program.maxLiveLayoutWidth?_check?` proves success
+		  implies the existing checker succeeds.  Its block/statement/list
+		  soundness lemmas also prove the computed width bounds the entry and output
+		  layouts of the checked traversal, with CALL-independent pins in
+		  `StackGuardAudit.LiveLayoutWidthChecker`.  The checker now also exposes
+		  the runtime-consumable bounded-layout invariant
+		  `Checked.*.LayoutsBoundedBy`: `Block.widthCheck?_layoutsBoundedBy` and
+		  `Program.maxLiveLayoutWidth?_body_layoutsBoundedBy` prove every
+		  traversal layout covered by the successful executable checker is bounded
+		  by the computed width.  The Yul no-CALL runtime layer now has a checked
+		  live-layout visible-source gate,
+		  `compileLiveNoInternalCallCheckedAssemblyTargetBytecodeFeaturesSourceStaticExecutableAssemblyInferredBoundFrameWordSumLiveLayoutStackSafeNoReturnDataCopy?`.
+		  Compile success exposes the lowered object program, the executable
+		  `maxLiveLayoutWidth?` result, the visible frame-word stack-resource
+		  checker at that width, `body_layoutsBoundedBy`, and the executable
+		  assembly inferred stack-bound result.  Remaining work is the
+		  preservation/live-context bridge that consumes `LayoutsBoundedBy` for
+		  every runtime context and produces
+		  `RecursiveBridgeSourceDirectFrameWordSumLiveLayoutPoint` along the
+		  actual source/target trace.  The downstream consumer is now checked:
+		  `RecursiveBridgeActualSourceRunFrameStackHeadroom.toEVMStackHeadroomBound`,
+		  `RecursiveBridgeActualSourceRunFrameWordSumLiveLayoutPoints.toEVMStackHeadroomBound`,
+		  and the gate-specific
+		  `_actualEVMStackHeadroomBound_of_sourceRunFrameWordSumLiveLayoutPoints`
+		  plus
+		  `_actualEVMStackHeadroomBound_of_sourceRunFrameStackHeadroom`
+		  theorem turn those exact live-layout trace points into the public
+		  `RecursiveBridgeActualEVMStackHeadroomBound`.  The public
+		  `LayerAudit.ImportedYulBoundary` roots now select this exact
+		  live-layout gate.  Remaining refinement is deriving the trace points
+		  from live-layout preservation rather than passing them through an
+		  internal bridge.
 	  Live public-gate checkpoint: the function layer now has checked assembly
 	  preservation for the executable live-layout/no-internal-CALL compile gate,
 	  `Functions.LiveLayout.SourceTarget.Program.compileLiveNoInternalCallChecked_preserves`.
@@ -7451,6 +9890,22 @@ storage scratch assumption.
   separated as `LiveLayout.Layout.promoteNameUnbounded?`; `LayerAudit` checks
   that an 18th-slot name has a valid unbounded layout promotion while both the
   stack-only layout helper and Locals backend still reject it.
+  The stack-only adaptive spill route is now audit-visible too:
+  `compileFreshAtomWithAdaptiveSpill?` first tries the ordinary atom compiler
+  and then spills one stack local at a time until the same atom compiles.  Its
+  well-formedness, no-CALL/CREATE, source-scope, store-defined, and source-run
+  soundness facts are pinned in `StackGuardAudit`, along with executable
+  regressions showing that the adaptive route accepts the `SWAP17`-shaped atom
+  and the 17-local open-block case.  This is still not the public scoped
+  program wrapper; the public route remains the conservative spill-on-atom-
+  failure checker until the adaptive scheduler is lifted through the same
+  scoped/public boundary.  `StackGuardAudit` now also pins a Functions-level
+  17-local regression: direct `toExpressions?` rejects it, the executable
+  source-owned gate accepts it, and the conservative spill planner accepts the
+  lowered Locals program.  The `Functions.Source.Program` wrapper has a checked
+  constructor theorem from the underlying Locals spill/backend result, so this
+  regression is tied to the public theorem boundary without pretending the
+  noncomputable backend assembly wrapper is itself `native_decide`-testable.
 - [x] Deep-locals spill architecture decision:
   oracle
   `resp_076a4060dc6ff6c8006a1fd481bf408192b65d3191ea099e5b` completed with a
@@ -7489,13 +9944,18 @@ storage scratch assumption.
     which is required by Lean's concrete `ByteArray.write` implementation.
     The executable byte-range no-touch checker `ByteDisjoint.check`/`ScratchRange.disjointBytes?`
     is checked with soundness/completeness pins.  The conservative source
-    no-memory-touch checker `SourceNoMemoryTouch.program?` is also checked
-    through operation/terminal soundness pins and audit tripwires; it rejects
-    memory-reading/writing primitives instead of proving dynamic range
+    no-memory-touch checker `SourceNoMemoryTouch.program?` is also checked:
+    successful executable runs now produce a syntax-shaped `ProgramSafe`
+    theorem, with operation/terminal leaf soundness and audit tripwires.  It
+    rejects memory-reading/writing primitives instead of proving dynamic range
     separation.  The spill-aware local-location/layout relation
     `SpillLayout.WellFormed` and executable `SpillLayout.checked?` are checked
     with soundness/completeness plus audit tripwires for stack bindings, scratch
-    bounds, and duplicate scratch slots.  The first compositional macro fact is
+    bounds, and duplicate scratch slots.  The compiler-facing
+    `PrivateScratchBoundary.check?` now bundles the executable source
+    no-memory-touch check, target scratch-readiness check, and spill-layout
+    check, with sound projections for the future theorem boundary.  The first
+    compositional macro fact is
     checked on the target-only scratch-write side:
     `byteArray_write32_getElem_eq_of_byteDisjoint` and
     `MemoryByteEqOutsideScratch.mstore_target_scratch_slot` show a compiler
@@ -7520,11 +9980,591 @@ storage scratch assumption.
     `SpillLayout.ValueRel`, and the stack/scratch projection lemmas relate
     stack-bound and scratch-bound locals to the source store, including the
     fact that scratch-bound locals load their source value from the assigned
-    private scratch slot.  Remaining work is the public theorem split and
-    compiler wiring for spill-aware emitted code.
-  Until that route is fully checked, the shippable path remains conservative:
-  dead-drop, SWAP16-reachable promotion, and rejection of genuinely-live
-  deeper-than-window locals.
+    private scratch slot.  The load-only retrieval side is also audit-pinned:
+    `spillLoadCode`, `run_spillLoadCode`, and
+    `MemoryByteEqOutsideScratch.run_spillLoadCode_target_scratch_binding_valueRel`
+    show that a scratch-bound local can be reloaded by concrete emitted code
+    while preserving the outside-scratch memory relation and spill-layout value
+    relation.  The scratch-assignment side now has the corresponding checked
+    update fact: spill-layout uniqueness lemmas prove a checked layout cannot
+    alias scratch slots or bind the same name to stack and scratch, and
+    `spillStoreTopCode`, `run_spillStoreTopCode`,
+    `SpillLayout.ValueRel.mstore_target_scratch_slot_assign`, and
+    `MemoryByteEqOutsideScratch.run_spillStoreTopCode_target_scratch_binding_assign`
+    show that `push offset; mstore`, starting with the assigned value already on
+    top of the target stack, consumes that value, writes the private scratch
+    slot, preserves the outside-scratch memory relation, and updates the
+    source-store/spill-layout value relation for the assigned local.  The
+    shared-state boundary is now packaged explicitly:
+    `SharedStateEqOutsideScratch` keeps account/storage/environment/receipt/
+    created-account fields exact while relating the machine memory outside the
+    private scratch range, and `SpillStateRel` bundles that relation with
+    scratch readiness, checked spill layout, and spill-layout values.  Its
+    `SpillStateRel.mstore_scratch_assign` theorem updates the full relation for
+    a source assignment to a scratch-bound local plus the matching target
+    scratch write.  The temporary result boundary is now checked too:
+    `SpillStackPrefixRel` represents target expression results above the
+    spill-layout base stack, `run_spillLoadCode_shared`/
+    `run_spillStoreTopCode_shared` expose the concrete macros' shared-state
+    effects, `SpillStackPrefixRel.run_spillLoadCode_scratch_binding` reloads a
+    scratch-bound local into that prefix, and
+    `SpillStackPrefixRel.run_spillStoreTopCode_scratch_assign` consumes a top
+    value into scratch while returning the full `SpillStateRel`.  The first
+    executable read-selector bridge is checked as well:
+    `SpillLayout.lookup?`/`lookup?_complete` find checked stack-or-scratch
+    bindings, `SpillLayout.readCode?` selects either stack `DUPn` or scratch
+    `spillLoadCode`, and
+    `SpillStackPrefixRel.readCode_scratch_var_bridge` proves source `.var`
+    evaluation for a scratch-bound local agrees with the selected emitted code
+    and extends the temporary result prefix with the same value.  The
+    stack-bound side is checked too:
+    `SpillLayout.readCode?_stack_of_binding` proves checked stack bindings
+    select the expected temporary-prefix-adjusted `DUPn`, and
+    `SpillStackPrefixRel.readCode_stack_var_bridge` proves source `.var`
+    evaluation agrees with that selected emitted code under the explicit
+    `DUP1..DUP16` bound.  The atom-expression compiler surface is now checked:
+    `SpillExpr.compileOneCode?` emits concrete code for `.lit` and `.var`
+    atoms, rejects still-unhandled `.code`/`.prim` expressions, and
+    `SpillStackPrefixRel.compileOneCode_lit_bridge`,
+    `SpillStackPrefixRel.compileOneCode_scratch_var_bridge`, and
+    `SpillStackPrefixRel.compileOneCode_stack_var_bridge` prove those emitted
+    atoms agree with source evaluation while extending the target prefix by the
+    same value.  The atom-sequence surface now has compiler-owned bridge facts:
+    `SpillExpr.compileSeqCode?` emits append-composed atom code,
+    `SpillStackPrefixRel.compileOneCode_bridge` derives the concrete target
+    run from executable atom compiler success plus source evaluation,
+    `SpillStackPrefixRel.compileOneCode_eval_length` derives the result width
+    for accepted atoms, and `SpillStackPrefixRel.compileSeqCode_bridge` lifts
+    the bridge to atom-only expression sequences while deriving `DUP1..DUP16`
+    and width facts from compiler success instead of caller-supplied evidence.
+    The full recursive expression compiler interface is now checked behind a
+    discharged primitive obligation: `PrimitiveScratchSound` states exactly what
+    non-memory-touching primitives must preserve across the private-scratch
+    state relation, including scratch readiness, machine-state equality for the
+    spill slots, result stack shape, and result arity.  `SpillExpr.compileCode?`
+    and `SpillExpr.compileSeqFullCode?` compile recursive expressions with
+    primitives, while `SpillStackPrefixRel.eval_length_of_exprSafe`,
+    `SpillStackPrefixRel.compileCode_bridge`, and
+    `SpillStackPrefixRel.compileSeqFullCode_bridge` prove the emitted code
+    preserves the spill relation from executable compiler success plus source
+    safe/eval facts.  The outside-scratch machine relation has been hardened so
+    only private scratch memory may diverge: `MemoryEqOutsideScratch` now keeps
+    gas availability, return data, and `H_return` exact as well as active memory
+    shape, and `SharedStateEqOutsideScratch.toState_eq`/`replaceToState_same`
+    expose the exact state-update bridge needed by stateful primitives.  The
+    primitive-step family lemmas now cover pure stack, execution-env, state,
+    unary/binary state, and machine-read primitives:
+    `structured_eval_step_exists_outsideScratch_bin`,
+    `structured_eval_step_exists_outsideScratch_un`,
+    `structured_eval_step_exists_outsideScratch_tri`,
+    `structured_eval_step_exists_outsideScratch_pop`,
+    `structured_eval_step_exists_outsideScratch_executionEnv`,
+    `structured_eval_step_exists_outsideScratch_unaryExecutionEnv`,
+    `structured_eval_step_exists_outsideScratch_state`,
+    `structured_eval_step_exists_outsideScratch_unaryState`,
+    `structured_eval_step_exists_outsideScratch_binaryState`, and
+    `structured_eval_step_exists_outsideScratch_machineState`.
+    `structured_eval_step_exists_outsideScratch` assembles these cases and
+    `PrimitiveSemantics.structuredScratchSound` discharges
+    `PrimitiveScratchSound Source.PrimitiveSemantics.structured`.  The
+    structured-specialized wrappers
+    `SpillStackPrefixRel.compileCode_bridge_structured`,
+    `SpillStackPrefixRel.compileSeqFullCode_bridge_structured`, and
+    `SpillStackPrefixRel.compileCode_zero_spillStateRel_structured` now expose
+    the expression bridge to statement-level spill proofs without a generic
+    primitive-soundness parameter.  The first statement-shaped stack-retained
+    update is checked too: `SpillLayout.pushStackLayout` shifts existing
+    stack-bound locals under a fresh top-stack local while preserving scratch
+    slots, `WellFormed.pushStack` and `ValueRel.pushStack_insert` prove the
+    layout/value relation update, and
+    `SpillStackPrefixRel.compileCode_one_letStack_spillStateRel_structured`
+    composes structured expression replay with the fresh `.let_` stack binding.
+    The fresh scratch-backed `.let_` sibling is now checked as well:
+    `SpillLayout.pushScratchLayout` prepends a fresh private-scratch binding,
+    `WellFormed.pushScratch`/`ValueRel.pushScratch_insert` prove the relation
+    update after the matching target `MSTORE`,
+    `SpillStackPrefixRel.run_spillStoreTopCode_cons_insert_scratch` proves the
+    concrete `spillStoreTopCode` macro consumes the top expression result into
+    that fresh slot, and
+    `SpillStackPrefixRel.compileCode_one_letScratch_spillStateRel_structured`
+    composes expression replay with the emitted scratch store.  Scratch-bound
+    assignment now has the corresponding statement bridge:
+    `SpillStackPrefixRel.compileCode_one_assignScratch_spillStateRel_structured`
+    composes RHS expression replay with concrete `spillStoreTopCode` into an
+    existing scratch binding and produces the source `withVars (Store.insert
+    ...)` state under the full spill relation.  Stack-bound assignment is now
+    checked too:
+    `SpillLayout.ValueRel.assignStack_insert` updates mixed stack/scratch value
+    relations after a stack-slot replacement,
+    `SpillStackPrefixRel.run_assignStackCode_stack_binding_assign` proves the
+    concrete bounded `SWAP(depth+1); POP` assignment macro, and
+    `SpillStackPrefixRel.compileCode_one_assignStack_spillStateRel_structured`
+    composes RHS expression replay with that emitted assignment code.  The
+    non-memory-touching terminal route is now checked too:
+    `MemoryByteEqOutsideScratch.setReturnData_setHReturn`/`setHReturn` and
+    `SharedStateEqOutsideScratch.setReturnData_setHReturn` preserve the
+    private-scratch relation through terminal machine updates,
+    `PrimitiveSemantics.selfdestructTerminalState_toSharedState_outsideScratch`
+    lifts `SELFDESTRUCT` across exact account/substate fields plus
+    outside-scratch machine equality, and
+    `PrimitiveSemantics.structured_terminal_step_exists_outsideScratch`,
+    `SpillStackPrefixRel.terminal_step_spillHaltRel_structured`,
+    `SpillStackPrefixRel.terminal_spillStateRel_structured`, and
+    `SpillStackPrefixRel.compileSeqFullCode_terminalArgs_spillHaltRel_structured`
+    compose accepted terminal/terminal-argument execution to a related halted
+    target state.  The terminal and regular statement routes now share a
+    uniform checked outcome interface too: `SpillStmtCode.run` distinguishes
+    regular code from terminal code, `SpillOutcomeRel` relates either a regular
+    source outcome to `SpillStateRel` or a halted source outcome to
+    `SpillHaltRel`, and
+    `SpillStackPrefixRel.compileCode_zero_spillOutcomeRel_structured`,
+    `SpillStackPrefixRel.terminal_spillOutcomeRel_structured`, and
+    `SpillStackPrefixRel.compileSeqFullCode_terminalArgs_spillOutcomeRel_structured`
+    package the already-checked regular/terminal bridges into that interface.
+    The one-result local-update atoms are packaged there now as well:
+    `SpillStackPrefixRel.compileCode_one_letStack_spillOutcomeRel_structured`,
+    `SpillStackPrefixRel.compileCode_one_letScratch_spillOutcomeRel_structured`,
+    `SpillStackPrefixRel.compileCode_one_assignScratch_spillOutcomeRel_structured`,
+    and
+    `SpillStackPrefixRel.compileCode_one_assignStack_spillOutcomeRel_structured`
+    lift the checked stack/scratch let/assignment routes into regular
+    `SpillOutcomeRel` results.  The statement-code runner now has its first
+    compositional helper:
+    `SpillStmtCode.prependCode` and `SpillStmtCode.run_prependCode` prove that
+    adding an ordinary structured-code prefix to either a regular or terminal
+    tail factors as "run the prefix, then run the tail"; this is the reusable
+    runner fact needed for block sequencing.  The next sequencing atom is
+    checked too: `SpillStmtCode.seq`/`SpillStmtCode.run_seq` combine a head
+    statement with a tail statement by running the tail only on regular head
+    results and preserving halted head results, while
+    `SpillOutcomeRel.regular_inv`, `SpillOutcomeRel.halt_inv`, and
+    `SpillOutcomeRel.halt_layout_irrelevant` expose the relation facts needed
+    to switch between regular-tail continuation and halted short-circuit cases.
+    The preservation-level sequencing wrappers are checked as well:
+    `SpillStmtCode.run_seq_regular` and `SpillStmtCode.run_seq_halt` expose the
+    two target runner cases, while `SpillOutcomeRel.seq_regular_preserves` and
+    `SpillOutcomeRel.seq_halt_preserves` package the regular-tail and
+    halt-short-circuit preservation patterns for the upcoming recursive block
+    proof.  The block-list runner layer is now checked:
+    `SpillStmtCode.skip`, `SpillStmtCode.seqList`,
+    `SpillStmtCode.run_skip`, `SpillStmtCode.run_seqList_nil`, and
+    `SpillStmtCode.run_seqList_cons` give empty-block and cons execution laws;
+    `SpillOutcomeRel.skip_preserves`,
+    `SpillOutcomeRel.seqList_nil_preserves`,
+    `SpillOutcomeRel.seqList_cons_regular_preserves`, and
+    `SpillOutcomeRel.seqList_cons_halt_preserves` package those laws into
+    reusable list-shaped preservation lemmas.  The first executable scheduler
+    surface is now checked too: `SpillLayout.firstFreeScratchSlot?` finds a
+    fresh in-range scratch word when it succeeds, `stackOp_swap?_some_bound`
+    turns successful `SWAP?` selection into the needed top-16 proof, and
+    `SpillAtomPlan.compileExpr0?`, `compileLet?`, `compileAssign?`,
+    `compileTerminal?`, and `compileTerminalArgs?` produce `SpillStmtCode`
+    atoms with soundness theorems (`compileExpr0?_sound`, `compileLet?_sound`,
+    `compileAssign?_sound`, `compileTerminal?_sound`, and
+    `compileTerminalArgs?_sound`) that derive the target run and
+    `SpillOutcomeRel` from executable planner success plus the corresponding
+    source evaluation.  The source-run-driven atom wrappers
+    `compileExpr0?_sound_of_source_run`, `compileLet?_sound_of_source_run`,
+    `compileAssign?_sound_of_source_run`,
+    `compileTerminal?_sound_of_source_run`, and
+    `compileTerminalArgs?_sound_of_source_run` now invert the actual
+    `Source.Stmt.run` result and derive those expression/terminal facts
+    internally, including assignment-name preservation through RHS evaluation.
+    The matching output-layout invariant is checked as well:
+    `compileExpr0?_wellFormed`, `compileLet?_wellFormed`,
+    `compileAssign?_wellFormed`, `compileTerminal?_wellFormed`, and
+    `compileTerminalArgs?_wellFormed` derive the next `SpillLayout.WellFormed`
+    directly from executable planner success, input well-formedness, and the
+    source-facing `let` freshness fact.  The unified atom dispatcher is now
+    checked too: `SpillAtomPlan.Fresh` isolates the source-facing `let`
+    freshness premise, while `compile?_wellFormed` and
+    `compile?_sound_of_source_run` package the per-atom cases behind the
+    executable `compile?` dispatcher.  The first recursive list scheduler is
+    now checked: `SpillPlan.compileFreshAtom?` rejects duplicate `let`s
+    executablely before dispatching to the atom planner, and
+    `SpillPlan.compileStmtList?` / `compileBlockOpen?` recursively thread the
+    computed spill layout and sequenced `SpillStmtCode` over atom-only
+    statement lists.  Their checked facts
+    `compileStmtList?_wellFormed`, `compileBlockOpen?_wellFormed`,
+    `compileStmtList?_sound_of_source_run`, and
+    `compileBlockOpen?_sound_of_source_run` derive target execution from
+    executable scheduler success plus a real `Source.Block.runOpen` result;
+    unsupported statement heads still fail closed.  The first eviction-layout
+    brick is checked as well: `LocalLocation.evictTopStack`,
+    `evictTopStackLayout`, and `evictTopStackLayout?` describe the executable
+    transformation that maps stack depth `0` to a fresh scratch slot and
+    decrements deeper stack locals, then reruns `SpillLayout.checked?` for the
+    post-pop layout.  The checked facts
+    `evictTopStackLayout?_sound`, `evictTopStackLayout?_slot`,
+    `evictTopStackLayout?_names`, and `evictTopStackLayout?_wellFormed` expose
+    the selected fresh slot, name preservation, and resulting well-formed
+    layout from executable success.  That checker is now tightened so success
+    also proves the actual top-stack layout binding exists; this avoids treating
+    a nonempty `stackLayout` list as a value proof.  The concrete
+    store-and-pop eviction bridge is checked too:
+    `SpillLayout.StoreDefined` records the source-facing invariant that layout
+    bindings have source-store values, `StoreDefined.evictTopStackLayout`
+    preserves it across the layout rewrite,
+    `SpillLayout.ValueRel.evictTopStack_mstore` updates the mixed
+    stack/scratch value relation after target `MSTORE` into the chosen fresh
+    scratch slot, and
+    `run_spillStoreTopCode_evictTopStackLayout?_of_storeDefined` runs the
+    emitted `spillStoreTopCode` and produces the post-pop `SpillStateRel`.
+    The first conservative executable headroom helper is also checked:
+    `SpillPlan.spillAllStack?` repeatedly evicts all stack-bound locals to
+    scratch, `spillAllStack?_sound` proves the generated code reaches a regular
+    target state with empty stack layout, and
+    `compileFreshAtomWithSpill?`/`compileFreshAtomWithSpill?_sound_of_source_run`
+    compose that helper with the existing atom planner.  This gives a verified
+    atom-level route around top-16 stack-local reads by spilling before the atom.
+    A less blunt atom helper is now checked as well:
+    `compileFreshAtomWithAdaptiveSpill?` first tries the current layout without
+    spilling, then repeatedly evicts only one stack local and retries the real
+    executable atom compiler.  Its well-formedness and soundness theorems,
+    `compileFreshAtomWithAdaptiveSpill?_wellFormed` and
+    `compileFreshAtomWithAdaptiveSpill?_sound_of_source_run`, make this a
+    verified spill-only-when-needed atom route instead of an always-spill route.
+    `compileFreshAtomWithAdaptiveSpill?_of_compileFreshAtom?` pins the no-spill
+    case: if the ordinary atom compiler already succeeds, the adaptive compiler
+    returns exactly that atom plan.  The companion
+    `compileFreshAtomWithAdaptiveSpill?_isSome_of_compileFreshAtomWithSpill?`
+    proves the adaptive atom scheduler is at least as complete as the blunt
+    spill-all-first atom scheduler: any atom accepted after spilling every
+    stack local is also accepted by the adaptive retry loop, possibly with less
+    emitted spill code.
+    The explicitly conservative fallback route is now named and checked too:
+    `compileFreshAtomWithConservativeSpill?` first tries the ordinary atom
+    compiler and, only when that fails, falls back to the blunt
+    `compileFreshAtomWithSpill?` path that spills every current stack local
+    before compiling the atom.  Its well-formedness, no-spill exactness,
+    spill-all acceptance, source-run soundness, and regular-result
+    `StoreDefined` preservation facts are pinned in `LayerAudit`.
+    The regular-result source-store invariant and recursive atom-list/block
+    routes are now checked too:
+    `compileFreshAtom?_regular_storeDefined_of_source_run`,
+    `compileFreshAtom?_regular_storeDefined_of_source_run_emptyStack`,
+    `compileFreshAtomWithSpill?_regular_storeDefined_of_source_run`,
+    `compileFreshAtomWithConservativeSpill?_regular_storeDefined_of_source_run`,
+    `compileFreshAtomWithAdaptiveSpill?_regular_storeDefined_of_source_run`,
+    `compileStmtListWithSpill?_wellFormed`,
+    `compileBlockOpenWithSpill?_wellFormed`,
+    `compileStmtListWithSpill?_sound_of_source_run`, and
+    `compileBlockOpenWithSpill?_sound_of_source_run` prove the conservative
+    spill-before-each-atom scheduler preserves well-formed layouts and target
+    behavior over atom-only open blocks.  The conservative-fallback sibling,
+    `compileStmtListWithConservativeSpill?`/
+    `compileBlockOpenWithConservativeSpill?`, has matching well-formedness,
+    no-spill exactness, and source-run soundness theorems for atom-only open
+    blocks while spilling all stack locals only on atoms the ordinary planner
+    rejects.  The adaptive sibling,
+    `compileStmtListWithAdaptiveSpill?`/`compileBlockOpenWithAdaptiveSpill?`,
+    with their well-formedness and soundness theorems, now proves the same
+    atom-only open-block property while first trying the current layout and
+    spilling only when the real atom compiler fails.  The exactness facts
+    `compileStmtListWithAdaptiveSpill?_of_compileStmtList?` and
+    `compileBlockOpenWithAdaptiveSpill?_of_compileBlockOpen?` prove that this
+    list/block scheduler also emits the original no-spill plan whenever the
+    ordinary scheduler succeeds.  The public
+    `Functions.Source.Program.compileCheckedWithConservativeSpillSourceOwned?`
+    route remains the deliberately conservative spill-on-failure path, but its
+    constructor theorem and StackGuardAudit 17-local regression now make the
+    top-16 escape hatch visible at the source-owned public wrapper.  The
+    emitted-code adapter has started:
+    `SpillStmtCode.toExpressionsBlock` translates spill code into the existing
+    `Expressions.Block` layer, and `run_toExpressionsBlock_exists` proves that
+    a successful spill-code run is replayable as an expressions-block run with
+    the matching regular/halt outcome.
+    `compileBlockOpenWithConservativeSpill?_expressionsBlock_sound_of_source_run`
+    composes that adapter with the conservative atom-only open-block soundness
+    theorem.  The adaptive open-block route now has the same emitted-code
+    bridge:
+    `compileBlockOpenWithAdaptiveSpill?_expressionsBlock_sound_of_source_run`
+    composes adaptive atom-only source-run soundness with the expressions-block
+    replay adapter, so callers can consume the actual emitted adaptive spill
+    block rather than only the internal spill-code runner.
+    The adaptive route also has a generated-program wrapper now:
+    `compileProgramBodyWithAdaptiveSpillExpressions?` and
+    `compileProgramBodyWithAdaptiveSpillChecked?` build the emitted
+    expressions/assembly programs from executable compile success, while
+    `compileProgramBodyWithAdaptiveSpillExpressions?_of_compileBlockOpen?`
+    proves the generated expressions wrapper returns exactly the ordinary
+    no-spill plan/program whenever the ordinary root-body scheduler already
+    succeeds, lifting the adaptive no-spill exactness policy to the generated
+    program boundary; `compileProgramBodyWithAdaptiveSpillChecked?_of_compileBlockOpen?`
+    gives the matching checked assembly constructor once that generated
+    expressions program compiles.  The public assembly-only wrapper now exposes
+    the same direct constructor as
+    `Locals.Source.Program.compileCheckedWithAdaptiveSpill?_of_compileBlockOpen?`,
+    so callers do not need to mention the private checked triple helper.  The
+    `compileProgramBodyWithAdaptiveSpillChecked?_assembly_sound_of_initialState_privateScratchBoundary`
+    and its `_endPc` sibling lift atom-only adaptive program bodies through the
+    same private-scratch initial-state and checked assembly-preservation
+    boundary as the conservative route.  This remains separate from the public
+    conservative source wrapper; it is the checked path for the less
+    conservative adaptive scheduler.
+    The first source-facing entry theorem is now checked too:
+    `SpillStateRel.of_privateScratchBoundary_empty` derives the initial
+    empty-layout spill relation from the executable private-scratch checker,
+    and
+    `compileProgramBodyWithConservativeSpill?_expressionsBlock_sound_of_privateScratchBoundary`
+    proves that an accepted conservative-spill program body can run as an
+    `Expressions.Block` from that checker plus the source open-block run.
+    `compileProgramBodyWithConservativeSpill?_expressionsBlock_sound_of_initialState_privateScratchBoundary`
+    packages the common same-initial-state case, so the theorem derives the
+    outside-scratch equality from reflexivity instead of exposing it as a
+    caller-supplied premise.
+    The generated spill program now has a checked assembly-facing wrapper:
+    `SpillPlan.toExpressionsProgram` builds an `Expressions.Program` whose body
+    is the emitted spill block,
+    `compileProgramBodyWithConservativeSpillChecked?` compiles that generated
+    expression program through the existing checked expressions-to-assembly
+    compiler, and
+    `compileProgramBodyWithConservativeSpillChecked?_assembly_sound_of_initialState_privateScratchBoundary`
+    composes the source/spill proof with `Expressions.Program` preservation to
+    get an actual assembly execution plus the intermediate `SpillOutcomeRel`.
+    Its `_endPc` sibling additionally derives the target end-PC fact from the
+    same generated expressions-to-assembly compiler success.
+    The generated path now also carries a checked no-CALL/CREATE guarantee:
+    `compileProgramBodyWithConservativeSpillChecked?_noCallCreate` derives
+    `Assembly.Program.usesCallCreate asm = false` from the executable spill
+    compiler itself.  The proof is compositional through
+    `SpillExpr.compileCode?_noCallCreate`,
+    `SpillAtomPlan.compile?_noCallCreate`, and the conservative spill-list
+    planner, so the new scratch-load/store and stack-shuffle wrappers cannot
+    accidentally smuggle in CALL/CREATE while the CALL refactor is in flight.
+    This is intentionally a separate spill-aware generated-program path; it
+    does not pretend that the old `program.toExpressions?` ordinary compiler
+    path emitted the spill block.
+    The source-facing public wrapper is now checked as a separate entrypoint:
+    `Locals.Source.Program.compileCheckedWithConservativeSpill?` returns only
+    the generated assembly, while
+    `compileCheckedWithConservativeSpill?_preserves` hides the generated
+    `SpillPlan`/`Expressions.Program` and proves preservation for ordinary
+    `Program.run` through `ConservativeSpillProgramOutcomeRel`.  Its `_endPc`
+    sibling also exposes `Structured.Preservation.TargetOutcomeEndPc`, so the
+    alternate path now has the same end-PC hygiene expected by later bytecode
+    bridges.  That relation intentionally records the scratch-local
+    implementation boundary: target stack/scratch locals may remain, but the
+    assembly result is related to the source outcome via the checked spill
+    relation and whole-program expressions-to-assembly relation.  The companion
+    `compileCheckedWithConservativeSpill?_noCallCreate` keeps this alternate path
+    no-CALL/CREATE while CALL is still under refactor.  Public compile-success
+    decomposition is now available as
+    `compileCheckedWithConservativeSpill?_components`: from the assembly-only
+    entrypoint result, later proofs can recover the checked spill block and the
+    generated `Expressions.Program.compileChecked?` success without depending
+    on the private triple-returning helper as their theorem boundary.  The
+    core conservative-spill pins, including the public wrapper, component
+    extractor, no-CALL/CREATE fact, choice-policy facts, preservation wrappers,
+    observation projections, and deep-local regressions, are now mirrored in
+    `EvmCompiler.StackGuardAudit` so this stack route remains independently
+    checkable during CALL refactors.
+    Two small bridge facts now make the generated-artifact boundary more
+    explicit: `compileProgramBodyWithConservativeSpillExpressions?_of_compileBlockOpen?`
+    proves that ordinary atom-only open-block success is accepted by the
+    conservative generated expressions path,
+    `compileProgramBodyWithConservativeSpillChecked?_of_compileBlockOpen?`
+    lifts that to the checked assembly helper, and
+    `Locals.Source.Program.compileCheckedWithConservativeSpill?_of_compileBlockOpen?`
+    exposes the same construction through the public assembly-only wrapper; and
+    `compileCheckedWithConservativeSpill?_of_checked` is the reverse direction
+    of the public wrapper extractor, so checked internal spill output composes
+    back to the user-facing assembly-only compiler result without recomputing a
+    concrete assembly regression.
+    The atom-level choice policy is pinned too:
+    `compileFreshAtomWithConservativeSpill?_fallback` and
+    `_fallback_some` prove that conservative atom compilation delegates to the
+    spill-all fallback exactly when ordinary atom compilation returns `none`;
+    the existing `_of_compileFreshAtom?` fact covers the no-spill case.
+    Public inversion facts now make the outcome relation auditable:
+    `ConservativeSpillOpenOutcomeRel.regular_inv`/`halt_inv` and
+    `ConservativeSpillProgramOutcomeRel.regular_inv`/`halt_inv` expose the
+    hidden spill target, exact spill/shared-state relation, and final
+    assembly-side `eraseControl`/halt-frame relation instead of leaving readers
+    to chase the existential relation by hand.
+    The source-facing result wrappers
+    `compileCheckedWithConservativeSpill?_regular_result` and
+    `compileCheckedWithConservativeSpill?_halt_result` now package those
+    inversions directly from compile success plus source execution.  The regular
+    wrapper additionally exposes
+    `SharedStateEqOutsideScratchExceptGas` for the actual assembly final state,
+    making the successful storage/account/created-account/memory-outside-scratch
+    claim explicit while still excluding gas/PC/exec bookkeeping from the
+    observation.  The public projection surface now goes one step further:
+    `compileCheckedWithConservativeSpill?_regular_sharedState` and
+    `_halt_sharedState` state the final source/target shared-state relation
+    directly for ordinary `Program.run` outcomes, and
+    `_regular_observations`/`_halt_observations` project the contract-visible
+    equalities that matter for the spill route: account map, substate,
+    created accounts, return data, and `H_return` are equal between the source
+    outcome and the actual assembly result, while only private scratch memory
+    remains hidden behind the outside-scratch relation.  The compact
+    `ConservativeSpillObservableOutcomeRel` plus
+    `compileCheckedWithConservativeSpill?_observations` now package the same
+    boundary for arbitrary successful source runs: accepted spill programs
+    produce either a related running result or a related halt, while
+    top-level `break`/`continue`/`leave` outcomes are ruled out by unpacking the
+    checked spill outcome relation.
+    The scratch-boundary premise has been narrowed to the executable
+    `PrivateScratchBoundary.scratchCheck?`, which checks only initial scratch
+    readiness and the starting spill layout; the older whole-program
+    no-memory-touch `PrivateScratchBoundary.check?` remains as a stricter
+    compatibility wrapper.  The source body still cannot touch memory on the
+    spill route because successful atom compilation itself rejects
+    memory-touching atoms, and `.call`/nested control remain fail-closed here.
+    The conservative fallback route is now verified end-to-end for atom-only
+    open blocks and the source-facing alternate entrypoint: it tries ordinary
+    atom compilation first and spills every current stack local only if that
+    atom would otherwise fail.  Scoped nested `.block` support now has a checked
+    standalone statement route:
+    `compileBlockStmtWithConservativeSpill?` compiles the block as an open
+    spill block, restricts the final logical layout back to the entry source
+    scope while retaining physical dead stack spacers, and proves no-CALL/CREATE,
+    well-formedness, and source-run soundness from the checked source-scope
+    equality at the statement boundary.  The recursive scoped planner is now
+    present under the `compile*WithConservativeScopedSpill?` names: statement,
+    statement-list, open-block, and scoped-block compilation all check for
+    no-CALL/CREATE and layout well-formedness, the source-scope plus regular
+    `StoreDefined` threading facts are verified for nested scoped blocks, and
+    the full scoped statement-list/open-block/block-statement source-run
+    soundness theorem is checked.  The public conservative-spill body compiler
+    now uses this scoped planner, so nested lexical `.block` statements are on
+    the checked public conservative-spill route instead of the older atom-only
+    scheduler.
+    The Functions-source lift is checked as well:
+    `Functions.Source.Program.compileCheckedWithConservativeSpill?`,
+    `run_toLocals_of_sourceOwned`,
+    `_preserves_of_sourceOwned`, and `_observations_of_sourceOwned` expose the
+    same generated conservative spill path one layer up for top-level
+    `SourceToLocals.Block.SourceOwned [] program.body` programs.  The executable
+    `SourceToLocals.*.sourceOwned?` checker derives that ownership proof from
+    the program body, and
+    `Functions.Source.Program.compileCheckedWithConservativeSpillSourceOwned?`
+    wraps compile success, no-CALL/CREATE, preservation, and observable-outcome
+    equality without exposing `SourceOwned` as a caller-supplied premise.  The
+    Functions lift now also mirrors the locals public-constructor surface:
+    `compileCheckedWithConservativeSpill?_of_compileBlockOpen?`/
+    `compileCheckedWithAdaptiveSpill?_of_compileBlockOpen?` and their
+    `SourceOwned?` variants derive assembly-only wrapper success directly from
+    the lowered root-body spill scheduler plus generated expressions-program
+    compilation, keeping the private checked triple out of the public boundary.
+    The transparent Objects/Yul source-owned adapters now mirror that constructor
+    surface too, using `program.toFunctions` or a checked `program.toObjects?`
+    witness plus the same lowered root-body scheduler and generated expressions
+    compile result.
+    The
+    older atom-owned wrapper remains for compatibility, but the broader checked
+    route now accepts nested `.block`/`.if`/`.switch`/`.for` source-owned control
+    while still rejecting `.call` and raw lower `.code` expressions.  It remains
+    deliberately not a CALL theorem; the broader CALL/public-Yul path remains
+    separate.
+    The scoped conservative route is now lifted through the wider public Yul
+    path as a separate spill-aware entrypoint.  `Objects.Source.Program` and
+    `Yul.Program` expose source-owned conservative compile/preservation/
+    observation wrappers, and the no-CALL runtime layer resolves that compiler
+    through assembly target generation, bytecode bridge checks,
+    feature/source-static gates, no-RETURNDATACOPY, no-CALL/CREATE, executable
+    inferred 1024-stack bounds, source-lowered gas replay, and imported/
+    reference Yul run-result replay.  The first assembly-target wrappers now
+    also have direct constructors from the executable root spill scheduler plus
+    generated expressions-program compilation and `Assembly.compile?`, so this
+    boundary no longer requires callers to unpack the private spill
+    plan/expressions/assembly triple.  The adaptive and conservative
+    spill-stack-safe gates also expose source-run-indexed EVM headroom points
+    through `adaptiveSpillStackSafe_actualEVMHeadroomPoints` and
+    `conservativeSpillStackSafe_actualEVMHeadroomPoints`, and both stack-safe
+    gates have `_of_noReturnDataCopy` constructors from the executable
+    no-RETURNDATACOPY target gate plus assembly-bound checker success.
+    The explicit fallback compiler
+    `compileCheckedStackSafeNoReturnDataCopyOrConservativeSpill?` now packages
+    the policy decision as Lean code: exact ordinary stack-safe compilation is
+    preferred, and conservative private-scratch spilling is used only if the
+    exact path fails.  Its theorem exposes a disjunctive observation relation so
+    callers can see whether they got exact whole-program outcome equality or
+    conservative equality outside the declared scratch range.
+    The exact-or-adaptive sibling,
+    `compileCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?`, is now checked
+    and audit-pinned too: it keeps the exact ordinary stack-safe result when
+    available and otherwise uses the adaptive private-scratch spill route,
+    exposing the same exact-or-outside-scratch observable boundary through
+    sufficient-gas and no-out-of-gas EVM replay wrappers.  Its theorem-facing
+    wrapper now consumes the same `RecursiveBridgeExprUserCallResultContracts`
+    plus existential `RecursiveBridgeSourceRun` source boundary as the current
+    exact public spine, rather than the older stronger expression
+    no-successful-out-of-fuel package; the only extra premise is the explicit
+    executable private-scratch initial-state check.
+    `LayerAudit.ImportedYulBoundary` now exports this theorem as the public
+    stack-too-deep widening sibling
+    `recursiveBridgeTopToGasAwareEVMAdaptiveSpill`, plus the matching
+    `recursiveBridgeTopToGasAwareEVMAdaptiveSpillNoOutOfGas` projection.  The
+    exact live-layout root remains the exact-memory theorem; the adaptive root
+    is the public theorem whose outcome relation honestly permits only private
+    scratch divergence.  `StackGuardAudit.LiveLayoutPreservationBoundary` now
+    also pins the final live-layout no-internal-CALL preservation theorem
+    through the Functions, Objects, and Yul source-lowered adapters, so the
+    top-16 compile-around route is visible as execution preservation and not
+    just as a checker or target/gas wrapper.  The
+    `StackGuardAudit.LiveLayoutRegressionBoundary` section additionally pins
+    the many-dead-locals
+    regression: a variable that is top-16-inaccessible before dead-prefix
+    trimming becomes accessible after trimming, and the checked live-layout
+    lowering accepts the corresponding program through Locals/Expressions.
+    The preferred widened wrapper is now
+    `compileLiveNoInternalCallCheckedStackSafeNoReturnDataCopyOrAdaptiveSpill?`:
+    it tries the exact live-layout compiler first and falls back to the existing
+    exact-or-adaptive private-scratch route only if live-layout compilation
+    fails.  `LayerAudit.ImportedYulBoundary` exports this as
+    `recursiveBridgeTopToGasAwareEVMLiveLayoutOrAdaptiveSpill` plus the matching
+    no-out-of-gas projection.  The wrapper has a checked decomposition theorem:
+    success is either exact live-layout success, or live-layout failure plus
+    adaptive fallback success.  The public theorem now takes the private-scratch
+    initial-state check only conditionally on live-layout failure, so the exact
+    branch preserves whole-program equality without a scratch-range premise and
+    the fallback branch exposes the honest outside-scratch relation.
+    The shorter `compileStackGuardedNoReturnDataCopy?` and
+    `LayerAudit.ImportedYulBoundary.recursiveBridgeTopToGasAwareEVM` aliases are
+    now the canonical no-CALL stack-guarded surface; the older exact, adaptive,
+    live-layout-or-adaptive, and explicit `...StackGuarded` names remain
+    compatibility/detail roots for audits.  The exact live-layout theorem is
+    still exported under `recursiveBridgeTopToGasAwareEVMExactLiveLayout`, so
+    exact-memory and spill-aware theorem boundaries are both visible.
+    `StackGuardAudit` now pins this canonical surface with the branch-aware
+    theorem boundary: the private-scratch readiness premise is conditional on
+    live-layout compilation failing, so exact live-layout success does not carry
+    a scratch assumption.
+    That branch condition is now named at both theorem layers as
+    `StackGuardedSourceOwnedFallbackScratchReady` and
+    `StackGuardedNoReturnDataCopyFallbackScratchReady`, keeping the scratch
+    policy explicit before any future canonical-compiler replacement.
+    The canonical target theorem wrappers now expose the clean public surface:
+    callers provide only `compileStackGuardedNoReturnDataCopy?` success plus
+    the named fallback scratch policy, and consume the named
+    `StackGuardedSufficientGasConclusion` /
+    `StackGuardedNoOutOfGasConclusion` conclusions rather than lower
+    live-layout compiler internals or raw scratch implications.
+    The Yul preservation layer now also has the assembly-only sibling
+    `compileStackGuardedSourceOwned?`, which uses the same live-layout-first,
+    adaptive-fallback policy and proves branch-aware source preservation and
+    observation theorems before the later target/gas wrapper.
+    The exact hidden-frame accounting also now has an explicit compatibility
+    projection back to the older uniform frame-word context:
+    `ActiveHiddenFrameWordsContext.callersWordsLe_programMax` proves each hidden
+    frame is bounded by the program max, and
+    `SourceDirectWeightedFrameContext.toFrameWordsContextProgramMax` builds the
+    coarser `SourceDirectFrameWordsContext` only when an older theorem requires
+    that shape.
+    The stack-guarded entry has replaced the exact-only root as the canonical
+    no-CALL imported-Yul gas-aware theorem surface.  The old
+    `program.toExpressions?`-based `compileChecked?` path remains as a legacy
+    assembly compiler and compatibility proof path, but it is no longer the
+    audit-facing top theorem for stack-guarded no-CALL EVM correctness.
+    The shippable no-CALL stack-too-deep path is now adaptive but deliberately
+    scoped: dead-drop, SWAP16-reachable promotion, live-layout-first exact
+    compilation, and a private-scratch adaptive fallback that spills only after
+    the ordinary atom/block path fails. Programs outside the proved no-CALL
+    spill surface still fail closed, and arbitrary-state memory spilling remains
+    a separate private-scratch theorem boundary rather than an exact-memory
+    theorem.
 
 ### Acceptance Power Ladder
 
