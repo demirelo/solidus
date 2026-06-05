@@ -2,7 +2,7 @@
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-05 07:12 CEST.
+Last updated: 2026-06-05 07:44 CEST.
 
 ### Current Assessment
 
@@ -89,17 +89,18 @@ caller tail keeps caller variables. The layout-weakening helpers
 checked and pinned; these let the recursive theorem forget `let`-introduced
 variables when a caller-side head only needs the original source layout.
 
-The full response-aware recursive block theorem is now checked and pinned as
-`compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout`.
-It consumes the dynamic statement-level `Stmt.call` source/gas tail package in
-the call-statement branch, drives the recursive callee body with the actual
-body-entry `SourceStateRel`/`SourceStateTargetGasRel`, threads response
-admissibility through argument/body/tail traces, weakens `let`-extended final
-source layouts back to the caller layout, and hands recursive caller tails the
-actual post-call source/gas witnesses instead of the older callback scaffold.
-The theorem still has an explicit actual-run non-CALL primitive source/gas seed
-premise; this is now the next premise to discharge or keep private during
-public wiring, not a missing CALL branch.
+The full recursive block theorem has now been migrated to the no-seed,
+readiness-driven source/gas route and is checked/pinned as
+`compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_supportedFor_programLayout`.
+It consumes the no-seed ordinary block-head wrappers for `expr`, initialized
+`let`, and `assign`, plus the no-seed regular `Stmt.call` source/gas theorem.
+The recursive call branch still drives the callee body with actual body-entry
+`SourceStateRel`/`SourceStateTargetGasRel`, weakens `let`-extended final source
+layouts back to the caller layout, and hands recursive caller tails actual
+post-call `SourceStateRel` and `SourceStateTargetGasRel`. The old
+`...sourceGasSeed...supportedFor_programLayout` name is now only a thin
+temporary adapter for lower top-wrapper callers; its proof delegates to the new
+no-seed theorem and ignores the old seed/response arguments.
 
 That recursive theorem has now also been lifted through the initial scoped
 block-plus-cleanup wrapper, whole-program/postamble wrapper, block-level shim,
@@ -118,9 +119,14 @@ and
 These consume argument expression-sequence source/gas readiness instead of the
 broad actual-run non-CALL source/gas seed while still returning actual
 post-call `SourceStateRel` and `SourceStateTargetGasRel` for caller tails.
-The remaining seed premise is now above this local corridor: ordinary enriched
-block-head wrappers and the recursive block/top wrappers still use the
-sourceGasSeed route and must be migrated next.
+2026-06-05 07:44 CEST update: the ordinary enriched block-head wrappers and
+the recursive source/gas block theorem have also moved to the no-seed route:
+`compilerOpenFunctionsBlock_expr_cons_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_tail`,
+`...let...sourceGasRel_of_compileOpen_tail`,
+`...assign...sourceGasRel_of_compileOpen_tail`, and the recursive theorem named
+above. The remaining seed/callback exposure is now higher: initial
+scoped/top/checked-compile wrappers still call the old adapter name and must be
+migrated next, after which the adapter can be deleted.
 
 The generated return-dispatch
 condition prefix, `JUMPI` step, full `DUP`/`PUSH`/`EQ`/`JUMPI` test,
@@ -1197,13 +1203,13 @@ Immediate proof tasks:
      supplying the recursive callee-body and caller-tail result-plus callbacks
      from the smaller-fuel IH:
      `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_of_compileOpen_supportedFor_programLayout`.
-   - [x] Consume the source/gas-enriched ordinary heads, dynamic statement-level
-     `Stmt.call` wrapper, program-layout callee-body source/gas wrapper, and
-     layout weakening in the full recursive block theorem:
-     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasSeed_of_compileOpen_supportedFor_programLayout`.
-     This is the recursive CALL branch we were trying to close; remaining
-     recursive-frontier work is wiring this theorem upward and discharging its
-     explicit actual-run non-CALL primitive seed premise.
+   - [x] Consume the no-seed source/gas-enriched ordinary heads, no-seed
+     statement-level `Stmt.call` wrapper, program-layout callee-body source/gas
+     wrapper, and layout weakening in the full recursive block theorem:
+     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_supportedFor_programLayout`.
+     This is the recursive CALL branch we were trying to close. The old
+     `...sourceGasSeed...` theorem name is now a temporary adapter that
+     delegates to this no-seed theorem for top-wrapper compatibility.
    - [x] Confirm the leave-body analogue is not a blocker for the current
      regular CALL theorem. The leave body-to-dispatch/result-plus corridors are
      checked for reuse, while the regular statement-level CALL theorem rules
@@ -1215,9 +1221,10 @@ Immediate proof tasks:
    `FunctionsProgramToAssemblySourceOpenSoundAt` also has
    `SourceOpenTraceCurrentSharedBridgeReadyFor` and the final
    `FunctionsBlockCompiledOpenResultRelSourceGas` evidence needed by the CALL
-   public spine. Status: mostly checked internally via source/gas wrappers; not
-   complete until the remaining source/gas seed and readiness premises are
-   discharged or kept private from the public theorem.
+   public spine. Status: the recursive source/gas theorem itself is now
+   no-seed/readiness-driven; the remaining work is migrating the initial
+   scoped/top/checked-compile wrappers off the temporary seed adapter and then
+   deriving or privatizing readiness premises from checked compiler contracts.
    - [x] Add the generated program-end postamble carrier:
      `sourceTrace_currentSharedBridgeReadyResultRel_program_end_postamble_of_main_fallthrough`
      replays the main fallthrough jump to `programEnd` and final label inside
@@ -1251,6 +1258,11 @@ Immediate proof tasks:
      It derives the initial `SourceStateRel`/`SourceStateTargetGasRel` from the
      initial shared-state relation and threads response admissibility into the
      source-open carrier.
+   - [ ] Replace those source/gas-seeded top wrappers with no-seed variants
+     that call
+     `compilerOpenFunctionsBlock_regular_stateRel_frameStateRel_sourceTrace_currentSharedBridgeReadyResultRel_compiledOpenResultRelSourceGas_sourceGasRel_of_compileOpen_supportedFor_programLayout`
+     directly, then delete the temporary `...sourceGasSeed...supportedFor`
+     adapter.
    - [x] Replace the over-strong arbitrary shared-state program readiness
      premise with the seeded
      `FunctionsProgramCallEntrySourceStateRelReadyFor` predicate and thread the
@@ -1261,9 +1273,9 @@ Immediate proof tasks:
      `FunctionsStmtListSourceStateRelReadyFor` premises from checked
      source/compiler contracts, or add them to a checked compiler contract so
      they are not public callbacks.
-   - [ ] Discharge or privatize the explicit actual-run non-CALL primitive
-     source/gas seed premise needed by the source/gas route before replacing
-     the public runtime wrapper.
+   - [ ] Remove any remaining public/top-wrapper non-CALL primitive
+     source/gas seed premise by migrating callers to the no-seed source/gas
+     route or keeping old adapters private until they can be deleted.
 6. [ ] Feed the public replay wrapper from the checked source-open carrier and
    remove public target-side CALL bridge callbacks from the ordinary CALL path
    and its family wrappers.
