@@ -1,3 +1,13 @@
+## 2026-06-06 15:46 CEST - cleanup/prune-single-call-audit-pins
+
+Removed the remaining single-`CALL` checked-target alias cluster and examples
+from `LayerAudit.ImportedYulOpenCALLBoundary`, leaving the CALL-family
+checked-target aliases as the public compiler-check surface. Search found no
+current references outside `LayerAudit` and old roadmap chronology.
+Verification passed: removed-name scan, `lake env lean EvmCompiler/LayerAudit.lean`,
+`lake build EvmCompiler.LayerAudit`, renamed completion audit, and
+`git diff --check`.
+
 ## 2026-06-06 15:43 CEST - cleanup/prune-layeraudit-response-pins
 
 Pruned the lower response/result-tracking audit pins from

@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:43 CEST.
+Last updated: 2026-06-06 15:46 CEST.
 
 ### Current Assessment
 
@@ -120,7 +120,7 @@ are still proof plumbing for the public top wrappers.
 
 ### Remaining Trim Candidates
 
-Last audited: 2026-06-06 15:43 CEST.
+Last audited: 2026-06-06 15:46 CEST.
 
 - [x] Unused alternate global-response endpoint wrappers:
   the result-tracking, outcome-tracking, and committed-response-safety compiled
@@ -137,12 +137,11 @@ Last audited: 2026-06-06 15:43 CEST.
   response-specialized `openXCommittedSafeBelow...` aliases are unreferenced
   outside `LayerAudit` and historical logs. Remove those audit pins while
   leaving the underlying `OpenRuntime` proof plumbing intact.
-- [ ] Single-`CALL` checked-target aliases and examples in `LayerAudit`:
-  the preferred public theorem is CALL-family. The remaining
-  `checkedCALLRegularOpen...` alias cluster and examples appear only in
-  `LayerAudit` plus old roadmap chronology. Audit whether any current artifact
-  still needs them; if not, remove those public pins or demote them to an
-  explicitly historical section.
+- [x] Single-`CALL` checked-target aliases and examples in `LayerAudit`:
+  the preferred public theorem is CALL-family. Removed the
+  `checkedCALLRegularOpen...` alias cluster and examples after confirming they
+  appeared only in `LayerAudit` plus old roadmap chronology; the CALL-family
+  checked-target aliases remain.
 - [ ] Exact-CALL route structures in `OpenRuntime`:
   older route records and exact-CALL wrappers may still be proof plumbing for
   fallback branches. Do not delete them in bulk; first prove each candidate has

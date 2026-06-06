@@ -1551,36 +1551,6 @@ extracts the lowered Functions program, and also runs the executable
 theorem.
 -/
 
-abbrev checkedCALLRegularOpenTarget :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?
-
-abbrev checkedCALLFeaturesSourceStaticOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_checkedCALLFeaturesSourceStatic
-
-abbrev assemblyCompileOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_assemblyCompile
-
-abbrev assembleOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_assemble
-
-abbrev decodeWindowOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_decodeWindow
-
-abbrev jumpdestCorrectOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_jumpdestCorrect
-
-abbrev decodeSafetyOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_decodeSafety
-
-abbrev encodingCorrectOfCheckedRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_encodingCorrect
-
-abbrev functionsRegularOpenTargetOfCheckedCALLRegularOpenTarget :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpen?_functionsRegularOpenTarget
-
-abbrev functionsOpenSoundOfCheckedCALLRegularOpenTarget :=
-  @Yul.Program.FunctionsProgramToCompiledOpenSoundAt.of_yulCheckedCALLRegularOpenTarget
-
 abbrev checkedCALLFamilyRegularOpenTarget :=
   Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpen?
 
@@ -1613,9 +1583,6 @@ abbrev functionsOpenSoundOfCheckedCALLFamilyRegularOpenTarget :=
 
 abbrev functionsOpenBlockTraceOfCheckedCALLFamilyRegularOpenTarget :=
   @Yul.Program.functionsProgram_openBlockTrace_of_yulCheckedCALLFamilyRegularOpenTarget
-
-abbrev functionsOpenBlockTraceOfCheckedCALLRegularOpenTarget :=
-  @Yul.Program.functionsProgram_openBlockTrace_of_yulCheckedCALLRegularOpenTarget
 
 abbrev sourceOpenDispatcherTraceAccepted :=
   @Yul.Program.SourceOpenDispatcherTraceAccepted
@@ -2016,48 +1983,6 @@ abbrev openXReplayTraceReadinessForCheckedTraceOfCompiledOpenCurrentEmittedEvide
 abbrev openXReplayTraceReadinessForCheckedTraceOfOpenBlockTraceCurrentSharedBridgeCases :=
   @Yul.Program.OpenXReplayTraceReadinessForCheckedTrace.of_openBlockTrace_current_shared_bridge_cases
 
-abbrev checkedCALLRegularOpenNoReturnDataCopyTarget :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetEqSome :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_eq_some
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetRegularOpen :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_regularOpen
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetAssemblyCompile :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemblyCompile
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetAssemble :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_assemble
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetNoReturnDataCopy :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_targetNoReturnDataCopy
-
-abbrev checkedCALLRegularOpenNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenNoReturnDataCopy?_blockReplayNoReturnDataCopy
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTarget :=
-  Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetEqSome :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_eq_some
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBase :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_base
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetRegularOpen :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_regularOpen
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetBlockReplayNoReturnDataCopy :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_blockReplayNoReturnDataCopy
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetAssemblyBoundCheck :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_assemblyBoundCheck
-
-abbrev checkedCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTargetInitialSourceStackBoundPoint :=
-  @Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?_initialSourceStackBoundPoint
-
 abbrev checkedCALLFamilyRegularOpenNoReturnDataCopyTarget :=
   Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFamilyFeaturesSourceStaticRegularOpenNoReturnDataCopy?
 
@@ -2166,44 +2091,6 @@ abbrev openXContractLivenessAndSafetyFinalObservationResultOrFailureAtOfGasLt :=
 
 abbrev openXContractLivenessAndSafetyFinalObservationOutcomeSafetyAtOfGasLt :=
   @Yul.Program.OpenXContractLivenessAndSafetyFinalObservation.outcomeSafetyAt_of_gas_lt
-
-example
-    {program : Yul.Program} {functionProgram : Functions.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hChecked :
-      checkedCALLRegularOpenTarget program =
-        some (functionProgram, asm, target)) :
-    Yul.Program.compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStatic?
-        program =
-      some (asm, target) :=
-  checkedCALLFeaturesSourceStaticOfCheckedRegularOpenTarget hChecked
-
-example
-    {program : Yul.Program} {functionProgram : Functions.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    (hChecked :
-      checkedCALLRegularOpenTarget program =
-        some (functionProgram, asm, target)) :
-    Yul.OpenLowering.FunctionsProgramCompileCheckedRegularOpenAssemblyTarget?
-        functionProgram =
-      some (asm, target) :=
-  functionsRegularOpenTargetOfCheckedCALLRegularOpenTarget hChecked
-
-example
-    {prim : Functions.Source.PrimitiveSemantics}
-    {program : Yul.Program} {functionProgram : Functions.Program}
-    {asm : Assembly.Program} {target : Assembly.TargetProgram}
-    {sourceFuel : Nat} {initial : Yul.EVMState}
-    (hPrim : Locals.SourceLowering.PrimitiveSound prim)
-    (hChecked :
-      checkedCALLRegularOpenTarget program =
-        some (functionProgram, asm, target))
-    (hInitialPc : initial.pc = Assembly.Program.pcAfter [])
-    (hInitialStack : initial.stack = []) :
-    Yul.OpenLowering.FunctionsProgramToCompiledOpenSoundAt prim
-      functionProgram asm sourceFuel initial :=
-  functionsOpenSoundOfCheckedCALLRegularOpenTarget hPrim hChecked hInitialPc
-    hInitialStack
 
 end
 end ImportedYulOpenCALLBoundary
