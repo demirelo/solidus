@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 14:59 CEST.
+Last updated: 2026-06-06 15:26 CEST.
 
 ### Current Assessment
 
@@ -37,6 +37,73 @@ conclusion wrappers over the no-artificial-cap external-world carrier.
 `LayerAudit` pins this stronger top package and wrappers, so the preferred
 audit surface no longer asks callers to traffic in route-local replay/layout
 proof artifacts.
+
+2026-06-06 15:22 CEST addendum: tightened the audit surface around that top
+package. `LayerAudit` no longer advertises the lower unbundled
+`compileChecked...openXContractLivenessAndSafety...NoArtificialCap...`
+endpoint aliases; the checked gas audit files now pin the top-package wrappers
+directly. The remaining wrapper inputs are classified as non-generated
+boundaries: `SourceOpenInternalUserCallBodyFuelAdequateUpTo` is a source-fuel
+adequacy condition for selected internal user-call body clocks,
+`SourceOpenDispatcherTraceAccepted` selects a finite source-open trace whose
+responses preserve the shared-state relation, `initial.executionEnv.perm = true`
+is the canonical entry/static-mode permission condition, and
+`OpenXCallFamilyNoArtificialCapExternalWorldReadyFor` is the open-world
+response-gas/result-tracking contract. None is a route-local replay, layout,
+certificate, or compiler-generated table.
+
+### Stale-Path Cleanup Inventory
+
+This is the current full cleanup pass before further deletion. The rule is:
+`LayerAudit` should advertise the shortest source-facing theorem spine; long
+route records and replay adapters may remain in `OpenRuntime` only when they
+are still proof plumbing for the public top wrappers.
+
+- [x] Lower no-artificial-cap compiled endpoint aliases:
+  removed the four `LayerAudit` aliases pointing directly at the unbundled
+  `compileChecked...openXContractLivenessAndSafety...sourceBridgeNoArtificialCap...`
+  theorems, and repointed the gas audit files to the top-assumption wrappers.
+- [x] Remaining global-response-gas replay alias:
+  `openXReplayAboveOfSourceOpenDispatcherCallFamilyAssemblyInferredBoundStackSafeNoReturnDataCopySourceBridgeGlobalResponseGasReadyNoReturnDataCopy`
+  was a lower replay-only pin. Removed it from `LayerAudit`; the underlying
+  `OpenRuntime` theorem remains available as internal proof plumbing.
+- [x] Old exact-CALL and lower CALL-family dispatcher pins:
+  `compiledOpenOfSourceOpenDispatcher...`,
+  `compiledOpenTraceOfSourceOpenDispatcher...`, and
+  `openBlockTraceOfSourceOpenDispatcher...` for the single-`CALL` corridor,
+  plus the analogous lower `...CallFamily...` dispatcher/open-trace pins, are
+  superseded by the CALL-family top package for the public proof. Removed their
+  `LayerAudit` exposure after confirming no audit file depends on them; kept
+  the source-facing `SourceOpenDispatcherTraceAccepted` helper aliases.
+- [x] Exact-CALL route2 projection pins:
+  `recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2...`
+  aliases exposed route-local replay/committed-safety adapters. Removed those
+  public pins; the `OpenRuntime` route structure remains internal proof
+  plumbing for now.
+- [x] CALL-aware spill selector pins:
+  `CALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc...`,
+  `...FalseRouteAssumptions`, `...Route2Assumptions`, and
+  `...BranchRouteAssumptions` aliases described the old selector/fallback
+  corridor; the adjacent unused `...OrNoCallSpillPlannedPrealloc` selector
+  aliases were part of the same stale surface. Removed these `LayerAudit` pins.
+  The underlying spill/planned-prealloc proofs remain available in
+  `OpenRuntime`.
+- [x] Lower gas-ready/result-tracking wrapper families:
+  the `sourceBridgeGasReady`, `sourceBridgeGasStrictReady`,
+  `sourceBridgeGlobalResponseGasReady`, and result/outcome/committed-safety
+  theorem families in `OpenRuntime` are adapters beneath the no-artificial-cap
+  endpoint. They are no longer pinned in `LayerAudit`; keep them internal
+  because the top no-artificial-cap wrappers still depend on this adapter chain.
+- [x] Raw generated-evidence terminal-prelude aliases:
+  the terminal path already quarantines older helpers under explicit
+  `RawGeneratedEvidence` names. Current search finds no live `LayerAudit` or
+  proof-artifact pin with that marker; remaining mentions are historical docs.
+  No CALL cleanup needed here.
+- [x] Object-runtime generic wrappers:
+  the canonical object wrappers now specialize `terminalRel`/`revertRel`.
+  `LayerAudit` does not currently expose object wrapper aliases, and the top
+  roadmap object note already records the canonical-terminal `H_return` fact.
+  Keep the generic theorem for custom observation relations.
 
 2026-06-06 13:08 CEST addendum: the no-artificial-cap CALL gas liveness/safety
 goal is completion-audited. The public carrier
