@@ -1,3 +1,15 @@
+## 2026-06-06 15:41 CEST - cleanup/remove-unused-global-response-endpoints
+
+Recorded the remaining proof-surface trim candidates in `ROADMAP.md`, then
+removed the unused alternate global-response compiled endpoint wrappers at the
+end of `OpenRuntime`. These result-tracking, outcome-tracking, and
+committed-response-safety variants had no live references outside historical
+logs; the external-world carrier constructors now provide the cleaner route
+into the top-assumption wrappers. Verification passed: focused `OpenRuntime`
+source check, `lake build EvmCompiler.Yul.OpenRuntime EvmCompiler.LayerAudit`,
+renamed external-world gas axiom/completion audits, proof-marker scan, and
+`git diff --check`.
+
 ## 2026-06-06 15:36 CEST - cleanup/call-family-external-world-rename
 
 Renamed the live CALL-family gas carrier from the historically contingent

@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:36 CEST.
+Last updated: 2026-06-06 15:41 CEST.
 
 ### Current Assessment
 
@@ -117,6 +117,36 @@ are still proof plumbing for the public top wrappers.
   `LayerAudit` does not currently expose object wrapper aliases, and the top
   roadmap object note already records the canonical-terminal `H_return` fact.
   Keep the generic theorem for custom observation relations.
+
+### Remaining Trim Candidates
+
+Last audited: 2026-06-06 15:41 CEST.
+
+- [x] Unused alternate global-response endpoint wrappers:
+  the result-tracking, outcome-tracking, and committed-response-safety compiled
+  endpoint theorem families at the end of `OpenRuntime` are no longer part of
+  the public route. Search finds only their definitions plus historical log
+  mentions; the external-world carrier constructors now cover those weaker
+  premise variants before entering the top-assumption wrappers. Trim these
+  theorem blocks rather than keeping a parallel public endpoint family.
+- [ ] Lower response/result-tracking pins in `LayerAudit`:
+  the current audit artifacts only need `OpenXCallFamilyExternalWorldReadyFor`,
+  two carrier projection facts, and the top-assumption wrappers. The many
+  `openXCurrentRunningInstrCallResponse...`,
+  `openXCallFamilyResponse...`, `openXAllOutcomeTraces...`, and
+  response-specialized `openXCommittedSafeBelow...` aliases are unreferenced
+  outside `LayerAudit` and historical logs. Remove those audit pins while
+  leaving the underlying `OpenRuntime` proof plumbing intact.
+- [ ] Single-`CALL` checked-target aliases and examples in `LayerAudit`:
+  the preferred public theorem is CALL-family. The remaining
+  `checkedCALLRegularOpen...` alias cluster and examples appear only in
+  `LayerAudit` plus old roadmap chronology. Audit whether any current artifact
+  still needs them; if not, remove those public pins or demote them to an
+  explicitly historical section.
+- [ ] Exact-CALL route structures in `OpenRuntime`:
+  older route records and exact-CALL wrappers may still be proof plumbing for
+  fallback branches. Do not delete them in bulk; first prove each candidate has
+  no same-file/top-wrapper dependency.
 
 2026-06-06 13:08 CEST addendum: the external-world CALL gas liveness/safety
 goal is completion-audited. The public carrier
