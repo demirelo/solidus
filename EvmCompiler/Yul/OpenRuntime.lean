@@ -5063,15 +5063,15 @@ theorem
   exact ⟨hExactNone, hSufficient.to_noOutOfGas⟩
 
 /--
-Public branch=false CALL-aware spill route.
+Branch-false CALL-aware spill fallback.
 
-This is the branch-specific surface for the stack-too-deep fallback.  Unlike the
-full selector route, it does not require the exact-CALL open-replay assumptions:
-successful branch=false compilation is enough to derive the call-aware/no-CALL
-planned-prealloc sufficient-gas and no-out-of-gas conclusions.
+This branch-specific package does not require exact-CALL open-replay
+assumptions: successful branch=false compilation is enough to derive the
+call-aware/no-CALL planned-prealloc sufficient-gas and no-out-of-gas
+conclusions.
 -/
 structure
-    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
     (cfg : Reference.StateRelConfig)
     (maxWords : Nat)
     (program : Program)
@@ -5097,7 +5097,7 @@ structure
       (canonicalEntryState initial).toMachineState
   initialPerm : initial.executionEnv.perm = true
 
-namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
 
 theorem sufficientGas
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
@@ -5112,7 +5112,7 @@ theorem sufficientGas
     {initial : EVMState}
     {referenceResult : Reference.Result}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
         cfg maxWords program range asm target shared store initial
         referenceResult) :
     compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
@@ -5138,7 +5138,7 @@ theorem openReplayConclusion
     {initial : EVMState}
     {referenceResult : Reference.Result}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
         cfg maxWords program range asm target shared store initial
         referenceResult) :
     compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
@@ -5164,7 +5164,7 @@ theorem noOutOfGas
     {initial : EVMState}
     {referenceResult : Reference.Result}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
         cfg maxWords program range asm target shared store initial
         referenceResult) :
     compileCheckedAssemblyTargetBytecodeResourcesCALLFeaturesSourceStaticRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopy?
@@ -5177,7 +5177,7 @@ theorem noOutOfGas
     assumptions.initialCodeImageRel assumptions.sourceFuelRun
     assumptions.checked assumptions.initialMemory assumptions.initialPerm
 
-end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
 
 inductive
     CALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocEvidence
@@ -21622,7 +21622,7 @@ theorem
     exact hSpill
 
 /--
-Public selector-level CALL route.
+Trace-local-gas selector-level CALL package.
 
 This packages the checked exact-CALL-or-call-aware-spill selector rather than the
 old exact-CALL compiler alone.  It introduces no replay/evidence oracle: the
@@ -21630,7 +21630,7 @@ only compiler-facing field is the checked selector result, and the false branch
 is discharged by the call-aware/no-CALL planned-prealloc spill theorems above.
 -/
 structure
-    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
     (cfg : Reference.StateRelConfig)
     (outcomeRel : Reference.OutcomeRel)
     (maxWords : Nat)
@@ -21673,7 +21673,7 @@ structure
   callResponseGasAdmissibleReady :
     OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target
 
-namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
 
 theorem sourceOpenDispatcherOrSpillSufficientGas
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
@@ -21691,7 +21691,7 @@ theorem sourceOpenDispatcherOrSpillSufficientGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -21759,7 +21759,7 @@ theorem sourceOpenDispatcherOrSpillOpenReplayConclusion
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -21827,7 +21827,7 @@ theorem sourceOpenReplaySomeGasOrSpillNoOutOfGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -21896,7 +21896,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -21969,7 +21969,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22042,7 +22042,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -22137,7 +22137,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -22220,18 +22220,18 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     rcases hSpill with ⟨hBranch, hExactNone, hSufficient⟩
     exact ⟨hBranch, hExactNone, hSufficient.to_noOutOfGas⟩
 
-end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
 
 /--
-Branch-sensitive selector-level CALL route.
+Branch-sensitive selector-level CALL package.
 
-Unlike `RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions`,
+Unlike `RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions`,
 the exact-CALL open-replay fields are conditional on `branch = true`.  Thus a
 branch=false spill proof can be packaged without supplying irrelevant CALL
 runtime, trace, or response-gas assumptions.
 -/
 structure
-    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
     (cfg : Reference.StateRelConfig)
     (outcomeRel : Reference.OutcomeRel)
     (maxWords : Nat)
@@ -22280,9 +22280,9 @@ structure
   trueCallResponseGasAdmissibleReady :
     branch = true → OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target
 
-namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
 
-theorem of_route2
+theorem of_traceLocalGas
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {maxWords : Nat}
@@ -22297,10 +22297,10 @@ theorem of_route2
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult) :
-    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
       cfg outcomeRel maxWords program branch range asm target shared store
       initial referenceResult trace sourceResult where
   exprNoSuccessfulOutOfFuel := assumptions.exprNoSuccessfulOutOfFuel
@@ -22317,7 +22317,7 @@ theorem of_route2
   trueCallResponseGasAdmissibleReady := fun _hBranch =>
     assumptions.callResponseGasAdmissibleReady
 
-theorem of_falseRoute
+theorem of_fallback
     {cfg : Reference.StateRelConfig}
     {outcomeRel : Reference.OutcomeRel}
     {maxWords : Nat}
@@ -22331,10 +22331,10 @@ theorem of_falseRoute
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFalseRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocFallbackAssumptions
         cfg maxWords program range asm target shared store initial
         referenceResult) :
-    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+    RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
       cfg outcomeRel maxWords program false range asm target shared store
       initial referenceResult trace sourceResult where
   exprNoSuccessfulOutOfFuel := assumptions.exprNoSuccessfulOutOfFuel
@@ -22372,7 +22372,7 @@ theorem sourceOpenDispatcherOrSpillSufficientGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22463,7 +22463,7 @@ theorem sourceOpenDispatcherOrSpillOpenReplayConclusion
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22554,7 +22554,7 @@ theorem sourceOpenReplaySomeGasOrSpillNoOutOfGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22636,7 +22636,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22735,7 +22735,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillOpenReplayConclusionOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22834,7 +22834,7 @@ theorem sourceOpenLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -22947,7 +22947,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -23042,7 +23042,7 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -23125,10 +23125,10 @@ theorem sourceOpenLivenessAndSafetyOrSpillNoOutOfGasOfResponseStrictOrAllGasOOGR
     rcases hSpill with ⟨hBranch, hExactNone, hSufficient⟩
     exact ⟨hBranch, hExactNone, hSufficient.to_noOutOfGas⟩
 
-end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
 
 /--
-Stack-safe public no-return-data-copy CALL route.
+Trace-local-gas no-return-data-copy CALL package.
 
 It consumes the strengthened checked compiler wrapper above, so successful
 compilation now includes the inferred assembly stack-bound check.
@@ -23136,7 +23136,7 @@ The internal-call body-fuel field is an explicit source resource boundary over
 all initialized callee-body clocks up to `sourceFuel`; it is not derived from
 the single top-level source run.
 -/
-structure RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+structure RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
     (cfg : Reference.StateRelConfig)
     (outcomeRel : Reference.OutcomeRel)
     (program : Program) (functionProgram : Functions.Program)
@@ -23172,7 +23172,7 @@ structure RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDa
   callResponseGasAdmissibleReady :
     OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target
 
-namespace RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+namespace RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
 
 theorem openXReplayAbove
     {cfg : Reference.StateRelConfig}
@@ -23186,7 +23186,7 @@ theorem openXReplayAbove
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      _root_.EvmCompiler.Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      _root_.EvmCompiler.Yul.Program.RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23242,7 +23242,7 @@ theorem openXLivenessAndSafetyOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23314,7 +23314,7 @@ theorem openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23407,7 +23407,7 @@ theorem openXReplayAt
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23469,7 +23469,7 @@ theorem openXCommittedSafeAbove
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23527,7 +23527,7 @@ theorem openXCommittedSafeAboveWithCommittedStorageImageRel
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23614,7 +23614,7 @@ theorem openXCommittedSafeForAllGasOfBelow
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -23675,7 +23675,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafety
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -23740,7 +23740,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -23806,7 +23806,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -23873,7 +23873,7 @@ theorem openXCommittedSafeForAllGasOfResponseTrackingFixed
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -23942,7 +23942,7 @@ theorem openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -24008,7 +24008,7 @@ theorem openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -24080,7 +24080,7 @@ theorem openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseResultTrackingReady :
@@ -24150,7 +24150,7 @@ theorem openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixe
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24220,7 +24220,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTrac
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24298,7 +24298,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFa
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24390,7 +24390,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObse
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24464,7 +24464,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcom
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24540,7 +24540,7 @@ theorem openXReplaySomeGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -24588,10 +24588,10 @@ theorem openXReplaySomeGas
   intro hGasBoundFits
   exact hReplayAbove.to_replaySomeGas_of_bound_lt hGasBoundFits
 
-end RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+end RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
 
 /--
-Stack-safe public no-return-data-copy CALL-family route.
+Trace-local-gas no-return-data-copy CALL-family package.
 
 It consumes the strengthened checked compiler wrapper above, so successful
 compilation now includes the inferred assembly stack-bound check.
@@ -24599,7 +24599,7 @@ The internal-call body-fuel field is an explicit source resource boundary over
 all initialized callee-body clocks up to `sourceFuel`; it is not derived from
 the single top-level source run.
 -/
-structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
     (cfg : Reference.StateRelConfig)
     (outcomeRel : Reference.OutcomeRel)
     (program : Program) (functionProgram : Functions.Program)
@@ -24635,7 +24635,7 @@ structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRe
   callResponseGasAdmissibleReady :
     OpenXCallFamilyResponseGasTraceAdmissibleReadyFor asm target
 
-namespace RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+namespace RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
 
 theorem openBlockTrace
     {cfg : Reference.StateRelConfig}
@@ -24649,7 +24649,7 @@ theorem openBlockTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -24699,7 +24699,7 @@ theorem openXReplayAbove
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -24755,7 +24755,7 @@ theorem openXLivenessAndSafetyOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -24827,7 +24827,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -24903,7 +24903,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultT
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -25002,7 +25002,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseResultTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseResultTrackingReady :
@@ -25065,7 +25065,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseOutcomeTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseOutcomeTrackingReady :
@@ -25128,7 +25128,7 @@ theorem openXLivenessAndSafetyFinalObservationOfCommittedResponseSafety
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25191,7 +25191,7 @@ theorem openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -25284,7 +25284,7 @@ theorem openXReplayAt
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -25346,7 +25346,7 @@ theorem openXCommittedSafeAbove
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -25404,7 +25404,7 @@ theorem openXCommittedSafeAboveWithCommittedStorageImageRel
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -25491,7 +25491,7 @@ theorem openXCommittedSafeForAllGasOfBelow
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -25552,7 +25552,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafety
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25617,7 +25617,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25683,7 +25683,7 @@ theorem openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25750,7 +25750,7 @@ theorem openXCommittedSafeForAllGasOfResponseTrackingFixed
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25819,7 +25819,7 @@ theorem openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25885,7 +25885,7 @@ theorem openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -25957,7 +25957,7 @@ theorem openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseResultTrackingReady :
@@ -26027,7 +26027,7 @@ theorem openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixe
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26097,7 +26097,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTrac
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26175,7 +26175,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFa
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26267,7 +26267,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObse
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26341,7 +26341,7 @@ theorem openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcom
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26417,7 +26417,7 @@ theorem openXReplaySomeGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store sourceFuel
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -26465,9 +26465,9 @@ theorem openXReplaySomeGas
   intro hGasBoundFits
   exact hReplayAbove.to_replaySomeGas_of_bound_lt hGasBoundFits
 
-end RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+end RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
 
-structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
     (cfg : Reference.StateRelConfig)
     (outcomeRel : Reference.OutcomeRel)
     (program : Program) (functionProgram : Functions.Program)
@@ -26503,7 +26503,7 @@ structure RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRe
   callResponseGasAdmissibleReady :
     OpenXCallFamilyResponseGasAdmissibleReadyFor asm target
 
-namespace RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+namespace RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
 
 theorem to_traceLocal
     {cfg : Reference.StateRelConfig}
@@ -26517,10 +26517,10 @@ theorem to_traceLocal
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult) :
-    RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions
+    RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions
       cfg outcomeRel program functionProgram asm target shared store sourceFuel
       initial referenceResult trace sourceResult where
   semantics := assumptions.semantics
@@ -26547,11 +26547,11 @@ abbrev openBlockTrace
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openBlockTrace
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openBlockTrace
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXReplayAbove
@@ -26566,11 +26566,11 @@ abbrev openXReplayAbove
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAbove
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXReplayAbove
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfGasBudget
@@ -26585,11 +26585,11 @@ abbrev openXLivenessAndSafetyOfGasBudget
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfGasBudget
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfGasBudget
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
@@ -26604,11 +26604,11 @@ abbrev openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTracking
@@ -26623,18 +26623,18 @@ abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTracking
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTracking
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
-section RemainingRoute2Delegates
+section RemainingTraceLocalGasDelegates
 
 variable {cfg : Reference.StateRelConfig}
 variable {outcomeRel : Reference.OutcomeRel}
@@ -26649,190 +26649,190 @@ variable {sourceResult : Except Reference.Exception Reference.State}
 
 abbrev openXReplayAt
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAt
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXReplayAt
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXCommittedSafeAbove
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeAbove
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeAbove
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXCommittedSafeAboveWithCommittedStorageImageRel
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeAboveWithCommittedStorageImageRel
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeAboveWithCommittedStorageImageRel
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfBelow
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfBelow
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfBelow
     (to_traceLocal assumptions) minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfCommittedResponseSafety
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafety
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfCommittedResponseSafety
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyTracks
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfCommittedResponseSafetyFixed
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfResponseTrackingFixed
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseTrackingFixed
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfResponseTrackingFixed
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfResponseTrackingFixedTrace
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
       OpenXCallFamilyCommittedResponseSafetyTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfResponseOutcomeTrackingFixedTrace
     (to_traceLocal assumptions) hCallResponseCommittedSafetyReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseResultTrackingReady :
       OpenXCallFamilyResponseResultTrackingTraceReadyFor asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfResponseResultTrackingFixedTrace
     (to_traceLocal assumptions) hCallResponseResultTrackingReady
     minimumCompilerFuel
 
 abbrev openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixedTrace
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixedTrace
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXCommittedSafeForAllGasOfResponseStrictOrAllGasOOGResultTrackingFixedTrace
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingFixedTraceLe
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceOrFailureBelow
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingTraceObservationOrFailureBelow
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
 abbrev openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcomeBelow
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
       OpenXCallFamilyResponseStrictOrAllGasOOGResultTrackingTraceReadyFor
         asm target)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcomeBelow
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfResponseStrictOrAllGasOOGResultTrackingAllOutcomeBelow
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
-end RemainingRoute2Delegates
+end RemainingTraceLocalGasDelegates
 
 abbrev openXReplaySomeGas
     {cfg : Reference.StateRelConfig}
@@ -26846,11 +26846,11 @@ abbrev openXReplaySomeGas
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplaySomeGas
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXReplaySomeGas
     (to_traceLocal assumptions) minimumCompilerFuel
 
 /--
@@ -26889,7 +26889,7 @@ theorem openXLivenessAndSafetyFinalObservation
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -26948,7 +26948,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultT
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseStrictOrAllGasOOGResultTrackingReady :
@@ -26994,7 +26994,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultT
       Functions.Source.WholeProgramOutcomeRel programOutcome targetResult ∧
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultTracking
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultTracking
     (to_traceLocal assumptions)
     hCallResponseStrictOrAllGasOOGResultTrackingReady minimumCompilerFuel
 
@@ -27010,7 +27010,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseResultTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseResultTrackingReady :
@@ -27073,7 +27073,7 @@ theorem openXLivenessAndSafetyFinalObservationOfResponseOutcomeTracking
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseOutcomeTrackingReady :
@@ -27136,7 +27136,7 @@ theorem openXLivenessAndSafetyFinalObservationOfCommittedResponseSafety
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+      RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
         cfg outcomeRel program functionProgram asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (hCallResponseCommittedSafetyReady :
@@ -27181,14 +27181,14 @@ theorem openXLivenessAndSafetyFinalObservationOfCommittedResponseSafety
       Functions.Source.WholeProgramOutcomeRel programOutcome targetResult ∧
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyFinalObservationOfCommittedResponseSafety
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyFinalObservationOfCommittedResponseSafety
     (to_traceLocal assumptions)
     hCallResponseCommittedSafetyReady minimumCompilerFuel
 
-end RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions
+end RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions
 
 abbrev OpenXContractLivenessAndSafetyFinalObservation :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions.OpenXContractLivenessAndSafetyFinalObservation
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions.OpenXContractLivenessAndSafetyFinalObservation
 
 namespace OpenXContractLivenessAndSafetyFinalObservation
 
@@ -27261,7 +27261,7 @@ theorem outcomeSafetyAt_of_gas_lt
 
 end OpenXContractLivenessAndSafetyFinalObservation
 
-namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
 
 theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGasBudget
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
@@ -27279,7 +27279,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillNoOutOfGasOfGa
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -27363,7 +27363,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConc
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -27428,7 +27428,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConc
     · rcases hSpill with ⟨hBranch, _hExactNone, _hNoOutOfGas⟩
       cases hBranch
 
-end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchRouteAssumptions
+end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocBranchSensitiveAssumptions
 
 theorem
     compileCheckedCALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc?_sourceOpenContractLivenessAndSafetyFinalObservation_or_spill_noOutOfGas_X
@@ -27653,7 +27653,7 @@ theorem
     · rcases hSpill with ⟨hBranch, _hExactNone, _hNoOutOfGas⟩
       cases hBranch
 
-namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+namespace RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
 
 theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConclusionOfGasBudget
     (hSpec : Locals.SourceLowering.StateRel.SpillScratch.ZeroPaddingSpec)
@@ -27671,7 +27671,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConc
     {trace : OpenExternal.OpenTrace}
     {sourceResult : Except Reference.Exception Reference.State}
     (assumptions :
-      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+      RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
         cfg outcomeRel maxWords program branch range asm target shared store
         sourceFuel initial referenceResult trace sourceResult)
     (minimumCompilerFuel : Nat) :
@@ -27725,7 +27725,7 @@ theorem sourceOpenContractLivenessAndSafetyFinalObservationOrSpillOpenReplayConc
     assumptions.traceAccepted assumptions.initialMemory assumptions.initialPerm
     assumptions.callResponseGasAdmissibleReady minimumCompilerFuel
 
-end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocRoute2Assumptions
+end RecursiveBridgeCALLRegularOpenStackSafeOrCallAwareSpillPlannedPreallocTraceLocalGasAssumptions
 
 /--
 External-world package for the CALL gas liveness/safety theorem.
@@ -28022,7 +28022,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       Functions.Source.WholeProgramOutcomeRel programOutcome targetResult ∧
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyOfGasBudgetWithCommittedStorageImageRel
     { semantics := hSemantics
       initialCodeImageRel := hInitialCodeImageRel
       sourceRun := hSourceRun
@@ -28113,7 +28113,7 @@ theorem compileCheckedCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoRetur
       Functions.Source.WholeProgramOutcomeRel programOutcome targetResult ∧
       SourceOpenTargetCommittedStorageImageRel shared initial sourceResult
         targetResult :=
-  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultTracking
+  RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXLivenessAndSafetyFinalObservationOfResponseStrictOrAllGasOOGResultTracking
     { semantics := hSemantics
       initialCodeImageRel := hInitialCodeImageRel
       sourceRun := hSourceRun

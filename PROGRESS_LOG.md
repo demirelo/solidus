@@ -9276,3 +9276,10 @@ runtime composition.
 
 2026-06-06 15:02 CEST - compaction-resume: Resumed after context compaction at the final-checkpoint phase. Current focus is to verify the stronger CALL-family public top package plus canonical object wrappers, inspect the full dirty tree, and commit all valid project work once the checks are clean.
 2026-06-06 - compaction-resume: resumed the CALL-family cleanup audit after context compaction; next step is to continue trimming stale/internal proof paths while preserving the checked public top corridor.
+## 2026-06-06 — compaction-resume
+
+- Resuming cleanup after context compaction: continue auditing historically contingent CALL proof names and stale route/public wiring, starting from the already-renamed external-world carrier and pruned audit pins.
+
+## 2026-06-06 15:50 CEST - cleanup/call-route-semantic-names
+
+- Renamed the remaining current-facing `OpenRuntime` CALL assumption packages away from historical route labels: selector `Route2` packages are now `TraceLocalGas`, branch-false packages are `Fallback`, and branch-conditional packages are `BranchSensitive`. The active roadmap cleanup checklist now records these as live internal proof plumbing rather than stale public pins.

@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:46 CEST.
+Last updated: 2026-06-06 15:50 CEST.
 
 ### Current Assessment
 
@@ -88,19 +88,18 @@ are still proof plumbing for the public top wrappers.
   superseded by the CALL-family top package for the public proof. Removed their
   `LayerAudit` exposure after confirming no audit file depends on them; kept
   the source-facing `SourceOpenDispatcherTraceAccepted` helper aliases.
-- [x] Exact-CALL route2 projection pins:
-  `recursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2...`
-  aliases exposed route-local replay/committed-safety adapters. Removed those
-  public pins; the `OpenRuntime` route structure remains internal proof
-  plumbing for now.
+- [x] Exact-CALL trace-local-gas projection pins:
+  older numeric-route aliases exposed route-local replay/committed-safety
+  adapters. Removed those public pins; the remaining `OpenRuntime` assumption
+  packages now use semantic `TraceLocalGas` names.
 - [x] CALL-aware spill selector pins:
   `CALLRegularOpenStackSafeOrCallAwareSpillPlannedPrealloc...`,
-  `...FalseRouteAssumptions`, `...Route2Assumptions`, and
-  `...BranchRouteAssumptions` aliases described the old selector/fallback
-  corridor; the adjacent unused `...OrNoCallSpillPlannedPrealloc` selector
-  aliases were part of the same stale surface. Removed these `LayerAudit` pins.
-  The underlying spill/planned-prealloc proofs remain available in
-  `OpenRuntime`.
+  old numeric/boolean route aliases described the selector/fallback corridor in
+  historically contingent terms; the adjacent unused
+  `...OrNoCallSpillPlannedPrealloc` selector aliases were part of the same
+  stale surface. Removed these `LayerAudit` pins and renamed the remaining
+  `OpenRuntime` packages to `Fallback`, `TraceLocalGas`, and
+  `BranchSensitive`.
 - [x] Lower gas-ready/result-tracking wrapper families:
   the `sourceBridgeGasReady`, `sourceBridgeGasStrictReady`,
   `sourceBridgeGlobalResponseGasReady`, and result/outcome/committed-safety
@@ -120,7 +119,7 @@ are still proof plumbing for the public top wrappers.
 
 ### Remaining Trim Candidates
 
-Last audited: 2026-06-06 15:46 CEST.
+Last audited: 2026-06-06 15:50 CEST.
 
 - [x] Unused alternate global-response endpoint wrappers:
   the result-tracking, outcome-tracking, and committed-response-safety compiled
@@ -142,10 +141,10 @@ Last audited: 2026-06-06 15:46 CEST.
   `checkedCALLRegularOpen...` alias cluster and examples after confirming they
   appeared only in `LayerAudit` plus old roadmap chronology; the CALL-family
   checked-target aliases remain.
-- [ ] Exact-CALL route structures in `OpenRuntime`:
-  older route records and exact-CALL wrappers may still be proof plumbing for
-  fallback branches. Do not delete them in bulk; first prove each candidate has
-  no same-file/top-wrapper dependency.
+- [x] Exact-CALL route structures in `OpenRuntime`:
+  audited after the `LayerAudit` trim. The remaining records are live same-file
+  proof plumbing for trace-local gas and selector/fallback composition, so they
+  were renamed semantically rather than deleted.
 
 2026-06-06 13:08 CEST addendum: the external-world CALL gas liveness/safety
 goal is completion-audited. The public carrier
@@ -378,9 +377,9 @@ alternate-response final-observation theorems below. Aristotle job
 external check/backup; local proof and `LayerAudit` pin are already verified.
 2026-06-06 09:00 CEST addendum: the same exact shared-trace endpoint is now
 also exposed through the trace-local and global-response-gas route packages as
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openBlockTrace`
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openBlockTrace`
 and
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions.openBlockTrace`,
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions.openBlockTrace`,
 with `LayerAudit` pins. Route-package callers no longer need to detour through
 gas/replay/final-observation wrappers when they only need the selected
 shared-response trace theorem.
@@ -553,7 +552,7 @@ work from the other agent when available, and run the final assumption audit.
 
 2026-06-06 06:05 CEST update: the direct assembly-bound CALL-family endpoint
 now has route-2/liveness packaging. Added and pinned
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions`,
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions`,
 including replay-at/above, replay-some-gas, committed-safe-above/for-all-gas,
 storage-image, gas-budget, response-tracking, and strict/all-gas-OOG
 liveness/safety convenience theorems. `lake build
@@ -611,7 +610,7 @@ diff/proof-hole scans, and axiom audit all passed; the axiom audit reports only
 wrapper and was not merged.
 
 Follow-up route-2 public-boundary cleanup: added and pinned
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions`,
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions`,
 its `to_traceLocal` adapter, and the full delegated global-response-gas route-2
 corollary family. The new delegates cover exact replay, replay-above,
 replay-some-gas, committed-safety-above, all-gas committed-safety bridges,
@@ -690,7 +689,7 @@ restored.
 
 The global-response-gas route-2 assumption record now has its own checked
 final-observation projection:
-`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2Assumptions.openXLivenessAndSafetyFinalObservation`.
+`RecursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasAssumptions.openXLivenessAndSafetyFinalObservation`.
 `LayerAudit` pins it as
 `recursiveBridgeCALLFamilyRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyGlobalResponseGasReadyRoute2OpenXLivenessAndSafetyFinalObservation`.
 This packages the final replay/replay-some-gas/all-gas committed-safety/
@@ -1305,7 +1304,7 @@ initial gas value, and `OpenXReplaySomeGas` packages existential exact replay.
 replay theorem to the exact surface when a concrete feasible gas value is
 available, and `.to_replaySomeGas_of_bound_lt` specializes this to choosing
 `gas = gasBound` when the generated bound itself fits. The route-2 package exposes
-`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions.openXReplayAt`,
+`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions.openXReplayAt`,
 which returns the generated `gasBound` plus a checked proof that every
 `gasBound <= gas < 2^256` gives exact replay, and `openXReplaySomeGas`, which
 reduces existential exact replay to the crisp feasibility fact
@@ -1502,7 +1501,7 @@ and
 is the replacement for the old opaque static-safety callback.
 
 2026-06-05 route update: route-2 no longer takes `noCallStaticReady`.
-`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyRoute2Assumptions`
+`RecursiveBridgeCALLRegularOpenAssemblyInferredBoundStackSafeNoReturnDataCopyTraceLocalGasAssumptions`
 now exposes only `initialPerm : initial.executionEnv.perm = true` for this
 boundary, and the stack-safe/no-RDC CALL wrapper generates primitive static
 trace readiness internally from `traceAccepted.responses`,
