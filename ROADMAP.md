@@ -19,7 +19,7 @@ route is not vacuous with respect to terminal `H_return`.
 
 ## Active CALL Finish Checklist
 
-Last updated: 2026-06-06 15:41 CEST.
+Last updated: 2026-06-06 15:43 CEST.
 
 ### Current Assessment
 
@@ -120,7 +120,7 @@ are still proof plumbing for the public top wrappers.
 
 ### Remaining Trim Candidates
 
-Last audited: 2026-06-06 15:41 CEST.
+Last audited: 2026-06-06 15:43 CEST.
 
 - [x] Unused alternate global-response endpoint wrappers:
   the result-tracking, outcome-tracking, and committed-response-safety compiled
@@ -129,7 +129,7 @@ Last audited: 2026-06-06 15:41 CEST.
   mentions; the external-world carrier constructors now cover those weaker
   premise variants before entering the top-assumption wrappers. Trim these
   theorem blocks rather than keeping a parallel public endpoint family.
-- [ ] Lower response/result-tracking pins in `LayerAudit`:
+- [x] Lower response/result-tracking pins in `LayerAudit`:
   the current audit artifacts only need `OpenXCallFamilyExternalWorldReadyFor`,
   two carrier projection facts, and the top-assumption wrappers. The many
   `openXCurrentRunningInstrCallResponse...`,

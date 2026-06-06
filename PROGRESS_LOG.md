@@ -1,3 +1,16 @@
+## 2026-06-06 15:43 CEST - cleanup/prune-layeraudit-response-pins
+
+Pruned the lower response/result-tracking audit pins from
+`LayerAudit.ImportedYulOpenCALLBoundary`. The public audit surface now keeps
+the external-world carrier and its high-level projections, then proceeds to
+the top-assumption wrappers; the removed
+`openXCurrentRunningInstrCallResponse...`, `openXCallFamilyResponse...`, and
+response-specialized all-outcome/committed-safe aliases were unreferenced
+outside `LayerAudit` and historical notes. Verification passed:
+`lake env lean EvmCompiler/LayerAudit.lean`, `lake build
+EvmCompiler.LayerAudit`, renamed completion audit, proof-marker scan, and
+`git diff --check`.
+
 ## 2026-06-06 15:41 CEST - cleanup/remove-unused-global-response-endpoints
 
 Recorded the remaining proof-surface trim candidates in `ROADMAP.md`, then
